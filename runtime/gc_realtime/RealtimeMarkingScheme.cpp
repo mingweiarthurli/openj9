@@ -35,11 +35,17 @@
 #include "MarkMap.hpp"
 #include "ObjectAccessBarrier.hpp"
 #include "ObjectAllocationInterface.hpp"
+#include "OwnableSynchronizerObjectBufferRealtime.hpp"
+#include "OwnableSynchronizerObjectList.hpp"
 #include "RealtimeGC.hpp"
 #include "RealtimeRootScanner.hpp"
 #include "RealtimeMarkingScheme.hpp"
+#include "ReferenceObjectBufferRealtime.hpp"
+#include "ReferenceObjectList.hpp"
 #include "SlotObject.hpp"
 #include "StackSlotValidator.hpp"
+#include "UnfinalizedObjectBufferRealtime.hpp"
+#include "UnfinalizedObjectList.hpp"
 #include "WorkPacketsRealtime.hpp"
 
 /**
@@ -82,7 +88,7 @@ public:
 	virtual void
 	scanOneThreadImpl(MM_EnvironmentRealtime *env, J9VMThread* walkThread, void* localData)
 	{
-		MM_EnvironmentRealtime* walkThreadEnv = MM_EnvironmentRealtime::getEnvironment(walkThread);
+		MM_EnvironmentRealtime* walkThreadEnv = MM_EnvironmentRealtime::getEnvironment(walkThread->omrVMThread);
 		MM_RealtimeGC* realtimeGC = (MM_RealtimeGC*)_realtimeGC;
 		/* Scan the thread by invoking superclass */
 		MM_RootScanner::scanOneThread(env, walkThread, localData);
@@ -95,7 +101,7 @@ public:
 		/*((MM_SegregatedAllocationInterface *)walkThreadEnv->_objectAllocationInterface)->preMarkCache(walkThreadEnv);*/
 		walkThreadEnv->_objectAllocationInterface->flushCache(walkThreadEnv);
 		/* Disable the double barrier on the scanned thread. */
-		realtimeGC->disableDoubleBarrierOnThread(env, walkThread);
+		realtimeGC->disableDoubleBarrierOnThread(env, walkThread->omrVMThread);
 	}
 	
 #if defined(J9VM_GC_FINALIZATION)
@@ -495,7 +501,7 @@ MM_RealtimeMarkingScheme::markRoots(MM_EnvironmentRealtime *env, MM_RealtimeMark
 		/* Setting the permanent class loaders to scanned without a locked operation is safe
 		 * Class loaders will not be rescanned until a thread synchronize is executed
 		 */
-		if(_realtimeGC->isDynamicClassUnloadingEnabled()) {
+		if(_realtimeGC->getRealtimeDelegate()->isDynamicClassUnloadingEnabled()) {
 			((J9ClassLoader *)_javaVM->systemClassLoader)->gcFlags |= J9_GC_CLASS_LOADER_SCANNED;
 			markObject(env, (J9Object *)((J9ClassLoader *)_javaVM->systemClassLoader)->classLoaderObject);
 			if(_javaVM->applicationClassLoader) {
@@ -537,7 +543,7 @@ MM_RealtimeMarkingScheme::markRoots(MM_EnvironmentRealtime *env, MM_RealtimeMark
 		_scheduler->condYieldFromGC(env);
 #endif /* J9VM_GC_FINALIZATION */
 #if defined(J9VM_GC_DYNAMIC_CLASS_UNLOADING) 
-		if (!_realtimeGC->isDynamicClassUnloadingEnabled()) {
+		if (!_realtimeGC->getRealtimeDelegate()->isDynamicClassUnloadingEnabled()) {
 #endif /* J9VM_GC_DYNAMIC_CLASS_UNLOADING */ 
 			/* We are scanning all classes, no need to include stack frame references */
 			rootScanner->setIncludeStackFrameClassReferences(false); 
@@ -600,7 +606,7 @@ MM_RealtimeMarkingScheme::markLiveObjects(MM_EnvironmentRealtime *env)
 	MM_RealtimeMarkingSchemeRootMarker rootMarker(env, _realtimeGC);
 	env->setRootScanner(&rootMarker);
 #if defined(J9VM_GC_DYNAMIC_CLASS_UNLOADING)
-	rootMarker.setClassDataAsRoots(!_realtimeGC->isDynamicClassUnloadingEnabled());
+	rootMarker.setClassDataAsRoots(!_realtimeGC->getRealtimeDelegate()->isDynamicClassUnloadingEnabled());
 #endif /* J9VM_GC_DYNAMIC_CLASS_UNLOADING */
 	markRoots(env, &rootMarker);
 	env->setRootScanner(NULL);
@@ -610,7 +616,7 @@ MM_RealtimeMarkingScheme::markLiveObjects(MM_EnvironmentRealtime *env)
 	
 	env->getGCEnvironment()->_referenceObjectBuffer->flush(env);
 	if (env->_currentTask->synchronizeGCThreadsAndReleaseMaster(env, UNIQUE_ID)) {
-		_realtimeGC->_unmarkedImpliesCleared = true;
+		_realtimeGC->getRealtimeDelegate()->_unmarkedImpliesCleared = true;
 		env->_currentTask->releaseSynchronizedGCThreads(env);
 	}
 
@@ -636,12 +642,12 @@ MM_RealtimeMarkingScheme::markLiveObjects(MM_EnvironmentRealtime *env)
 		 * cleared. It's used to prevent objects that are going to be cleared (e.g. referent that is not marked,
 		 * or unmarked string constant) from escaping.
 		 */
-		_realtimeGC->_unmarkedImpliesCleared = false;
-		_realtimeGC->_unmarkedImpliesStringsCleared = false;
+		_realtimeGC->getRealtimeDelegate()->_unmarkedImpliesCleared = false;
+		_realtimeGC->getRealtimeDelegate()->_unmarkedImpliesStringsCleared = false;
 		
 #if defined(J9VM_GC_DYNAMIC_CLASS_UNLOADING)
 		/* enable to use mark information to detect is class dead */
-		_realtimeGC->_unmarkedImpliesClasses = true;
+		_realtimeGC->getRealtimeDelegate()->_unmarkedImpliesClasses = true;
 #endif /* defined(J9VM_GC_DYNAMIC_CLASS_UNLOADING) */
 
 		/* This is the symmetric call to the enabling of the write barrier that happens at the top of this method. */
@@ -716,7 +722,7 @@ MM_RealtimeMarkingScheme::scanMixedObject(MM_EnvironmentRealtime *env, J9Object 
 {
 	/* Object slots */
 
-	fj9object_t *scanPtr = (fj9object_t*)( objectPtr + 1 );
+	fj9object_t *scanPtr = _gcExtensions->mixedObjectModel.getHeadlessObject(objectPtr);
 	UDATA objectSize = _gcExtensions->mixedObjectModel.getSizeInBytesWithHeader(objectPtr);
 	fj9object_t *endScanPtr = (fj9object_t*)(((U_8 *)objectPtr) + objectSize);
 	UDATA *descriptionPtr;
@@ -728,7 +734,7 @@ MM_RealtimeMarkingScheme::scanMixedObject(MM_EnvironmentRealtime *env, J9Object 
 #endif /* J9VM_GC_LEAF_BITS */
 	
 #if defined(J9VM_GC_DYNAMIC_CLASS_UNLOADING)
-	if(_realtimeGC->isDynamicClassUnloadingEnabled()) {
+	if(_realtimeGC->getRealtimeDelegate()->isDynamicClassUnloadingEnabled()) {
 		markClassOfObject(env, objectPtr);
 	}
 #endif /* J9VM_GC_DYNAMIC_CLASS_UNLOADING */
@@ -787,7 +793,7 @@ MM_RealtimeMarkingScheme::scanMixedObject(MM_EnvironmentRealtime *env, J9Object 
 MMINLINE UDATA
 MM_RealtimeMarkingScheme::scanReferenceMixedObject(MM_EnvironmentRealtime *env, J9Object *objectPtr)
 {
-	fj9object_t *scanPtr = (fj9object_t*)( objectPtr + 1 );
+	fj9object_t *scanPtr = _gcExtensions->mixedObjectModel.getHeadlessObject(objectPtr);
 	UDATA objectSize = _gcExtensions->mixedObjectModel.getSizeInBytesWithHeader(objectPtr);
 	fj9object_t *endScanPtr = (fj9object_t*)(((U_8 *)objectPtr) + objectSize);
 	UDATA *descriptionPtr;
@@ -799,7 +805,7 @@ MM_RealtimeMarkingScheme::scanReferenceMixedObject(MM_EnvironmentRealtime *env, 
 #endif /* J9VM_GC_LEAF_BITS */
 	
 #if defined(J9VM_GC_DYNAMIC_CLASS_UNLOADING)
-	if(_realtimeGC->isDynamicClassUnloadingEnabled()) {
+	if(_realtimeGC->getRealtimeDelegate()->isDynamicClassUnloadingEnabled()) {
 		markClassOfObject(env, objectPtr);
 	}
 #endif /* J9VM_GC_DYNAMIC_CLASS_UNLOADING */
@@ -901,7 +907,7 @@ MM_RealtimeMarkingScheme::scanPointerArrayObject(MM_EnvironmentRealtime *env, J9
 	UDATA pointerFields = 0;
 	
 #if defined(J9VM_GC_DYNAMIC_CLASS_UNLOADING)
-	if(_realtimeGC->isDynamicClassUnloadingEnabled()) {
+	if(_realtimeGC->getRealtimeDelegate()->isDynamicClassUnloadingEnabled()) {
 		markClassOfObject(env, (J9Object *)objectPtr);
 	}
 #endif /* J9VM_GC_DYNAMIC_CLASS_UNLOADING */
@@ -1021,7 +1027,7 @@ MM_RealtimeMarkingScheme::incrementalConsumeQueue(MM_EnvironmentRealtime *env, U
 void
 MM_RealtimeMarkingScheme::scanUnfinalizedObjects(MM_EnvironmentRealtime *env)
 {
-	const UDATA maxIndex = MM_HeapRegionDescriptorRealtime::getUnfinalizedObjectListCount(env);
+	const UDATA maxIndex = _realtimeGC->getRealtimeDelegate()->getUnfinalizedObjectListCount(env);
 	/* first we need to move the current list to the prior list and process the prior list,
 	 * because if object has not yet become finalizable, we have to re-insert it back to the current list.
 	 */
@@ -1052,7 +1058,7 @@ MM_RealtimeMarkingScheme::scanUnfinalizedObjects(MM_EnvironmentRealtime *env)
 					/* object was not previously marked -- it is now finalizable so push it to the local buffer */
 					buffer.add(env, object);
 					gcEnv->_markJavaStats._unfinalizedEnqueued += 1;
-					_realtimeGC->_finalizationRequired = true;
+					_realtimeGC->getRealtimeDelegate()->_finalizationRequired = true;
 				} else {
 					/* object was already marked. It is still unfinalized */
 					gcEnv->_unfinalizedObjectBuffer->add(env, object);
@@ -1078,7 +1084,7 @@ MM_RealtimeMarkingScheme::scanUnfinalizedObjects(MM_EnvironmentRealtime *env)
 void
 MM_RealtimeMarkingScheme::scanOwnableSynchronizerObjects(MM_EnvironmentRealtime *env)
 {
-	const UDATA maxIndex = MM_HeapRegionDescriptorRealtime::getOwnableSynchronizerObjectListCount(env);
+	const UDATA maxIndex = _realtimeGC->getRealtimeDelegate()->getOwnableSynchronizerObjectListCount(env);
 
 	/* first we need to move the current list to the prior list and process the prior list,
 	 * because if object has been marked, we have to re-insert it back to the current list.
@@ -1133,7 +1139,7 @@ MM_RealtimeMarkingScheme::scanWeakReferenceObjects(MM_EnvironmentRealtime *env)
 {
 	GC_Environment *gcEnv = env->getGCEnvironment();
 	Assert_MM_true(gcEnv->_referenceObjectBuffer->isEmpty());
-	const UDATA maxIndex = MM_HeapRegionDescriptorRealtime::getReferenceObjectListCount(env);
+	const UDATA maxIndex = _realtimeGC->getRealtimeDelegate()->getReferenceObjectListCount(env);
 	UDATA listIndex;
 	for (listIndex = 0; listIndex < maxIndex; ++listIndex) {
 		if(J9MODRON_HANDLE_NEXT_WORK_UNIT(env)) {
@@ -1151,7 +1157,7 @@ MM_RealtimeMarkingScheme::scanSoftReferenceObjects(MM_EnvironmentRealtime *env)
 {
 	GC_Environment *gcEnv = env->getGCEnvironment();
 	Assert_MM_true(gcEnv->_referenceObjectBuffer->isEmpty());
-	const UDATA maxIndex = MM_HeapRegionDescriptorRealtime::getReferenceObjectListCount(env);
+	const UDATA maxIndex = _realtimeGC->getRealtimeDelegate()->getReferenceObjectListCount(env);
 	UDATA listIndex;
 	for (listIndex = 0; listIndex < maxIndex; ++listIndex) {
 		if(J9MODRON_HANDLE_NEXT_WORK_UNIT(env)) {
@@ -1170,7 +1176,7 @@ MM_RealtimeMarkingScheme::scanPhantomReferenceObjects(MM_EnvironmentRealtime *en
 	GC_Environment *gcEnv = env->getGCEnvironment();
 	/* unfinalized processing may discover more phantom reference objects */
 	gcEnv->_referenceObjectBuffer->flush(env);
-	const UDATA maxIndex = MM_HeapRegionDescriptorRealtime::getReferenceObjectListCount(env);
+	const UDATA maxIndex = _realtimeGC->getRealtimeDelegate()->getReferenceObjectListCount(env);
 	UDATA listIndex;
 	for (listIndex = 0; listIndex < maxIndex; ++listIndex) {
 		if(J9MODRON_HANDLE_NEXT_WORK_UNIT(env)) {
@@ -1233,7 +1239,7 @@ MM_RealtimeMarkingScheme::processReferenceList(MM_EnvironmentRealtime *env, MM_H
 					buffer.add(env, referenceObj);
 					referenceStats->_enqueued += 1;
 					/* Flag for the finalizer */
-					_realtimeGC->_finalizationRequired = true;
+					_realtimeGC->getRealtimeDelegate()->_finalizationRequired = true;
 				}
 #endif /* J9VM_GC_FINALIZATION */
 			}

@@ -34,7 +34,6 @@
 #include "il/Node_inlines.hpp"
 #include "il/symbol/LabelSymbol.hpp"
 #include "runtime/CodeCacheManager.hpp"
-#include "z/codegen/TRSystemLinkage.hpp"
 
 uint8_t *
 TR::S390J9CallSnippet::generateVIThunk(TR::Node * callNode, int32_t argSize, TR::CodeGenerator * cg)
@@ -254,7 +253,6 @@ TR::S390J9CallSnippet::emitSnippetBody()
    TR::Compilation *comp = cg()->comp();
    TR_J9VMBase *fej9 = (TR_J9VMBase *)(comp->fe());
 
-   // *this   swipeable for debugger
    uint8_t * cursor = cg()->getBinaryBufferCursor();
    TR::Node * callNode = getNode();
    TR::SymbolReference * methodSymRef =  getRealMethodSymbolReference();
@@ -391,7 +389,6 @@ TR::S390UnresolvedCallSnippet::emitSnippetBody()
    TR::Compilation *comp = cg()->comp();
    TR_J9VMBase *fej9 = (TR_J9VMBase *)(comp->fe());
 
-   // *this   swipeable for debugger
    uint8_t * cursor = TR::S390J9CallSnippet::emitSnippetBody();
 
    TR::SymbolReference * methodSymRef = getNode()->getSymbolReference();
@@ -482,14 +479,12 @@ TR::S390UnresolvedCallSnippet::emitSnippetBody()
 uint32_t
 TR::S390UnresolvedCallSnippet::getLength(int32_t  estimatedSnippetStart)
    {
-   // *this   swipeable for debugger
    return TR::S390CallSnippet::getLength(estimatedSnippetStart) + sizeof(uintptrj_t) + sizeof(int32_t);
    }
 
 uint8_t *
 TR::S390VirtualSnippet::emitSnippetBody()
    {
-   // *this   swipeable for debugger
    return NULL;
    }
 
@@ -502,7 +497,6 @@ TR::S390VirtualSnippet::getLength(int32_t  estimatedSnippetStart)
 uint8_t *
 TR::S390VirtualUnresolvedSnippet::emitSnippetBody()
    {
-   // *this   swipeable for debugger
    uint8_t * cursor = cg()->getBinaryBufferCursor();
    TR::Node * callNode = getNode();
    TR::Compilation *comp = cg()->comp();
@@ -616,7 +610,6 @@ TR::S390InterfaceCallSnippet::S390InterfaceCallSnippet(
 uint8_t *
 TR::S390InterfaceCallSnippet::emitSnippetBody()
    {
-   // *this   swipeable for debugger
    uint8_t * cursor = cg()->getBinaryBufferCursor();
    getSnippetLabel()->setCodeLocation(cursor);
    TR::Compilation *comp = cg()->comp();
@@ -648,7 +641,7 @@ TR::S390InterfaceCallSnippet::emitSnippetBody()
    *(int16_t *) cursor = 0xC0E0;
    cursor += sizeof(int16_t);
 
-   // Place holder.  Proper offset will be calulated by relocation.
+   // Place holder.  Proper offset will be calculated by relocation.
    *(int32_t *) cursor = 0xDEADBEEF;
    cursor += sizeof(int32_t);
 

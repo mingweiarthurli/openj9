@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2017 IBM Corp. and others
+ * Copyright (c) 1991, 2019 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -542,7 +542,7 @@ static BOOLEAN memoryCheck_parseOption(OMRPortLibrary *portLib, char const *opti
 	 *
 	 * Note, each site string is meant to be a prefix match to call site info.
 	 * if string is 'zip/', it will ignore all unfreed blocks with callsite string with 'zip/'
-	 * Conversly, if a call siteis abc/de.c, specifing a string of de.c will not be a match */
+	 * Conversely, if a call siteis abc/de.c, specifing a string of de.c will not be a match */
 	char const *optStrIgnoreUnfreedCallsite = "ignoreUnfreedCallsite=";
 	size_t optLenIgnoreUnfreedCallsite = strlen(optStrIgnoreUnfreedCallsite);
 
@@ -1079,7 +1079,7 @@ memoryCheck_hashEqualFn(void *leftEntry, void *rightEntry, void *userData)
  * 
  * @param[in] vmemId	A valid J9PortVmemIdentifier struct pointer to reserved and committed memory.
  * @param[in] userData	An ignored parameter required by the format used by the hashTable fcn pointer.
- * @return The hashkey that will return the pointer to the J9PortVmemIdentifer struct for later use.
+ * @return The hashkey that will return the pointer to the J9PortVmemIdentifier struct for later use.
  */
 static UDATA 
 memoryCheck_hashFn(void *vmemId, void *userData)
@@ -1633,7 +1633,7 @@ memoryCheck_wrapper_allocate_memory(OMRPortLibrary *portLib, UDATA byteAmount, c
 			/* we're in mode = J9_MCMODE_MPROTECT */
 			/* Allocate the structure.  
 			 * NOTE: memCheckPortLib->mem_allocate_memory is the "allocator" function (because we can't be
-			 *  using the subAllocator in conjuction with mode J9_MCMODE_MPROTECT).
+			 *  using the subAllocator in conjunction with mode J9_MCMODE_MPROTECT).
 			 * 		making it clear that we are using memCheckPortLib->mem_allocate_memory here because the 
 			 * 		corresponding free is done using memCheckPortLib->mem_free_memory (and we don't want to pass in
 			 * 		a deallocator to memoryCheck_wrapper_allocate_memory
@@ -2974,7 +2974,7 @@ memoryCheck_free_AVLTreeNode(OMRPortLibrary *portLib, J9AVLTreeNode *node)
  * @param insertNode The node which will be inserted into the tree
  * @param walk The current search position in the tree
  *
- * @return IDATA the difference bewtween the two strings alphabetically
+ * @return IDATA the difference between the two strings alphabetically
  *
  */
 static IDATA 
@@ -3020,7 +3020,7 @@ memoryCheck_print_stats_callSite(OMRPortLibrary *portLib, J9MEMAVLTreeNode *node
  * @param search The char * to search for
  * @param walk The current search position in the tree
  *
- * @return IDATA the difference bewtween the two strings alphabetically
+ * @return IDATA the difference between the two strings alphabetically
  *
  */
 static IDATA 

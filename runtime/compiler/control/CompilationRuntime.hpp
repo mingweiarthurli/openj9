@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2018 IBM Corp. and others
+ * Copyright (c) 2000, 2019 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -371,7 +371,7 @@ public:
       SAMPLER_STOPPED,
       SAMPLER_LAST_STATE, // must be the last one
       // If adding new state, one must add a new name as well in samplerThreadStateNames array
-      // and a frequency in samplerThreadStateFreqencies array
+      // and a frequency in samplerThreadStateFrequencies array
      };
 
    enum TR_SamplingThreadLifetimeStates
@@ -1042,7 +1042,7 @@ private:
    TR_LowPriorityCompQueue _lowPriorityCompilationScheduler;
    TR_JProfilingQueue      _JProfilingQueue;
 
-   TR::CompilationTracingFacility _compilationTracingFacility; // Must be intialized before using
+   TR::CompilationTracingFacility _compilationTracingFacility; // Must be initialized before using
    TR_CpuEntitlement _cpuEntitlement;
    TR_JitSampleInfo  _jitSampleInfo;
    TR_SharedCacheRelocationRuntime _reloRuntime;

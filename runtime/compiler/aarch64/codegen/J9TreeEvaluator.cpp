@@ -22,3 +22,7 @@
 
 #include "codegen/TreeEvaluator.hpp"
 
+void VMgenerateCatchBlockBBStartPrologue(TR::Node *node, TR::Instruction *fenceInstruction, TR::CodeGenerator *cg)
+   {
+   TR_UNIMPLEMENTED();
+   }
