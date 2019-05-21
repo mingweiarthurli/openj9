@@ -29,6 +29,7 @@
 #include "optimizer/Inliner.hpp"
 #include "optimizer/J9Inliner.hpp"
 #include "il/Node.hpp"
+#include "infra/Cfg.hpp"
 #include "infra/Stack.hpp"
 #include "il/TreeTop.hpp"
 #include "control/Recompilation.hpp"
@@ -94,5 +95,12 @@ class TR_J9EstimateCodeSize : public TR_EstimateCodeSize
       int32_t _optimisticSize;          // size if we assume we are doing a partial inline
    };
 
+class CFGgenerator : public TR_J9EstimateCodeSize 
+   {
+   public:
 
+      CFGgenerator() : TR_J9EstimateCodeSize() { };
+      TR::CFG *generateCFG(TR_CallTarget *calltarget, TR_CallStack *prevCallStack);
+
+   };
 #endif
