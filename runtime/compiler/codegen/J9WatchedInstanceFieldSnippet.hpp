@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2014 IBM Corp. and others
+ * Copyright (c) 2019, 2019 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -19,41 +19,33 @@
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
-#if !defined(EVENTREPORTMEMORYUSAGE_HPP_)
-#define EVENTREPORTMEMORYUSAGE_HPP_
 
-#include "j9.h"
-#include "j9cfg.h"
-#include "mmhook.h"
+#ifndef J9WATCHEDINSTANCEFIELDSNIPPET_INCL
+#define J9WATCHEDINSTANCEFIELDSNIPPET_INCL
 
-#include "VerboseEvent.hpp"
-#include "Forge.hpp"
+#include "codegen/Snippet.hpp"
+#include "codegen/CodeGenerator.hpp"
 
-/**
- * Stores the data relating to the reporting of memory usage
- * @ingroup GC_verbose_events
- */
-class MM_VerboseEventReportMemoryUsage : public MM_VerboseEvent
-{
-/* Data Members */
-private:
-	MM_MemoryStatistics* _statistics;
-	
-/* Function Members */
-public:
-	virtual void formattedOutput(MM_VerboseOutputAgent* agent);
+namespace TR {
 
-	MMINLINE virtual void consumeEvents() { };
-	MMINLINE virtual bool definesOutputRoutine() { return true; };
-	MMINLINE virtual bool endsEventChain() { return false; };
-	
-	static MM_VerboseEvent *newInstance(MM_ReportMemoryUsageEvent* event, J9HookInterface** hookInterface);
-	
-protected:
-	MM_VerboseEventReportMemoryUsage(MM_ReportMemoryUsageEvent* event, J9HookInterface** hookInterface) :
-		MM_VerboseEvent(event->currentThread, event->timestamp, event->eventid, hookInterface),
-		_statistics(event->statistics)
-	{ }
-};
+class J9WatchedInstanceFieldSnippet : public TR::Snippet
+   {
+   private :
 
-#endif /*EVENTREPORTMEMORYUSAGE_HPP_*/
+   J9JITWatchedInstanceFieldData instanceFieldData;
+
+   public :
+
+   J9WatchedInstanceFieldSnippet(TR::CodeGenerator *cg, TR::Node *node, J9Method *m, UDATA loc, UDATA os);
+
+   J9Method *getMethod() { return instanceFieldData.method; }
+   UDATA getLocation() { return instanceFieldData.location; }
+   UDATA getOffset() { return instanceFieldData.offset; }
+   virtual uint32_t getLength(int32_t val) { return sizeof(J9JITWatchedInstanceFieldData); }
+
+   virtual uint8_t *emitSnippetBody();
+   virtual void print(TR::FILE *pOutFile, TR_Debug *debug);
+   };
+}
+
+#endif
