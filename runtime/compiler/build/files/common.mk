@@ -22,6 +22,7 @@ JIT_PRODUCT_BACKEND_SOURCES+=\
     compiler/control/J9Recompilation.cpp \
     compiler/env/CHTable.cpp \
     compiler/env/PersistentCHTable.cpp \
+	compiler/optimizer/CogniWorklistOpt.cpp \
     compiler/optimizer/AllocationSinking.cpp \
     compiler/optimizer/DataAccessAccelerator.cpp \
     compiler/optimizer/DynamicLiteralPool.cpp \
