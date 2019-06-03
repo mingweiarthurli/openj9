@@ -75,7 +75,8 @@
 #include "runtime/J9Profiler.hpp"
 #include "optimizer/UnsafeFastPath.hpp"
 #include "optimizer/VarHandleTransformer.hpp"
-
+#include "optimizer/CogniWorklistOpt.hpp"
+  
 
 static const OptimizationStrategy J9EarlyGlobalOpts[] =
    {
@@ -643,6 +644,7 @@ static const OptimizationStrategy cheapWarmStrategyOpts[] =
    { OMR::inlining                                                              },
    { OMR::osrGuardInsertion,                         OMR::IfVoluntaryOSR       },
    { OMR::osrExceptionEdgeRemoval                                               }, // most inlining is done by now
+   { OMR::cogniWorklist                                                         }, //perform after inlining
    { OMR::jProfilingBlock                                                       },
    { OMR::virtualGuardTailSplitter                                              }, // merge virtual guards
    { OMR::treeSimplification                                                    },
@@ -807,7 +809,9 @@ J9::Optimizer::Optimizer(TR::Compilation *comp, TR::ResolvedMethodSymbol *method
    _opts[OMR::jProfilingValue] =
       new (comp->allocator()) TR::OptimizationManager(self(), TR_JProfilingValue::create, OMR::jProfilingValue);
    // NOTE: Please add new J9 optimizations here!
-
+   _opts[OMR::cogniWorklist] =
+     new (comp->allocator()) TR::OptimizationManager(self(), TR_CogniWorklistOpt::create, OMR::cogniWorklist);
+   
    // initialize additional J9 optimization groups
 
    _opts[OMR::loopAliasRefinerGroup] =
