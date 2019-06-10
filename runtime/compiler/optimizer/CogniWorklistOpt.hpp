@@ -38,8 +38,7 @@
          virtual int32_t perform();
          virtual const char * optDetailString() const throw()
          {
-	   //for now do a hello world test!
-            return "O^O Hello World Opt : ";
+            return "O^O COGNI worklist generation";
          };
    };
 
