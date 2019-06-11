@@ -28,42 +28,51 @@ TR_CogniWorklistOpt::shouldPerform() {
    return true;
 }
 
+/*
+ * looks for function calls in the compiling method that are uses of crypto APIs
+ * 
+ *
+ */
 int32_t
 TR_CogniWorklistOpt::perform() {
 
-   //looking for nodes that are function calls
-   TR::TreeTop *tt = comp()->getStartTree();
-   for (; tt; tt = tt->getNextTreeTop()){
+  //walking tree tops will be sufficient
+  TR::TreeTop *tt = comp()->getStartTree();
+  for(; tt; tt = tt->getNextTreeTop()){
+    
+    TR::Node *node = tt->getNode();
+    
+    if(node->getNumChildren() > 0){
+      if(node->getOpCodeValue() == TR::treetop) // jump over TreeTop
+	node = node->getFirstChild();
+      
+      if(node->getNumChildren() > 0 &&
+	  node->getFirstChild()->getOpCode().isFunctionCall()){
+	
+	TR::Node *classNode = node->getFirstChild();
+	TR::Symbol *symbol = classNode->getSymbolReference()->getSymbol();
+	
+	if(symbol->isResolvedMethod()){
+	  TR::ResolvedMethodSymbol *method = symbol->castToResolvedMethodSymbol();
+	  if(method){
 
-     TR::Node *node = tt->getNode();
+	    TR_ResolvedMethod *m = method->getResolvedMethod();
+	    char *sig = m->signatureChars();	    
 
-     if (node->getNumChildren() > 0){
-       if (node->getOpCodeValue() == TR::treetop) // jump over TreeTop
-         node = node->getFirstChild();
-
-       if (node->getNumChildren() > 0 &&
-	   node->getFirstChild()->getOpCode().isFunctionCall()){
-
-	 TR::Node *classNode = node->getFirstChild();
-	 TR::Symbol *symbol = classNode->getSymbolReference()->getSymbol();
-
-	 if(symbol->isResolvedMethod()){
-	   TR::ResolvedMethodSymbol *method = symbol->castToResolvedMethodSymbol();
-	   if(method){
-	     TR_ResolvedMethod *m = method->getResolvedMethod();
-	     
-	     int32_t len;
-	     char *sig = m->signatureChars();
-	     printf("Found a signature: %s\n", sig);
-		   
-	     if(((strstr(sig, "java/security") != NULL)) || ((strstr(sig, "javax/crypto") != NULL))){
-	       printf("Found this name belonging to sec or crypt: %s\n", sig);
-	     }
-	   }
-	 }
-       }
-     }
-   }
-
-   return 1;
+	    //TODO: replace hardcoded search for method signatures containing JCA API packages
+	    if(((strstr(sig, "java/security") != NULL)) || ((strstr(sig, "javax/crypto") != NULL))){
+	      printf("Found a signature from package of interest: %s\n", sig);
+	      //compilee method and class
+	      TR_ResolvedMethod *feMethod = comp()->getCurrentMethod();
+	      char *compileeClass = feMethod->classNameChars();
+	      printf("Found the name of the method we are in: %s and the name of the class: %s\n", feMethod->signatureChars(), compileeClass);
+	      //one item is enough
+	      break;
+	    }
+	  }
+	}
+      }
+    }
+  }  
+  return 1;
 }
