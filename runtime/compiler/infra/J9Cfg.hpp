@@ -64,8 +64,8 @@ class CFG : public OMR::CFGConnector
    {
 public:
 
-   CFG(TR::Compilation *c, TR::ResolvedMethodSymbol *m) :
-         OMR::CFGConnector(c, m),
+   CFG(TR::Compilation *c, TR::ResolvedMethodSymbol *m, TR::Region *r= NULL) :
+         OMR::CFGConnector(c, m, r),
       _externalProfiler(NULL)
       {
       }
