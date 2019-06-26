@@ -40,6 +40,7 @@
 #include "control/RecompilationInfo.hpp"
 #include "il/symbol/ResolvedMethodSymbol.hpp"
 #include "optimizer/AllocationSinking.hpp"
+#include "optimizer/BenefitInliner.hpp"
 #include "optimizer/IdiomRecognition.hpp"
 #include "optimizer/Inliner.hpp"
 #include "optimizer/J9Inliner.hpp"
@@ -50,6 +51,7 @@
 #include "optimizer/Optimizations.hpp"
 #include "optimizer/PartialRedundancy.hpp"
 #include "optimizer/ProfileGenerator.hpp"
+#include "optimizer/SelectOpt.hpp"
 #include "optimizer/SequentialStoreSimplifier.hpp"
 #include "optimizer/SignExtendLoads.hpp"
 #include "optimizer/StringBuilderTransformer.hpp"
@@ -125,8 +127,8 @@ static const OptimizationStrategy signExtendLoadsOpts[] =
 // **************************************************************************
 static const OptimizationStrategy fsdStrategyOptsForMethodsWithSlotSharing[] =
    {
-   { OMR::trivialInlining,       OMR::IfNotFullInliningUnderOSRDebug   },         //added for fsd inlining
-   { OMR::inlining,              OMR::IfFullInliningUnderOSRDebug      },         //added for fsd inlining
+   { OMR::trivialInlining,             OMR::IfNotFullInliningUnderOSRDebug   },         //added for fsd inlining
+   { OMR::inlining,                    OMR::IfFullInliningUnderOSRDebug      },         //added for fsd inlining
    { OMR::basicBlockExtension                           },
    { OMR::treeSimplification                            },         //added for fsd inlining
    { OMR::localCSE                                      },
@@ -743,7 +745,7 @@ J9::Optimizer::Optimizer(TR::Compilation *comp, TR::ResolvedMethodSymbol *method
    // initialize additional J9 optimizations
 
    _opts[OMR::inlining] =
-      new (comp->allocator()) TR::OptimizationManager(self(), TR_Inliner::create, OMR::inlining);
+      new (comp->allocator()) TR::OptimizationManager(self(), TR::SelectOpt<TR_EnableBenefitInliner, OMR::BenefitInlinerWrapper, TR_Inliner>::create, OMR::inlining);
    _opts[OMR::targetedInlining] =
       new (comp->allocator()) TR::OptimizationManager(self(), TR_Inliner::create, OMR::targetedInlining);
    _opts[OMR::targetedInlining]->setOptPolicy(new (comp->allocator()) TR_J9JSR292InlinerPolicy(comp));

@@ -21,6 +21,7 @@
  *******************************************************************************/
 
 #include "optimizer/CallInfo.hpp"
+#include "runtime/J9ValueProfiler.hpp"
 
 class TR_ResolvedMethod;
 
