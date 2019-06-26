@@ -35,7 +35,10 @@ class CFG : public J9::CFGConnector
    {
    public:
 
-   CFG(TR::Compilation *comp, TR::ResolvedMethodSymbol *method, TR::Region *region = NULL) :
+   CFG(TR::Compilation *comp, TR::ResolvedMethodSymbol *method) :
+      J9::CFGConnector(comp, method) {}
+
+   CFG(TR::Compilation *comp, TR::ResolvedMethodSymbol *method, TR::Region &region) :
       J9::CFGConnector(comp, method, region) {}
    };
 

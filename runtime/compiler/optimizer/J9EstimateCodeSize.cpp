@@ -1089,7 +1089,7 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
                (uint16_t) handler, (uint32_t) type);
          }
 
-      TR::CFG cfg(comp(), calltarget->_calleeSymbol, &comp()->trMemory()->currentStackRegion());
+      TR::CFG cfg(comp(), calltarget->_calleeSymbol, comp()->trMemory()->currentStackRegion());
       cfg.setStartAndEnd(new (comp()->trStackMemory()) TR::Block(
             TR::TreeTop::create(comp(), TR::Node::createOnStack(NULL,
                   TR::BBStart, 0)), TR::TreeTop::create(comp(),
