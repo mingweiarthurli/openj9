@@ -456,7 +456,7 @@ TR_J9EstimateCodeSize::adjustEstimateForStringCompression(TR_ResolvedMethod* met
 bool
 TR_J9EstimateCodeSize::estimateCodeSize(TR_CallTarget *calltarget, TR_CallStack *prevCallStack, bool recurseDown)
    {
-   if (realEstimateCodeSize(calltarget, prevCallStack, recurseDown))
+   if (realEstimateCodeSize(calltarget, prevCallStack, comp()->trMemory()->currentStackRegion(), recurseDown))
       {
       if (_isLeaf && _realSize > 1)
          {
@@ -585,7 +585,7 @@ static void propagateArgs (TR::ResolvedMethodSymbol* methodSymbol, TR_CallSite* 
    }
 
 bool
-TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallStack *prevCallStack, bool recurseDown)
+TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallStack *prevCallStack, TR::Region &region, bool recurseDown)
    {
    TR_ASSERT(calltarget->_calleeMethod, "assertion failure");
 
@@ -1089,7 +1089,7 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
                (uint16_t) handler, (uint32_t) type);
          }
 
-      TR::CFG cfg(comp(), calltarget->_calleeSymbol, comp()->trMemory()->currentStackRegion());
+      TR::CFG cfg(comp(), calltarget->_calleeSymbol, region);
       cfg.setStartAndEnd(new (comp()->trStackMemory()) TR::Block(
             TR::TreeTop::create(comp(), TR::Node::createOnStack(NULL,
                   TR::BBStart, 0)), TR::TreeTop::create(comp(),

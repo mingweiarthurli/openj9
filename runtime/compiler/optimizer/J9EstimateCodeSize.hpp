@@ -78,7 +78,7 @@ class TR_J9EstimateCodeSize : public TR_EstimateCodeSize
 
    protected:
       bool estimateCodeSize(TR_CallTarget *, TR_CallStack * , bool recurseDown = true);
-      bool realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallStack *prevCallStack, bool recurseDown);
+      bool realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallStack *prevCallStack, TR::Region &region, bool recurseDown);
 
       bool reduceDAAWrapperCodeSize(TR_CallTarget* target);
 
