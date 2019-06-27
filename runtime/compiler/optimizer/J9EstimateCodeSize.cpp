@@ -458,7 +458,8 @@ TR_J9EstimateCodeSize::adjustEstimateForStringCompression(TR_ResolvedMethod* met
 TR::CFG *
 TR_J9EstimateCodeSize::generateCFG(TR_CallTarget *calltarget, TR_CallStack *prevCallStack, TR::Region &region)
    {
-   realEstimateCodeSize(calltarget, prevCallStack, region, false, true);
+   bool retval = realEstimateCodeSize(calltarget, prevCallStack, region, false, true);
+   TR_ASSERT(retval, "we have a cfg");
    return calltarget->_cfg;
    }
 
@@ -550,7 +551,7 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
       return returnCleanup(1);
       }
 
-   int32_t size = calltarget->_myCallSite->_isIndirectCall ? 5 : 0;
+   int32_t size = calltarget->_myCallSite ? (calltarget->_myCallSite->_isIndirectCall ? 5 : 0) : 0;
 
    TR_J9ByteCodeIterator bci(0, static_cast<TR_ResolvedJ9Method *> (calltarget->_calleeMethod), static_cast<TR_J9VMBase *> (comp()->fej9()), comp());
 
@@ -868,7 +869,7 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
             flags[i].set(isUnsanitizeable);
             break;
          case J9BCaload0:
-            if (calltarget->_myCallSite->_isIndirectCall)
+            if (!stopAfterCFG && calltarget->_myCallSite->_isIndirectCall)
                thisOnStack = true;
             break;
          case J9BCiastore:
@@ -1016,7 +1017,10 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
       cfg.getEnd()->asBlock()->setIsEndBlock();
 
       TR::Block * currentBlock = cfg.getStart()->asBlock();
+      currentBlock->setJ9EstimateCodeSizeMethod(calltarget->_calleeMethod);
       currentBlock->setBlockBCIndex(0);
+      cfg.getStart()->asBlock()->setJ9EstimateCodeSizeMethod(calltarget->_calleeMethod);
+      cfg.getStart()->asBlock()->setBlockBCIndex(0);
 
       int32_t endNodeIndex = bci.maxByteCodeIndex() - 1;
       if (endNodeIndex < 0)
@@ -1497,7 +1501,7 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
                      }
 
                   callsite->_callerBlock = currentInlinedBlock;
-                  if (isInlineable(&callStack, callsite))
+                  if (!stopAfterCFG && isInlineable(&callStack, callsite))
                      {
                      callSites[i] = callsite;
                      inlineableCallExists = true;
@@ -1572,7 +1576,7 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
                   TR_PrexArgInfo *argInfo = calltarget->_ecsPrexArgInfo;
                   callsite->_callerBlock = currentInlinedBlock;
 
-                  if (isInlineable(&callStack, callsite))
+                  if (!stopAfterCFG && isInlineable(&callStack, callsite))
                      {
 
                      if (wasPeekingSuccessfull)
@@ -1636,7 +1640,7 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
 
                   TR_PrexArgInfo *argInfo = calltarget->_ecsPrexArgInfo;
                   callsite->_callerBlock = currentInlinedBlock;
-                  if (isInlineable(&callStack, callsite))
+                  if (!stopAfterCFG && isInlineable(&callStack, callsite))
                      {
 
                      if (wasPeekingSuccessfull)
@@ -1739,7 +1743,7 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
 
                callsite->_callerBlock = currentInlinedBlock;
 
-               if (isInlineable(&callStack, callsite))
+               if (!stopAfterCFG && isInlineable(&callStack, callsite))
                   {
 
                   if (wasPeekingSuccessfull)
