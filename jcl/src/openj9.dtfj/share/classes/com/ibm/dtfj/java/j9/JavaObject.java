@@ -487,7 +487,7 @@ public class JavaObject implements com.ibm.dtfj.java.JavaObject
 	 */
 	public long getHashcode() throws DataUnavailable, CorruptDataException
 	{
-		//currently, we know no difference between these two kinds of hashcodes (may be revisitted in the future)
+		//currently, we know no difference between these two kinds of hashcodes (may be revisited in the future)
 		return getPersistentHashcode();
 	}
 
@@ -544,7 +544,7 @@ public class JavaObject implements com.ibm.dtfj.java.JavaObject
 				try
 				{
 					int instanceSize = arrayForm.getInstanceSize(this);
-					//the instance size will include the header and the actual data inside the array so seperate them
+					//the instance size will include the header and the actual data inside the array so separate them
 					long contentDataSize = (long)(instanceSize - objectHeaderSize);
 					//get the number of leaves, excluding the tail leaf (the tail leaf is the final leaf which points back into the spine).  There won't be one if there is isn't a remainder in this calculation since it would be empty
 					int fullSizeLeaves = (int)(contentDataSize / _arrayletLeafSize);

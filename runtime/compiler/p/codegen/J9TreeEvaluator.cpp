@@ -4753,7 +4753,7 @@ TR::Register * J9::Power::TreeEvaluator::VMgenCoreInstanceofEvaluator(TR::Node *
       crReg = conditions->searchPreConditionRegister(TR::RealRegister::cr0);
       if (!crReg)
          {
-         // This is another hack to compensate for skipping the preservating of CCRs for helper calls in linkage code.
+         // This is another hack to compensate for skipping the preserving of CCRs for helper calls in linkage code.
          // This hack wouldn't be necessary if this code wasn't being lazy and re-using the dependencies
          // set up by the direct call evaluator, but alas...
          // Since we are not preserving CCRs and this code previously expected to find a CCR in the call instruction's
@@ -5516,9 +5516,7 @@ TR::Register *J9::Power::TreeEvaluator::VMmonexitEvaluator(TR::Node *node, TR::C
          lockSize = 4;
          }
       generateTrg1MemInstruction(cg, opCode, node, monitorReg, new (cg->trHeapMemory()) TR::MemoryReference(baseReg, moffset, lockSize, cg));
-#if defined(J9VM_TASUKI_LOCKS_SINGLE_SLOT)
       generateTrg1ImmInstruction(cg, TR::InstOpCode::li, node, ctempReg, 0);
-#endif
       generateTrg1Src2Instruction(cg,TR::InstOpCode::Op_cmp, node, condReg, monitorReg, metaReg);
 
       if (TR::Compiler->target.cpu.id() >= TR_PPCgp)

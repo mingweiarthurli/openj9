@@ -573,7 +573,7 @@ printClass(J9VMThread* vmThread, J9Class* clazz, char* message, UDATA bootLoader
 
 /**
  * parse a set of -verbose: options and update a settings struct.
- * @param options set of null-separated verbose obptions (e.g. "class", "gc", etc.  Terminated by a double null
+ * @param options set of null-separated verbose options (e.g. "class", "gc", etc.  Terminated by a double null
  * @param verboseOptions STructure of flags indicating which verbosity to turn on
  * @return 0 if error, 1 if success
  */
@@ -1268,7 +1268,7 @@ verboseClassVerificationFallback(J9HookInterface** hook, UDATA eventNum, void* e
 }
 
 /*
- * This event callback is triggered before starting the verificaiton of each method.
+ * This event callback is triggered before starting the verification of each method.
  */
 static void
 verboseMethodVerificationStart(J9HookInterface** hook, UDATA eventNum, void* eventData, void* userData)

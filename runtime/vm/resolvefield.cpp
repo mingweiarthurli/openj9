@@ -224,19 +224,21 @@ findFieldInClass(J9VMThread *vmStruct, J9Class *clazz, U_8 *fieldName, UDATA fie
 		while (!found && (result->field != NULL)) {
 			/* compare name and sig */
 			J9UTF8* thisName = J9ROMFIELDSHAPE_NAME(result->field);
-			if (J9UTF8_DATA_EQUALS(fieldName, fieldNameLength, J9UTF8_DATA(thisName), J9UTF8_LENGTH(thisName))) {
-				J9UTF8* thisSig = J9ROMFIELDSHAPE_SIGNATURE(result->field);
-				if (J9UTF8_DATA_EQUALS(signature, signatureLength, J9UTF8_DATA(thisSig), J9UTF8_LENGTH(thisSig))) {
-					if( offsetOrAddress != NULL ) {
-						/* if we are returning a static field, convert the offset to the actual address of the static */
-						if (result->field->modifiers & J9AccStatic) {
-							result->offset += (UDATA) clazz->ramStatics;
-						}
-						*offsetOrAddress = result->offset;
+			J9UTF8* thisSig = J9ROMFIELDSHAPE_SIGNATURE(result->field);
+			if ((fieldNameLength == J9UTF8_LENGTH(thisName)) 
+			&& (signatureLength == J9UTF8_LENGTH(thisSig))
+			&& (0 == memcmp(fieldName, J9UTF8_DATA(thisName), fieldNameLength))
+			&& (0 == memcmp(signature, J9UTF8_DATA(thisSig), signatureLength))
+			) {
+				if (offsetOrAddress != NULL) {
+					/* if we are returning a static field, convert the offset to the actual address of the static */
+					if (result->field->modifiers & J9AccStatic) {
+						result->offset += (UDATA) clazz->ramStatics;
 					}
-					shape = result->field;
-					found = 1;
+					*offsetOrAddress = result->offset;
 				}
+				shape = result->field;
+				found = 1;
 			}
 			if (!found) {
 				result = fieldOffsetsNextDo(&state);
@@ -613,13 +615,13 @@ J9Class *
 findJ9ClassInFlattenedClassCache(J9FlattenedClassCache *flattenedClassCache, U_8 *className, UDATA classNameLength)
 {
 	/* first field indicates the number of classes in the cache */
-	UDATA length = flattenedClassCache->offset;
+	UDATA length = flattenedClassCache->numberOfEntries;
 	J9Class *clazz = NULL;
 
-	for (UDATA i = 1; i <= length; i++) {
-		J9UTF8* currentClassName = J9ROMCLASS_CLASSNAME(flattenedClassCache[i].clazz->romClass);
+	for (UDATA i = 0; i < length; i++) {
+		J9UTF8* currentClassName = J9ROMCLASS_CLASSNAME(J9_VM_FCC_ENTRY_FROM_FCC(flattenedClassCache, i)->clazz->romClass);
 		if (J9UTF8_DATA_EQUALS(J9UTF8_DATA(currentClassName), J9UTF8_LENGTH(currentClassName), className, classNameLength)) {
-			clazz = flattenedClassCache[i].clazz;
+			clazz = J9_VM_FCC_ENTRY_FROM_FCC(flattenedClassCache, i)->clazz;
 			break;
 		}
 	}
@@ -632,19 +634,17 @@ UDATA
 findIndexInFlattenedClassCache(J9FlattenedClassCache *flattenedClassCache, J9ROMNameAndSignature *nameAndSignature)
 {
 	/* first field indicates the number of classes in the cache */
-	UDATA length = flattenedClassCache->offset;
+	UDATA length = flattenedClassCache->numberOfEntries;
 	UDATA index = 0;
 
-	for (UDATA i = 1; i <= length; i++) {
-		if (J9UTF8_EQUALS(J9ROMNAMEANDSIGNATURE_NAME(nameAndSignature), J9ROMNAMEANDSIGNATURE_NAME(flattenedClassCache[i].nameAndSignature))
-			&& J9UTF8_EQUALS(J9ROMNAMEANDSIGNATURE_SIGNATURE(nameAndSignature), J9ROMNAMEANDSIGNATURE_SIGNATURE(flattenedClassCache[i].nameAndSignature))
+	for (UDATA i = 0; i < length; i++) {
+		if (J9UTF8_EQUALS(J9ROMNAMEANDSIGNATURE_NAME(nameAndSignature), J9ROMNAMEANDSIGNATURE_NAME(J9_VM_FCC_ENTRY_FROM_FCC(flattenedClassCache, i)->nameAndSignature))
+			&& J9UTF8_EQUALS(J9ROMNAMEANDSIGNATURE_SIGNATURE(nameAndSignature), J9ROMNAMEANDSIGNATURE_SIGNATURE(J9_VM_FCC_ENTRY_FROM_FCC(flattenedClassCache, i)->nameAndSignature))
 		) {
 			index = i;
 			break;
 		}
 	}
-
-	Assert_VM_true(index != 0);
 	return index;
 }
 #endif /* J9VM_OPT_VALHALLA_VALUE_TYPES */
@@ -1478,11 +1478,10 @@ J9HashTable *
 fieldIndexTableNew(J9JavaVM* vm, J9PortLibrary *portLib) 
 {
 	J9HashTable *result = NULL;
-#if	!defined (J9VM_OUT_OF_PROCESS)
+#if !defined (J9VM_OUT_OF_PROCESS)
 	const IDATA initialSize = 64;
-	J9HookInterface ** vmHooks;
-	
-	vmHooks = vm->internalVMFunctions->getVMHookInterface(vm);
+	J9HookInterface ** vmHooks = J9_VM_FUNCTION_VIA_JAVAVM(vm, getVMHookInterface)(vm);
+
 #if defined(J9VM_GC_DYNAMIC_CLASS_UNLOADING)
 	(*vmHooks)->J9HookRegisterWithCallSite(vmHooks, J9HOOK_VM_CLASSES_UNLOAD, hookFieldTablePurge, OMR_GET_CALLSITE(), vm);
 #endif
@@ -1503,7 +1502,7 @@ fieldIndexTableNew(J9JavaVM* vm, J9PortLibrary *portLib)
 void
 fieldIndexTableFree(J9JavaVM* vm)
 {
-#if	!defined (J9VM_OUT_OF_PROCESS)
+#if !defined (J9VM_OUT_OF_PROCESS)
 	if (vm->fieldIndexTable != NULL) {
 		hookFieldTablePurge(NULL, 0, NULL, vm);
 		hashTableFree(vm->fieldIndexTable);
@@ -1520,7 +1519,7 @@ fieldIndexTableFree(J9JavaVM* vm)
  * @returns new entry
  * @exceptions none
  */
-#if	!defined (J9VM_OUT_OF_PROCESS)
+#if !defined (J9VM_OUT_OF_PROCESS)
 static fieldIndexTableEntry*
 fieldIndexTableAdd(J9JavaVM* vm, J9Class *ramClass, J9FieldTable *table)
 {	

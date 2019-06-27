@@ -406,7 +406,7 @@ MM_Scheduler::waitForMutatorsToStop(MM_EnvironmentRealtime *env)
 	 * exclusive access for itself.
 	 * requestExclusiveVMAccess is invoked atomically with _mode being set to WAKING_GC
 	 * under masterThreadMonitor (see continueGC). Therefore, we check here if mode is not
-	 * WAKING_GC, and only than we reqest exclusive assess for ourselves.
+	 * WAKING_GC, and only then we request exclusive assess for ourselves.
 	 * TODO: This approach is just to fix some timing holes in shutdown. Consider removing this
 	 * "if" statement and fix alarm thread not to die before requesting exclusive access for us.
 	 */
@@ -538,7 +538,7 @@ MM_Scheduler::reportStopGCIncrement(MM_EnvironmentRealtime *env, bool isCycleEnd
 	 */
 	if (isCycleEnd) {
 		if (_completeCurrentGCSynchronously) {
-			/* The reqests for Sync GC made at the very end of
+			/* The requests for Sync GC made at the very end of
 			 * GC cycle might not had a chance to make the local copy
 			 */
 			if (_completeCurrentGCSynchronouslyMasterThreadCopy) {
@@ -755,7 +755,7 @@ MM_Scheduler::startUpThreads()
 
 	/* At this point, all GC threads have signalled that they are ready.
 	 * However, because Metronome uses omrthread_suspend/omrthread_resume to stop and
-	 * start threads, there is a race: the thread may have been pre-empted after
+	 * start threads, there is a race: the thread may have been preempted after
 	 * signalling but before suspending itself. An alternative may be to use
 	 * omrthread_park/unpark.
 	 */
@@ -1055,4 +1055,3 @@ j9gc_startGCIfTimeExpired(OMR_VMThread* vmThread)
 }
 
 }
-

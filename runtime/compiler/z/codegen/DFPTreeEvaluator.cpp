@@ -242,7 +242,7 @@ genStoreDFP(
    TR_J9VMBase *fej9 = (TR_J9VMBase *)(comp->fe());
    TR::Register * objRegister = cg->evaluate(objAddrNode);
 
-   // query the VM for the field offset to wich we are going to store
+   // query the VM for the field offset to which we are going to store
    if (dfpFieldOffset == -1)
       {
       TR_OpaqueClassBlock * bigDClass = NULL;
@@ -1838,7 +1838,7 @@ Conversion is performed in compliance with what's described in 'zOS XLC V1R10 La
            floating-point number is positive, or 0 otherwise.
        - If the integer type is signed, the result is the most negative or positive representable
            number according to the sign of the floating-point number
-currently tobey follows this rule for DFP to singned/unsigned int, but seems not for short/byte types
+currently tobey follows this rule for DFP to signed/unsigned int, but seems not for short/byte types
      where the upper bits are simple choped off, i think it's just a bug in tobey
 
      DFP to fixed type conversions are expanded in WCode IlGen phase, so don't need it here anymore

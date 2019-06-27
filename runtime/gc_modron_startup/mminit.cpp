@@ -482,7 +482,7 @@ j9gc_initialize_heap(J9JavaVM *vm, IDATA *memoryParameterTable, UDATA heapBytesR
 	}
 
 #if defined(J9VM_GC_IDLE_HEAP_MANAGER)
-	if (extensions->gcOnIdle || extensions->compactOnIdle) {
+	if (extensions->gcOnIdle) {
 		/* Enable idle tuning only for gencon policy */
 		if (gc_policy_gencon == extensions->configurationOptions._gcPolicy) {
 			extensions->idleGCManager = MM_IdleGCManager::newInstance(&env);
@@ -500,7 +500,7 @@ error_no_memory:
 }
 
 /**
- * Creates and initialized VM owned structers related to the heap
+ * Creates and initialized VM owned structures related to the heap
  * Calls low level heap initialization function
  * @return J9VMDLLMAIN_OK or J9VMDLLMAIN_FAILED
  */
@@ -603,7 +603,7 @@ void j9gc_jvmPhaseChange(J9VMThread *currentThread, UDATA phase)
 	MM_EnvironmentBase env(currentThread->omrVMThread);
 	if (J9VM_PHASE_NOT_STARTUP == phase) {
 
-		if (NULL != vm->sharedClassConfig) {
+		if ((NULL != vm->sharedClassConfig) && extensions->useGCStartupHints) {
 			if (extensions->isStandardGC()) {
 				/* read old values from SC */
 				uintptr_t hintDefaultOld = 0;
@@ -649,7 +649,7 @@ gcExpandHeapOnStartup(J9JavaVM *javaVM)
 	J9VMThread *currentThread = javaVM->internalVMFunctions->currentVMThread(javaVM);
 	MM_EnvironmentBase env(currentThread->omrVMThread);
 
-	if (NULL != sharedClassConfig) {
+	if ((NULL != sharedClassConfig) && extensions->useGCStartupHints) {
 		if (extensions->isStandardGC()) {
 			uintptr_t hintDefault = 0;
 			uintptr_t hintTenure = 0;
@@ -1215,7 +1215,7 @@ gcInitializeXmxXmdxVerification(J9JavaVM *javaVM, IDATA* memoryParameters, bool 
 
 	/* Still need to verify the minimum size of Xmx/Xmdx is not less than the required
 	 * minimum subSpace size (oldSpace/NewSpace).  Do this verification after those minimum
-	 * values are verfied.
+	 * values are verified.
 	 */
 	return JNI_OK;
 

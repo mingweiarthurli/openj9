@@ -388,7 +388,7 @@ MM_MetronomeDelegate::incrementalCollect(MM_EnvironmentRealtime *env)
 }
 
 void
-MM_MetronomeDelegate::doAuxilaryGCWork(MM_EnvironmentBase *env)
+MM_MetronomeDelegate::doAuxiliaryGCWork(MM_EnvironmentBase *env)
 {
 #if defined(J9VM_GC_FINALIZATION)
 	if(isFinalizationRequired()) {
@@ -835,7 +835,7 @@ MM_MetronomeDelegate::allocateAccessBarrier(MM_EnvironmentBase *env)
 
 /**
  * Iterates over all threads and enables the double barrier for each thread by setting the
- * remebered set fragment index to the reserved index.
+ * remembered set fragment index to the reserved index.
  */
 void
 MM_MetronomeDelegate::enableDoubleBarrier(MM_EnvironmentBase *env)
@@ -986,15 +986,16 @@ MM_MetronomeDelegate::doClassTracing(MM_EnvironmentRealtime *env)
 					 */
 					hashTableResetFlag(classLoader->classHashTable, J9HASH_TABLE_DO_NOT_REHASH);
 
-					Assert_MM_true(NULL != classLoader->moduleHashTable);
-					J9Module **modulePtr = (J9Module **)hashTableStartDo(classLoader->moduleHashTable, &walkState);
-					while (NULL != modulePtr) {
-						J9Module * const module = *modulePtr;
+					if (NULL != classLoader->moduleHashTable) {
+						J9Module **modulePtr = (J9Module **)hashTableStartDo(classLoader->moduleHashTable, &walkState);
+						while (NULL != modulePtr) {
+							J9Module * const module = *modulePtr;
 
-						didWork |= _markingScheme->markObject(env, module->moduleObject);
-						didWork |= _markingScheme->markObject(env, module->moduleName);
-						didWork |= _markingScheme->markObject(env, module->version);
-						modulePtr = (J9Module**)hashTableNextDo(&walkState);
+							didWork |= _markingScheme->markObject(env, module->moduleObject);
+							didWork |= _markingScheme->markObject(env, module->moduleName);
+							didWork |= _markingScheme->markObject(env, module->version);
+							modulePtr = (J9Module**)hashTableNextDo(&walkState);
+						}
 					}
 				}
 			}
@@ -1069,7 +1070,7 @@ MM_MetronomeDelegate::postRequestExclusiveVMAccess(OMR_VMThread *threadRequestin
  * but not necessarily by the same thread.
  *
  * @param env the requesting thread.
- * @param block boolean input paramter specifing whether we should block and wait, if another party is requesting at the same time, or we return
+ * @param block boolean input parameter specifying whether we should block and wait, if another party is requesting at the same time, or we return
  * @return boolean returning whether request was successful or not (make sense only if block is set to FALSE)
  */
 uintptr_t

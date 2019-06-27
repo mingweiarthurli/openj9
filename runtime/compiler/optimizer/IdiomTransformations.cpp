@@ -887,7 +887,7 @@ indexContainsArrayAccess(TR::Compilation *comp, TR::Node *aXaddNode)
    return false;
    }
 
-// isIndexVaraibleInList checks whether the induction (index) variable symbol(s)
+// isIndexVariableInList checks whether the induction (index) variable symbol(s)
 // from the given 'node' subtree is found inside 'nodeList'.
 //
 // Returns true if
@@ -6830,7 +6830,7 @@ CISCTransform2ArrayCopyC2BMixed(TR_CISCTransformer *trans)
                                          blockLE->getEntry());
    blockLE->append(TR::TreeTop::create(comp, backIfLE));
 
-   // after these two pathes
+   // after these two paths
    //
    // Currently, blockAfter has no nodes.
    //

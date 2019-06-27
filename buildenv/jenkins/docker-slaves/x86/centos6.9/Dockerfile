@@ -118,7 +118,7 @@ RUN yum -y update \
   && yum clean all \
   && ln -s /opt/rh/devtoolset-7/root/usr/bin/gcc /usr/bin/cc \
   && ln -s /opt/rh/devtoolset-7/root/usr/bin/gcc /usr/bin/gcc \
-  && ln -s /opt/rh/devtoolset-7/root/usr/bin/g++ /usr/bin/g++ 
+  && ln -s /opt/rh/devtoolset-7/root/usr/bin/g++ /usr/bin/g++
 
 # Dependency required by test framework
 RUN wget -O - http://cpanmin.us | perl - --self-upgrade \
@@ -258,24 +258,31 @@ RUN mkdir /home/${USER}/openjdk_cache \
   && git init --bare \
   && git remote add jdk8 https://github.com/ibmruntimes/openj9-openjdk-jdk8.git \
   && git remote add jdk11 https://github.com/ibmruntimes/openj9-openjdk-jdk11.git \
+  && git remote add jdk12 https://github.com/ibmruntimes/openj9-openjdk-jdk12.git \
+  && git remote add jdk13 https://github.com/ibmruntimes/openj9-openjdk-jdk13.git \
   && git remote add jdk https://github.com/ibmruntimes/openj9-openjdk-jdk.git \
   && git remote add openj9 https://github.com/eclipse/openj9.git \
   && git remote add omr https://github.com/eclipse/openj9-omr.git \
-  && git fetch --all
+  && git fetch --all \
+  && git gc --aggressive --prune=all
 
-# Install OpenSSL v1.1.0
+# Install OpenSSL v1.1.1b
+# Required for JITaaS  & Crypto functional testing
 RUN cd /tmp \
-  && wget https://www.openssl.org/source/old/1.1.0/openssl-1.1.0g.tar.gz \
-  && tar -xzf openssl-1.1.0g.tar.gz \
-  && rm -f openssl-1.1.0g.tar.gz \
-  && cd /tmp/openssl-1.1.0g \
-  && ./config -Wl,-rpath,/usr/local/lib64 \
+  && wget https://github.com/openssl/openssl/archive/OpenSSL_1_1_1b.tar.gz \
+  && tar -xzf OpenSSL_1_1_1b.tar.gz \
+  && rm -f OpenSSL_1_1_1b.tar.gz \
+  && cd /tmp/openssl-OpenSSL_1_1_1b \
+  && ./config --prefix=/usr/local/openssl-1.1.1b --openssldir=/usr/local/openssl-1.1.1b \
   && make \
   && make install \
   && cd .. \
-  && rm -rf openssl-1.1.0g
+  && rm -rf openssl-OpenSSL_1_1_1b \
+  && echo "/usr/local/openssl-1.1.1b/lib" > /etc/ld.so.conf.d/openssl-1.1.1b.conf \
+  && echo "PATH=/usr/local/openssl-1.1.1b/bin:$PATH" > /etc/environment
 
 # Install Protobuf v3.5.1
+# Required for JITaaS
 RUN cd /tmp \
   && wget https://github.com/protocolbuffers/protobuf/releases/download/v3.5.1/protobuf-cpp-3.5.1.tar.gz \
   && tar -xzf protobuf-cpp-3.5.1.tar.gz \
@@ -286,9 +293,27 @@ RUN cd /tmp \
   && make install \
   && cd .. \
   && rm -rf protobuf-3.5.1
+# Run ldconfig to create necessary links and cache to protobuf libraries
+RUN echo "/usr/local/lib" > /etc/ld.so.conf.d/usr-local.conf \
+  && echo "/usr/local/lib64" >> /etc/ld.so.conf.d/usr-local.conf \
+  && ldconfig
 
-# Run ldconfig to create necessary links and cache to shared libraries
-RUN ldconfig
+# Install Python3 v3.7.3
+RUN yum -y update \
+  && yum -y install \
+    zlib-devel \
+    libffi-devel \
+  && yum clean all \
+  && cd /tmp \
+  && wget https://www.python.org/ftp/python/3.7.3/Python-3.7.3.tar.xz \
+  && tar -xJf Python-3.7.3.tar.xz \
+  && rm -f Python-3.7.3.tar.xz \
+  && cd /tmp/Python-3.7.3 \
+  && ./configure --prefix=/usr/local \
+  && make \
+  && make install \
+  && cd .. \
+  && rm -rf Python-3.7.3
 
 # Expose SSH port and run SSHD
 EXPOSE 22
@@ -298,9 +323,7 @@ RUN mkdir -p /var/run/sshd \
   && service sshd start \
   && service sshd stop
 
-# Adding bash profile so jenkins max user processes will be unlimited
-RUN echo >> /home/jenkins/.bashrc \
-  && echo "# Change max user processes in jenkins" >> /home/jenkins/.bashrc \
-  && echo "ulimit -u unlimited" >> /home/jenkins/.bashrc
-
-CMD ["/usr/sbin/sshd","-D"]
+# Adding bash profile so ${USER} max user processes will be unlimited
+RUN echo >> /home/${USER}/.bashrc \
+  && echo "# Change max user processes in ${USER}" >> /home/${USER}/.bashrc \
+  && echo "ulimit -u unlimited" >> /home/${USER}/.bashrc

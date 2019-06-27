@@ -2584,13 +2584,13 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 	 */
 	public Stream<String> lines() {
 		if (enableCompression && (null == compressionFlag || coder == LATIN1)) {
-			/*[IF Java12]*/
+			/*[IF Java12 & !Java13]*/
 			return StringLatin1.lines(value, 0, 0);
 			/*[ELSE]*/
 			return StringLatin1.lines(value);
 			/*[ENDIF] Java12*/
 		} else {
-			/*[IF Java12]*/
+			/*[IF Java12 & !Java13]*/
 			return StringUTF16.lines(value, 0, 0);
 			/*[ELSE]*/
 			return StringUTF16.lines(value);
@@ -3051,7 +3051,7 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 	/**
 	 * Replace any substrings within this String that match the supplied regular expression expr, with the String substitute.
 	 *
-	 * @param expr
+	 * @param regex 
 	 *			  the regular expression to match
 	 * @param substitute
 	 *			  the string to replace the matching substring with
@@ -3138,7 +3138,7 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 	 *
 	 * @param regex
 	 *			  Regular expression that is used as a delimiter
-	 * @return The array of strings which are splitted around the regex
+	 * @return The array of strings which are split around the regex
 	 *
 	 * @throws PatternSyntaxException
 	 *				if the syntax of regex is invalid
@@ -3195,7 +3195,7 @@ public final class String implements Serializable, Comparable<String>, CharSeque
 	 * 
 	 * @param regex Regular expression that is used as a delimiter
 	 * @param max The threshold of the returned array
-	 * @return The array of strings which are splitted around the regex
+	 * @return The array of strings which are split around the regex
 	 *
 	 * @throws PatternSyntaxException if the syntax of regex is invalid
 	 *
@@ -7465,7 +7465,7 @@ written authorization of the copyright holder.
 	 *
 	 * @param regex
 	 *			  Regular expression that is used as a delimiter
-	 * @return The array of strings which are splitted around the regex
+	 * @return The array of strings which are split around the regex
 	 *
 	 * @throws PatternSyntaxException
 	 *				if the syntax of regex is invalid
@@ -7522,7 +7522,7 @@ written authorization of the copyright holder.
 	 * 
 	 * @param regex Regular expression that is used as a delimiter
 	 * @param max The threshold of the returned array
-	 * @return The array of strings which are splitted around the regex
+	 * @return The array of strings which are split around the regex
 	 *
 	 * @throws PatternSyntaxException if the syntax of regex is invalid
 	 *
@@ -8355,4 +8355,15 @@ written authorization of the copyright holder.
 		return builder.toString();
 	}	
 /*[ENDIF] Java12 */
+	
+/*[IF Java13]*/
+	/*
+	 * Determine if current String object is LATIN1.
+	 * 
+	 * @return true if it is LATIN1, otherwise false.
+	 */
+	boolean isLatin1() {
+		return LATIN1 == coder();
+	}
+/*[ENDIF] Java13 */
 }

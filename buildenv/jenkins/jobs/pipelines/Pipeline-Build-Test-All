@@ -52,7 +52,7 @@
  *   VARIABLE_FILE: String - the custom variables file. Uses defaults.yml when no value is provided.
  *   VENDOR_REPO: String - the repository URL of a Git repository that stores a custom variables file
  *   VENDOR_BRANCH: String - the vendor branch to clone from
- *   VENDOR_CREDENTIALS_ID: String - the Jenkis credentials to connect to the vendor Git repository if VENDOR_REPO is a private repository
+ *   VENDOR_CREDENTIALS_ID: String - the Jenkins credentials to connect to the vendor Git repository if VENDOR_REPO is a private repository
  *   SETUP_LABEL: String - the node label(s) to run this job on; could be any node that has Git installed on it
  *   BUILD_NODE_LABELS: String - the labels of a node to compile and build the Eclipse OpenJ9 extensions for OpenJDK
  *   TEST_NODE_LABELS: String - the labels of a node to run tests on
@@ -75,7 +75,7 @@
  *   OPENJDK<version>_SHA_<platform>: String - the last commit SHA
  */
 
-CURRENT_RELEASES = ['8', '11', '12', 'next']
+CURRENT_RELEASES = ['8', '11', '12', '13', 'next']
 
 SPECS = ['ppc64_aix'      : CURRENT_RELEASES,
          'ppc64le_linux'  : CURRENT_RELEASES,
@@ -125,8 +125,6 @@ PROMOTE = (params.PROMOTE) ? params.PROMOTE : ""
 echo "PROMOTE:'${PROMOTE}'"
 SLACK_CHANNEL = (params.SLACK_HANDLE) ? params.SLACK_HANDLE : ""
 echo "SLACK_CHANNEL:'${SLACK_CHANNEL}'"
-BUILD_LIST = (params.BUILD_LIST) ? params.BUILD_LIST : ""
-echo "BUILD_LIST:'${BUILD_LIST}'"
 BUILD_IDENTIFIER = (params.BUILD_IDENTIFIER) ? params.BUILD_IDENTIFIER : ""
 echo "BUILD_IDENTIFIER:'${BUILD_IDENTIFIER}'"
 AUTOMATIC_GENERATION = (params.AUTOMATIC_GENERATION) ? params.AUTOMATIC_GENERATION : 'true'
@@ -294,6 +292,8 @@ try {
 
 def build(JOB_NAME, OPENJDK_REPO, OPENJDK_BRANCH, SHAS, OPENJ9_REPO, OPENJ9_BRANCH, OMR_REPO, OMR_BRANCH, SPEC, SDK_VERSION, BUILD_NODE, TEST_NODE, EXTRA_GETSOURCE_OPTIONS, EXTRA_CONFIGURE_OPTIONS, EXTRA_MAKE_OPTIONS, OPENJDK_CLONE_DIR, ADOPTOPENJDK_REPO, ADOPTOPENJDK_BRANCH, AUTOMATIC_GENERATION, CUSTOM_DESCRIPTION) {
     stage ("${JOB_NAME}") {
+        SCM_BRANCH = (ghprbPullId && ghprbGhRepository == GHPRB_REPO_OPENJ9) ? "origin/pr/${ghprbPullId}/merge" : 'refs/heads/master'
+        SCM_REFSPEC = (ghprbPullId && ghprbGhRepository == GHPRB_REPO_OPENJ9) ? "+refs/pull/${ghprbPullId}/merge:refs/remotes/origin/pr/${ghprbPullId}/merge" : ''
         JOB = build job: JOB_NAME,
                 parameters: [
                     string(name: 'OPENJDK_REPO', value: OPENJDK_REPO),
@@ -319,7 +319,6 @@ def build(JOB_NAME, OPENJDK_REPO, OPENJDK_BRANCH, SHAS, OPENJ9_REPO, OPENJ9_BRAN
                     string(name: 'RESTART_TIMEOUT', value: RESTART_TIMEOUT),
                     string(name: 'RESTART_TIMEOUT_UNITS', value: RESTART_TIMEOUT_UNITS),
                     string(name: 'SETUP_LABEL', value: SETUP_LABEL),
-                    string(name: 'BUILD_LIST', value: BUILD_LIST),
                     string(name: 'BUILD_IDENTIFIER', value: BUILD_IDENTIFIER),
                     string(name: 'EXTRA_GETSOURCE_OPTIONS', value: EXTRA_GETSOURCE_OPTIONS),
                     string(name: 'EXTRA_CONFIGURE_OPTIONS', value: EXTRA_CONFIGURE_OPTIONS),
@@ -331,7 +330,9 @@ def build(JOB_NAME, OPENJDK_REPO, OPENJDK_BRANCH, SHAS, OPENJ9_REPO, OPENJ9_BRAN
                     string(name: 'ghprbGhRepository', value: ghprbGhRepository),
                     string(name: 'ghprbCommentBody', value: ghprbCommentBody),
                     string(name: 'ghprbTargetBranch', value: ghprbTargetBranch),
-                    string(name: 'ghprbActualCommit', value: ghprbActualCommit)]
+                    string(name: 'ghprbActualCommit', value: ghprbActualCommit),
+                    string(name: 'SCM_BRANCH', value: SCM_BRANCH),
+                    string(name: 'SCM_REFSPEC', value: SCM_REFSPEC)]
         return JOB
     }
 }

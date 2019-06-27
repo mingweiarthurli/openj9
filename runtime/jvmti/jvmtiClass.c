@@ -1164,8 +1164,8 @@ redefineClassesCommon(jvmtiEnv* env,
 			if (!extensionsEnabled) {
 				/* Fast HCR path - where the J9Class is redefined in place. */
 
-				/* Add method equivalences for the methods that were re-defined (reverse of before!). */
-				rc = fixMethodEquivalences(currentThread, classPairs, jitEventDataPtr, TRUE, &methodEquivalences, extensionsUsed);
+				/* Add method equivalences for the methods that were re-defined (reverse of before!). Propagate any equivalent resolved callsites. */
+				rc = fixMethodEquivalencesAndCallSites(currentThread, classPairs, jitEventDataPtr, TRUE, &methodEquivalences, extensionsUsed);
 				if (rc != JVMTI_ERROR_NONE) {
 					goto failed;
 				}
@@ -1230,8 +1230,8 @@ redefineClassesCommon(jvmtiEnv* env,
 				/* Unresolve all classes */
 				unresolveAllClasses(currentThread, classPairs, methodPairs, extensionsUsed);
  
-				/* Update method equivalences */
-				rc = fixMethodEquivalences(currentThread, classPairs, jitEventDataPtr, FALSE, &methodEquivalences, extensionsUsed);
+				/* Update method equivalences. Propagate any equivalent resolved callsites. */
+				rc = fixMethodEquivalencesAndCallSites(currentThread, classPairs, jitEventDataPtr, FALSE, &methodEquivalences, extensionsUsed);
 				if (rc != JVMTI_ERROR_NONE) {
 					goto failed;
 				}
@@ -1718,7 +1718,7 @@ done:
 
 
 /** 
- * \brief	Returnt the raw Constant Pool bytes for the specified class
+ * \brief	Return the raw Constant Pool bytes for the specified class
  * \ingroup	jvmtiClass 
  * 
  * 
@@ -1858,7 +1858,7 @@ done:
  *	ISSUES:
  *		The UTF8 and NameAndSignature constants are not stored on the constant pool and
  *		therefore do not have an "index" but rather use SRP references. This call will 
- *		create CP entries and update refering CP items accordingly
+ *		create CP entries and update referring CP items accordingly
  *
  *		The Long and Double type is defined by the spec to take _TWO_ constant pool entries
  *		instead of one. This creates a problem since our bytecode's cp indices have been

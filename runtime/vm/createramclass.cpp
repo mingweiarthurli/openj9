@@ -52,7 +52,7 @@ extern "C" {
 
 #define LOCAL_INTERFACE_ARRAY_SIZE 10
 
-#define DEFAULT_SIZE_OF_CLASS_CACHE 8
+#define DEFAULLT_NUMBER_OF_ENTRIES_IN_FLATTENED_CLASS_CACHE 8
 
 enum J9ClassFragments {
 	RAM_CLASS_HEADER_FRAGMENT,
@@ -427,7 +427,7 @@ initializeRAMClassITable (J9VMThread* vmStruct, J9Class *ramClass, J9Class *supe
  * @param[in] sig1 The first signature
  * @param[in] name2 The second name
  * @param[in] sig2 The second signature
- * @return true iff the names and signtures are the same.
+ * @return true iff the names and signatures are the same.
  */
 static bool VMINLINE
 areNamesAndSignaturesEqual(J9UTF8 *name1, J9UTF8 *sig1, J9UTF8 *name2, J9UTF8 *sig2)
@@ -697,7 +697,7 @@ processEquivalentSets(J9VMThread *vmStruct, UDATA *defaultConflictCount, UDATA v
 		UDATA slotValue = vTableMethods[i];
 
 		if (EQUIVALENT_SET_ID_TAG == (slotValue & VTABLE_SLOT_TAG_MASK)) {
-			/* Process set and determine if there is a method that satisifies or if this is a conflict */
+			/* Process set and determine if there is a method that satisfies or if this is a conflict */
 			J9EquivalentEntry *entry = (J9EquivalentEntry*)(slotValue & ~EQUIVALENT_SET_ID_TAG);
 			J9Method *candidate = entry->method;
 			bool foundNonAbstract = false;
@@ -1094,7 +1094,7 @@ found:
 					}
 
 					/* Always consume an entry from the super vTable.  Note that once the size hits zero and superclass becomes NULL,
-					 * superVTableReadCursor will never be dereferenced again, so it's value does not matter.  Also, there's no possibilty
+					 * superVTableReadCursor will never be dereferenced again, so it's value does not matter.  Also, there's no possibility
 					 * of superVTableSize rolling over again (once it's decremented beyond 0), and it wouldn't matter if it did, since
 					 * superclass will already be NULL.
 					 */
@@ -1750,7 +1750,7 @@ loadFlattenableFieldValueClasses(J9VMThread *currentThread, J9ClassLoader *class
 						goto done;
 					}
 
-					J9FlattenedClassCache *entry = flattenedClassCache + (flattenableInstanceFieldCount + 1);
+					J9FlattenedClassCacheEntry *entry = J9_VM_FCC_ENTRY_FROM_FCC(flattenedClassCache, flattenableInstanceFieldCount);
 					entry->clazz = valueClass;
 					entry->nameAndSignature = &(field->nameAndSignature);
 					entry->offset = 0;
@@ -1775,7 +1775,7 @@ loadFlattenableFieldValueClasses(J9VMThread *currentThread, J9ClassLoader *class
 		}
 		field = romFieldsNextDo(&fieldWalkState);
 	}
-	flattenedClassCache[0].offset = flattenableInstanceFieldCount;
+	flattenedClassCache->numberOfEntries = flattenableInstanceFieldCount;
 
 done:
 	return result;
@@ -2061,7 +2061,6 @@ internalCreateRAMClassFromROMClassImpl(J9VMThread *vmThread, J9ClassLoader *clas
 	UDATA inheritedInterfaceCount = 0;
 	UDATA defaultConflictCount = 0;
 	J9OverrideErrorData errorData = {0};
-
 	PORT_ACCESS_FROM_JAVAVM(javaVM);
 
 	state->retry = FALSE;
@@ -2403,9 +2402,13 @@ fail:
 
 			/* flattened classes cache */
 #if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+			UDATA flattenedClassCacheAllocSize = 0;
+			if (J9_ARE_ALL_BITS_SET(romClass->modifiers, J9AccValueType) || (flattenedClassCache->numberOfEntries > 0)) {
+				flattenedClassCacheAllocSize = sizeof(J9FlattenedClassCache) + (sizeof(J9FlattenedClassCacheEntry) * flattenedClassCache->numberOfEntries);
+			}
 			allocationRequests[RAM_CLASS_FLATTENED_CLASS_CACHE].prefixSize = 0;
 			allocationRequests[RAM_CLASS_FLATTENED_CLASS_CACHE].alignment = OMR_MAX(sizeof(J9Class *), sizeof(UDATA));
-			allocationRequests[RAM_CLASS_FLATTENED_CLASS_CACHE].alignedSize = sizeof(J9FlattenedClassCache) * (flattenedClassCache[0].offset > 0 ? flattenedClassCache[0].offset + 1 : 0);
+			allocationRequests[RAM_CLASS_FLATTENED_CLASS_CACHE].alignedSize = flattenedClassCacheAllocSize;
 			allocationRequests[RAM_CLASS_FLATTENED_CLASS_CACHE].address = NULL;
 #endif /* J9VM_OPT_VALHALLA_VALUE_TYPES */
 
@@ -2465,8 +2468,8 @@ fail:
 				}
 #if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
 				ramClass->flattenedClassCache = (J9FlattenedClassCache *) allocationRequests[RAM_CLASS_FLATTENED_CLASS_CACHE].address;
-				if (flattenedClassCache[0].offset > 0) {
-					memcpy(ramClass->flattenedClassCache, flattenedClassCache, sizeof(J9FlattenedClassCache) * (flattenedClassCache[0].offset + 1));
+				if (0 != flattenedClassCacheAllocSize) {
+					memcpy(ramClass->flattenedClassCache, flattenedClassCache, flattenedClassCacheAllocSize);
 				}
 #endif /* J9VM_OPT_VALHALLA_VALUE_TYPES */
 			}
@@ -2920,12 +2923,11 @@ internalCreateRAMClassFromROMClass(J9VMThread *vmThread, J9ClassLoader *classLoa
 	J9ClassLoader* hostClassLoader = classLoader;
 	J9Module* module = NULL;
 #if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
-	UDATA romFieldCount = romClass->romFieldCount;
-	UDATA flattenedClassCacheAllocSize = sizeof(J9FlattenedClassCache) * (romFieldCount + 1);
+	UDATA romFieldCount = romClass->romFieldCount;		
 	UDATA largestFieldType = 0;
-	/* The +1 is for the size field */
-	J9FlattenedClassCache flattenedClassCacheBuffer[DEFAULT_SIZE_OF_CLASS_CACHE + 1] = {0};
-	J9FlattenedClassCache *flattenedClassCache = flattenedClassCacheBuffer;
+	UDATA flattenedClassCacheAllocSize = sizeof(J9FlattenedClassCache) + (sizeof(J9FlattenedClassCacheEntry) * romFieldCount);
+	U_8 flattenedClassCacheBuffer[sizeof(J9FlattenedClassCache) + (sizeof(J9FlattenedClassCacheEntry) * DEFAULLT_NUMBER_OF_ENTRIES_IN_FLATTENED_CLASS_CACHE)] = {0};
+	J9FlattenedClassCache *flattenedClassCache = (J9FlattenedClassCache *) flattenedClassCacheBuffer;
 	PORT_ACCESS_FROM_VMC(vmThread);
 #endif /* defined(J9VM_OPT_VALHALLA_VALUE_TYPES) */
 
@@ -3044,7 +3046,7 @@ retry:
 		}
 	}
 #if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
-	if (romFieldCount > DEFAULT_SIZE_OF_CLASS_CACHE) {
+	if (romFieldCount > DEFAULLT_NUMBER_OF_ENTRIES_IN_FLATTENED_CLASS_CACHE) {
 		flattenedClassCache = (J9FlattenedClassCache *) j9mem_allocate_memory(flattenedClassCacheAllocSize, J9MEM_CATEGORY_CLASSES);
 		if (NULL == flattenedClassCache) {
 			setNativeOutOfMemoryError(vmThread, 0, 0);
@@ -3061,7 +3063,7 @@ retry:
 #endif /* defined(J9VM_OPT_VALHALLA_VALUE_TYPES) */
 	) {
 #if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
-		if (flattenedClassCache != flattenedClassCacheBuffer) {
+		if (flattenedClassCache != (J9FlattenedClassCache *) flattenedClassCacheBuffer) {
 			j9mem_free_memory(flattenedClassCache);
 		}
 #endif /* defined(J9VM_OPT_VALHALLA_VALUE_TYPES) */
@@ -3073,7 +3075,7 @@ retry:
 	result = internalCreateRAMClassFromROMClassImpl(vmThread, classLoader, romClass, options, elementClass,
 		methodRemapArray, entryIndex, locationType, classBeingRedefined, packageID, superclass, &state, hostClassLoader, hostClass, module, flattenedClassCache);
 
-		if (flattenedClassCache != flattenedClassCacheBuffer) {
+		if (flattenedClassCache != (J9FlattenedClassCache *) flattenedClassCacheBuffer) {
 			j9mem_free_memory(flattenedClassCache);
 		}
 #else

@@ -59,7 +59,7 @@
  *
  * For further details see "Experiences in Designing a Robust and Scalable
  * Interpreter Profiling Framework" by Ian Gartley, Marius Pirvu, Vijay
- * Sundaresan and Nikola Grecvski, published in *Code Generation and Optization (CGO)*, 2013. 
+ * Sundaresan and Nikola Grecvski, published in *Code Generation and Optimization (CGO)*, 2013. 
  */
 
 #include "j9.h"
@@ -554,7 +554,7 @@ public:
    void jitProfileParseBuffer(J9VMThread *vmThread);
    uint32_t getIProfilerThreadExitFlag() { return _iprofilerThreadExitFlag; }
    bool postIprofilingBufferToWorkingQueue(J9VMThread * vmThread, const U_8* dataStart, UDATA size);
-   // this is wapper of registered version, for the helper function, from JitRunTime
+   // this is wrapper of registered version, for the helper function, from JitRunTime
 
 private:
 #ifdef J9VM_INTERP_PROFILING_BYTECODES

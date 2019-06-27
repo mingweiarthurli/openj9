@@ -144,7 +144,7 @@
 #define J9DescriptionReturnTypeInt 0x6
 #define J9DescriptionReturnTypeDouble 0x7
 #define J9DescriptionReturnTypeLong 0x8
-/* ROM CP have 32 bit slots, currently the least significat 20 bits are in use
+/* ROM CP have 32 bit slots, currently the least significant 20 bits are in use
  * so the Constant Dynamic return types will be shifted left to use the free bits
  */
 #define J9DescriptionReturnTypeShift 20
@@ -1711,11 +1711,36 @@ typedef struct J9ModuleExtraInfo {
 	UDATA patchPathCount;
 } J9ModuleExtraInfo;
 
-typedef struct J9FlattenedClassCache {
+/*             Structure of Flattened Class Cache              */
+/*                                                             *
+ *    Default Value   |   Number of Entries   |                *
+ *____________________|_______________________|________________* 
+ *                    |                       |                *
+ *      clazz 0       |   Name & Signature 0  |     offset 0   *
+ *____________________|_______________________|________________* 
+ *                    |                       |                *
+ *      clazz 1       |   Name & Signature 1  |     offset 1   *
+ *____________________|_______________________|________________* 
+ *         .          |           .           |        .       *
+ *         .          |           .           |        .       *
+ *         .          |           .           |        .       *
+ *____________________|_______________________|________________* 
+ *                    |                       |                *
+ *      clazz N       |   Name & Signature N  |     offset N   * 
+ ***************************************************************/
+typedef struct J9FlattenedClassCacheEntry {
 	struct J9Class* clazz;
 	struct J9ROMNameAndSignature* nameAndSignature;
 	UDATA offset;
+} J9FlattenedClassCacheEntry;
+
+typedef struct J9FlattenedClassCache {
+	j9object_t defaultValue;
+	UDATA numberOfEntries;
 } J9FlattenedClassCache;
+
+#define J9_VM_FCC_ENTRY_FROM_FCC(flattenedClassCache, index) (((J9FlattenedClassCacheEntry *)((flattenedClassCache) + 1)) + (index))
+#define J9_VM_FCC_ENTRY_FROM_CLASS(clazz, index) J9_VM_FCC_ENTRY_FROM_FCC((clazz)->flattenedClassCache, index)
 
 struct J9TranslationBufferSet;
 typedef struct J9VerboseStruct {
@@ -1989,7 +2014,8 @@ typedef struct J9BCTranslationData {
 #define BCT_Java11MajorVersionShifted 0x37000000
 #define BCT_Java12MajorVersionShifted 0x38000000
 #define BCT_Java13MajorVersionShifted 0x39000000
-#define BCT_JavaMaxMajorVersionShifted BCT_Java13MajorVersionShifted
+#define BCT_Java14MajorVersionShifted 0x3A000000
+#define BCT_JavaMaxMajorVersionShifted BCT_Java14MajorVersionShifted
 
 typedef struct J9RAMClassFreeListBlock {
 	UDATA size;
@@ -2798,11 +2824,17 @@ typedef struct J9Object {
 #define OBJECT_HEADER_MONITOR_ENTER_INTERRUPTED  1
 #define OBJECT_HEADER_ILLEGAL_MONITOR_STATE  2
 
-#define J9OBJECT_MONITOR_EA(vmThread, object) ((j9objectmonitor_t*)((U_8 *)(object)+(J9OBJECT_CLAZZ(vmThread, object))->lockOffset))
-
 typedef struct J9NonIndexableObject {
 	j9objectclass_t clazz;
 } J9NonIndexableObject;
+
+typedef struct J9NonIndexableObjectCompressed {
+	U_32 clazz;
+} J9NonIndexableObjectCompressed;
+
+typedef struct J9NonIndexableObjectFull {
+	UDATA clazz;
+} J9NonIndexableObjectFull;
 
 typedef struct J9IndexableObject {
 	j9objectclass_t clazz;
@@ -2816,6 +2848,19 @@ typedef struct J9IndexableObjectContiguous {
 #endif /* J9VM_ENV_DATA64 && !OMR_GC_COMPRESSED_POINTERS */
 } J9IndexableObjectContiguous;
 
+typedef struct J9IndexableObjectContiguousCompressed {
+	U_32 clazz;
+	U_32 size;
+} J9IndexableObjectContiguousCompressed;
+
+typedef struct J9IndexableObjectContiguousFull {
+	UDATA clazz;
+	U_32 size;
+#if defined(J9VM_ENV_DATA64)
+	U_32 padding;
+#endif /* J9VM_ENV_DATA64 */
+} J9IndexableObjectContiguousFull;
+
 typedef struct J9IndexableObjectDiscontiguous {
 	j9objectclass_t clazz;
 	U_32 mustBeZero;
@@ -2824,6 +2869,22 @@ typedef struct J9IndexableObjectDiscontiguous {
 	U_32 padding;
 #endif /* OMR_GC_COMPRESSED_POINTERS || !J9VM_ENV_DATA64 */
 } J9IndexableObjectDiscontiguous;
+
+typedef struct J9IndexableObjectDiscontiguousCompressed {
+	U_32 clazz;
+	U_32 mustBeZero;
+	U_32 size;
+	U_32 padding;
+} J9IndexableObjectDiscontiguousCompressed;
+
+typedef struct J9IndexableObjectDiscontiguousFull {
+	UDATA clazz;
+	U_32 mustBeZero;
+	U_32 size;
+#if !defined(J9VM_ENV_DATA64)
+	U_32 padding;
+#endif /* !J9VM_ENV_DATA64 */
+} J9IndexableObjectDiscontiguousFull;
 
 typedef struct J9InitializerMethods {
 	void* initialStaticMethod;
@@ -3671,6 +3732,8 @@ typedef struct J9JITConfig {
 	void ( *jitMethodBreakpointed)(struct J9VMThread *currentThread, struct J9Method *method) ;
 	void ( *jitMethodUnbreakpointed)(struct J9VMThread *currentThread, struct J9Method *method) ;
 	void ( *jitIllegalFinalFieldModification)(struct J9VMThread *currentThread, struct J9Class *fieldClass);
+	U_8* (*codeCacheWarmAlloc)(void *codeCache);
+	U_8* (*codeCacheColdAlloc)(void *codeCache);
 } J9JITConfig;
 
 #define J9JIT_GROW_CACHES  0x100000
@@ -3709,7 +3772,6 @@ typedef struct J9JITConfig {
 #define J9JIT_CODE_CACHE_FULL  0x40000000
 #define J9JIT_COMPILE_CLINIT  0x400000
 #define J9JIT_JVMPI_INLINE_ALLOCATION_OFF  32
-#define J9JIT_J2PROF  0x100
 
 typedef struct J9AOTConfig {
 	IDATA  ( *entryPoint)(struct J9JITConfig *jitConfig, struct J9VMThread *vmStruct, J9Method *method, void *oldStartPC) ;
@@ -4341,6 +4403,7 @@ typedef struct J9MemoryManagerFunctions {
 	UDATA  ( *j9gc_arraylet_getLeafSize)(struct J9JavaVM* javaVM) ;
 	UDATA  ( *j9gc_arraylet_getLeafLogSize)(struct J9JavaVM* javaVM) ;
 #endif /* J9VM_GC_ARRAYLETS */
+	void  ( *j9gc_set_allocation_sampling_interval)(struct J9VMThread *vmThread, UDATA samplingInterval);
 	void  ( *j9gc_set_allocation_threshold)(struct J9VMThread *vmThread, UDATA low, UDATA high) ;
 	void  ( *j9gc_objaccess_recentlyAllocatedObject)(struct J9VMThread *vmThread, J9Object *dstObject) ;
 	void  ( *j9gc_objaccess_postStoreClassToClassLoader)(struct J9VMThread* vmThread, J9ClassLoader* destClassLoader, J9Class* srcClass) ;
@@ -4815,7 +4878,6 @@ typedef struct J9VMThread {
 	UDATA debugEventData6;
 	UDATA debugEventData7;
 	UDATA debugEventData8;
-	struct J9Class* methodHandlesLookupAccessClass;
 	struct J9ClassLoadingStackElement* classLoadingStack;
 	UDATA jitTransitionJumpSlot;
 	omrthread_monitor_t gcClassUnloadingMutex;
@@ -4873,7 +4935,7 @@ typedef struct J9VMThread {
 	U_32 ludclBPOffset;
 #if defined(J9VM_JIT_FREE_SYSTEM_STACK_POINTER)
 	UDATA systemStackPointer;
-#if !defined(J9VM_ENV_DATA64)
+#if 0 && !defined(J9VM_ENV_DATA64) /* Change to 0 or 1 based on number of fields above */
 	U_32 zosPadTo8;
 #endif /* !J9VM_ENV_DATA64 */
 #endif /* J9VM_JIT_FREE_SYSTEM_STACK_POINTER */
@@ -4885,7 +4947,7 @@ typedef struct J9VMThread {
 	UDATA jitCurrentRIFlags;
 	UDATA jitPendingRIFlags;
 	struct J9RIParameters *riParameters;
-#if !defined(J9VM_ENV_DATA64)
+#if !defined(J9VM_ENV_DATA64) && defined(J9VM_JIT_FREE_SYSTEM_STACK_POINTER)
 	U_32 riPadTo8;
 #endif /* !J9VM_ENV_DATA64 */
 #endif /* J9VM_JIT_RUNTIME_INSTRUMENTATION */
@@ -4978,6 +5040,10 @@ typedef struct J9VMThread {
 #else /* OMR_GC_COMPRESSED_POINTERS */
 #define J9VMTHREAD_COMPRESS_OBJECT_REFERENCES(vmThread) FALSE
 #endif /* OMR_GC_COMPRESSED_POINTERS */
+#define J9VMTHREAD_REFERENCE_SIZE(vmThread) (J9VMTHREAD_COMPRESS_OBJECT_REFERENCES(vmThread) ? sizeof(U_32) : sizeof(UDATA))
+#define J9VMTHREAD_MIXED_HEADER_SIZE(vmThread) (J9VMTHREAD_COMPRESS_OBJECT_REFERENCES(vmThread) ? sizeof(J9NonIndexableObjectCompressed) : sizeof(J9NonIndexableObjectFull))
+#define J9VMTHREAD_CONTIGUOUS_HEADER_SIZE(vmThread) (J9VMTHREAD_COMPRESS_OBJECT_REFERENCES(vmThread) ? sizeof(J9IndexableObjectContiguousCompressed) : sizeof(J9IndexableObjectContiguousFull))
+#define J9VMTHREAD_DISCONTIGUOUS_HEADER_SIZE(vmThread) (J9VMTHREAD_COMPRESS_OBJECT_REFERENCES(vmThread) ? sizeof(J9IndexableObjectDiscontiguousCompressed) : sizeof(J9IndexableObjectDiscontiguousFull))
 
 typedef struct J9ReflectFunctionTable {
 	jobject  ( *idToReflectMethod)(struct J9VMThread* vmThread, jmethodID methodID) ;
@@ -5374,6 +5440,7 @@ typedef struct J9JavaVM {
 	jmethodID addOpens;
 	jmethodID addUses;
 	jmethodID addProvides;
+	UDATA addModulesCount;
 	UDATA safePointState;
 	UDATA safePointResponseCount;
 	struct J9VMRuntimeStateListener vmRuntimeStateListener;
@@ -5425,6 +5492,10 @@ typedef struct J9JavaVM {
 #else /* OMR_GC_COMPRESSED_POINTERS */
 #define J9JAVAVM_COMPRESS_OBJECT_REFERENCES(vm) FALSE
 #endif /* OMR_GC_COMPRESSED_POINTERS */
+#define J9JAVAVM_REFERENCE_SIZE(vm) (J9JAVAVM_COMPRESS_OBJECT_REFERENCES(vm) ? sizeof(U_32) : sizeof(UDATA))
+#define J9JAVAVM_MIXED_HEADER_SIZE(vm) (J9JAVAVM_COMPRESS_OBJECT_REFERENCES(vm) ? sizeof(J9NonIndexableObjectCompressed) : sizeof(J9NonIndexableObjectFull))
+#define J9JAVAVM_CONTIGUOUS_HEADER_SIZE(vm) (J9JAVAVM_COMPRESS_OBJECT_REFERENCES(vm) ? sizeof(J9IndexableObjectContiguousCompressed) : sizeof(J9IndexableObjectContiguousFull))
+#define J9JAVAVM_DISCONTIGUOUS_HEADER_SIZE(vm) (J9JAVAVM_COMPRESS_OBJECT_REFERENCES(vm) ? sizeof(J9IndexableObjectDiscontiguousCompressed) : sizeof(J9IndexableObjectDiscontiguousFull))
 
 /* Data block for JIT instance field watch reporting */
 
@@ -5669,7 +5740,7 @@ typedef struct J9CInterpreterStackFrame {
 	 */
 #endif /* J9VM_ENV_DATA64 */
 #else /* J9VM_ARCH_X86 */
-#error Unknown architechture
+#error Unknown architecture
 #endif /* J9VM_ARCH_X86 */
 } J9CInterpreterStackFrame;
 

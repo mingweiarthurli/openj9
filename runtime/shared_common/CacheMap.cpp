@@ -486,7 +486,7 @@ SH_CacheMap::startup(J9VMThread* currentThread, J9SharedClassPreinitConfig* pico
 
 				/* Two reasons for moving the code to check for full cache from SH_CompositeCacheImpl::startup()
 				 * to SH_CacheMap::startup():
-				 * 	- While marking cache full, last unsused pages are also protected, which ideally should be done
+				 * 	- While marking cache full, last unused pages are also protected, which ideally should be done
 				 * 	  after protecting pages belonging to ROMClass area and metadata area.
 				 * 	- Secondly, when setting cache full flags, the code expects to be holding the write mutex, which is not done in
 				 * 	  SH_CompositeCacheImpl::startup().
@@ -1894,7 +1894,7 @@ SH_CacheMap::allocateClassDebugData(J9VMThread* currentThread, U_16 classnameLen
 }
 
 /**
- * Roll back uncommited changes made by the last call too 'allocateClassDebugData()'
+ * Roll back uncommitted changes made by the last call too 'allocateClassDebugData()'
  *
  * @param [in] currentThread the thread calling this function
  * @param [in] classnameLength ROMClass class name length
@@ -3757,7 +3757,7 @@ SH_CacheMap::addByteDataToCache(J9VMThread* currentThread, SH_Manager* localBDM,
  *   J9SHRDATA_SINGLE_STORE_FOR_KEY_TYPE - only allow one store for a given key/type combination
  *      subsequent stores return the existing data regardless of whether it matches the input data
  *   J9SHRDATA_SINGLE_STORE_FOR_KEY_TYPE_OVERWRITE - Similar to J9SHRDATA_SINGLE_STORE_FOR_KEY_TYPE, only one record of key/dataType combination is allowed in the shared cache.
- *   	subsequent stores overwite the existing data. This flag is ignored if J9SHRDATA_NOT_INDEXED, J9SHRDATA_ALLOCATE_ZEROD_MEMORY or J9SHRDATA_USE_READWRITE presents
+ *   	subsequent stores overwrite the existing data. This flag is ignored if J9SHRDATA_NOT_INDEXED, J9SHRDATA_ALLOCATE_ZEROD_MEMORY or J9SHRDATA_USE_READWRITE presents
  * 
  * @param[in] currentThread  The current thread
  * @param[in] key  The UTF8 key to store the data against

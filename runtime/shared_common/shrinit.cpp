@@ -593,7 +593,7 @@ parseArgs(J9JavaVM* vm, char* options, U_64* runtimeFlags, UDATA* verboseFlags, 
 				} else
 				if (J9SHAREDCLASSESOPTIONS[i].parseType==PARSE_TYPE_STARTSWITH) {
 					if (options[compareToLen]=='\0') {
-						/* Potentially don't know verboseFlags yet, so this msg cannot be surpressed by "silent" */
+						/* Potentially don't know verboseFlags yet, so this msg cannot be suppressed by "silent" */
 						SHRINIT_ERR_TRACE1(1, J9NLS_SHRC_SHRINIT_REQUIRES_SUBOPTION, options);
 						return RESULT_PARSE_FAILED;
 					}
@@ -607,7 +607,7 @@ parseArgs(J9JavaVM* vm, char* options, U_64* runtimeFlags, UDATA* verboseFlags, 
 		}
 		
 		if (NULL == J9SHAREDCLASSESOPTIONS[i].option) {
-			/* Potentially don't know verboseFlags yet, so this msg cannot be surpressed by "silent" */
+			/* Potentially don't know verboseFlags yet, so this msg cannot be suppressed by "silent" */
 			SHRINIT_ERR_TRACE1(1, J9NLS_SHRC_SHRINIT_OPTION_UNRECOGNISED, options);
 			return RESULT_PARSE_FAILED;
 		}
@@ -786,7 +786,7 @@ parseArgs(J9JavaVM* vm, char* options, U_64* runtimeFlags, UDATA* verboseFlags, 
 				*runtimeFlags &= ~(J9SHR_RUNTIMEFLAG_ENABLE_MPROTECT_PARTIAL_PAGES | J9SHR_RUNTIMEFLAG_ENABLE_MPROTECT_ONFIND);
 				tempInt = strlen(SUB_OPTION_MPROTECT_NO_PARTIAL_PAGES);
 			} else {
-				/* Potentially don't know verboseFlags yet, so this msg cannot be surpressed by "silent" */
+				/* Potentially don't know verboseFlags yet, so this msg cannot be suppressed by "silent" */
 				SHRINIT_ERR_TRACE(1, J9NLS_SHRC_SHRINIT_MPROTECT_UNRECOGNISED);
 				return RESULT_PARSE_FAILED;
 			}
@@ -1122,7 +1122,7 @@ j9shr_dump_help(J9JavaVM* vm, UDATA more)
 				if (strlen(J9SHAREDCLASSESHELPTEXT[i].option) > 27) {
 				/* Some help text has more than 28 chars, print them in two lines, e.g.
 				 * invalidateAotMethods=<method_specification>[,<method_specification>]
-                 *            Invalidate the AOT method(s) specified by the user.
+				 * Invalidate the AOT method(s) specified by the user.
 				 */
 					j9file_printf(PORTLIB, J9PORT_TTY_OUT, " %s\n", J9SHAREDCLASSESHELPTEXT[i].option);
 					j9file_printf(PORTLIB, J9PORT_TTY_OUT, " %28s", "");
@@ -5101,8 +5101,8 @@ j9shr_storeGCHints(J9VMThread* currentThread, UDATA heapSize1, UDATA heapSize2, 
 /**
  * Find the GC hints from the shared classes cache
  * @param[in] vmThread  The current thread
- * @param[out] heapSize1  The first heap size that has been previouly stored
- * @param[out] heapSize2  The second heap size that has been previouly stored
+ * @param[out] heapSize1  The first heap size that has been previously stored
+ * @param[out] heapSize2  The second heap size that has been previously stored
  *
  * @return 0 on success, -1 otherwise.
  */

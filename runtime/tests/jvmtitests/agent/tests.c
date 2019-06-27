@@ -27,7 +27,7 @@
 
 
 /**
- *  A list of all known tests. While adding new tesst, this is the only place that
+ *  A list of all known tests. While adding a new test, this is the only place that
  *  needs to be updated in order for the agent to recognize the test.
  */
 static jvmtiTest jvmtiTestList[] =
@@ -134,6 +134,7 @@ static jvmtiTest jvmtiTestList[] =
 	{ "soae001", soae001, "com.ibm.jvmti.tests.samplingObjectAllocation.soae001", "Test JEP331 low-overhead sampling heap object allocation" },
 #endif /* JAVA_SPEC_VERSION >= 11 */
 	{ "gsp001", gsp001, "com.ibm.jvmti.tests.getSystemProperty.gsp001", "Ensure JVMTI GetSystemProperty can retrieve certain system properties at early phrase" },
+	{ "ee001", ee001, "com.ibm.jvmti.tests.eventException.ee001", "Ensure only single JVMTI Exception event gets generated with JNI frame before handler" },
 	{ NULL, NULL, NULL, NULL }
 };
 

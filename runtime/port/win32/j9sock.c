@@ -512,7 +512,7 @@ useIPv4Socket(j9socket_t sockHandle)
  * entity, as known to the communications layer. The exact format of the addr parameter 
  * is determined by the address family established when the socket was created. 
  * @param[in] sockHandle A pointer to a j9socket_t  which will point to the newly created 
- * socket once accept returns succesfully
+ * socket once accept returns successfully
  *
  * @return 
  * \arg 0 on success
@@ -1329,7 +1329,7 @@ j9sock_getaddrinfo_family(struct J9PortLibrary *portLibrary, j9addrinfo_t handle
     int i;
 
 
-	/* If we have the IPv6 functions then we'll cast to a OSADDRINFO othewise we have a hostent */
+	/* If we have the IPv6 functions then we'll cast to a OSADDRINFO otherwise we have a hostent */
 	if( PPG_sock_IPv6_FUNCTION_SUPPORT ) {
 
 	     addr = (OSADDRINFO *) handle->addr_info;
@@ -1552,7 +1552,7 @@ j9sock_gethostname(struct J9PortLibrary *portLibrary, char *buffer, int32_t leng
  * @param[in] sockaddr_size The size of "in_addr"
  * @param[out] name The hostname of the passed address in a preallocated buffer.
  * @param[in] name_length The length of the buffer pointed to by name
- * @param[in] flags Flags on how to form the repsonse (see man pages or doc for getnameinfo)
+ * @param[in] flags Flags on how to form the response (see man pages or doc for getnameinfo)
  *
  * @return	0, if no errors occurred, otherwise the (negative) error code
  *
@@ -1952,7 +1952,7 @@ j9sock_getsockname(struct J9PortLibrary *portLibrary, j9socket_t handle, j9socka
 		}
 	}
 
-	/* if both sockets are open we cannot retun the address for either one as whichever one we return it is wrong in some 
+	/* if both sockets are open we cannot return the address for either one as whichever one we return it is wrong in some 
 	   cases. Therefore,  we reset the address to the ANY address and leave the port as is as it should be the same
        for both sockets (bind makes sure that when we open the two sockets we use the same port */
 	if ((handle->flags & SOCKET_IPV4_OPEN_MASK) && (handle->flags & SOCKET_IPV6_OPEN_MASK)) {
@@ -3206,7 +3206,7 @@ j9sock_shutdown_output(struct J9PortLibrary *portLibrary, j9socket_t sock)
 
 
 /**
- * Creates a new j9sockaddr, refering to the specified port and address.  The only address family currently supported
+ * Creates a new j9sockaddr, referring to the specified port and address.  The only address family currently supported
  * is AF_INET.
  *
  * @param[in] portLibrary The port library.
@@ -3387,7 +3387,7 @@ j9sock_sockaddr_port(struct J9PortLibrary *portLibrary, j9sockaddr_t handle)
  * @param[in] portLibrary The port library.
  * @param[out]	handle Pointer pointer to the j9socket struct, to be allocated
  * @param[in] family The address family (currently, only J9SOCK_AFINET is supported)
- * @param[in] socktype Secifies what type of socket is created
+ * @param[in] socktype Specifies what type of socket is created
  * \arg J9SOCK_STREAM, for a stream socket
  * \arg J9SOCK_DGRAM, for a datagram socket
  * @param[in] protocol Type/family specific creation parameter (currently, only J9SOCK_DEFPROTOCOL supported).

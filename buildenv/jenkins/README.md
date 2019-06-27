@@ -75,7 +75,7 @@ This folder contains Jenkins pipeline scripts that are used in the OpenJ9 Jenkin
     - `<platform>` is one of the platform shorthands above
     - `<version>` is the number of the supported release, e.g. 8 | 11 | next
 - Note: You can use keyword `all` for platform but not for test level/type or JDK versions.
-- Note: For backward compatability `<level>.<test type>` equal to `sanity` or `extended` is acceptable and will map to `sanity.functional` and `extended.functional` respectively.
+- Note: For backward compatibility `<level>.<test type>` equal to `sanity` or `extended` is acceptable and will map to `sanity.functional` and `extended.functional` respectively.
 
 ###### Examples
 - Request a Compile-only build on all platforms and multiple versions by commenting in a PR
@@ -112,6 +112,10 @@ You can request a Pull Request build from the Eclipse OpenJ9 repository - [openj
     - `Jenkins test sanity zlinux jdk8 depends eclipse/omr#123`
 
 ###### Note: When specifying a dependent change in an OpenJDK extensions repo, you can only build the SDK version that matches the repo where the dependent change lives. Eg. You cannot build JDK8 with a PR in openj9-openjdk-jdk11.
+
+##### Testing Changes to Pipeline code
+
+- If you have changes to Jenkins Pipeline code (including the defaults.yml variable file), you can test most code paths via a PR build. Your PR build will load the Pipeline code from your PR (merge ref). Also note if you have dependent changes you have to launch your PR build through the OpenJ9 repo in order for the Pipeline changes to be loaded in your build.
 
 ##### Other Pull Requests builds
 

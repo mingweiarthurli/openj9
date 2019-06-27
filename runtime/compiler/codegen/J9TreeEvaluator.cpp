@@ -713,6 +713,8 @@ uint32_t J9::TreeEvaluator::calculateInstanceOfOrCheckCastSequences(TR::Node *in
    //
    if (objectNode->isNull())
       {
+      if (instanceOfOrCheckCastNode->getOpCodeValue() == TR::checkcastAndNULLCHK)
+            sequences[i++] = NullTest;
       sequences[i++] = isInstanceOf ? GoToFalse : GoToTrue;
       }
    // Cast class is unresolved, not a lot of room to be fancy here.
@@ -1034,7 +1036,7 @@ uint32_t J9::TreeEvaluator::calculateInstanceOfOrCheckCastSequences(TR::Node *in
 
 /*
  * if recordAll is true, record all result in classArray, skip MinProfiledCheckcastFrequency check
- * if probability is not null, record class' corresponding probablity in this array. Used for cost/benefit analysis for profiled check.
+ * if probability is not null, record class' corresponding probability in this array. Used for cost/benefit analysis for profiled check.
  */
 uint8_t
 J9::TreeEvaluator::interpreterProfilingInstanceOfOrCheckCastInfo(

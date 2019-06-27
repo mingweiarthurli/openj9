@@ -736,7 +736,7 @@ TR::OptionTable OMR::Options::_feOptions[] = {
         TR::Options::setJitConfigNumericValue, offsetof(J9JITConfig, dataCacheTotalKB), 0, " %d (KB)"},
    {"disableIProfilerClassUnloadThreshold=",      "R<nnn>\tNumber of classes that can be unloaded before we disable the IProfiler",
         TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_disableIProfilerClassUnloadThreshold, 0, "F%d", NOT_IN_SUBSET},
-   {"dltPostponeThreshold=",      "M<nnn>\tNumber of dlt attepts inv. count for a method is seen not advancing",
+   {"dltPostponeThreshold=",      "M<nnn>\tNumber of dlt attempts inv. count for a method is seen not advancing",
         TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_dltPostponeThreshold, 0, "F%d", NOT_IN_SUBSET },
    {"exclude=",           "D<xxx>\tdo not compile methods beginning with xxx", TR::Options::limitOption, 1, 0, "P%s"},
    {"expensiveCompWeight=", "M<nnn>\tweight of a comp request to be considered expensive",
@@ -850,9 +850,6 @@ TR::OptionTable OMR::Options::_feOptions[] = {
         TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_iprofilerSamplesBeforeTurningOff, 0, "P%d", NOT_IN_SUBSET},
    {"itFileNamePrefix=",  "L<filename>\tprefix for itrace filename",
         TR::Options::setStringForPrivateBase, offsetof(TR_JitPrivateConfig,itraceFileNamePrefix), 0, "P%s"},
-#if defined(AIXPPC)
-   {"j2prof",             0, SET_JITCONFIG_RUNTIME_FLAG(J9JIT_J2PROF) },
-#endif
    {"jProfilingEnablementSampleThreshold=", "M<nnn>\tNumber of global samples to allow generation of JProfiling bodies",
         TR::Options::setStaticNumeric, (intptrj_t)&TR::Options::_jProfilingEnablementSampleThreshold, 0, "F%d", NOT_IN_SUBSET },
    {"kcaoffsets",         "I\tGenerate a header file with offset data for use with KCA", TR::Options::kcaOffsets, 0, 0, "F" },
@@ -1776,7 +1773,7 @@ J9::Options::fePreProcess(void * base)
    preferTLHPrefetch = TR::Compiler->target.cpu.getSupportsArch(TR::CPU::z10);
 #else /* TR_HOST_X86 */
    preferTLHPrefetch = true;
-   // Disable TM on x86 because we cannot tell whether a Haswell chip supports TM or not, plus it's killing the performace on dayTrader3
+   // Disable TM on x86 because we cannot tell whether a Haswell chip supports TM or not, plus it's killing the performance on dayTrader3
    self()->setOption(TR_DisableTM);
 #endif
 
@@ -1851,14 +1848,6 @@ J9::Options::fePreProcess(void * base)
    else
       {
       self()->setOption(TR_InlineVeryLargeCompiledMethods);
-      }
-
-   static bool enableZ15 = feGetEnv("TR_EnableZ15") != NULL;
-
-   if (!enableZ15)
-      {
-      // Disable zNext support until it has been gone through several rounds of functional stress testing
-      self()->setOption(TR_DisableZ15);
       }
 #endif
 
@@ -2337,11 +2326,17 @@ bool J9::Options::feLatePostProcess(void * base, TR::OptionSet * optionSet)
          {
          if (!self()->getOption(TR_DisablePersistIProfile))
             {
-            TR::CompilationInfo * compInfo = getCompilationInfo(jitConfig);
-            static char * dnipdsp = feGetEnv("TR_DisableNoIProfilerDuringStartupPhase");
-            if (compInfo->isWarmSCC() == TR_yes && !dnipdsp) // turn off Iprofiler only for the warm runs
+            // Turn off Iprofiler for the warm runs, but not if we cache only bootstrap classes
+            // This is because we may be missing IProfiler information for non-bootstrap classes
+            // that could not be stored in SCC
+            if (J9_ARE_ALL_BITS_SET(javaVM->sharedClassConfig->runtimeFlags, J9SHR_RUNTIMEFLAG_ENABLE_CACHE_NON_BOOT_CLASSES))
                {
-               self()->setOption(TR_NoIProfilerDuringStartupPhase);
+               TR::CompilationInfo * compInfo = getCompilationInfo(jitConfig);
+               static char * dnipdsp = feGetEnv("TR_DisableNoIProfilerDuringStartupPhase");
+               if (compInfo->isWarmSCC() == TR_yes && !dnipdsp)
+                  {
+                  self()->setOption(TR_NoIProfilerDuringStartupPhase);
+                  }
                }
             }
          }

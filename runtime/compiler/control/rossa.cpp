@@ -295,9 +295,9 @@ j9jit_testarossa_err(
             if (fe->isAsyncCompilation())
                return 0; // early return because the method is queued for compilation
             }
-         // If PersistentJittedBody contains the profile Info and has BlockFrequencyInfo, it will set the 
+         // If PersistentJittedBody contains the profile Info and has BlockFrequencyInfo, it will set the
          // isQueuedForRecompilation field which can be used by the jitted code at runtime to skip the profiling
-         // code if it has made request to recompile this method. 
+         // code if it has made request to recompile this method.
          if (jbi && jbi->getProfileInfo() != NULL && jbi->getProfileInfo()->getBlockFrequencyInfo() != NULL)
             jbi->getProfileInfo()->getBlockFrequencyInfo()->setIsQueuedForRecompilation();
 
@@ -608,6 +608,23 @@ jitExclusiveVMShutdownPending(J9VMThread * vmThread)
    #endif
    }
 
+// Code cache callbacks to be used by the VM
+//
+extern "C" U_8*
+getCodeCacheWarmAlloc(void *codeCache)
+   {
+   TR::CodeCache * cc = static_cast<TR::CodeCache*>(codeCache);
+   return cc->getWarmCodeAlloc();
+   }
+
+extern "C" U_8*
+getCodeCacheColdAlloc(void *codeCache)
+   {
+   TR::CodeCache * cc = static_cast<TR::CodeCache*>(codeCache);
+   return cc->getColdCodeAlloc();
+   }
+
+
 // -----------------------------------------------------------------------------
 // JIT control
 // -----------------------------------------------------------------------------
@@ -771,7 +788,6 @@ command(J9VMThread * vmThread, const char * cmdString)
 
    return 0;
    }
-
 
 static IDATA
 internalCompileClass(J9VMThread * vmThread, J9Class * clazz)
@@ -1021,6 +1037,10 @@ onLoadInternal(
          return -1;
       }
 
+   // Callbacks for code cache allocation pointers
+   jitConfig->codeCacheWarmAlloc = getCodeCacheWarmAlloc;
+   jitConfig->codeCacheColdAlloc = getCodeCacheColdAlloc;
+
    /* Allocate the privateConfig structure.  Note that the AOTRT DLL does not allocate this structure */
    jitConfig->privateConfig = j9mem_allocate_memory(sizeof(TR_JitPrivateConfig), J9MEM_CATEGORY_JIT);
    if (jitConfig->privateConfig == NULL)  // Memory Allocation Failure.
@@ -1133,7 +1153,7 @@ onLoadInternal(
       jitConfig->dataCacheKB = 2048;
 
       //zOS will set the code cache to create at startup after options are enabled below
-#if !defined(J9ZOS390)	
+#if !defined(J9ZOS390)
       if (!isQuickstart) // for -Xquickstart start with one code cache
          numCodeCachesToCreateAtStartup = 4;
 #endif
@@ -1166,7 +1186,7 @@ onLoadInternal(
           * the process is allowed to have; cap the maximum using the default 256m and use a 1m floor.
           * MAXXMMES is specified as the number of 1MB frames.
           * Use the default 2048 KB data cache. The default values for z/TPF can be
-          * overriden via the command line interface.
+          * overridden via the command line interface.
           */
          const uint16_t ZTPF_CODE_CACHE_DIVISOR = 5;
 
@@ -1245,9 +1265,9 @@ onLoadInternal(
 
    // Now that the options have been processed we can initialize the RuntimeAssumptionTables
    // If we cannot allocate various runtime assumption hash tables, fail the JVM
-   
+
    // Allocate trampolines for z/OS 64-bit
-#if defined(J9ZOS390)	
+#if defined(J9ZOS390)
    if (TR::Options::getCmdLineOptions()->getOption(TR_EnableRMODE64) && !isQuickstart)
       numCodeCachesToCreateAtStartup = 4;
 #endif
@@ -1509,7 +1529,7 @@ onLoadInternal(
       ((TR_JitPrivateConfig*)(jitConfig->privateConfig))->jProfiler = TR_JProfilerThread::allocate();
       if (!(((TR_JitPrivateConfig*)(jitConfig->privateConfig))->jProfiler))
          {
-         TR::Options::getCmdLineOptions()->setOption(TR_DisableJProfilerThread); 
+         TR::Options::getCmdLineOptions()->setOption(TR_DisableJProfilerThread);
          }
       }
    else
@@ -1527,7 +1547,7 @@ onLoadInternal(
       if (TR::Compiler->target.cpu.getSupportsRuntimeInstrumentationFacility())
          ((TR_JitPrivateConfig*)(jitConfig->privateConfig))->hwProfiler = TR_ZHWProfiler::allocate(jitConfig);
 #elif defined(TR_HOST_POWER)
-#if !defined(J9OS_I5) 
+#if !defined(J9OS_I5)
 /* We disable it on current releases. May enable in future. */
       TR_Processor processor = portLibCall_getProcessorType();
       ((TR_JitPrivateConfig*)(jitConfig->privateConfig))->hwProfiler = processor >= TR_PPCp8 ? TR_PPCHWProfiler::allocate(jitConfig) : NULL;
@@ -1571,6 +1591,13 @@ onLoadInternal(
       // issue is fixed.
       TR::Options::getCmdLineOptions()->setOption(TR_DisableDynamicLoopTransfer);
       }
+#endif
+
+#if defined(TR_HOST_ARM64)
+   // DLT support is not available in AArch64 yet.
+   // OpenJ9 issue #5917 tracks the work to enable.
+   //
+   TR::Options::getCmdLineOptions()->setOption(TR_DisableDynamicLoopTransfer);
 #endif
 
 #if defined(TR_HOST_POWER)

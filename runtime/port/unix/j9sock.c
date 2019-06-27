@@ -492,7 +492,7 @@ platformSocketOption(int32_t portableSocketOption)
  * entity, as known to the communications layer. The exact format of the addr parameter 
  * is determined by the address family established when the socket was created. 
  * @param[in] sockHandle A pointer to a j9socket_t  which will point to the newly created 
- * socket once accept returns succesfully
+ * socket once accept returns successfully
  *
  * @return 
  * \arg 0 on success
@@ -1068,7 +1068,7 @@ j9sock_getaddrinfo_family(struct J9PortLibrary *portLibrary, j9addrinfo_t handle
 	OSADDRINFO *addr;
     	int i;
 
-	/* If we have the IPv6 functions then we'll cast to a OSADDRINFO othewise we have a hostent */
+	/* If we have the IPv6 functions then we'll cast to a OSADDRINFO otherwise we have a hostent */
 #ifdef IPv6_FUNCTION_SUPPORT
 	addr = (OSADDRINFO *) handle->addr_info;
 	for( i=0; i<index; i++ ) {
@@ -1451,7 +1451,7 @@ j9sock_gethostname(struct J9PortLibrary *portLibrary, char *buffer, int32_t leng
  * @param[in] sockaddr_size The size of "in_addr"
  * @param[out] name The hostname of the passed address in a preallocated buffer.
  * @param[in] name_length The length of the buffer pointed to by name
- * @param[in] flags Flags on how to form the repsonse (see man pages or doc for getnameinfo)
+ * @param[in] flags Flags on how to form the response (see man pages or doc for getnameinfo)
  *
  * @return	0, if no errors occurred, otherwise the (negative) error code
  *
@@ -3484,7 +3484,7 @@ j9sock_sockaddr_port(struct J9PortLibrary *portLibrary, j9sockaddr_t handle)
  * @param[in] portLibrary The port library.
  * @param[out]	handle Pointer pointer to the j9socket struct, to be allocated
  * @param[in] family The address family (currently, only J9SOCK_AFINET is supported)
- * @param[in] socktype Secifies what type of socket is created
+ * @param[in] socktype Specifies what type of socket is created
  * \arg J9SOCK_STREAM, for a stream socket
  * \arg J9SOCK_DGRAM, for a datagram socket
  * @param[in] protocol Type/family specific creation parameter (currently, only J9SOCK_DEFPROTOCOL supported).

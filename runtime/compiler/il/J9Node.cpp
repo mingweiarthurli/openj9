@@ -26,6 +26,7 @@
 #include <algorithm>
 #include "codegen/CodeGenerator.hpp"
 #include "compile/Compilation.hpp"
+#include "compile/Method.hpp"
 #include "env/CompilerEnv.hpp"
 #include "il/Node.hpp"
 #include "il/Node_inlines.hpp"
@@ -2366,7 +2367,7 @@ J9::Node::chkOpsSkipCopyOnStore()
 bool
 J9::Node::skipCopyOnStore()
    {
-   TR_ASSERT(self()->chkOpsSkipCopyOnStore(), "flag only valid for BCD or aggregrate store ops\n");
+   TR_ASSERT(self()->chkOpsSkipCopyOnStore(), "flag only valid for BCD or aggregate store ops\n");
    if (self()->chkOpsSkipCopyOnStore())
       return _flags.testAny(SkipCopyOnStore);
    else
@@ -2377,7 +2378,7 @@ void
 J9::Node::setSkipCopyOnStore(bool v)
    {
    TR::Compilation *c = TR::comp();
-   TR_ASSERT(self()->chkOpsSkipCopyOnStore(), "flag only valid for BCD or aggregrate store ops\n");
+   TR_ASSERT(self()->chkOpsSkipCopyOnStore(), "flag only valid for BCD or aggregate store ops\n");
    if (self()->chkOpsSkipCopyOnStore() &&
        performNodeTransformation2(c, "O^O NODE FLAGS: Setting skipCopyOnStore flag on node %p to %d\n", self(), v))
       {
@@ -2448,7 +2449,7 @@ J9::Node::chkOpsUseStoreAsAnAccumulator()
 bool
 J9::Node::useStoreAsAnAccumulator()
    {
-   TR_ASSERT(self()->chkOpsUseStoreAsAnAccumulator(), "flag only valid for BCD or aggregrate store ops\n");
+   TR_ASSERT(self()->chkOpsUseStoreAsAnAccumulator(), "flag only valid for BCD or aggregate store ops\n");
    if (self()->chkOpsUseStoreAsAnAccumulator())
       return _flags.testAny(UseStoreAsAnAccumulator);
    else
@@ -2459,7 +2460,7 @@ void
 J9::Node::setUseStoreAsAnAccumulator(bool v)
    {
    TR::Compilation *c = TR::comp();
-   TR_ASSERT(self()->chkOpsUseStoreAsAnAccumulator(), "flag only valid for BCD or aggregrate store ops\n");
+   TR_ASSERT(self()->chkOpsUseStoreAsAnAccumulator(), "flag only valid for BCD or aggregate store ops\n");
    if (self()->chkOpsUseStoreAsAnAccumulator() &&
        performNodeTransformation2(c, "O^O NODE FLAGS: Setting UseStoreAsAnAccumulator flag on node %p to %d\n", self(), v))
       {
@@ -2602,7 +2603,7 @@ J9::Node::isArrayCopyCall()
       }
    else
       {
-      TR_Method *method = self()->getSymbol()->castToMethodSymbol()->getMethod();
+      TR::Method *method = self()->getSymbol()->castToMethodSymbol()->getMethod();
 
       // Method may be unresolved but we would still like to transform arraycopy calls so pattern match the signature as well
       if (method != NULL &&

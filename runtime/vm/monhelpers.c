@@ -24,9 +24,8 @@
 #include "j9consts.h"
 #include "j9protos.h"
 #include "ut_j9vm.h"
-#ifdef J9VM_THR_LOCK_NURSERY
-#include "lockNurseryUtil.h"
-#endif
+#include "j9protos.h"
+#include "j9consts.h"
 #include "vm_internal.h"
 #include "util_internal.h"
 #include "monhelp.h"
@@ -201,7 +200,7 @@ objectMonitorExit(J9VMThread* vmStruct, j9object_t object)
 	The lock has not already been inflated.
    returns:
 	NULL if out of memory
-	the inflated monitor, if succesful
+	the inflated monitor, if successful
  */
 J9ObjectMonitor * 
 objectMonitorInflate(J9VMThread* vmStruct, j9object_t object, UDATA lock) 

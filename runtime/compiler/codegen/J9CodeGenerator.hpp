@@ -86,6 +86,8 @@ public:
 
    void createReferenceReadBarrier(TR::TreeTop* treeTop, TR::Node* parent);
 
+   TR::list<TR_Pair<TR_ResolvedMethod,TR::Instruction> *> &getJNICallSites() { return _jniCallSites; }  // registerAssumptions()
+
    // OSR, not code generator
    void populateOSRBuffer();
 
@@ -271,6 +273,10 @@ public:
 private:
 
    TR_HashTabInt _uncommonedNodes;               // uncommoned nodes keyed by the original nodes
+   
+   TR::list<TR::Node*> _nodesSpineCheckedList;
+   
+   TR::list<TR_Pair<TR_ResolvedMethod, TR::Instruction> *> _jniCallSites; // list of instrutions representing direct jni call sites
 
    uint16_t changeParmLoadsToRegLoads(TR::Node*node, TR::Node **regLoads, TR_BitVector *globalRegsWithRegLoad, TR_BitVector &killedParms, vcount_t visitCount); // returns number of RegLoad nodes created
 
@@ -325,6 +331,11 @@ private:
 
    TR_BitVector *_liveMonitors;
 
+protected:
+
+   // isTemporaryBased storageReferences just have a symRef but some other routines expect a node so use the below to fill in this symRef on this node
+   TR::Node *_dummyTempStorageRefNode;
+
 public:
 
    static bool wantToPatchClassPointer(TR::Compilation *comp,
@@ -334,6 +345,17 @@ public:
    bool wantToPatchClassPointer(const TR_OpaqueClassBlock *allegedClassPointer, const uint8_t *inCodeAt);
 
    bool wantToPatchClassPointer(const TR_OpaqueClassBlock *allegedClassPointer, const TR::Node *forNode);
+
+   bool getSupportsBigDecimalLongLookasideVersioning() { return _flags3.testAny(SupportsBigDecimalLongLookasideVersioning);}
+   void setSupportsBigDecimalLongLookasideVersioning() { _flags3.set(SupportsBigDecimalLongLookasideVersioning);}
+
+   bool constLoadNeedsLiteralFromPool(TR::Node *node) { return false; }
+   
+   // Java, likely Z
+   bool supportsTrapsInTMRegion() { return true; }
+
+   // J9	
+   int32_t getInternalPtrMapBit() { return 31;}
 
    // --------------------------------------------------------------------------
    // GPU
@@ -476,12 +498,13 @@ private:
 
    enum // Flags
       {
-      HasFixedFrameC_CallingConvention    = 0x00000001,
-      SupportsMaxPrecisionMilliTime       = 0x00000002,
-      SupportsInlineStringCaseConversion  = 0x00000004, /*! codegen inlining of Java string case conversion */
-      SupportsInlineStringIndexOf         = 0x00000008, /*! codegen inlining of Java string index of */
-      SupportsInlineStringHashCode        = 0x00000010, /*! codegen inlining of Java string hash code */
-      SupportsInlineConcurrentLinkedQueue = 0x00000020,
+      HasFixedFrameC_CallingConvention                    = 0x00000001,
+      SupportsMaxPrecisionMilliTime                       = 0x00000002,
+      SupportsInlineStringCaseConversion                  = 0x00000004, /*! codegen inlining of Java string case conversion */
+      SupportsInlineStringIndexOf                         = 0x00000008, /*! codegen inlining of Java string index of */
+      SupportsInlineStringHashCode                        = 0x00000010, /*! codegen inlining of Java string hash code */
+      SupportsInlineConcurrentLinkedQueue                 = 0x00000020,
+      SupportsBigDecimalLongLookasideVersioning           = 0x00000040, 
       };
 
    flags32_t _j9Flags;

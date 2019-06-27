@@ -2041,7 +2041,7 @@ typedef struct J9JVMTIHCRJitEventData {
 	UDATA * dataCursor;      /*!< cursor into the data buffer */
 	UDATA * data;            /*!< data buffer containing the jit class redefinition event data */
 	UDATA classCount;        /*!< number of classes in the data buffer */
-	UDATA initialized;       /*!< indicates that the strucutre has been initialized and is ready for use and dealloc */
+	UDATA initialized;       /*!< indicates that the structure has been initialized and is ready for use and dealloc */
 } J9JVMTIHCRJitEventData;
 
 void
@@ -2106,7 +2106,7 @@ enum jvmtiError
 verifyNewClasses (J9VMThread * currentThread, jint class_count, J9JVMTIClassPair * classPairs);
 
 jvmtiError
-fixMethodEquivalences(J9VMThread * currentThread, 
+fixMethodEquivalencesAndCallSites(J9VMThread * currentThread, 
 	J9HashTable * classPairs,
 	J9JVMTIHCRJitEventData * eventData,
 	BOOLEAN fastHCR, J9HashTable ** methodEquivalences,

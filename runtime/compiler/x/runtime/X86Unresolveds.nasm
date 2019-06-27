@@ -107,7 +107,7 @@
 ;
 ; NOTES:
 ;
-; [1] A POP is not strictly necessary to shapen the stack. The RA could be left on the
+; [1] A POP is not strictly necessary to shape the stack. The RA could be left on the
 ; stack and the new stack shape updated in getJitStaticMethodResolvePushes(). It
 ; was left this way because we have to dork with the RA anyways to get back from
 ; this function which will already cause a return mispredict. Leaving it as is
@@ -342,7 +342,7 @@ doLOCKORESP:
 
 
       ; Loading a long in 32 bit is done with a lock cmpxchng by default.
-      ; We need to swtitch the op bits of the instructions that performs loads for the lock cmpxchng setup
+      ; We need to switch the op bits of the instructions that performs loads for the lock cmpxchng setup
       ; to stores. We also need to patch over the lock cmpxchg with nops.
       ;
 patchLowerLong:
@@ -375,13 +375,13 @@ patchCmpxchgForLongStore:
 patchMainlineInstructionFromCache:
 
       mov         ecx, dword  [esp + 12]                            ; Load low dword of patch instruction in snippet BEFORE volatile resolution
-      mov         ebx, dword  [esp + 16]                            ; Load high dword of patch instruction in snippet BEFORE volatile resoluion
+      mov         ebx, dword  [esp + 16]                            ; Load high dword of patch instruction in snippet BEFORE volatile resolution
 
 
 patchMainlineInstruction:
 
 
-      mov         esi, dword  [esp]                                 ; Restor RA in mainline code.
+      mov         esi, dword  [esp]                                 ; Restore RA in mainline code.
       mov         edx, dword  [esp + 4]                             ; Restore the call instruction (edx:eax) that should have brought
       mov         eax, dword  [esp + 8]                             ; us to this snippet + the following 3 bytes.
 
@@ -1010,7 +1010,7 @@ segment .text
 ; the interpreter which reads the parameters from the stack. The backspilling has
 ; already occured at this point.
 ;
-; [2] A POP is not strictly necessary to shapen the stack. The RA could be left on the
+; [2] A POP is not strictly necessary to shape the stack. The RA could be left on the
 ; stack and the new stack shape updated in getJitStaticMethodResolvePushes(). It
 ; was left this way because we have to dork with the RA anyways to get back from
 ; this function which will already cause a return mispredict. Leaving it as is
@@ -1374,7 +1374,7 @@ findOffset:
       and         rax, rcx
 
 patchWith5ByteNOP:
-      ;cmp word ptr[rax], eq_LORBinaryWord ; make sure we are pathcing over a lock or [esp] ;TEMP
+      ;cmp word ptr[rax], eq_LORBinaryWord ; make sure we are patching over a lock or [esp] ;TEMP
       ;je restoreRegs
 
       mov         ecx,    dword  [rax + 4]            ; load the existing dword with the last byte of the lock and the following 3 bytes

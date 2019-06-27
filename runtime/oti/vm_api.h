@@ -1550,8 +1550,8 @@ IDATA
 VMInitStages(J9JavaVM *vm, IDATA stage, void* reserved);
 
 /**
- * Initializes class path entries. Path of each class path entry is set using the 'classPath' provided as paramenter.
- * Each path in 'classPath' is seaprated by 'classPathSeparator'.
+ * Initializes class path entries. Path of each class path entry is set using the 'classPath' provided as parameter.
+ * Each path in 'classPath' is separated by 'classPathSeparator'.
  * If 'initClassPathEntry' is TRUE, then each class path entry in initialized by calling 'initializeClassPathEntry()' function.
  *
  * @param[in] vm pointer to the J9JavaVM
@@ -3035,7 +3035,7 @@ walkStackFrames(J9VMThread *currentThread, J9StackWalkState *walkState);
 
 
 /**
-* @brief Print and assert when an invalid reutrn address is detected in a JIT frame.
+* @brief Print and assert when an invalid return address is detected in a JIT frame.
 * @param *walkState
 * @return void
 */
@@ -3132,7 +3132,7 @@ loadAndVerifyNestHost(J9VMThread *vmThread, J9Class *clazz, UDATA options);
  * @param vmThread vmthread token
  * @param nestMember the j9lass requesting the nesthost
  * @param nestHost the actual nest host, this may be NULL
- * @param errorCode the error code represting the exception to throw
+ * @param errorCode the error code representing the exception to throw
  * 	J9_VISIBILITY_NEST_HOST_LOADING_FAILURE_ERROR
  * 	J9_VISIBILITY_NEST_HOST_DIFFERENT_PACKAGE_ERROR
  * 	J9_VISIBILITY_NEST_MEMBER_NOT_CLAIMED_ERROR
@@ -3304,7 +3304,7 @@ releaseExclusiveVMAccessFromExternalThread(J9JavaVM * vm);
 /**
 * @brief initiates an exclusive access request for metronome
 * @param vm
-* @param block input parameter specifing whether caller should block if another request is ongoing
+* @param block input parameter specifying whether caller should block if another request is ongoing
 * @param responsesRequired the number of mutator threads that must voluntarily quiesce themselves
 * @param gcPriority returned the new gc collector priority
 * @return effectively a boolean the request is successful or not 
@@ -3315,7 +3315,7 @@ requestExclusiveVMAccessMetronome(J9JavaVM *vm, UDATA block, UDATA *responsesReq
 /**
 * @brief initiates an exclusive access request for metronome
 * @param vm
-* @param block input parameter specifing whether caller should block if another request is ongoing
+* @param block input parameter specifying whether caller should block if another request is ongoing
 * @param vmResponsesRequired the number of mutator threads holding VM access that must voluntarily quiesce themselves
 * @param jniResponsesRequired the number of mutator threads holding JNI critical access that must voluntarily quiesce themselves
 * @param gcPriority returned the new gc collector priority

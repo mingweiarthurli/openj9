@@ -575,8 +575,8 @@ J9::Z::TreeEvaluator::pd2udEvaluator(TR::Node *node, TR::CodeGenerator *cg)
  * \param node              Parent node object.
  * \param targetReg         PseudoRegister object for the parent node (the node)
  * \param sourceMR          MemoryRefernece object pointer
- * \param childReg          PesudoRegister object for the child node (e.g. pdloadi node)
- * \param isSeparaeteSign   True if the opteration is pd2udsl or pd2udst, which all have separate sign code. False
+ * \param childReg          PseudoRegister object for the child node (e.g. pdloadi node)
+ * \param isSeparateSign    True if the operation is pd2udsl or pd2udst, which all have separate sign code. False
  *                          if it's pd2ud.
  * \param cg                The codegen object
  * \param srcStorageReference If not null, this replaces the childReg's StorageReference for unpack to unicode
@@ -1900,7 +1900,7 @@ J9::Z::TreeEvaluator::pd2zdVectorEvaluatorHelper(TR::Node * node, TR::CodeGenera
    // 2. creatememoryreference from the StorageREference,
    // 3. Use the memory reference to create VUPKZ instruction
    //
-   // return the allocate PseudoRegister associate the storage refence to the Pseudo register
+   // return the allocate PseudoRegister associate the storage reference to the Pseudo register
    // return this pseudoregister/
    //
    TR_StorageReference *hint = node->getStorageReferenceHint();
@@ -2387,7 +2387,7 @@ J9::Z::TreeEvaluator::isZonedOperationAnEffectiveNop(TR::Node * node, int32_t sh
  *
  * \param node                  the BCDCHK node
  * \param cg                    codegen object
- * \param numCallChildre        number of callNode children
+ * \param numCallParam          number of callNode children
  * \param callChildStartIndex   the index of the first callChild under the BCDCHK node
  * \param isResultPD            True if the result of the pdOpNode a PD; false if the result is a binary integer/long
  *                              This also implies that the second node of the BCDCHK node is an address node.
@@ -3165,7 +3165,7 @@ J9::Z::TreeEvaluator::df2pdEvaluator(TR::Node *node, TR::CodeGenerator *cg)
       }
 
    int32_t maxBytesFromConv = 0;    // how many digits CSDTR/CSXTR can at most produce
-   int32_t maxDigitsInSrc = 0;   // how many signif digits are possible from source dfp
+   int32_t maxDigitsInSrc = 0;   // how many significant digits are possible from source dfp
    if (isFloat)
       {
       maxBytesFromConv = cg->getDecimalFloatToPackedFixedSize();  // CSDTR produces 15 digits == 8 bytes; CPDT produces 16 digits == 9 bytes
@@ -4353,7 +4353,7 @@ J9::Z::TreeEvaluator::evaluateValueModifyingOperand(TR::Node * node,
       // Save the storage reference dependent state leftAlignedZeroDigits, rightAlignedDeadBytes and the derived liveSymbolSize before
       // the possible call to ssrClobberEvaluate below.
       // If a clobber evaluate is done then the above mentioned state will be reset on firstReg (so subsequent commoned uses of firstReg that now
-      // use the newly created temporary storage reference are correct). Cache the values here as this state *will* presist up this tree on the targetReg.
+      // use the newly created temporary storage reference are correct). Cache the values here as this state *will* persist up this tree on the targetReg.
       int32_t savedLiveSymbolSize = firstReg->getLiveSymbolSize();
       int32_t savedLeftAlignedZeroDigits = firstReg->getLeftAlignedZeroDigits();
       int32_t savedRightAlignedDeadBytes = firstReg->getRightAlignedDeadBytes();
@@ -5195,7 +5195,7 @@ TR::Register* J9::Z::TreeEvaluator::pdstoreEvaluatorHelper(TR::Node *node, TR::C
    bool isLeadingSignByteWidening = isByteWidening && node->getType().isLeadingSign();
 
    useZAP =  useZAP && bcdValueReg && (!bcdValueReg->hasKnownOrAssumedCleanSign() || mustUseZAP);
-   //useZAP = useZAP || (isPacked && isByteTruncation); // truncating packed stores that need oveflow exception should be using pdshlOverflow
+   //useZAP = useZAP || (isPacked && isByteTruncation); // truncating packed stores that need overflow exception should be using pdshlOverflow
 
    bool preserveSrcSign = bcdValueReg && !bcdValueReg->isLegalToCleanSign();
 

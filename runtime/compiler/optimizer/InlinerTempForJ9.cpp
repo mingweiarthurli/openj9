@@ -26,6 +26,8 @@
 #include "optimizer/J9EstimateCodeSize.hpp"
 
 #include "env/KnownObjectTable.hpp"
+#include "compile/InlineBlock.hpp"
+#include "compile/Method.hpp"
 #include "compile/OSRData.hpp"
 #include "compile/ResolvedMethod.hpp"
 #include "env/CompilerEnv.hpp"
@@ -1055,6 +1057,12 @@ TR_J9InlinerPolicy::createUnsafePutWithOffset(TR::ResolvedMethodSymbol *calleeSy
    if(comp()->getOption(TR_TraceUnsafeInlining))
        traceMsg(comp(),"\tcreateUnsafePutWithOffset.  call tree %p offset(datatype) %d isvolatile %d needNullCheck %d isOrdered %d\n", callNodeTreeTop, type.getDataType(),isVolatile,needNullCheck,isOrdered);
 
+   // Truncate the value before inlining the call
+   if (TR_J9MethodBase::isUnsafeGetPutBoolean(calleeSymbol->getRecognizedMethod()))
+      {
+      TR::TransformUtil::truncateBooleanForUnsafeGetPut(comp(), callNodeTreeTop);
+      }
+
    // Preserve null check on the unsafe object
    TR::TransformUtil::separateNullCheck(comp(), callNodeTreeTop, comp()->getOption(TR_TraceUnsafeInlining));
 
@@ -1391,6 +1399,12 @@ TR_J9InlinerPolicy::createUnsafeGetWithOffset(TR::ResolvedMethodSymbol *calleeSy
 
    if (debug("traceUnsafe"))
       printf("createUnsafeGetWithOffset %s in %s\n", type.toString(), comp()->signature());
+
+   // Truncate the return before inlining the call
+   if (TR_J9MethodBase::isUnsafeGetPutBoolean(calleeSymbol->getRecognizedMethod()))
+      {
+      TR::TransformUtil::truncateBooleanForUnsafeGetPut(comp(), callNodeTreeTop);
+      }
 
    // Preserve null check on the unsafe object
    TR::TransformUtil::separateNullCheck(comp(), callNodeTreeTop, comp()->getOption(TR_TraceUnsafeInlining));
@@ -2432,23 +2446,13 @@ TR_J9InlinerPolicy::skipHCRGuardForCallee(TR_ResolvedMethod *callee)
          break;
       }
 
-   // Certain JSR292 methods are also ignored here as they are internal to the JIT and therefore cannot be
-   // redefined
-   TR::RecognizedMethod mandatoryRM = callee->convertToMethod()->getMandatoryRecognizedMethod();
-   if (mandatoryRM == TR::java_lang_invoke_MethodHandle_invokeExactTargetAddress)
-      return true;
-
-   // VarHandle operation methods are also ignored here as they are implementation detail and are not expected to be redefined.
-   if (TR_J9MethodBase::isVarHandleOperationMethod(mandatoryRM))
-      return true;
-
-   // Check if the class of the method is internal to our VM
+   // Skip HCR guard for non-public methods in java/lang/invoke package. These methods
+   // are related to implementation details of MethodHandle and VarHandle
    int32_t length = callee->classNameLength();
    char* className = callee->classNameChars();
-
-   if (length == 29 && !strncmp(className, "java/lang/invoke/DirectHandle", length))
-      return true;
-   else if (length == 32 && !strncmp(className, "java/lang/invoke/PrimitiveHandle", length))
+   if (length > 17
+       && !strncmp("java/lang/invoke/", className, 17)
+       && !callee->isPublic())
       return true;
 
    return false;
@@ -3488,7 +3492,7 @@ bool TR_MultipleCallTargetInliner::inlineCallTargets(TR::ResolvedMethodSymbol *c
       // all the methods that deal with temps (parametertoargumentmapper, handleinjectedbasicblock,transforminlinedfunction) will consult these lists
       // usually, it will search a list, and if it doesn't find a temp, search the second list.
       // the problem is when inlining out of order and with the fact that both temp lists can be consulted, it is possible that a temp will get misused.
-      // an example will be a call lower down was inlined first and created a temp t1, for a paremeter (the block doesn't get split).  It gets added to availableTemps after inlining.
+      // an example will be a call lower down was inlined first and created a temp t1, for a parameter (the block doesn't get split).  It gets added to availableTemps after inlining.
       // After, higher up (in the same block) another call now gets inlined, and splits the block.  handleinjectedbasicblock now goes and breaks commoning around this higher up call.
       // when this happens, it can grab the temp t1 from the availableTemps list and reuse it for breaking commoning.  Now there are two stores to t1 in the same block.  If there was any
       // commoning that existed after the second store to t1 that was supposed to get broken, it will now load a bad value of t1.
@@ -4185,7 +4189,7 @@ TR_MultipleCallTargetInliner::exceedsSizeThreshold(TR_CallSite *callSite, int by
    // we need to be conservative about inlining potentially highly polymorphic interface calls for
    // functional frameworks like scala - we limit this to hot and above
    // if the callsite is highly polymorphic but the following conditions are meet, still inline the callee
-   // 1. the compiling method is sorching
+   // 1. the compiling method is scorching
    // 2. the callee is scorching OR queued for veryhot/scorching compile
    int32_t outterMethodSize = getJ9InitialBytecodeSize(callSite->_callerResolvedMethod, 0, comp());
    if (comp()->getMethodHotness() > warm && callSite->isInterface()
@@ -5058,7 +5062,7 @@ static TR_PrexArgument *stronger(TR_PrexArgument *left, TR_PrexArgument *right, 
       return right;
    }
 
-static void populateClassNameSignature(TR_Method* m, TR_ResolvedMethod* caller, TR_OpaqueClassBlock* &c, char* &nc, int32_t &nl, char* &sc, int32_t &sl)
+static void populateClassNameSignature(TR::Method *m, TR_ResolvedMethod* caller, TR_OpaqueClassBlock* &c, char* &nc, int32_t &nl, char* &sc, int32_t &sl)
    {
    int32_t len = m->classNameLength();
    char* cs = classNameToSignature(m->classNameChars(), len, TR::comp());
@@ -5069,7 +5073,7 @@ static void populateClassNameSignature(TR_Method* m, TR_ResolvedMethod* caller, 
    sl = m->signatureLength();
    }
 
-static char* classSignature (TR_Method* m, TR::Compilation* comp) //tracer helper
+static char* classSignature (TR::Method * m, TR::Compilation* comp) //tracer helper
    {
    int32_t len = m->classNameLength();
    return classNameToSignature(m->classNameChars(), len /*don't care, cos this gives us a null terminated string*/, comp);
@@ -5103,7 +5107,7 @@ TR::Node* TR_PrexArgInfo::getCallNode (TR::ResolvedMethodSymbol* methodSymbol, T
 
 
          populateClassNameSignature (callsite->_initialCalleeMethod ?
-               callsite->_initialCalleeMethod->convertToMethod() : //TR_ResolvedMethod doesn't extend TR_Method
+               callsite->_initialCalleeMethod->convertToMethod() : //TR_ResolvedMethod doesn't extend TR::Method
                callsite->_interfaceMethod,
             methodSymbol->getResolvedMethod(),
             callSiteClass,
@@ -5760,7 +5764,7 @@ TR_J9TransformInlinedFunction::isSyncReturnBlock(TR::Compilation *comp, TR::Bloc
    }
 
 /*
- * if the initialCalleeMethod of this callsite is not overriden, add this method as the target of the callsite
+ * if the initialCalleeMethod of this callsite is not overridden, add this method as the target of the callsite
  */
 bool
 TR_J9InlinerUtil::addTargetIfMethodIsNotOverridenInReceiversHierarchy(TR_IndirectCallSite *callsite)

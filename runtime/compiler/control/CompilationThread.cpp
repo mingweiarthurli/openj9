@@ -112,8 +112,6 @@ static void printCompFailureInfo(TR::Compilation * comp, const char * reason);
 
 #if defined(AIXPPC)
 #include <unistd.h>
-extern FILE *j2Profile;
-extern void  j2Prof_methodReport(TR_Method * vmMethod, TR::Compilation * comp);
 #endif
 
 #if defined(J9VM_INTERP_PROFILING_BYTECODES)
@@ -1016,7 +1014,7 @@ TR_YesNoMaybe TR::CompilationInfo::detectCompThreadStarvation()
    for (int32_t compId = 0; compId < _compThreadIndex; compId++)
       {
       // We must look at all active threads because we want to avoid the
-      // case where they compete with each other (4 comp threads on a single procesor)
+      // case where they compete with each other (4 comp threads on a single processor)
       //
       TR::CompilationInfoPerThread *compInfoPT = _arrayOfCompilationInfoPerThread[compId];
       TR_ASSERT(compInfoPT, "compInfoPT must exist because we don't destroy compilation threads");
@@ -1538,7 +1536,7 @@ TR::CompilationInfo::updateCompQueueAccountingOnDequeue(TR_MethodToBeCompiled *e
       TR_ASSERT(_numQueuedFirstTimeCompilations >= 0, "_numQueuedFirstTimeCompilations is negative : %d", _numQueuedFirstTimeCompilations);
       }
    // Note: queue weight is handled separately because a method that is currently being
-   // compiled is considered as bringing some weigth to the processing backlog
+   // compiled is considered as bringing some weight to the processing backlog
    }
 
 
@@ -2632,7 +2630,7 @@ void TR::CompilationInfo::stopCompilationThreads()
    //fprintf(stderr, "stopCompilationThread\n");
    // if we compile on application thread, there is no compilation
    // request queue and there is no compilation thread
-   // The SMALL jit case is already treated separatelly
+   // The SMALL jit case is already treated separately
    if (!useSeparateCompilationThread())
       {
       acquireCompMonitor(vmThread);
@@ -3729,7 +3727,7 @@ TR::CompilationInfoPerThread::processEntry(TR_MethodToBeCompiled &entry, J9::J9S
 
       compInfo->debugPrint("\trequeueing interrupted compilation request", details, compThread);
 
-      // After releaseing the monitors and vm access below, we will loop back to the head of the loop, and retry the
+      // After releasing the monitors and vm access below, we will loop back to the head of the loop, and retry the
       // compilation.  Do not put the request back into the pool, instead requeue.
       //
       requeue();
@@ -4695,7 +4693,7 @@ TR::CompilationInfo::getNextMethodToBeCompiled(TR::CompilationInfoPerThread *com
 
 //----------------------------- computeCompThreadSleepTime ----------------------
 // Compute how much the compilation thread should sleep for throttling purposes
-// Parameters: compilationTimeMs is the wall clock time spent by previuous
+// Parameters: compilationTimeMs is the wall clock time spent by previous
 // compilation
 // The return value is in ms.
 //-------------------------------------------------------------------------------
@@ -4961,7 +4959,7 @@ void *TR::CompilationInfo::compileMethod(J9VMThread * vmThread, TR::IlGeneratorM
 
    // If compiling on this thread acquire the application thread monitor.
    // This is the monitor that prevents compilation on multiple application
-   // threadsat the same time. It is held for the duration of the compilation.
+   // threads at the same time. It is held for the duration of the compilation.
    //
    if (!useSeparateCompilationThread())
       {
@@ -6070,7 +6068,7 @@ void TR::CompilationInfo::queueForcedAOTUpgrade(TR_MethodToBeCompiled *originalE
          {
          if (!TR::Options::isQuickstartDetected())
             hotness = warm;
-         else  if (TR::Options::getCmdLineOptions()->getOption(TR_UpgradeBootstrapAtWarm))// This is a JIT option because it perteins to JIT compilations
+         else  if (TR::Options::getCmdLineOptions()->getOption(TR_UpgradeBootstrapAtWarm))// This is a JIT option because it pertains to JIT compilations
             {
             // To reduce affect on short applications like tomcat
             // upgrades to warm should be performed only outside the grace period
@@ -6658,7 +6656,7 @@ TR::CompilationInfoPerThreadBase::postCompilationTasks(J9VMThread * vmThread,
             }
          }
 
-      // Check conditions for adding to JProfling queue.
+      // Check conditions for adding to JProfiling queue.
       // TODO: How should be AOT loads treated?
       if (_addToJProfilingQueue &&
          entry->_oldStartPC == 0 && startPC != 0)// Must be a first time compilation that succeeded
@@ -7207,7 +7205,7 @@ TR::CompilationInfoPerThreadBase::wrappedCompile(J9PortLibrary *portLib, void * 
                }
 
             // Check if user allows us to do samplingJProfiling.
-            // If so, enable it programatically on a method by method basis
+            // If so, enable it programmatically on a method by method basis
             //
             if (!options->getOption(TR_DisableSamplingJProfiling))
                {
@@ -9608,11 +9606,6 @@ void TR::CompilationInfoPerThreadBase::logCompilationSuccess(
 
       if (!vm.isAOT_DEPRECATED_DO_NOT_USE())
          {
-#if defined(AIXPPC)
-         if (j2Profile != NULL)
-            j2Prof_methodReport(compilee->convertToMethod(), compiler);
-#endif
-
          if (J9_EVENT_IS_HOOKED(javaVM->hookInterface, J9HOOK_VM_DYNAMIC_CODE_LOAD))
             {
             OMR::CodeCacheMethodHeader *ccMethodHeader;

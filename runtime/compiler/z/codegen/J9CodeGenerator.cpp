@@ -238,6 +238,19 @@ J9::Z::CodeGenerator::doInlineAllocate(TR::Node *node)
    return true;
    }
 
+bool
+J9::Z::CodeGenerator::constLoadNeedsLiteralFromPool(TR::Node *node)
+   {
+   if (node->isClassUnloadingConst() || node->getType().isIntegral() || node->getType().isAddress())
+      {
+      return false;
+      }
+   else
+      {
+      return true;  // Floats/Doubles require literal pool
+      }
+   }
+
 TR::Recompilation *
 J9::Z::CodeGenerator::allocateRecompilationInfo()
    {
@@ -3512,7 +3525,7 @@ J9::Z::CodeGenerator::canGeneratePDBinaryIntrinsic(TR::ILOpCodes opCode, TR::Nod
    }
 
 void
-J9::Z::CodeGenerator::incRefCountForOpaquePseudoRegister(TR::Node * node, TR::CodeGenerator * cg, TR::Compilation * comp)
+J9::Z::CodeGenerator::incRefCountForOpaquePseudoRegister(TR::Node * node)
    {
    if (node->getOpaquePseudoRegister())
       {
@@ -3520,9 +3533,9 @@ J9::Z::CodeGenerator::incRefCountForOpaquePseudoRegister(TR::Node * node, TR::Co
       TR_StorageReference *ref = reg->getStorageReference();
       if (ref && ref->isNodeBased() && ref->getNodeReferenceCount() > 0)
          {
-         if (cg->traceBCDCodeGen())
-            comp->getDebug()->trace("\tnode %s (%p) with storageRef #%d (%s): increment nodeRefCount %d->%d when artificially incrementing ref count\n",
-               node->getOpCode().getName(),node,ref->getReferenceNumber(),comp->getDebug()->getName(ref->getSymbol()),ref->getNodeReferenceCount(),ref->getNodeReferenceCount()+1);
+         if (self()->traceBCDCodeGen())
+            self()->comp()->getDebug()->trace("\tnode %s (%p) with storageRef #%d (%s): increment nodeRefCount %d->%d when artificially incrementing ref count\n",
+               node->getOpCode().getName(),node,ref->getReferenceNumber(),self()->comp()->getDebug()->getName(ref->getSymbol()),ref->getNodeReferenceCount(),ref->getNodeReferenceCount()+1);
          ref->incrementNodeReferenceCount();
          }
       }

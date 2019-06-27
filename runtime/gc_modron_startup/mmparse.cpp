@@ -1145,7 +1145,7 @@ gcParseSovereignArguments(J9JavaVM *vm)
 	
 #endif /* J9VM_GC_LARGE_OBJECT_AREA) */
 
-	/* If user has specifed any of the following SOV options  then we just silently ignore them 
+	/* If user has specified any of the following SOV options  then we just silently ignore them 
 	 * 
 	 * -Xparroot
 	 * -XloratioN 
@@ -1209,19 +1209,45 @@ gcParseSovereignArguments(J9JavaVM *vm)
 		}
 	}
 
-	if (-1 != FIND_ARG_IN_VMARGS(EXACT_MATCH, "-XX:+HeapManagementMXBeanCompatibility", NULL)) {
-
-		extensions->_HeapManagementMXBeanBackCompatibilityEnabled = true;
-	}
-	
-	if (-1 != FIND_ARG_IN_VMARGS(EXACT_MATCH, "-XX:-HeapManagementMXBeanCompatibility", NULL)) {
-		extensions->_HeapManagementMXBeanBackCompatibilityEnabled = false;
-	}
 	return 1;
 
 _error:
 	return 0;
 
+}
+
+static UDATA
+gcParseXXArguments(J9JavaVM *vm)
+{
+	MM_GCExtensions *extensions = MM_GCExtensions::getExtensions(vm);
+
+	{
+		IDATA heapManagementMXBeanCompatibilityIndex = FIND_ARG_IN_VMARGS(EXACT_MATCH, "-XX:+HeapManagementMXBeanCompatibility", NULL);
+		IDATA noHheapManagementMXBeanCompatibilityIndex = FIND_ARG_IN_VMARGS(EXACT_MATCH, "-XX:-HeapManagementMXBeanCompatibility", NULL);
+		if (heapManagementMXBeanCompatibilityIndex != noHheapManagementMXBeanCompatibilityIndex) {
+			/* At least one option is set. Find the right most one. */
+			if (heapManagementMXBeanCompatibilityIndex > noHheapManagementMXBeanCompatibilityIndex) {
+				extensions->_HeapManagementMXBeanBackCompatibilityEnabled = true;
+			} else {
+				extensions->_HeapManagementMXBeanBackCompatibilityEnabled = false;
+			}
+		}
+	}
+
+	{
+		IDATA useGCStartupHintsIndex = FIND_ARG_IN_VMARGS(EXACT_MATCH, "-XX:+UseGCStartupHints", NULL);
+		IDATA noUseGCStartupHintsIndex = FIND_ARG_IN_VMARGS(EXACT_MATCH, "-XX:-UseGCStartupHints", NULL);
+		if (useGCStartupHintsIndex != noUseGCStartupHintsIndex) {
+			/* At least one option is set. Find the right most one. */
+			if (useGCStartupHintsIndex > noUseGCStartupHintsIndex) {
+				extensions->useGCStartupHints = true;
+			} else {
+				extensions->useGCStartupHints = false;
+			}
+		}
+	}
+
+	return 1;
 }
 
 /**
@@ -1432,7 +1458,7 @@ gcParseCommandLineAndInitializeWithValues(J9JavaVM *vm, IDATA *memoryParameters)
 	PORT_ACCESS_FROM_JAVAVM(vm);
 
 	/* Parse the command line 
-	 * Order is important for paramters that match as substrings (-Xmrx/-Xmr)
+	 * Order is important for parameters that match as substrings (-Xmrx/-Xmr)
 	 */
 	result = option_set_to_opt(vm, OPT_XMCA, &index, EXACT_MEMORY_MATCH, &vm->ramClassAllocationIncrement);
 	if (OPTION_OK != result) {
@@ -1651,6 +1677,11 @@ gcParseCommandLineAndInitializeWithValues(J9JavaVM *vm, IDATA *memoryParameters)
 	 * easily disallow -Xgcpolicy options.
 	 */
 	if (0 == gcParseSovereignArguments(vm)) {
+		return JNI_EINVAL;
+	}
+
+	/* parse -XX: option that logicially belong to GC */
+	if (0 == gcParseXXArguments(vm)) {
 		return JNI_EINVAL;
 	}
 

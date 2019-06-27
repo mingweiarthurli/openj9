@@ -557,7 +557,7 @@ void OMRNORETURN exitJavaVM(J9VMThread * vmThread, IDATA rc)
 		}
 
 #if defined(WIN32)
-		/* Do not attempt to exit while a JNI sharead library open is in progress */
+		/* Do not attempt to exit while a JNI shared library open is in progress */
 		omrthread_monitor_enter(vm->nativeLibraryMonitor);
 		omrthread_monitor_enter(vm->classLoaderBlocksMutex);
 #endif
@@ -870,7 +870,7 @@ freeJavaVM(J9JavaVM * vm)
 }
 
 /**
- * Do a runtime check of the processor and operating sytem to determine if
+ * Do a runtime check of the processor and operating system to determine if
  * this is a supported configuration.
  *
  * @param[in] portLibrary - the port library.
@@ -1815,6 +1815,20 @@ IDATA VMInitStages(J9JavaVM *vm, IDATA stage, void* reserved) {
 				}
 			}
 
+			/* -XX commandline option for +/- TransparentHugepage */
+			argIndex = FIND_ARG_IN_VMARGS(EXACT_MATCH, VMOPT_XXNOTRANSPARENT_HUGEPAGE, NULL);
+			argIndex2 = FIND_ARG_IN_VMARGS(EXACT_MATCH, VMOPT_XXTRANSPARENT_HUGEPAGE, NULL);
+			{
+				/* Last instance of +/- TransparentHugepage found on the command line wins
+				 * Default to -XX:-TransparentHugepage for performance reasons
+				 */
+				if (argIndex2 > argIndex) {
+					j9port_control(J9PORT_CTLDATA_VMEM_ADVISE_HUGEPAGE, 1);
+				} else {
+					j9port_control(J9PORT_CTLDATA_VMEM_ADVISE_HUGEPAGE, 0);
+				}
+			}
+
 			argIndex = FIND_ARG_IN_VMARGS(EXACT_MATCH, VMOPT_XXNLSMESSAGES, NULL);
 			argIndex2 = FIND_ARG_IN_VMARGS(EXACT_MATCH, VMOPT_XXNONLSMESSAGES, NULL);
 			if (argIndex2 > argIndex) {
@@ -1831,11 +1845,6 @@ IDATA VMInitStages(J9JavaVM *vm, IDATA stage, void* reserved) {
 					loadInfo->fatalErrorStr = "cannot set system property sun.nio.PageAlignDirectMemory=true";
 					goto _error;
 				}
-			}
-
-			/* Consume and issue warning for -Xdiagnosticscollector */
-			if (FIND_AND_CONSUME_ARG(STARTSWITH_MATCH, VMOPT_XDIAGNOSTICSCOLLECTOR, NULL) >= 0) {
-				j9nls_printf(PORTLIB, J9NLS_WARNING, J9NLS_VM_DIAGNOSTIC_COLLECTOR_NOT_SUPPORTED);
 			}
 
 #if !defined(WIN32) && !defined(J9ZTPF)
@@ -1879,20 +1888,23 @@ IDATA VMInitStages(J9JavaVM *vm, IDATA stage, void* reserved) {
 				}
 				if (TRUE == enableGcOnIdle) {
 					vm->vmRuntimeStateListener.idleTuningFlags |= (UDATA)J9_IDLE_TUNING_GC_ON_IDLE;
+					/*
+ 					 * 
+				  	 * CompactOnIdle is enabled only if XX:+IdleTuningGcOnIdle is set and:
+				  	 * 1. -XX:+IdleTuningCompactOnIdle is set, or
+				  	 * 2. running in container
+				  	 *
+				  	 * Setting Xtune:virtualized on java versions 9 or above does not enable CompactOnIdle.
+				  	 */
+					if ((argIndexCompactOnIdleEnable > argIndexCompactOnIdleDisable)
+					|| ((-1 == argIndexCompactOnIdleDisable) && inContainer)
+					) {
+						vm->vmRuntimeStateListener.idleTuningFlags |= (UDATA)J9_IDLE_TUNING_COMPACT_ON_IDLE;
+					} else {
+						vm->vmRuntimeStateListener.idleTuningFlags &= ~(UDATA)J9_IDLE_TUNING_COMPACT_ON_IDLE;
+					}
 				} else {
 					vm->vmRuntimeStateListener.idleTuningFlags &= ~(UDATA)J9_IDLE_TUNING_GC_ON_IDLE;
-				}
-				/*
-				 * CompactOnIdle is enabled only if:
-				 * 1. -XX:+IdleTuningCompactOnIdle is set, or
-				 * 2. running in container
-				 */
-				if ((argIndexCompactOnIdleEnable > argIndexCompactOnIdleDisable)
-				|| ((-1 == argIndexCompactOnIdleDisable) && inContainer)
-				) {
-					vm->vmRuntimeStateListener.idleTuningFlags |= (UDATA)J9_IDLE_TUNING_COMPACT_ON_IDLE;
-				} else {
-					vm->vmRuntimeStateListener.idleTuningFlags &= ~(UDATA)J9_IDLE_TUNING_COMPACT_ON_IDLE;
 				}
 				/* default ignore if idle tuning options not supported */
 				vm->vmRuntimeStateListener.idleTuningFlags |= (UDATA)J9_IDLE_TUNING_IGNORE_UNRECOGNIZED_OPTIONS;
@@ -2520,8 +2532,11 @@ static void consumeVMArgs(J9JavaVM* vm, J9VMInitArgs* j9vm_args) {
 	BOOLEAN assertOptionFound = FALSE;
 
 	findArgInVMArgs( PORTLIB, j9vm_args, EXACT_MATCH, VMOPT_XINT, NULL, TRUE);
-	/* If -Xverify:none, other -Xverify args previous to that should be ignored */
+	/* If -Xverify:none, other -Xverify args previous to that should be ignored. As of Java 13 -Xverify:none and -noverify are deprecated. */
 	if (findArgInVMArgs( PORTLIB, j9vm_args, STARTSWITH_MATCH, VMOPT_XVERIFY_COLON, OPT_NONE, TRUE) >= 0) {
+		if (J2SE_VERSION(vm) >= J2SE_V13) {
+			j9nls_printf(PORTLIB, J9NLS_WARNING, J9NLS_VM_XVERIFYNONE_DEPRECATED);
+		}
 		findArgInVMArgs( PORTLIB, j9vm_args, OPTIONAL_LIST_MATCH, VMOPT_XVERIFY, NULL, TRUE);
 	}
 #if defined(J9VM_INTERP_VERBOSE)
@@ -2701,6 +2716,11 @@ modifyDllLoadTable(J9JavaVM * vm, J9Pool* loadTable, J9VMInitArgs* j9vm_args)
 			}
 		}
 	}
+
+#if defined(J9AARCH64)
+	// temporary change until the JIT becomes available
+	xint = TRUE;
+#endif
 
 	if (xint) {
 		JVMINIT_VERBOSE_INIT_VM_TRACE(vm, "-Xint set\n");
@@ -5798,7 +5818,7 @@ protectedInitializeJavaVM(J9PortLibrary* portLibrary, void * userData)
 
 
 #ifdef J9VM_OPT_SIDECAR
-	/* Whinge about -Djava.compiler after extra VM options are added, but before mappings are set */
+	/* Whine about -Djava.compiler after extra VM options are added, but before mappings are set */
 	if (RC_FAILED == checkDjavacompiler(portLibrary, vm->vmArgsArray)) {
 		goto error;
 	}

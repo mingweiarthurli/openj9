@@ -149,7 +149,7 @@ performVerification(J9VMThread *currentThread, J9Class *clazz)
 				clazz = VM_VMHelpers::currentClass(clazz);
 				bcvd->vmStruct = NULL;
 				if (0 != verifyResult) {
-					/* INL had a check for Object here which is unncessary in SE */
+					/* INL had a check for Object here which is unnecessary in SE */
 					if (-2 == verifyResult) {
 						omrthread_monitor_exit(bcvd->verifierMutex);
 						/* vmStruct is already up to date */
@@ -386,6 +386,24 @@ doVerify:
 				if (NULL == initializationLock) {
 					goto done;
 				}
+#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+				if (J9_IS_J9CLASS_VALUETYPE(clazz)) {
+					PUSH_OBJECT_IN_SPECIAL_FRAME(currentThread, initializationLock);
+					/* Preparation is the earliest point where the defaultValue would needed. 
+					* I.e pre-filling static fields. Therefore, the defaultValue must be allocated at 
+					* the end of verification 
+					*/
+					j9object_t defaultValue = vm->memoryManagerFunctions->J9AllocateObject(currentThread, clazz, J9_GC_ALLOCATE_OBJECT_TENURED | J9_GC_ALLOCATE_OBJECT_NON_INSTRUMENTABLE);
+					initializationLock = POP_OBJECT_IN_SPECIAL_FRAME(currentThread);
+					clazz = VM_VMHelpers::currentClass(clazz);
+					if (NULL == defaultValue) {
+						setHeapOutOfMemoryError(currentThread);
+						goto done;
+					}
+					j9object_t *defaultValueAddress = &(clazz->flattenedClassCache->defaultValue);
+					J9STATIC_OBJECT_STORE(currentThread, clazz, defaultValueAddress, defaultValue);
+				}
+#endif
 				if (((UDATA)currentThread | J9ClassInitUnverified) == clazz->initializeStatus) {
 					initializationLock = setInitStatus(currentThread, clazz, J9ClassInitUnprepared, initializationLock);
 					clazz = VM_VMHelpers::currentClass(clazz);

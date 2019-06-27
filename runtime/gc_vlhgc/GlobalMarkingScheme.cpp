@@ -178,7 +178,7 @@ MM_ParallelGlobalMarkTask::cleanup(MM_EnvironmentBase *envBase)
 
 	env->_lastOverflowedRsclWithReleasedBuffers = NULL;
 	
-	/* record the thread-specific paralellism stats in the trace buffer. This partially duplicates info in -Xtgc:parallel */ 
+	/* record the thread-specific parallelism stats in the trace buffer. This partially duplicates info in -Xtgc:parallel */ 
 	Trc_MM_ParallelGlobalMarkTask_parallelStats(
 			env->getLanguageVMThread(),
 			(U_32)env->getSlaveID(),
@@ -808,23 +808,24 @@ MM_GlobalMarkingScheme::scanClassLoaderObject(MM_EnvironmentVLHGC *env, J9Object
 		}
 		GC_VMInterface::unlockClasses(_extensions);
 
-		Assert_MM_true(NULL != classLoader->moduleHashTable);
-		J9HashTableState walkState;
-		J9Module **modulePtr = (J9Module **)hashTableStartDo(classLoader->moduleHashTable, &walkState);
-		while (NULL != modulePtr) {
-			J9Module * const module = *modulePtr;
-			Assert_MM_true(NULL != module->moduleObject);
-			markObject(env, module->moduleObject);
-			rememberReferenceIfRequired(env, classLoaderObject, module->moduleObject);
-			if (NULL != module->moduleName) {
-				markObject(env, module->moduleName);
-				rememberReferenceIfRequired(env, classLoaderObject, module->moduleName);
+		if (NULL != classLoader->moduleHashTable) {
+			J9HashTableState walkState;
+			J9Module **modulePtr = (J9Module **)hashTableStartDo(classLoader->moduleHashTable, &walkState);
+			while (NULL != modulePtr) {
+				J9Module * const module = *modulePtr;
+				Assert_MM_true(NULL != module->moduleObject);
+				markObject(env, module->moduleObject);
+				rememberReferenceIfRequired(env, classLoaderObject, module->moduleObject);
+				if (NULL != module->moduleName) {
+					markObject(env, module->moduleName);
+					rememberReferenceIfRequired(env, classLoaderObject, module->moduleName);
+				}
+				if (NULL != module->version) {
+					markObject(env, module->version);
+					rememberReferenceIfRequired(env, classLoaderObject, module->version);
+				}
+				modulePtr = (J9Module**)hashTableNextDo(&walkState);
 			}
-			if (NULL != module->version) {			
-				markObject(env, module->version);
-				rememberReferenceIfRequired(env, classLoaderObject, module->version);
-			}
-			modulePtr = (J9Module**)hashTableNextDo(&walkState);
 		}
 	}
 }

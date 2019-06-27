@@ -1914,7 +1914,7 @@ public final class DecimalData
             precision--;
         }
         
-        // Pre-emptive check overflow: 10 digits in Integer.MAX_VALUE
+        // Preemptive check overflow: 10 digits in Integer.MAX_VALUE
         if (checkOverflow && precision > 10) {
             throw new ArithmeticException(
                 "Decimal overflow - Unicode Decimal too large for an int");
@@ -2024,7 +2024,7 @@ public final class DecimalData
             precision--;
         }
         
-        // Pre-emptive check overflow: 19 digits in Long.MAX_VALUE
+        // Preemptive check overflow: 19 digits in Long.MAX_VALUE
         if (checkOverflow && precision > 19) {
             throw new ArithmeticException(
                 "Decimal overflow - Unicode Decimal too large for a long");
@@ -2329,7 +2329,7 @@ public final class DecimalData
      * @param bigIntegerValue
      *            BigInteger value to be converted
      * @param unicodeDecimal
-     *            char array that will hold the Unicde decimal on a successful return
+     *            char array that will hold the Unicode decimal on a successful return
      * @param offset
      *            offset into <code>unicodeDecimal</code> where the Unicode Decimal is expected to be located
      * @param precision

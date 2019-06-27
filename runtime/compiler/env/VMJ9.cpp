@@ -61,6 +61,7 @@
 #include "codegen/Snippet.hpp"
 #include "compile/Compilation.hpp"
 #include "compile/CompilationTypes.hpp"
+#include "compile/Method.hpp"
 #include "compile/ResolvedMethod.hpp"
 #include "compile/VirtualGuard.hpp"
 #include "control/OptionsUtil.hpp"
@@ -1174,10 +1175,10 @@ UDATA TR_J9VMBase::getObjectHeaderSizeInBytes()                     {return size
 UDATA TR_J9VMBase::getOffsetOfSuperclassesInClassObject()           {return offsetof(J9Class, superclasses);}
 UDATA TR_J9VMBase::getOffsetOfBackfillOffsetField()                 {return offsetof(J9Class, backfillOffset);}
 
-UDATA TR_J9VMBase::getOffsetOfContiguousArraySizeField()            {return TMP_OFFSETOF_J9INDEXABLEOBJECTCONTIGUOUS_SIZE;}
-UDATA TR_J9VMBase::getOffsetOfDiscontiguousArraySizeField()         {return TMP_OFFSETOF_J9INDEXABLEOBJECTDISCONTIGUOUS_SIZE;}
-UDATA TR_J9VMBase::getJ9ObjectContiguousLength()                    {return offsetof(J9IndexableObjectContiguous, size);}
-UDATA TR_J9VMBase::getJ9ObjectDiscontiguousLength()                 {return offsetof(J9IndexableObjectContiguous, size);}
+UDATA TR_J9VMBase::getOffsetOfContiguousArraySizeField()            {return TR::Compiler->om.offsetOfContiguousArraySizeField();}
+UDATA TR_J9VMBase::getOffsetOfDiscontiguousArraySizeField()         {return TR::Compiler->om.offsetOfDiscontiguousArraySizeField();}
+UDATA TR_J9VMBase::getJ9ObjectContiguousLength()                    {return TR::Compiler->om.offsetOfContiguousArraySizeField();}
+UDATA TR_J9VMBase::getJ9ObjectDiscontiguousLength()                 {return TR::Compiler->om.offsetOfContiguousArraySizeField();}
 
 UDATA TR_J9VMBase::getOffsetOfArrayClassRomPtrField()               {return offsetof(J9ArrayClass, romClass);}
 UDATA TR_J9VMBase::getOffsetOfClassRomPtrField()                    {return offsetof(J9Class, romClass);}
@@ -1908,8 +1909,6 @@ UDATA TR_J9VMBase::thisThreadGetGSIntermediateResultOffset()
  */
 UDATA TR_J9VMBase::thisThreadGetConcurrentScavengeActiveByteAddressOffset()
    {
-   TR_ASSERT_FATAL(J9_PRIVATE_FLAGS_CONCURRENT_SCAVENGER_ACTIVE == 0x20000,
-              "GSCS: The check weither concurrent scavenge is active is dependant on the flag being 0x20000");
    int32_t privateFlagsConcurrentScavengerActiveByteOffset = 5;
    return offsetof(J9VMThread, privateFlags) + privateFlagsConcurrentScavengerActiveByteOffset;
    }
@@ -2373,7 +2372,7 @@ TR_MarkHotField::mark(J9Class * clazz, bool isFixedClass)
 
    if ((*(UDATA *)((char *)clazz + offsetOfHotFields()) & 0x1))
       {
-      // temorary hack: tenure aligned classes can't have
+      // temporary hack: tenure aligned classes can't have
       // hot fields marked, we need another word for this
       if (_comp->getOption(TR_TraceMarkingOfHotFields))
          {
@@ -2773,7 +2772,7 @@ TR_J9VMBase::isQueuedForVeryHotOrScorching(TR_ResolvedMethod *calleeMethod, TR::
    }
 
 bool
-TR_J9VMBase::maybeHighlyPolymorphic(TR::Compilation *comp, TR_ResolvedMethod *caller, int32_t cpIndex, TR_Method *callee, TR_OpaqueClassBlock * receiverClass)
+TR_J9VMBase::maybeHighlyPolymorphic(TR::Compilation *comp, TR_ResolvedMethod *caller, int32_t cpIndex, TR::Method *callee, TR_OpaqueClassBlock * receiverClass)
    {
    //if (method->isInterface())
      {
@@ -3133,7 +3132,7 @@ int TR_J9VMBase::checkInlineableTarget (TR_CallTarget* target, TR_CallSite* call
             }
          else if ( comp->getCurrentMethod()->convertToMethod()->isArchetypeSpecimen() || comp->getCurrentMethod()->getRecognizedMethod() == TR::java_lang_invoke_MethodHandle_invokeExact )
             {
-            // We're in JSR292 Inlining rounds, and we are ourselves an archetype specimen, so we can inline other archetype specimina whenever we see fit
+            // We're in JSR292 Inlining rounds, and we are ourselves an archetype specimen, so we can inline other archetype specimens whenever we see fit
             }
          else if ( comp->getMethodHotness() >= hot )
             {
@@ -4284,7 +4283,7 @@ bool TR_J9VMBase::isFinalFieldPointingAtJ9Class(TR::SymbolReference *symRef, TR:
 
 // }}}  (end of predicates)
 
-static bool foldFinalFieldsIn(char *className, int32_t classNameLength, TR::Compilation *comp)
+static bool foldFinalFieldsIn(const char *className, int32_t classNameLength, TR::Compilation *comp)
    {
    TR::SimpleRegex *classRegex = comp->getOptions()->getClassesWithFoldableFinalFields();
    if (classRegex)
@@ -4331,8 +4330,6 @@ TR_J9VMBase::canDereferenceAtCompileTime(TR::SymbolReference *fieldRef, TR::Comp
          }
       else switch (fieldRef->getSymbol()->getRecognizedField())
          {
-         case TR::Symbol::Java_lang_invoke_MethodHandle_rawModifiers: // JTC 83328: Delete once VM changes promote.  Moved to PrimitiveHandle
-         case TR::Symbol::Java_lang_invoke_MethodHandle_defc:         // JTC 83328: Delete once VM changes promote.  Moved to PrimitiveHandle
          case TR::Symbol::Java_lang_invoke_PrimitiveHandle_rawModifiers:
          case TR::Symbol::Java_lang_invoke_PrimitiveHandle_defc:
          case TR::Symbol::Java_lang_invoke_VarHandle_handleTable:
@@ -4350,12 +4347,24 @@ TR_J9VMBase::canDereferenceAtCompileTime(TR::SymbolReference *fieldRef, TR::Comp
             // ourselves to fold instance fields only in classes classes where
             // this is known to be safe.
 
-            J9Class *fieldClass = (J9Class*)fieldRef->getOwningMethod(comp)->getClassFromFieldOrStatic(comp, fieldRef->getCPIndex());
-            if (!fieldClass)
-               return false;
-
+            const char* name;
             int32_t len;
-            char * name = getClassNameChars((TR_OpaqueClassBlock*)fieldClass, len);
+
+            // Get class name for fabricated java field
+            if (fieldRef->getCPIndex() < 0 &&
+               fieldRef->getSymbol()->getRecognizedField() != TR::Symbol::UnknownField)
+               {
+               name = fieldRef->getSymbol()->owningClassNameCharsForRecognizedField(len);
+               }
+            else
+               {
+               TR_OpaqueClassBlock *fieldClass = fieldRef->getOwningMethod(comp)->getClassFromFieldOrStatic(comp, fieldRef->getCPIndex());
+               if (!fieldClass)
+                  return false;
+
+               name = getClassNameChars((TR_OpaqueClassBlock*)fieldClass, len);
+               }
+
             return foldFinalFieldsIn(name, len, comp);
             }
          }
@@ -4487,7 +4496,7 @@ TR_J9VMBase::initializeLocalArrayHeader(TR::Compilation * comp, TR::Node * alloc
       arraySizeSymRef = comp->getSymRefTab()->findOrCreateDiscontiguousArraySizeSymbolRef();
       }
 #if defined(TR_HOST_S390) && defined(TR_TARGET_S390)
-   //TODO remove define s390 flags when x and power enable suport for inlining 0 size arrays
+   //TODO remove define s390 flags when x and power enable support for inlining 0 size arrays
    // clean up canGenerateArraylets() && TR::Compiler->om.useHybridArraylets() && TR::Compiler->om.isDiscontiguousArray(instanceSize) queries?
    else if (!comp->getOptions()->realTimeGC() && instanceSize == 0)
       {
@@ -4657,13 +4666,13 @@ J9JITConfig * getJ9JitConfigFromFE(void * fe)
    }
 
 void *
-TR_J9VMBase::setJ2IThunk(TR_Method *method, void *thunkptr, TR::Compilation *comp)
+TR_J9VMBase::setJ2IThunk(TR::Method *method, void *thunkptr, TR::Compilation *comp)
    {
    return setJ2IThunk(method->signatureChars(), method->signatureLength(), thunkptr, comp);
    }
 
 void *
-TR_J9VMBase::getJ2IThunk(TR_Method *method, TR::Compilation *comp)
+TR_J9VMBase::getJ2IThunk(TR::Method *method, TR::Compilation *comp)
    {
    return getJ2IThunk(method->signatureChars(), method->signatureLength(), comp);
    }
@@ -4777,7 +4786,7 @@ TR_J9VMBase::needsInvokeExactJ2IThunk(TR::Node *callNode, TR::Compilation *comp)
    TR_ASSERT(callNode->getOpCode().isCall(), "needsInvokeExactJ2IThunk expects call node; found %s", callNode->getOpCode().getName());
 
    TR::MethodSymbol *methodSymbol = callNode->getSymbol()->castToMethodSymbol();
-   TR_Method       *method       = methodSymbol->getMethod();
+   TR::Method       *method       = methodSymbol->getMethod();
    if (  methodSymbol->isComputed()
       && (  method->getMandatoryRecognizedMethod() == TR::java_lang_invoke_MethodHandle_invokeExact
          || method->isArchetypeSpecimen()))
@@ -5436,13 +5445,6 @@ TR_J9VMBase::reportPrexInvalidation(void * startPC)
       return;
    // Generate a trace point
    Trc_JIT_MethodPrexInvalidated(vmThread(), startPC);
-   }
-
-
-void
-TR_J9VMBase::traceAssumeFailure(int32_t line, const char * file)
-   {
-   //Trc_JIT_assumeFailure(vmThread(), line, file);
    }
 
 
@@ -7410,7 +7412,7 @@ TR_J9VM::inlineNativeCall(TR::Compilation * comp, TR::TreeTop * callNodeTreeTop,
          TR::MethodSymbol *sym = callNode->getSymbol()->castToMethodSymbol();
          sym->setVMInternalNative(false);
          sym->setInterpreted(false);
-         TR_Method *method = sym->getMethod();
+         TR::Method *method = sym->getMethod();
 
          TR::SymbolReference *helperSymRef = comp->getSymRefTab()->findOrCreateRuntimeHelper(TR_j2iTransition, true, true, false);
          sym->setMethodAddress(helperSymRef->getMethodAddress());
@@ -7990,7 +7992,7 @@ TR_J9VM::inlineNativeCall(TR::Compilation * comp, TR::TreeTop * callNodeTreeTop,
                // first get the helpers object
                // acall getHelpers
                //
-               TR_Method *method = getHelpersSymRef->getSymbol()->castToMethodSymbol()->getMethod();
+               TR::Method *method = getHelpersSymRef->getSymbol()->castToMethodSymbol()->getMethod();
                TR::Node *helpersCallNode = TR::Node::createWithSymRef(callNode, method->directCallOpCode(), 0, getHelpersSymRef);
                TR::TreeTop *helpersCallTT = TR::TreeTop::create(comp, TR::Node::create(TR::treetop, 1, helpersCallNode));
                callNodeTreeTop->insertBefore(helpersCallTT);
@@ -8261,7 +8263,7 @@ TR_J9VMBase::setInlineThresholds (TR::Compilation *comp, int32_t &callerWeightLi
      }
 
 
-   int32_t _adjustMaxCutOff = 200; //decrease the thershold to make it similar to r11 while we are big app
+   int32_t _adjustMaxCutOff = 200; //decrease the threshold to make it similar to r11 while we are big app
 
    static const char * adjustMaxCutOff = feGetEnv("TR_WarmInlineAdjustMaxCutOff");
 

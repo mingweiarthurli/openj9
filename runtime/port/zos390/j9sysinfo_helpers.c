@@ -27,6 +27,7 @@
  */
 
 #include <errno.h>
+#include <string.h>
 #include <sys/__wlm.h>
 
 #include "atoe.h"
@@ -37,11 +38,8 @@
 #include "ut_j9prt.h"
 
 /* Forward declarations. */
-static int32_t
-computeCpuTime(struct J9PortLibrary *portLibrary, int64_t *cpuTime);
-
-static int32_t
-getProcessorSpeed(struct J9PortLibrary *portLibrary, int64_t *cpuSpeed);
+static int32_t computeCpuTime(struct J9PortLibrary *portLibrary, int64_t *cpuTime);
+static int32_t getProcessorSpeed(struct J9PortLibrary *portLibrary, int64_t *cpuSpeed);
 
 intptr_t
 retrieveZGuestMemoryStats(struct J9PortLibrary *portLibrary, struct J9GuestMemoryUsage *gmUsage)
@@ -154,7 +152,7 @@ computeCpuTime(struct J9PortLibrary *portLibrary, int64_t *cpuTime)
 		return J9PORT_ERROR_HYPERVISOR_LPDAT_QUERY_FAILED;
 	}
 
-	/* Sum up serivce units in capped and uncapped modes for all entries that are
+	/* Sum up service units in capped and uncapped modes for all entries that are
 	 * present - by default, there being 48 entries, unless configured otherwise.
 	 */
 	for (i = 0; i < lpdatp->serviceTableEntries; i++) {

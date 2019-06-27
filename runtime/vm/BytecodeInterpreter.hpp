@@ -31,7 +31,6 @@
 #include "j9jclnls.h"
 #include "j9bcvnls.h"
 #include "bcnames.h"
-#include "lockNurseryUtil.h"
 #include "rommeth.h"
 #include "stackwalk.h"
 #include "ut_j9vm.h"
@@ -180,7 +179,7 @@ private:
 	 * Shareable thunk compilation is based on the ThunkTuple counting.
 	 * Shareable thunks then modify the MH.invocationCount on each invocation.  We
 	 * only want invocations from jitted code to drive CustomThunk compilation so the
-	 * interpreter needs to pre-emptively negate the modification to the invocationCount.
+	 * interpreter needs to preemptively negate the modification to the invocationCount.
 	 *
 	 * @param methodHandle[in] The MethodHandle to modify the count on
 	 */
@@ -2413,6 +2412,8 @@ ffi_exit:
 		_currentThread->currentException = NULL;
 		/* Only report the event if the tag is set - this prevents reporting multiple throws of the same exception when returning from internal call-in */
 		if (_currentThread->privateFlags & J9_PRIVATE_FLAGS_REPORT_EXCEPTION_THROW) {
+			/* Clear the flag once the entered the reporting branch */
+			_currentThread->privateFlags &= ~(UDATA)J9_PRIVATE_FLAGS_REPORT_EXCEPTION_THROW;
 			if (J9_EVENT_IS_HOOKED(_vm->hookInterface, J9HOOK_VM_EXCEPTION_THROW)) {
 				ALWAYS_TRIGGER_J9HOOK_VM_EXCEPTION_THROW(_vm->hookInterface, _currentThread, exception);
 				if (immediateAsyncPending()) {
@@ -3744,7 +3745,7 @@ done:
 		} else {
 			J9Class *arrayClazz = J9VM_J9CLASS_FROM_HEAPCLASS(_currentThread, classObject);
 			if (J9CLASS_IS_ARRAY(arrayClazz)) {
-				returnSingleFromINL(REGISTER_ARGS, VM_UnsafeAPI::arrayBaseOffset((J9ArrayClass*)arrayClazz), 2);
+				returnSingleFromINL(REGISTER_ARGS, VM_UnsafeAPI::arrayBaseOffset(_currentThread, (J9ArrayClass*)arrayClazz), 2);
 			} else {
 				buildInternalNativeStackFrame(REGISTER_ARGS);
 				updateVMStruct(REGISTER_ARGS);
@@ -4155,7 +4156,7 @@ internalError:
 		} else {
 			updateVMStruct(REGISTER_ARGS);
 			J9ClassLoader* result = internalAllocateClassLoader(_vm, classLoaderObject);
-			VMStructHasBeenUpdated(REGISTER_ARGS); // likely unncessary - no code runs in internalAllocateClassLoader
+			VMStructHasBeenUpdated(REGISTER_ARGS); // likely unnecessary - no code runs in internalAllocateClassLoader
 			if (NULL == result) {
 				rc = GOTO_THROW_CURRENT_EXCEPTION;
 				goto done;
@@ -6428,7 +6429,7 @@ retry:
 						_sp += (slotsToPop - 1);
 #if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
 						if (flags & J9FieldFlagFlattened) {
-							J9FlattenedClassCache *cache = J9OBJECT_CLAZZ(_currentThread, objectref)->flattenedClassCache + valueOffset;
+							J9FlattenedClassCacheEntry *cache = J9_VM_FCC_ENTRY_FROM_CLASS(J9OBJECT_CLAZZ(_currentThread, objectref), valueOffset);
 							J9Class *flattenedFieldClass = cache->clazz;
 							j9object_t newObjectRef = _objectAllocate.inlineAllocateObject(_currentThread, flattenedFieldClass, false, false);
 
@@ -6573,7 +6574,7 @@ resolve:
 				}
 #if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
 				if (flags & J9FieldFlagFlattened) {
-					J9FlattenedClassCache *cache = J9OBJECT_CLAZZ(_currentThread, objectref)->flattenedClassCache + valueOffset;
+					J9FlattenedClassCacheEntry *cache = J9_VM_FCC_ENTRY_FROM_CLASS(J9OBJECT_CLAZZ(_currentThread, objectref), valueOffset);
 
 					_objectAccessBarrier.copyObjectFields(_currentThread,
 										cache->clazz,
@@ -7188,7 +7189,7 @@ done:
 	 *
 	 * @param[in] lhs the lhs object of acmp bytecodes
 	 * @param[in] rhs the rhs object of acmp bytecodes
-	 * return true if they are substituable and false otherwise
+	 * return true if they are substitutable and false otherwise
 	 */
 	VMINLINE bool
 	acmp(j9object_t lhs, j9object_t rhs)
@@ -8386,7 +8387,7 @@ retry:
 				_sp += 2;
 			} else if (J9_ARE_ALL_BITS_SET(flags, J9FieldFlagObject)) {
 				if (J9_ARE_ALL_BITS_SET(flags, J9FieldFlagFlattened)) {
-					J9FlattenedClassCache *cache = objectRefClass->flattenedClassCache + valueOffset;
+					J9FlattenedClassCacheEntry *cache = J9_VM_FCC_ENTRY_FROM_CLASS(objectRefClass, valueOffset);
 					_objectAccessBarrier.copyObjectFields(_currentThread,
 										cache->clazz,
 										*(j9object_t*)_sp,

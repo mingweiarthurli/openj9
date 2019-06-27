@@ -156,7 +156,6 @@ uint8_t *J9::ARM::AheadOfTimeCompile::initializeAOTRelocationHeader(TR::Iterated
          break;
       case TR_JNISpecialTargetAddress:
       case TR_VirtualRamMethodConst:
-      case TR_SpecialRamMethodConst:
          {
          TR::SymbolReference *tempSR = (TR::SymbolReference *)relocation->getTargetAddress();
          uintptr_t inlinedSiteIndex = (uintptr_t)relocation->getTargetAddress2();
@@ -242,7 +241,6 @@ uint8_t *J9::ARM::AheadOfTimeCompile::initializeAOTRelocationHeader(TR::Iterated
          break;
          }
       case TR_ConstantPoolOrderedPair:
-      case TR_Trampolines:
          {
          *(uintptrj_t *)cursor = (uintptrj_t)relocation->getTargetAddress2(); // inlined site index
          cursor += SIZEPOINTER;
@@ -267,7 +265,6 @@ uint8_t *J9::ARM::AheadOfTimeCompile::initializeAOTRelocationHeader(TR::Iterated
          }
          break;
 
-      case TR_CheckMethodEnter:
       case TR_CheckMethodExit:
          {
          *(uintptrj_t*)cursor = (uintptrj_t)relocation->getTargetAddress();
@@ -294,8 +291,6 @@ uint8_t *J9::ARM::AheadOfTimeCompile::initializeAOTRelocationHeader(TR::Iterated
          break;
          }
 
-      case TR_RamMethod:
-         break;
       case TR_RamMethodSequence:
       case TR_RamMethodSequenceReg:
          {
@@ -382,26 +377,18 @@ uint8_t *J9::ARM::AheadOfTimeCompile::initializeAOTRelocationHeader(TR::Iterated
          }
          break;
 
-      case TR_InlinedStaticMethodWithNopGuard:
-      case TR_InlinedSpecialMethodWithNopGuard:
-      case TR_InlinedVirtualMethodWithNopGuard:
       case TR_InlinedVirtualMethod:
-      case TR_InlinedInterfaceMethodWithNopGuard:
       case TR_InlinedInterfaceMethod:
-      case TR_InlinedHCRMethod:
          {
          guard = (TR_VirtualGuard *) relocation->getTargetAddress2();
 
-         if (relocation->getTargetKind() == TR_InlinedHCRMethod)
-            {
-            // Setup flags field with type of method that needs to be validated at relocation time
-            if (guard->getSymbolReference()->getSymbol()->getMethodSymbol()->isStatic())
-               flags = inlinedMethodIsStatic;
-            if (guard->getSymbolReference()->getSymbol()->getMethodSymbol()->isSpecial())
-               flags = inlinedMethodIsSpecial;
-            if (guard->getSymbolReference()->getSymbol()->getMethodSymbol()->isVirtual())
-               flags = inlinedMethodIsVirtual;
-            }
+         // Setup flags field with type of method that needs to be validated at relocation time
+         if (guard->getSymbolReference()->getSymbol()->getMethodSymbol()->isStatic())
+            flags = inlinedMethodIsStatic;
+         if (guard->getSymbolReference()->getSymbol()->getMethodSymbol()->isSpecial())
+            flags = inlinedMethodIsSpecial;
+         if (guard->getSymbolReference()->getSymbol()->getMethodSymbol()->isVirtual())
+            flags = inlinedMethodIsVirtual;
 
          TR_ASSERT((flags & RELOCATION_CROSS_PLATFORM_FLAGS_MASK) == 0,  "reloFlags bits overlap cross-platform flags bits\n");
          *flagsCursor |= (flags & RELOCATION_RELOC_FLAGS_MASK);
@@ -485,55 +472,7 @@ uint8_t *J9::ARM::AheadOfTimeCompile::initializeAOTRelocationHeader(TR::Iterated
          }
          break;
 
-      case TR_VerifyClassObjectForAlloc:
-         {
-         TR::SymbolReference * classSymRef = (TR::SymbolReference *) relocation->getTargetAddress();
-         TR_RelocationRecordInformation *recordInfo = (TR_RelocationRecordInformation*) relocation->getTargetAddress2();
-         TR::LabelSymbol *label = (TR::LabelSymbol *) recordInfo->data3;
-         TR::Instruction *instr = (TR::Instruction *) recordInfo->data4;
-
-         *(uintptrj_t *) cursor = (uintptrj_t) recordInfo->data2; // inlined call site index
-         cursor += SIZEPOINTER;
-
-         *(uintptrj_t *) cursor = (uintptrj_t) classSymRef->getOwningMethod(comp)->constantPool();
-         cursor += SIZEPOINTER;
-
-         *(uintptrj_t *) cursor = (uintptrj_t) classSymRef->getCPIndex(); // cp Index
-         cursor += SIZEPOINTER;
-
-         uint32_t branchOffset = (uint32_t) (label->getCodeLocation() - instr->getBinaryEncoding());
-         *(uintptrj_t *) cursor = (uintptrj_t) branchOffset;
-         cursor += SIZEPOINTER;
-
-         *(uintptrj_t *) cursor = (uintptrj_t) recordInfo->data1; // allocation size.
-         cursor += SIZEPOINTER;
-         }
-         break;
-
-      case TR_VerifyRefArrayForAlloc:
-         {
-         TR::SymbolReference * classSymRef = (TR::SymbolReference *) relocation->getTargetAddress();
-         TR_RelocationRecordInformation *recordInfo = (TR_RelocationRecordInformation*) relocation->getTargetAddress2();
-         TR::LabelSymbol *label = (TR::LabelSymbol *) recordInfo->data3;
-         TR::Instruction *instr = (TR::Instruction *) recordInfo->data4;
-
-         *(uintptrj_t *) cursor = (uintptrj_t) recordInfo->data2; // inlined call site index
-         cursor += SIZEPOINTER;
-
-         *(uintptrj_t *) cursor = (uintptrj_t) classSymRef->getOwningMethod(comp)->constantPool();
-         cursor += SIZEPOINTER;
-
-         *(uintptrj_t *) cursor = (uintptrj_t) classSymRef->getCPIndex(); // cp Index
-         cursor += SIZEPOINTER;
-
-         uint32_t branchOffset = (uint32_t) (label->getCodeLocation() - instr->getBinaryEncoding());
-         *(uintptrj_t *) cursor = (uintptrj_t) branchOffset;
-         cursor += SIZEPOINTER;
-         }
-         break;
-
       case TR_ValidateClass:
-      case TR_ValidateInstanceField:
          {
          *(uintptrj_t*)cursor = (uintptrj_t)relocation->getTargetAddress(); // Inlined site index
          cursor += SIZEPOINTER;

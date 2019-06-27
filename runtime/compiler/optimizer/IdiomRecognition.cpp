@@ -1942,7 +1942,7 @@ TR_CISCTransformer::isInsideOfFastVersionedLoop(TR_RegionStructure *l)
 
 
 // createLoopCandidates populates the given list with natural loop candidates
-// whcih contains structure information and is not cold.  The return value of
+// which contains structure information and is not cold.  The return value of
 // this call dictates whether we found candidates or not.
 bool
 TR_CISCTransformer::createLoopCandidates(List<TR_RegionStructure> *loopCandidates)
@@ -3229,7 +3229,7 @@ int32_t TR_CISCTransformer::perform()
          if (loopNumber++ == disableLoopNumber)
             {
             restoreBitsKeepAliveCalls();
-            continue; // for debug perpose
+            continue; // for debug purpose
             }
 
          analyzeHighFrequencyLoop(graph, nextLoop); // Analyze if frequently iterated loop.
@@ -5784,7 +5784,7 @@ TR_CISCTransformer::analyzeSuccessorBlock(TR::Node *ignoreTree)
 
 
 //*****************************************************************************************
-// It sets one successsor "target" to the block.
+// It sets one successor "target" to the block.
 //*****************************************************************************************
 void
 TR_CISCTransformer::setSuccessorEdge(TR::Block *block, TR::Block *target)
@@ -5847,7 +5847,7 @@ TR_CISCTransformer::searchOtherBlockInSuccBlocks(TR::Block *target0)
 
 
 //*****************************************************************************************
-// It sets two successsors "target0" and "target1" to the block.
+// It sets two successors "target0" and "target1" to the block.
 //*****************************************************************************************
 TR::Block *
 TR_CISCTransformer::setSuccessorEdges(TR::Block *block, TR::Block *target0, TR::Block *target1)

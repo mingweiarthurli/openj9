@@ -249,7 +249,7 @@ class TR_JitSampleInfo
 
 // The following class is used for tracking methods that have their invocation
 // count decremented due to a sample in interpreted code. When that happens
-// we add teh method to a list. When a method needs to be compiled we check
+// we add the method to a list. When a method needs to be compiled we check
 // the list and if the method is in the list we delete it and schedule a
 // SamplingJprofiling compilation for the count that has been skipped
 class TR_InterpreterSamplingTracking
@@ -976,7 +976,7 @@ private:
    int32_t                _samplingThreadWaitTimeInDeepIdleToNotifyVM;
    int32_t                _numMethodsFoundInSharedCache;
    int32_t                _numInvRequestsInCompQueue; // number of invalidation requests present in the compilation queue
-   uint64_t               _lastReqStartTime; // time (ms) when procesing the last request started
+   uint64_t               _lastReqStartTime; // time (ms) when processing the last request started
    uint64_t               _lastCompilationsShouldBeInterruptedTime; // RAS
 // statistics
    int32_t                _statsOptLevels[numHotnessLevels]; // will be zeroed with memset

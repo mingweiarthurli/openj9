@@ -67,7 +67,7 @@ add_custom_command(
 )
 add_custom_target(j9jit_tracegen DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/env/ut_j9jit.h)
 
-#TODO We should get rid of this, but its still requred by the compiler_support module in omr
+#TODO We should get rid of this, but its still required by the compiler_support module in omr
 set(J9SRC  ${j9vm_SOURCE_DIR})
 
 
@@ -193,7 +193,7 @@ set(J9_CXXFLAGS
 	${OMR_PLATFORM_COMPILE_OPTIONS}
 	${OMR_PLATFORM_CXX_COMPILE_OPTIONS}
 )
-if(OMR_OS_LINUX)
+if(OMR_OS_LINUX OR OMR_OS_OSX)
 	set(J9_SHAREDFLAGS
 		${J9_SHAREDFLAGS}
 		-fno-strict-aliasing

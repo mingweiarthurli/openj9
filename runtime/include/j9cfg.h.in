@@ -43,6 +43,7 @@ extern "C" {
 #define EsExtraVersionString ""
 
 #define JAVA_SPEC_VERSION ${JAVA_SPEC_VERSION}
+#define JAVA_SPEC_VERSION_STRING "${JAVA_SPEC_VERSION}"
 
 /* Note: The following defines record flags used to build the VM. */
 /* Changing them here does not remove the feature and may cause linking problems. */
@@ -278,6 +279,8 @@ extern "C" {
 #cmakedefine J9VM_THR_LOCK_RESERVATION
 #cmakedefine J9VM_THR_PREEMPTIVE
 #cmakedefine J9VM_THR_SMART_DEFLATION
+
+#undef J9VM_OPT_VALHALLA_VALUE_TYPES
 
 #if JAVA_SPEC_VERSION >= 11
 #define J9VM_OPT_VALHALLA_NESTMATES

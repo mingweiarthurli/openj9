@@ -74,7 +74,10 @@ J9::CodeGenerator::CodeGenerator() :
    _gpuSymbolMap(self()->comp()->allocator()),
    _stackLimitOffsetInMetaData(self()->comp()->fej9()->thisThreadGetStackLimitOffset()),
    _uncommonedNodes(self()->comp()->trMemory(), stackAlloc),
-   _liveMonitors(NULL)
+   _liveMonitors(NULL),
+   _nodesSpineCheckedList(getTypedAllocator<TR::Node*>(TR::comp()->allocator())),
+   _jniCallSites(getTypedAllocator<TR_Pair<TR_ResolvedMethod,TR::Instruction> *>(TR::comp()->allocator())),
+   _dummyTempStorageRefNode(NULL)
    {
    }
 
@@ -2735,7 +2738,6 @@ J9::CodeGenerator::processRelocations()
             case TR_InlinedVirtualMethodWithNopGuard:
             case TR_InlinedInterfaceMethodWithNopGuard:
             case TR_InlinedAbstractMethodWithNopGuard:
-            case TR_InlinedHCRMethod:
             case TR_ProfiledClassGuardRelocation:
             case TR_ProfiledMethodGuardRelocation:
             case TR_ProfiledInlinedMethodRelocation:
@@ -2994,7 +2996,6 @@ J9::CodeGenerator::compressedReferenceRematerialization()
          node = tt->getNode();
          if (node->getOpCodeValue() == TR::BBStart && !node->getBlock()->isExtensionOfPreviousBlock())
             {
-            _compressedRefs.clear();
 
             ListIterator<TR::Node> nodesIt(&rematerializedNodes);
             for (TR::Node * rematNode = nodesIt.getFirst(); rematNode != NULL; rematNode = nodesIt.getNext())
@@ -3012,7 +3013,6 @@ J9::CodeGenerator::compressedReferenceRematerialization()
            {
            if (node->getFirstChild()->getVisitCount() == visitCount)
               alreadyVisitedFirstChild = true;
-           _compressedRefs.push_front(node->getFirstChild());
            }
 
          self()->rematerializeCompressedRefs(autoSymRef, tt, NULL, -1, node, visitCount, &rematerializedNodes);

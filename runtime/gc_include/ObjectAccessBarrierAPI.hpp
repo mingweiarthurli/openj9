@@ -302,9 +302,9 @@ public:
 	 * does not have an inline lockword.
 	 */
 	VMINLINE j9objectmonitor_t *
-	getLockwordAddress(J9Object *object)
+	getLockwordAddress(J9VMThread *currentThread, J9Object *object)
 	{
-		J9Class *clazz = TMP_J9OBJECT_CLAZZ(object);
+		J9Class *clazz = J9OBJECT_CLAZZ(currentThread, object);
 		if (J9_IS_J9CLASS_VALUETYPE(clazz)) {
 			return NULL;
 		}
@@ -335,7 +335,7 @@ public:
 #if defined(J9VM_THR_LOCK_NURSERY)
 		if (copyLockword) {
 			/* zero lockword, if present */
-			j9objectmonitor_t *lockwordAddress = getLockwordAddress(copy);
+			j9objectmonitor_t *lockwordAddress = getLockwordAddress(currentThread, copy);
 			if (NULL != lockwordAddress) {
 				*lockwordAddress = 0;
 			}
@@ -380,12 +380,9 @@ public:
 #if defined(J9VM_GC_ALWAYS_CALL_OBJECT_ACCESS_BARRIER)
 		vmThread->javaVM->memoryManagerFunctions->j9gc_objaccess_copyObjectFields(vmThread, objectClass, srcObject, srcOffset, destObject, destOffset);
 #else /* defined(J9VM_GC_ALWAYS_CALL_OBJECT_ACCESS_BARRIER) */
+
 		if (j9gc_modron_readbar_none != _readBarrierType) {	
-			if (j9gc_modron_readbar_range_check == _readBarrierType) {
-				vmThread->javaVM->memoryManagerFunctions->j9gc_objaccess_copyObjectFields(vmThread, objectClass, srcObject, srcOffset, destObject, destOffset);
-			} else if (j9gc_modron_readbar_always == _readBarrierType) {
-				vmThread->javaVM->memoryManagerFunctions->j9gc_objaccess_copyObjectFields(vmThread, objectClass, srcObject, srcOffset, destObject, destOffset);
-			}
+			vmThread->javaVM->memoryManagerFunctions->j9gc_objaccess_copyObjectFields(vmThread, objectClass, srcObject, srcOffset, destObject, destOffset);
 		} else {
 			UDATA offset = 0;
 			UDATA limit = mixedObjectGetDataSize(objectClass);
@@ -401,7 +398,7 @@ public:
 		
 #if defined(J9VM_THR_LOCK_NURSERY)
 			/* zero lockword, if present */
-			j9objectmonitor_t *lockwordAddress = getLockwordAddress(destObject);
+			j9objectmonitor_t *lockwordAddress = getLockwordAddress(vmThread, destObject);
 			if (NULL != lockwordAddress) {
 				*lockwordAddress = 0;
 			}

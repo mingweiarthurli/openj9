@@ -183,7 +183,7 @@ public :
 		return (DataType*)&_Buffer;
 	}
 
-	/* Method for locating the first occurence of a zero terminated substring in a string */
+	/* Method for locating the first occurrence of a zero terminated substring in a string */
 	inline LengthType find(const DataType* targetString, LengthType position = 0) const
 	{
 		/* Determine the length of the target string */
@@ -415,7 +415,7 @@ protected :
 	Buffer*        _Buffer;
 	
 private :
-	/* Prevent use of the unimplemmented copy constructor and assignment operator */
+	/* Prevent use of the unimplemented copy constructor and assignment operator */
 	inline Strings& operator=(const Strings& source);
 	inline Strings(const Strings& source);
 };
@@ -1720,7 +1720,7 @@ BinaryHeapDumpWriter::writeArrayObjectRecord(J9MM_IterateObjectDescriptor* objec
 			// Write a long primitive array record with the hash code.
 			/* Calculate the start tag / flags */
 			int flags =((dataType << 5) & 0xE0 );
-			// We can only specifiy byte or word size.
+			// We can only specify byte or word size.
 			if( overallEncoding != 0 ) {
 				flags = flags | 0x10;
 			}
@@ -2302,7 +2302,7 @@ int BinaryHeapDumpWriter::getObjectHashCode(j9object_t object) {
 #if defined(J9VM_OPT_NEW_OBJECT_HASH)
 	/* Sniff hash code without growing of objects
 	 */
-	UDATA objectFlags = TMP_J9OBJECT_FLAGS(object);
+	UDATA objectFlags = J9OBJECT_FLAGS_FROM_CLAZZ_VM(_VirtualMachine, object);
 	UDATA hashed = objectFlags & (OBJECT_HEADER_HAS_BEEN_HASHED_IN_CLASS | OBJECT_HEADER_HAS_BEEN_MOVED_IN_CLASS);
 
 	int hashCode = 0;

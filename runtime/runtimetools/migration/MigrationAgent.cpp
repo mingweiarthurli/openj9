@@ -28,7 +28,7 @@ static MigrationAgent* migrationAgent;
 
 /*
  * default timein milliseconds that we wait after a check signal before deciding we are not likely to migrate after all
- * The number is currently quite high because the obervered times are quite high
+ * The number is currently quite high because the observed times are quite high
  */
 #define DEFAULT_MIGRATE_WAIT_INTERVAL 200000
 
@@ -87,7 +87,7 @@ Agent_OnUnload(JavaVM * vm)
  * callback invoked by JVMTI when the agent is loaded
  * @param vm       [in] jvm that can be used by the agent
  * @param options  [in] options specified on command line for agent
- * @param reserver [in/out] reserved for future use
+ * @param reserved [in/out] reserved for future use
  */
 jint JNICALL
 Agent_OnLoad(JavaVM * vm, char * options, void * reserved)
@@ -111,7 +111,7 @@ Agent_OnLoad(JavaVM * vm, char * options, void * reserved)
  * callback invoked when an attach is made on the jvm
  * @param vm       [in] jvm that can be used by the agent
  * @param options  [in] options specified on command line for agent
- * @param reserver [in/out] reserverd for future use
+ * @param reserved [in/out] reserved for future use
  */
 jint JNICALL
 Agent_OnAttach(JavaVM * vm, char * options, void * reserved)

@@ -694,7 +694,7 @@ LABEL(Ljitted)
 
 ifdef([MCC_SUPPORTED],[dnl
 ZZ Call MCC service for code patching of the resolved method.
-ZZ Paramters:
+ZZ Parameters:
 ZZ       j9method, callSite, newPC, extraArg
 ZZ  We have to load the arguments onto the stack to pass to
 ZZ  jitCallCFunction:
@@ -1439,7 +1439,7 @@ ZZ  # derive base pointer into table
     BRAS    breg,LDataResolve_common_code_instructions
 
 ZZ  First constant is a BRC 3 (jump by 6 bytes)
-ZZ  This is used to patch the orginal branch to
+ZZ  This is used to patch the original branch to
 ZZ  Snippet instruction, if the original branch
 ZZ  was not a BRCL (BRCL has its displacement patched
 ZZ  manually).  See comment for Unresolved*Data*Glue
@@ -1573,7 +1573,7 @@ ZZ  If resolved offset is greater than 4k
     JH     LDataOOL
 
     L_GPR   r3,eq_codeRef_inDataSnippet(,r14) #DataRef instr location
-ZZ  needsToBeSignExtenedTo8Bytes
+ZZ  needsToBeSignExtendedTo8Bytes
 ifdef([TR_HOST_64BIT],[dnl
     CLI     0(r3),HEX(59)  #check if this is OC_C
     JNZ     LclearD2
@@ -2048,9 +2048,9 @@ ZZ                        # jit-to-jit offset, so we need to
 
     LR_GPR  r14,r0
 ifdef([TR_HOST_64BIT],[dnl
-    STPQ    r2,eq_implementorClass_inInterfaceSnippet(,r14)
+    STPQ    r2,eq_implementerClass_inInterfaceSnippet(,r14)
 ],[dnl
-    STM     r2,r3,eq_implementorClass_inInterfaceSnippet(r14)
+    STM     r2,r3,eq_implementerClass_inInterfaceSnippet(r14)
 ])dnl
 
 ZZ check if this picSite has already been registered,
@@ -2098,7 +2098,7 @@ ifdef([J9ZOS390],[dnl
 
     ST_GPR  J9SP,J9TR_VMThread_sp(r13)
 
-    LA      CARG2,eq_implementorClass_inInterfaceSnippet(r14)
+    LA      CARG2,eq_implementerClass_inInterfaceSnippet(r14)
 
 ZZ make the call
 
@@ -2262,7 +2262,7 @@ ZZ # Load the address of the lookup class
     LR_GPR  r14,r0
     JNZ     ifCHMLcommonJitDispatch
 
-ZZ  #Load reciving object classPtr in R2
+ZZ  #Load receiving object classPtr in R2
 ifdef([OMR_GC_COMPRESSED_POINTERS],[dnl
     L       r2,J9TR_J9Object_class(,r1)
 ZZ # Read class offset
@@ -2532,7 +2532,7 @@ ZZ  restore all regs
     CHI_GPR CRINT,1
     JNE     ifCHMLcontinueLookup
 
-LABEL(ifCHMLInovkeIFCPrivate)
+LABEL(ifCHMLInvokeIFCPrivate)
 ZZ  remove low tag and call
     L_GPR   r0,eq_intfMethodIndex_inInterfaceSnippet(r14)
     LR_GPR  r3,r14         # free r14 for RA

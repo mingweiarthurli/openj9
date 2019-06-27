@@ -22,7 +22,9 @@
 
 #include "optimizer/J9ValuePropagation.hpp"
 #include "optimizer/VPBCDConstraint.hpp"
+#include "codegen/CodeGenerator.hpp"
 #include "compile/Compilation.hpp"
+#include "compile/Method.hpp"
 #include "il/symbol/ParameterSymbol.hpp"
 #include "il/Node.hpp"
 #include "il/Node_inlines.hpp"
@@ -181,7 +183,7 @@ void
 J9::ValuePropagation::transformCallToIconstInPlaceOrInDelayedTransformations(TR::TreeTop* callTree, int32_t result, bool isGlobal, bool inPlace)
    {
     TR::Node * callNode = callTree->getNode()->getFirstChild();
-    TR_Method * calledMethod = callNode->getSymbol()->castToMethodSymbol()->getMethod();
+    TR::Method * calledMethod = callNode->getSymbol()->castToMethodSymbol()->getMethod();
     const char *signature = calledMethod->signature(comp()->trMemory(), stackAlloc);
     if (inPlace)
        {
@@ -927,7 +929,7 @@ J9::ValuePropagation::doDelayedTransformations()
       TR::TreeTop *callTree = it->_tree;
       int32_t result = it->_result;
       TR::Node * callNode = callTree->getNode()->getFirstChild();
-      TR_Method * calledMethod = callNode->getSymbol()->castToMethodSymbol()->getMethod();
+      TR::Method * calledMethod = callNode->getSymbol()->castToMethodSymbol()->getMethod();
       const char *signature = calledMethod->signature(comp()->trMemory(), stackAlloc);
 
       if (!performTransformation(comp(), "%sTransforming call %s on node %p on tree %p to iconst %d\n", OPT_DETAILS, signature, callNode, callTree, result))
@@ -1187,38 +1189,6 @@ J9::ValuePropagation::getParmValues()
    TR_ASSERT(parmIterator->atEnd() && parmIndex == numParms, "Bad signature for owning method");
    }
 
-static bool isTakenSideOfAVirtualGuard(TR::Compilation* comp, TR::Block* block)
-   {
-   // First block can never be taken side
-   if (block == comp->getMethodSymbol()->getFirstTreeTop()->getEnclosingBlock())
-      return false;
-
-   for (auto edge = block->getPredecessors().begin(); edge != block->getPredecessors().end(); ++edge)
-      {
-      TR::Block *pred = toBlock((*edge)->getFrom());
-      TR::Node* predLastRealNode = pred->getLastRealTreeTop()->getNode();
-
-      if (predLastRealNode
-          && predLastRealNode->isTheVirtualGuardForAGuardedInlinedCall()
-          && predLastRealNode->getBranchDestination()->getEnclosingBlock() == block)
-         return true;
-
-      }
-
-   return false;
-   }
-
-static bool skipFinalFieldFoldingInBlock(TR::Compilation* comp, TR::Block* block)
-   {
-   if (block->isCold()
-       || block->isOSRCatchBlock()
-       || block->isOSRCodeBlock()
-       || isTakenSideOfAVirtualGuard(comp, block))
-      return true;
-
-   return false;
-   }
-
 static bool isStaticFinalFieldWorthFolding(TR::Compilation* comp, TR_OpaqueClassBlock* declaringClass, char* fieldSignature, int32_t fieldSigLength)
    {
    if (comp->getMethodSymbol()->hasMethodHandleInvokes()
@@ -1231,24 +1201,15 @@ static bool isStaticFinalFieldWorthFolding(TR::Compilation* comp, TR_OpaqueClass
    return false;
    }
 
-
-// Do not add fear point in a frame that doesn't support OSR
-static bool cannotAttemptOSRDuring(TR::Compilation* comp, int32_t callerIndex)
-   {
-   TR::ResolvedMethodSymbol *method = callerIndex == -1 ?
-      comp->getJittedMethodSymbol() : comp->getInlinedResolvedMethodSymbol(callerIndex);
-
-   return method->cannotAttemptOSRDuring(callerIndex, comp, false);
-   }
-
 bool J9::ValuePropagation::transformDirectLoad(TR::Node* node)
    {
-   // Allow OMR to fold reliable static final field first
+   // Allow OMR to fold reliable static final field
    if (OMR::ValuePropagation::transformDirectLoad(node))
       return true;
 
+   // Limited to varhandle folding only in VP
    if (node->isLoadOfStaticFinalField() &&
-       tryFoldStaticFinalFieldAt(_curTree, node))
+          TR::TransformUtil::attemptVarHandleStaticFinalFieldFolding(this, _curTree, node))
       {
       return true;
       }
@@ -1256,165 +1217,318 @@ bool J9::ValuePropagation::transformDirectLoad(TR::Node* node)
    return false;
    }
 
-
-static TR_HCRGuardAnalysis* runHCRGuardAnalysisIfPossible()
+static void getHelperSymRefs(OMR::ValuePropagation *vp, TR::Node *curCallNode, TR::SymbolReference *&getHelpersSymRef, TR::SymbolReference *&helperSymRef, char *helperSig, int32_t helperSigLen, TR::MethodSymbol::Kinds helperCallKind)
    {
-   return NULL;
+   //Function to retrieve the JITHelpers.getHelpers and JITHelpers.<helperSig> method symbol references.
+   //
+   TR_OpaqueClassBlock *jitHelpersClass = vp->comp()->getJITHelpersClassPointer();
+
+   //If we can't find the helper class, or it isn't initalized, return.
+   //
+   if (!jitHelpersClass || !TR::Compiler->cls.isClassInitialized(vp->comp(), jitHelpersClass))
+      return;
+
+   TR_ScratchList<TR_ResolvedMethod> helperMethods(vp->trMemory());
+   vp->comp()->fej9()->getResolvedMethods(vp->trMemory(), jitHelpersClass, &helperMethods);
+   ListIterator<TR_ResolvedMethod> it(&helperMethods);
+
+   //Find the symRefs
+   //
+   for (TR_ResolvedMethod *m = it.getCurrent(); m; m = it.getNext())
+      {
+      char *sig = m->nameChars();
+      //printf("Here is the sig %s and the passed in %s \n", sig,helperSig);
+      if (!strncmp(sig, helperSig, helperSigLen))
+         {
+         if (TR::MethodSymbol::Virtual == helperCallKind)
+            {
+            //REVISIT FOR IMPL HASH CODE***
+            //
+            helperSymRef = vp->comp()->getSymRefTab()->findOrCreateMethodSymbol(JITTED_METHOD_INDEX, -1, m, TR::MethodSymbol::Virtual);
+            helperSymRef->setOffset(TR::Compiler->cls.vTableSlot(vp->comp(), m->getPersistentIdentifier(), jitHelpersClass));
+            }
+         else
+            {
+            helperSymRef = vp->comp()->getSymRefTab()->findOrCreateMethodSymbol(curCallNode->getSymbolReference()->getOwningMethodIndex(), -1, m, helperCallKind);
+            }
+         //printf("found gethelpers, 0x%x \n", helperSymRef);
+         }
+      else if (!strncmp(sig, "jitHelpers", 10))
+         {
+         //printf("found helpers");
+         getHelpersSymRef = vp->comp()->getSymRefTab()->findOrCreateMethodSymbol(JITTED_METHOD_INDEX, -1, m, TR::MethodSymbol::Static);
+         }
+      }
    }
 
-TR_YesNoMaybe J9::ValuePropagation::safeToAddFearPointAt(TR::TreeTop* tt)
+
+static void transformToOptimizedCloneCall(OMR::ValuePropagation *vp, TR::Node *node, bool isDirectCall)
    {
-   if (trace())
-      {
-      traceMsg(comp(), "Checking if it is safe to add fear point at n%dn\n", tt->getNode()->getGlobalIndex());
-      }
+   TR::SymbolReference *getHelpersSymRef = NULL;
+   TR::SymbolReference *optimizedCloneSymRef = NULL;
 
-   int32_t callerIndex = tt->getNode()->getByteCodeInfo().getCallerIndex();
-   if (!cannotAttemptOSRDuring(comp(), callerIndex) && !comp()->isOSRProhibitedOverRangeOfTrees())
-      {
-      if (trace())
-         {
-         traceMsg(comp(), "Safe to add fear point because there is no OSR prohibition\n");
-         }
-      return TR_yes;
-      }
+   getHelperSymRefs(vp, node, getHelpersSymRef, optimizedCloneSymRef, "optimizedClone", 14, TR::MethodSymbol::Special);
 
-   // Look for an OSR point dominating tt in block
-   TR::Block* block = tt->getEnclosingBlock();
-   TR::TreeTop* firstTT = block->getEntry();
-   while (tt != firstTT)
-      {
-      if (comp()->isPotentialOSRPoint(tt->getNode()))
-         {
-         TR_YesNoMaybe result = comp()->isPotentialOSRPointWithSupport(tt) ? TR_yes : TR_no;
-         if (trace())
-            {
-            traceMsg(comp(), "Found %s potential OSR point n%dn, %s to add fear point\n",
-                     result == TR_yes ? "supported" : "unsupported",
-                     tt->getNode()->getGlobalIndex(),
-                     result == TR_yes ? "Safe" : "Not safe");
-            }
+   //printf("helper sym 0x%x, optsym 0x%x \n", getHelpersSymRef, optimizedCloneSymRef);
 
-         return result;
-         }
-      tt = tt->getPrevTreeTop();
-      }
+   if (optimizedCloneSymRef && getHelpersSymRef && performTransformation(vp->comp(), "%sChanging call to new optimizedClone at node [%p]\n", OPT_DETAILS, node))
+        {
+        //FIXME: add me to the list of calls to be inlined
+        //
+        TR::Method *method = optimizedCloneSymRef->getSymbol()->castToMethodSymbol()->getMethod();
+        TR::Node *helpersCallNode = TR::Node::createWithSymRef(node, method->directCallOpCode(), 0, getHelpersSymRef);
+        TR::TreeTop *helpersCallTT = TR::TreeTop::create(vp->comp(), TR::Node::create(TR::treetop, 1, helpersCallNode));
+        vp->_curTree->insertBefore(helpersCallTT);
 
-   TR_HCRGuardAnalysis* guardAnalysis = runHCRGuardAnalysisIfPossible();
-   if (guardAnalysis)
-      {
-      TR_YesNoMaybe result = guardAnalysis->_blockAnalysisInfo[block->getNumber()]->isEmpty() ? TR_yes : TR_no;
-      if (trace())
-         {
-         traceMsg(comp(), "%s to add fear point based on HCRGuardAnalysis\n", result == TR_yes ? "Safe" : "Not safe");
-         }
-
-      return result;
-      }
-
-   if (trace())
-      {
-      traceMsg(comp(), "Cannot determine if it is safe\n");
-      }
-   return TR_maybe;
+        method = optimizedCloneSymRef->getSymbol()->castToMethodSymbol()->getMethod();
+        TR::Node::recreate(node, method->directCallOpCode());
+        TR::Node *firstChild = node->getFirstChild();
+        firstChild->decReferenceCount();
+        node->setNumChildren(2);
+        node->setAndIncChild(0, helpersCallNode);
+        node->setAndIncChild(1, firstChild);
+        node->setSymbolReference(optimizedCloneSymRef);
+        vp->invalidateUseDefInfo();
+        vp->invalidateValueNumberInfo();
+        }
+//printf("TRANSFORMED \n");
    }
 
-/** \brief
- *     Try to fold static final field
- *
- *  \param tree
- *     The tree with the load of static final field.
- *
- *  \param fieldNode
- *     The node which is a load of a static final field.
- */
-bool J9::ValuePropagation::tryFoldStaticFinalFieldAt(TR::TreeTop* tree, TR::Node* fieldNode)
+
+static TR::Node *setCloneClassInNode(OMR::ValuePropagation *vp, TR::Node *node, TR::VPConstraint *constraint, bool isGlobal)
    {
-   TR_ASSERT(fieldNode->isLoadOfStaticFinalField(), "Node n%dn %p has to be a load of a static final field", fieldNode->getGlobalIndex(), fieldNode);
 
-   if (comp()->getOption(TR_DisableGuardedStaticFinalFieldFolding))
+   // If the child is a resolved class type, hide the class pointer in the
+   // second child
+   //
+
+   if(!node->isProcessedByCallCloneConstrain())
       {
-      return false;
+      node->setSecond(NULL);
+      node->setProcessedByCallCloneConstrain();
       }
 
-   if (!comp()->supportsInduceOSR()
-       || !comp()->isOSRTransitionTarget(TR::postExecutionOSR)
-       || comp()->getOSRMode() != TR::voluntaryOSR)
+   if (constraint && constraint->getClass())
       {
-      return false;
-      }
+      TR_OpaqueClassBlock *clazz = constraint->getClass();
+      if (constraint->isClassObject() == TR_yes)
+         clazz = vp->fe()->getClassClassPointer(clazz);
 
-   if (skipFinalFieldFoldingInBlock(comp(), tree->getEnclosingBlock())
-       || safeToAddFearPointAt(tree) != TR_yes
-       || TR::TransformUtil::canFoldStaticFinalField(comp(), fieldNode) != TR_maybe)
-      {
-      return false;
-      }
+      if (clazz && (TR::Compiler->cls.classDepthOf(clazz) == 0) &&
+          !constraint->isFixedClass())
+         clazz = NULL;
 
-   TR::SymbolReference* symRef = fieldNode->getSymbolReference();
-   if (symRef->hasKnownObjectIndex())
-      {
-      return false;
-      }
-
-   int32_t cpIndex = symRef->getCPIndex();
-   TR_OpaqueClassBlock* declaringClass = symRef->getOwningMethod(comp())->getClassFromFieldOrStatic(comp(), cpIndex);
-   int32_t fieldNameLen;
-   char* fieldName = symRef->getOwningMethod(comp())->fieldName(cpIndex, fieldNameLen, comp()->trMemory(), stackAlloc);
-   int32_t fieldSigLength;
-   char* fieldSignature = symRef->getOwningMethod(comp())->staticSignatureChars(cpIndex, fieldSigLength);
-
-   if (trace())
-      {
-      traceMsg(comp(),
-              "Looking at static final field n%dn %.*s declared in class %p\n",
-              fieldNode->getGlobalIndex(), fieldNameLen, fieldName, declaringClass);
-      }
-
-   if (isStaticFinalFieldWorthFolding(comp(), declaringClass, fieldSignature, fieldSigLength))
-      {
-      if (TR::TransformUtil::foldStaticFinalFieldAssumingProtection(comp(), fieldNode))
+      if (node->getCloneClassInNode() &&
+          clazz &&
+          (node->getCloneClassInNode() != clazz))
          {
-         // Add class to assumption table
-         comp()->addClassForStaticFinalFieldModification(declaringClass);
-         // Insert osrFearPointHelper call
-         TR::TreeTop* helperTree = TR::TreeTop::create(comp(),
-                                                       TR::Node::create(fieldNode,
-                                                                        TR::treetop,
-                                                                        1,
-                                                                        TR::Node::createOSRFearPointHelperCall(fieldNode)));
-         tree->insertBefore(helperTree);
+         TR_YesNoMaybe answer = vp->fe()->isInstanceOf(clazz, node->getCloneClassInNode(), true, true);
+         if (answer != TR_yes)
+            clazz = node->getCloneClassInNode();
+         }
+      if (performTransformation(vp->comp(), "%sSetting type on Object.Clone acall node [%p] to [%p]\n", OPT_DETAILS, node, clazz))
+         node->setSecond((TR::Node*)clazz);
+      }
+   return node;
+   }
 
-         if (trace())
+
+TR::Node *
+J9::ValuePropagation::innerConstrainAcall(TR::Node *node)
+   {
+   // This node can be constrained by the return type of the method.
+   //
+   TR::VPConstraint *constraint = NULL;
+   TR::SymbolReference * symRef = node->getSymbolReference();
+   TR::ResolvedMethodSymbol *method = symRef->getSymbol()->getResolvedMethodSymbol();
+
+   // For the special case of a direct call to Object.clone() the return type
+   // will be the same as the type of the "this" argument, which may be more
+   // precise than the declared return type of "Object".
+   //
+   if (method)
+      {
+      if (!node->getOpCode().isIndirect())
+         {
+         static char *enableDynamicObjectClone = feGetEnv("TR_enableDynamicObjectClone");
+         // Dynamic cloning kicks in when we attempt to make direct call to Object.clone
+         // or J9VMInternals.primitiveClone where the cloned object is an array.
+         if (method->getRecognizedMethod() == TR::java_lang_Object_clone
+             || method->getRecognizedMethod() == TR::java_lang_J9VMInternals_primitiveClone)
             {
-            traceMsg(comp(),
-                    "Static final field n%dn is folded with OSRFearPointHelper call tree n%dn  helper tree n%dn\n",
-                    fieldNode->getGlobalIndex(), tree->getNode()->getGlobalIndex(), helperTree->getNode()->getGlobalIndex());
+            bool isGlobal;
+            if (method->getRecognizedMethod() == TR::java_lang_Object_clone)
+              constraint = getConstraint(node->getFirstChild(), isGlobal);
+            else
+              constraint = getConstraint(node->getLastChild(), isGlobal);
+
+            TR::VPResolvedClass *newTypeConstraint = NULL;
+            if (constraint)
+               {
+               // Do nothing if the class of the object doesn't implement Cloneable
+               if (constraint->getClass() && !comp()->fej9()->isCloneable(constraint->getClass()))
+                  {
+                  if (trace())
+                     traceMsg(comp(), "Object Clone: Class of node %p is not cloneable, quit\n", node);
+
+                  TR::DebugCounter::incStaticDebugCounter(comp(), TR::DebugCounter::debugCounterName(comp(), "inlineClone/unsuitable/(%s)/%s/block_%d", comp()->signature(), comp()->getHotnessName(comp()->getMethodHotness()), _curTree->getEnclosingBlock()->getNumber()));
+
+                  return node;
+                  }
+               if ( constraint->isFixedClass() )
+                  {
+                  newTypeConstraint = TR::VPFixedClass::create(this, constraint->getClass());
+
+                  if (!comp()->compileRelocatableCode())
+                     {
+                     if (constraint->getClassType()
+                         && constraint->getClassType()->isArray() == TR_no
+                         && !_objectCloneCalls.find(_curTree))
+                        {
+                        _objectCloneCalls.add(_curTree);
+                        _objectCloneTypes.add(new (trStackMemory()) OMR::ValuePropagation::ObjCloneInfo(constraint->getClass(), true));
+                        }
+                     else if (constraint->getClassType()
+                              && constraint->getClassType()->isArray() == TR_yes
+                              && !_arrayCloneCalls.find(_curTree))
+                        {
+                        _arrayCloneCalls.add(_curTree);
+                        _arrayCloneTypes.add(new (trStackMemory()) OMR::ValuePropagation::ArrayCloneInfo(constraint->getClass(), true));
+                        }
+                     }
+                  }
+               // Dynamic object clone is enabled only with FLAGS_IN_CLASS_SLOT and LOCK_NURSERY enabled
+               // as currenty codegen anewarray evaluator only supports this case for object header initialization.
+               // Even though all existing supported build config has these 2 falgs set, this ifdef serves as a safety precaution.
+#if defined(J9VM_INTERP_FLAGS_IN_CLASS_SLOT) && defined(J9VM_THR_LOCK_NURSERY)
+               else if ( constraint->getClassType()
+                         && constraint->getClassType()->asResolvedClass() )
+                  {
+                  newTypeConstraint = TR::VPResolvedClass::create(this, constraint->getClass());
+                  if (trace())
+                     traceMsg(comp(), "Object Clone: Resolved Class of node %p \n", node);
+                  if (enableDynamicObjectClone
+                      && constraint->getClassType()->isArray() == TR_no
+                      && !_objectCloneCalls.find(_curTree))
+                     {
+                     if (trace())
+                        traceMsg(comp(), "Object Clone: Resolved Class of node %p object clone\n", node);
+                     _objectCloneCalls.add(_curTree);
+                     _objectCloneTypes.add(new (trStackMemory()) OMR::ValuePropagation::ObjCloneInfo(constraint->getClass(), false));
+                     }
+                  // Currently enabled for X86 as the required codegen support is implemented on X86 only.
+                  // Remove the condition as other platforms receive support.
+                  else if (comp()->cg()->getSupportsDynamicANewArray()
+                      && constraint->getClassType()->isArray() == TR_yes
+                      && !_arrayCloneCalls.find(_curTree)
+                      && !comp()->generateArraylets())
+                     {
+                     if (trace())
+                        traceMsg(comp(), "Object Clone: Resolved Class of node %p array clone\n", node);
+                     _arrayCloneCalls.add(_curTree);
+                     _arrayCloneTypes.add(new (trStackMemory()) OMR::ValuePropagation::ArrayCloneInfo(constraint->getClass(), false));;
+                     }
+                  }
+#endif
+               }
+
+            if (!constraint || (!constraint->isFixedClass()
+                && (enableDynamicObjectClone && !(constraint->getClassType() && constraint->getClassType()->asResolvedClass() && constraint->getClassType()->isArray() == TR_no))))
+               TR::DebugCounter::incStaticDebugCounter(comp(), TR::DebugCounter::debugCounterName(comp(), "inlineClone/miss/(%s)/%s/block_%d", comp()->signature(), comp()->getHotnessName(comp()->getMethodHotness()), _curTree->getEnclosingBlock()->getNumber()));
+            else
+               TR::DebugCounter::incStaticDebugCounter(comp(), TR::DebugCounter::debugCounterName(comp(), "inlineClone/hit/(%s)/%s/block_%d", comp()->signature(), comp()->getHotnessName(comp()->getMethodHotness()), _curTree->getEnclosingBlock()->getNumber()));
+
+            TR::VPClassPresence *cloneResultNonNull = TR::VPNonNullObject::create(this);
+            TR::VPObjectLocation *cloneResultOnHeap = TR::VPObjectLocation::create(this, TR::VPObjectLocation::HeapObject);
+            TR::VPArrayInfo *cloneResultArrayInfo = NULL;
+            if (constraint)
+               cloneResultArrayInfo = constraint->getArrayInfo();
+            TR::VPConstraint *newConstraint = TR::VPClass::create(this, newTypeConstraint, cloneResultNonNull, NULL, cloneResultArrayInfo, cloneResultOnHeap);
+
+            // This constraint can be global because the result of the clone call
+            // needs to have its own value number.
+            addGlobalConstraint(node, newConstraint);
+
+            if (method->getRecognizedMethod() == TR::java_lang_Object_clone
+                && (constraint && !constraint->isFixedClass()))
+               node = setCloneClassInNode(this, node, newConstraint, isGlobal);
+
+            // OptimizedClone
+            if(comp()->getOption(TR_EnableJITHelpersoptimizedClone) && newTypeConstraint)
+               transformToOptimizedCloneCall(this, node, true);
+            return node;
             }
-
-         TR::DebugCounter::prependDebugCounter(comp(),
-                                               TR::DebugCounter::debugCounterName(comp(),
-                                                                                  "staticFinalFieldFolding/success/(field %.*s)/(%s %s)",
-                                                                                  fieldNameLen,
-                                                                                  fieldName,
-                                                                                  comp()->signature(),
-                                                                                  comp()->getHotnessName(comp()->getMethodHotness())),
-                                                                                  tree->getNextTreeTop());
-
-         return true;
+         else if (method->getRecognizedMethod() == TR::java_math_BigDecimal_valueOf)
+            {
+            TR_ResolvedMethod *owningMethod = symRef->getOwningMethod(comp());
+            TR_OpaqueClassBlock *classObject = fe()->getClassFromSignature("java/math/BigDecimal", 20, owningMethod);
+            if (classObject)
+               {
+               constraint = TR::VPFixedClass::create(this, classObject);
+               addGlobalConstraint(node, constraint);
+               addGlobalConstraint(node, TR::VPNonNullObject::create(this));
+               }
+            }
+         }
+      else
+         {
+         if ((method->getRecognizedMethod() == TR::java_math_BigDecimal_add) ||
+             (method->getRecognizedMethod() == TR::java_math_BigDecimal_subtract) ||
+             (method->getRecognizedMethod() == TR::java_math_BigDecimal_multiply))
+            {
+            bool isGlobal;
+            constraint = getConstraint(node->getSecondChild(), isGlobal);
+            TR_ResolvedMethod *owningMethod = symRef->getOwningMethod(comp());
+            TR_OpaqueClassBlock * bigDecimalClass = fe()->getClassFromSignature("java/math/BigDecimal", 20, owningMethod);
+            //traceMsg(comp(), "child %p big dec class %p\n", constraint, bigDecimalClass);
+            if (constraint && bigDecimalClass &&
+                constraint->isFixedClass() &&
+                (bigDecimalClass == constraint->getClass()))
+               {
+               TR::VPConstraint *newConstraint = TR::VPFixedClass::create(this, bigDecimalClass);
+               addBlockOrGlobalConstraint(node, newConstraint,isGlobal);
+               addGlobalConstraint(node, TR::VPNonNullObject::create(this));
+               return node;
+               }
+            }
          }
       }
-   else
+
+   int32_t len = 0;
+   const char * sig = symRef->getTypeSignature(len);
+
+   if (sig == NULL)  // helper
+       return node;
+
+   TR_ASSERT(sig[0] == 'L' || sig[0] == '[', "Ref call return type is not a class");
+
+   TR::MethodSymbol *symbol = node->getSymbol()->castToMethodSymbol();
+   TR_ResolvedMethod *owningMethod = symRef->getOwningMethod(comp());
+   TR_OpaqueClassBlock *classBlock = fe()->getClassFromSignature(sig, len, owningMethod);
+   if (  classBlock
+      && TR::Compiler->cls.isInterfaceClass(comp(), classBlock)
+      && !comp()->getOption(TR_TrustAllInterfaceTypeInfo))
       {
-      TR::DebugCounter::prependDebugCounter(comp(),
-                                            TR::DebugCounter::debugCounterName(comp(),
-                                                                               "staticFinalFieldFolding/notWorthFolding/(field %.*s)/(%s %s)",
-                                                                               fieldNameLen,
-                                                                               fieldName,
-                                                                               comp()->signature(),
-                                                                               comp()->getHotnessName(comp()->getMethodHotness())),
-                                                                               tree->getNextTreeTop());
+      // Can't trust interface type info coming from method return value
+      classBlock = NULL;
+      }
+   if (classBlock)
+      {
+      TR_OpaqueClassBlock *jlClass = fe()->getClassClassPointer(classBlock);
+      if (jlClass)
+         {
+         if (classBlock != jlClass)
+            constraint = TR::VPClassType::create(this, sig, len, owningMethod, false, classBlock);
+         else
+            constraint = TR::VPObjectLocation::create(this, TR::VPObjectLocation::JavaLangClassObject);
+         addGlobalConstraint(node, constraint);
+         }
+      }
+   else if (symRef->isUnresolved() && symbol && !symbol->isInterface())
+      {
+      TR::VPConstraint *constraint = TR::VPUnresolvedClass::create(this, sig, len, owningMethod);
+      addGlobalConstraint(node, constraint);
       }
 
-   return false;
+   return node;
    }
