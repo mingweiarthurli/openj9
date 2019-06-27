@@ -76,9 +76,11 @@ class TR_J9EstimateCodeSize : public TR_EstimateCodeSize
     */
    static bool adjustEstimateForStringCompression(TR_ResolvedMethod* method, int32_t& value, float factor);
 
+   TR::CFG* generateCFG(TR_CallTarget *calltarget, TR_CallStack *prevCallStack, TR::Region &region);
+
    protected:
       bool estimateCodeSize(TR_CallTarget *, TR_CallStack * , bool recurseDown = true);
-      bool realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallStack *prevCallStack, TR::Region &region, bool recurseDown);
+      bool realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallStack *prevCallStack, TR::Region &region, bool recurseDown, bool stopAfterCFG=false);
 
       bool reduceDAAWrapperCodeSize(TR_CallTarget* target);
 
@@ -95,12 +97,4 @@ class TR_J9EstimateCodeSize : public TR_EstimateCodeSize
       int32_t _optimisticSize;          // size if we assume we are doing a partial inline
    };
 
-class CFGgenerator : public TR_J9EstimateCodeSize 
-   {
-   public:
-
-      CFGgenerator() : TR_J9EstimateCodeSize() { };
-      TR::CFG *generateCFG(TR_CallTarget *calltarget, TR_CallStack *prevCallStack);
-
-   };
 #endif
