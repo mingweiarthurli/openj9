@@ -322,7 +322,7 @@ static void setupNode(TR::Node *node, uint32_t bcIndex,
 //#define Block TR::CFGNode
 #define Block TR::Block
 static Block * getBlock(TR::Compilation *comp, Block * * blocks,
-      TR_ResolvedMethod *feMethod, int32_t i, TR::CFG & cfg)
+      TR_ResolvedMethod *feMethod, int32_t i, TR::CFG * cfg)
    {
    if (!blocks[i])
       {
@@ -338,11 +338,11 @@ static Block * getBlock(TR::Compilation *comp, Block * * blocks,
 
       blocks[i]->setJ9EstimateCodeSizeMethod(feMethod);
       blocks[i]->setBlockBCIndex(i);
-      blocks[i]->setNumber(cfg.getNextNodeNumber());
+      blocks[i]->setNumber(cfg->getNextNodeNumber());
 
       setupNode(startTree->getNode(), i, feMethod, comp);
       setupNode(endTree->getNode(), i, feMethod, comp);
-      cfg.addNode(blocks[i]);
+      cfg->addNode(blocks[i]);
       }
 
    return blocks[i];
@@ -456,7 +456,8 @@ TR_J9EstimateCodeSize::adjustEstimateForStringCompression(TR_ResolvedMethod* met
 TR::CFG *
 TR_J9EstimateCodeSize::generateCFG(TR_CallTarget *calltarget, TR_CallStack *prevCallStack, TR::Region &region)
    {
-   realEstimateCodeSize(calltarget, prevCallStack, region, false, true);
+   bool retval = realEstimateCodeSize(calltarget, prevCallStack, region, false, true);
+   TR_ASSERT(retval, "we have a cfg");
    return calltarget->_cfg;
    }
 
@@ -662,7 +663,7 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
       return returnCleanup(1);
       }
 
-   int32_t size = calltarget->_myCallSite->_isIndirectCall ? 5 : 0;
+   int32_t size = calltarget->_myCallSite ? (calltarget->_myCallSite->_isIndirectCall ? 5 : 0) : 0;
 
    TR_J9ByteCodeIterator bci(0, static_cast<TR_ResolvedJ9Method *> (calltarget->_calleeMethod), static_cast<TR_J9VMBase *> (comp()->fej9()), comp());
 
@@ -972,7 +973,7 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
             flags[i].set(isUnsanitizeable);
             break;
          case J9BCaload0:
-            if (calltarget->_myCallSite->_isIndirectCall)
+            if (!stopAfterCFG && calltarget->_myCallSite->_isIndirectCall)
                thisOnStack = true;
             break;
          case J9BCiastore:
@@ -1096,8 +1097,8 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
                (uint16_t) handler, (uint32_t) type);
          }
 
-      TR::CFG cfg(comp(), calltarget->_calleeSymbol, region);
-      cfg.setStartAndEnd(new (comp()->trStackMemory()) TR::Block(
+      TR::CFG *cfg = new (region) TR::CFG(comp(), calltarget->_calleeSymbol, region);
+      cfg->setStartAndEnd(new (comp()->trStackMemory()) TR::Block(
             TR::TreeTop::create(comp(), TR::Node::createOnStack(NULL,
                   TR::BBStart, 0)), TR::TreeTop::create(comp(),
                   TR::Node::createOnStack(NULL, TR::BBEnd, 0)),
@@ -1107,22 +1108,22 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
                   TR::Node::createOnStack(NULL, TR::BBEnd, 0)),
             comp()->trMemory()));
 
-      cfg.getStart()->asBlock()->getEntry()->join(
-            cfg.getStart()->asBlock()->getExit());
-      cfg.getEnd()->asBlock()->getEntry()->join(
-            cfg.getEnd()->asBlock()->getExit());
-      cfg.getStart()->setNumber(cfg.getNextNodeNumber());
-      cfg.allocateNodeNumber();
-      cfg.getEnd()->setNumber(cfg.getNextNodeNumber());
-      cfg.allocateNodeNumber();
+      cfg->getStart()->asBlock()->getEntry()->join(
+            cfg->getStart()->asBlock()->getExit());
+      cfg->getEnd()->asBlock()->getEntry()->join(
+            cfg->getEnd()->asBlock()->getExit());
+      cfg->getStart()->setNumber(cfg->getNextNodeNumber());
+      cfg->allocateNodeNumber();
+      cfg->getEnd()->setNumber(cfg->getNextNodeNumber());
+      cfg->allocateNodeNumber();
 
-      cfg.getEnd()->asBlock()->setIsEndBlock();
+      cfg->getEnd()->asBlock()->setIsEndBlock();
 
-      TR::Block * currentBlock = cfg.getStart()->asBlock();
+      TR::Block * currentBlock = cfg->getStart()->asBlock();
       currentBlock->setJ9EstimateCodeSizeMethod(calltarget->_calleeMethod);
       currentBlock->setBlockBCIndex(0);
-      cfg.getStart()->asBlock()->setJ9EstimateCodeSizeMethod(calltarget->_calleeMethod);
-      cfg.getStart()->asBlock()->setBlockBCIndex(0);
+      cfg->getStart()->asBlock()->setJ9EstimateCodeSizeMethod(calltarget->_calleeMethod);
+      cfg->getStart()->asBlock()->setBlockBCIndex(0);
 
       int32_t endNodeIndex = bci.maxByteCodeIndex() - 1;
       if (endNodeIndex < 0)
@@ -1131,13 +1132,13 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
          endNodeIndex = 0;
          }
 
-      setupNode(cfg.getStart()->asBlock()->getEntry()->getNode(), 0,
+      setupNode(cfg->getStart()->asBlock()->getEntry()->getNode(), 0,
             calltarget->_calleeMethod, comp());
-      setupNode(cfg.getStart()->asBlock()->getExit()->getNode(), 0,
+      setupNode(cfg->getStart()->asBlock()->getExit()->getNode(), 0,
             calltarget->_calleeMethod, comp());
-      setupNode(cfg.getEnd()->asBlock()->getEntry()->getNode(),
+      setupNode(cfg->getEnd()->asBlock()->getEntry()->getNode(),
             endNodeIndex, calltarget->_calleeMethod, comp());
-      setupNode(cfg.getEnd()->asBlock()->getExit()->getNode(),
+      setupNode(cfg->getEnd()->asBlock()->getExit()->getNode(),
             endNodeIndex, calltarget->_calleeMethod, comp());
 
       TR::Block * * blocks =
@@ -1145,7 +1146,7 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
                   * sizeof(TR::Block *));
       memset(blocks, 0, maxIndex * sizeof(TR::Block *));
 
-      debugTrace(tracer(),"PECS: startblock %p %d endblock %p %d",cfg.getStart()->asBlock(), cfg.getStart()->getNumber(), cfg.getEnd()->asBlock(), cfg.getEnd()->getNumber());
+      debugTrace(tracer(),"PECS: startblock %p %d endblock %p %d",cfg->getStart()->asBlock(), cfg->getStart()->getNumber(), cfg->getEnd()->asBlock(), cfg->getEnd()->getNumber());
 
       bool addFallThruEdge = true;
 
@@ -1163,8 +1164,8 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
             if (i != startIndex)
                {
                currentBlock->setBlockSize(bcSizes[i] - blockStartSize);
-               if (cfg.getMethodSymbol())
-                  cfg.getMethodSymbol()->addProfilingOffsetInfo(currentBlock->getEntry()->getNode()->getByteCodeIndex(), currentBlock->getEntry()->getNode()->getByteCodeIndex() + currentBlock->getBlockSize());
+               if (cfg->getMethodSymbol())
+                  cfg->getMethodSymbol()->addProfilingOffsetInfo(currentBlock->getEntry()->getNode()->getByteCodeIndex(), currentBlock->getEntry()->getNode()->getByteCodeIndex() + currentBlock->getBlockSize());
                }
 
             if (addFallThruEdge)
@@ -1174,7 +1175,7 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
                debugTrace(tracer(),"joining nodes between blocks %p %d and %p %d", currentBlock, currentBlock->getNumber(), newBlock, newBlock->getNumber());
                currentBlock->getExit()->join(newBlock->getEntry());
 
-               cfg.addEdge(currentBlock, newBlock);
+               cfg->addEdge(currentBlock, newBlock);
                addFallThruEdge = true;
                }
             else
@@ -1210,14 +1211,14 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
             if (startIndex != i)
                {
                currentBlock->setBlockSize(bcSizes[i] - blockStartSize);
-               if (cfg.getMethodSymbol())
-                  cfg.getMethodSymbol()->addProfilingOffsetInfo(currentBlock->getEntry()->getNode()->getByteCodeIndex(), currentBlock->getEntry()->getNode()->getByteCodeIndex() + currentBlock->getBlockSize());
+               if (cfg->getMethodSymbol())
+                  cfg->getMethodSymbol()->addProfilingOffsetInfo(currentBlock->getEntry()->getNode()->getByteCodeIndex(), currentBlock->getEntry()->getNode()->getByteCodeIndex() + currentBlock->getBlockSize());
                }
             else
                {
                currentBlock->setBlockSize(1); // if there startIndex is the same as the current index then the block consists only of a branch
-               if (cfg.getMethodSymbol())
-                  cfg.getMethodSymbol()->addProfilingOffsetInfo(currentBlock->getEntry()->getNode()->getByteCodeIndex(), currentBlock->getEntry()->getNode()->getByteCodeIndex() + currentBlock->getBlockSize());
+               if (cfg->getMethodSymbol())
+                  cfg->getMethodSymbol()->addProfilingOffsetInfo(currentBlock->getEntry()->getNode()->getByteCodeIndex(), currentBlock->getEntry()->getNode()->getByteCodeIndex() + currentBlock->getBlockSize());
                }
 
             bci.setIndex(i);
@@ -1245,7 +1246,7 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
                                        getBlock(comp(), blocks, calltarget->_calleeMethod, i + bci.relativeBranch(), cfg)->getNumber());
 
                   setupLastTreeTop(currentBlock, bc, i, getBlock(comp(), blocks, calltarget->_calleeMethod, i + bci.relativeBranch(), cfg), calltarget->_calleeMethod, comp());
-                  cfg.addEdge(currentBlock, getBlock(comp(), blocks,
+                  cfg->addEdge(currentBlock, getBlock(comp(), blocks,
                         calltarget->_calleeMethod, i + bci.relativeBranch(),
                         cfg));
                   addFallThruEdge = true;
@@ -1254,13 +1255,13 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
                case J9BCgoto:
                case J9BCgotow:
                   setupLastTreeTop(currentBlock, bc, i, getBlock(comp(), blocks, calltarget->_calleeMethod, i + bci.relativeBranch(), cfg), calltarget->_calleeMethod, comp());
-                  cfg.addEdge(currentBlock, getBlock(comp(), blocks, calltarget->_calleeMethod, i + bci.relativeBranch(), cfg));
+                  cfg->addEdge(currentBlock, getBlock(comp(), blocks, calltarget->_calleeMethod, i + bci.relativeBranch(), cfg));
                   addFallThruEdge = false;
                   break;
                case J9BCgenericReturn:
                case J9BCathrow:
-                  setupLastTreeTop(currentBlock, bc, i, cfg.getEnd()->asBlock(), calltarget->_calleeMethod, comp());
-                  cfg.addEdge(currentBlock, cfg.getEnd());
+                  setupLastTreeTop(currentBlock, bc, i, cfg->getEnd()->asBlock(), calltarget->_calleeMethod, comp());
+                  cfg->addEdge(currentBlock, cfg->getEnd());
                   addFallThruEdge = false;
                   break;
                case J9BCtableswitch:
@@ -1271,11 +1272,11 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
                               index), cfg);
                   setupLastTreeTop(currentBlock, bc, i, defaultBlock,
                         calltarget->_calleeMethod, comp());
-                  cfg.addEdge(currentBlock, defaultBlock);
+                  cfg->addEdge(currentBlock, defaultBlock);
                   int32_t low = bci.nextSwitchValue(index);
                   int32_t high = bci.nextSwitchValue(index) - low + 1;
                   for (int32_t j = 0; j < high; ++j)
-                     cfg.addEdge(currentBlock, getBlock(comp(), blocks,
+                     cfg->addEdge(currentBlock, getBlock(comp(), blocks,
                            calltarget->_calleeMethod, i + bci.nextSwitchValue(
                                  index), cfg));
                   addFallThruEdge = false;
@@ -1289,12 +1290,12 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
                               index), cfg);
                   setupLastTreeTop(currentBlock, bc, i, defaultBlock,
                         calltarget->_calleeMethod, comp());
-                  cfg.addEdge(currentBlock, defaultBlock);
+                  cfg->addEdge(currentBlock, defaultBlock);
                   int32_t tableSize = bci.nextSwitchValue(index);
                   for (int32_t j = 0; j < tableSize; ++j)
                      {
                      index += 4; // match value
-                     cfg.addEdge(currentBlock, getBlock(comp(), blocks,
+                     cfg->addEdge(currentBlock, getBlock(comp(), blocks,
                            calltarget->_calleeMethod, i + bci.nextSwitchValue(
                                  index), cfg));
                      }
@@ -1318,7 +1319,7 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
 
          for (int32_t j = handlerInfo->_startIndex; j <= handlerInfo->_endIndex; ++j)
             if (blocks[j])
-               cfg.addExceptionEdge(blocks[j], blocks[handlerInfo->_handlerIndex]);
+               cfg->addExceptionEdge(blocks[j], blocks[handlerInfo->_handlerIndex]);
          }
 
       // Adjust call frequency for unknown or direct calls, for which we don't get profiling information
@@ -1333,10 +1334,10 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
          uint32_t bcIndex = calltarget->_myCallSite->_bcInfo.getByteCodeIndex();
          int32_t callCount = profileManager->getCallGraphProfilingCount(method,
                bcIndex, comp());
-         cfg._calledFrequency = callCount;
+         cfg->_calledFrequency = callCount;
 
          if (callCount <= 0 && _lastCallBlockFrequency > 0)
-            cfg._calledFrequency = _lastCallBlockFrequency;
+            cfg->_calledFrequency = _lastCallBlockFrequency;
 
          heuristicTrace(tracer(),
                "Depth %d: Setting called count for caller index %d, bytecode index %d of %d", _recursionDepth,
@@ -1345,17 +1346,17 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
          }
       else if (callGraphEnabled)
          {
-         cfg._calledFrequency = 10000;
+         cfg->_calledFrequency = 10000;
          }
 
-      cfg.propagateColdInfo(callGraphEnabled); // propagate coldness but also generate frequency information
+      cfg->propagateColdInfo(callGraphEnabled); // propagate coldness but also generate frequency information
       // for blocks if call graph profiling is enabled
 
       if (tracer()->heuristicLevel())
          {
          heuristicTrace(tracer(), "After propagating the coldness info\n");
          heuristicTrace(tracer(), "<cfg>");
-         for (TR::CFGNode* node = cfg.getFirstNode(); node; node = node->getNext())
+         for (TR::CFGNode* node = cfg->getFirstNode(); node; node = node->getNext())
             {
             comp()->findOrCreateDebug()->print(comp()->getOutFile(), node, 6);
             }
@@ -1493,7 +1494,7 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
                      }
 
                   callsite->_callerBlock = currentInlinedBlock;
-                  if (isInlineable(&callStack, callsite))
+                  if (!stopAfterCFG && isInlineable(&callStack, callsite))
                      {
                      callSites[i] = callsite;
                      inlineableCallExists = true;
@@ -1568,7 +1569,7 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
                   TR_PrexArgInfo *argInfo = calltarget->_ecsPrexArgInfo;
                   callsite->_callerBlock = currentInlinedBlock;
 
-                  if (isInlineable(&callStack, callsite))
+                  if (!stopAfterCFG && isInlineable(&callStack, callsite))
                      {
 
                      if (wasPeekingSuccessfull)
@@ -1632,7 +1633,7 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
 
                   TR_PrexArgInfo *argInfo = calltarget->_ecsPrexArgInfo;
                   callsite->_callerBlock = currentInlinedBlock;
-                  if (isInlineable(&callStack, callsite))
+                  if (!stopAfterCFG && isInlineable(&callStack, callsite))
                      {
 
                      if (wasPeekingSuccessfull)
@@ -1735,7 +1736,7 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
 
                callsite->_callerBlock = currentInlinedBlock;
 
-               if (isInlineable(&callStack, callsite))
+               if (!stopAfterCFG && isInlineable(&callStack, callsite))
                   {
 
                   if (wasPeekingSuccessfull)
@@ -1830,8 +1831,8 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
 
       /*************** PHASE 3:  Optimistically Assume we can partially inline calltarget and add to an optimisticSize ******************/
 
-      calltarget->_cfg = &cfg;
-      if (stopAfterCFG) return false;
+      calltarget->_cfg = cfg;
+      if (stopAfterCFG) return true;
 
       bool isCandidate = trimBlocksForPartialInlining(calltarget, &callBlocks);
 
