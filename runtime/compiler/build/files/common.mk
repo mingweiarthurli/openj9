@@ -185,6 +185,7 @@ JIT_PRODUCT_BACKEND_SOURCES+=\
     omr/compiler/optimizer/BenefitInliner.cpp \
     omr/compiler/optimizer/IDT.cpp \
     omr/compiler/optimizer/InliningProposal.cpp \
+    omr/compiler/optimizer/Growable_2d_array.cpp \
     omr/compiler/optimizer/IntersectionBitVectorAnalysis.cpp \
     omr/compiler/optimizer/IsolatedStoreElimination.cpp \
     omr/compiler/optimizer/Isolatedness.cpp \
