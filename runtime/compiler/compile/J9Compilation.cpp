@@ -88,6 +88,7 @@ void *operator new(size_t size)
  * Since we are using arena allocation, heap deletions must be a no-op, and
  * can't be used by JIT code, so we inject an assertion here.
  */
+/*
 void operator delete(void *)
    {
    TR_ASSERT(0, "Invalid use of global operator delete");

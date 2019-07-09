@@ -115,9 +115,9 @@ CX_FLAGS+=\
 ifneq ($(J9VM_OPT_JITSERVER),)
     CXX_FLAGS+=\
         -std=c++11
-else
-    CXX_FLAGS+=\
-        -std=c++0x
+#else
+#    CXX_FLAGS+=\
+#        -std=c++0x
 endif
 CXX_FLAGS+=\
     -fno-rtti \
@@ -535,3 +535,11 @@ ifneq ($(J9VM_OPT_JITSERVER),)
         CXX_INCLUDES+=$(OPENSSL_DIR)
     endif
 endif # J9VM_OPT_JITSERVER
+
+#for protbuf TODO guard like above later
+CXX_DEFINES+=GOOGLE_PROTOBUF_NO_RTTI
+
+SOLINK_LIBPATH+=/usr/local/lib
+SOLINK_SLINK+=protobuf
+C_INCLUDES+=/usr/local/include
+CXX_INCLUDES+=/usr/local/include

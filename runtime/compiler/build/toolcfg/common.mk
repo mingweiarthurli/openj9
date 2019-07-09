@@ -89,6 +89,14 @@ ifneq ($(J9VM_OPT_JITSERVER),)
 PRODUCT_INCLUDES+=\
     $(FIXED_SRCBASE)/compiler/net
 endif
+
+#
+# TCP
+#
+PRODUCT_INCLUDES+=\
+    $(FIXED_SRCBASE)/compiler/tcp/out \
+	$(FIXED_SRCBASE)/compiler/tcp
+
 #
 # Now we include the host and target tool config
 # These don't really do much generally... They set a few defines but there really
