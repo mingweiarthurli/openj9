@@ -105,7 +105,7 @@ CX_FLAGS+=\
     -fno-strict-aliasing
 
 CXX_FLAGS+=\
-    -std=c++0x \
+    -std=c++11 \
     -fno-rtti \
     -fno-threadsafe-statics \
     -Wno-deprecated \
@@ -506,3 +506,11 @@ SOLINK_EXTRA_ARGS+=-Wl,--version-script=$(SOLINK_VERSION_SCRIPT)
 endif
 
 SOLINK_FLAGS+=$(SOLINK_FLAGS_EXTRA)
+
+#for protbuf
+CXX_DEFINES+=GOOGLE_PROTOBUF_NO_RTTI
+
+SOLINK_LIBPATH+=/usr/local/lib
+SOLINK_SLINK+=protobuf
+C_INCLUDES+=/usr/local/include
+CXX_INCLUDES+=/usr/local/include

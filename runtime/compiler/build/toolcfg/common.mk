@@ -80,6 +80,14 @@ PRODUCT_SLINK=$(J9LIBS) $(J9LIBS)
 # Optional project-specific settings
 -include $(JIT_MAKE_DIR)/toolcfg/common-extra.mk
 
+
+#
+# TCP
+#
+PRODUCT_INCLUDES+=\
+    $(FIXED_SRCBASE)/compiler/tcp/out \
+	$(FIXED_SRCBASE)/compiler/tcp
+
 #
 # Now we include the host and target tool config
 # These don't really do much generally... They set a few defines but there really
