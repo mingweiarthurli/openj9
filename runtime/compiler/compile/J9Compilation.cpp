@@ -67,7 +67,8 @@
 bool firstCompileStarted = false;
 
 // JITSERVER_TODO: disabled to allow for JITServer
-#if !defined(JITSERVER_SUPPORT)
+//#if !defined(JITSERVER_SUPPORT)
+/*
 void *operator new(size_t size)
    {
 #if defined(DEBUG)
@@ -88,12 +89,13 @@ void *operator new(size_t size)
  * Since we are using arena allocation, heap deletions must be a no-op, and
  * can't be used by JIT code, so we inject an assertion here.
  */
+/*
 void operator delete(void *)
    {
    TR_ASSERT(0, "Invalid use of global operator delete");
    }
 #endif /* !defined(JITSERVER_SUPPORT) */
-
+*/
 
 
 

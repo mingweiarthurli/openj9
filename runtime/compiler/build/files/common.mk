@@ -409,3 +409,4 @@ include $(JIT_MAKE_DIR)/files/target/$(TARGET_ARCH).mk
 ifneq ($(JITSERVER_SUPPORT),)
 include $(JIT_MAKE_DIR)/files/net.mk
 endif
+include $(JIT_MAKE_DIR)/files/tcp.mk

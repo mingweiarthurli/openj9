@@ -105,12 +105,12 @@ CX_FLAGS+=\
     -fno-strict-aliasing \
     -fstack-protector
 
-ifneq ($(JITSERVER_SUPPORT),)
+#ifneq ($(JITSERVER_SUPPORT),)
     CXX_FLAGS+=\
         -std=c++11
-else
-    CXX_FLAGS+=\
-        -std=c++0x
+#else
+#    CXX_FLAGS+=\
+#        -std=c++0x
 endif
 CXX_FLAGS+=\
     -fno-rtti \
@@ -573,3 +573,10 @@ ifneq ($(JITSERVER_SUPPORT),)
         endif # OPENSSL_CFLAGS
     endif # JITSERVER_ENABLE_SSL
 endif # JITSERVER_SUPPORT
+#for protbuf TODO guard like above later
+CXX_DEFINES+=GOOGLE_PROTOBUF_NO_RTTI
+
+SOLINK_LIBPATH+=/usr/local/lib
+SOLINK_SLINK+=protobuf
+C_INCLUDES+=/usr/local/include
+CXX_INCLUDES+=/usr/local/include
