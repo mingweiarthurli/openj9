@@ -22,6 +22,8 @@
 #include "env/VerboseLog.hpp"
 #include "optimizer/CogniWorklistOpt.hpp"
 #include "il/SymbolReference.hpp"
+#include "tcp/client.hpp"
+#include "tcp/server.hpp"
 
 bool
 TR_CogniWorklistOpt::shouldPerform() {
@@ -35,7 +37,7 @@ TR_CogniWorklistOpt::shouldPerform() {
  */
 int32_t
 TR_CogniWorklistOpt::perform() {
-
+  
   //walking tree tops will be sufficient
   TR::TreeTop *tt = comp()->getStartTree();
   for(; tt; tt = tt->getNextTreeTop()){
@@ -65,8 +67,21 @@ TR_CogniWorklistOpt::perform() {
 	      //compilee method and class
 	      TR_ResolvedMethod *feMethod = comp()->getCurrentMethod();
 	      char *compileeClass = feMethod->classNameChars();
-	      printf("Found the name of the method we are in: %s and the name of the class: %s\n", feMethod->signatureChars(), compileeClass);
+	      printf("Found the name of the method we are in: %s and the name of the class: %s\n", feMethod->nameChars(), compileeClass);
 	      //one item is enough
+	      //hardcode for now for testing
+	      if(strstr(compileeClass, "FileAsStr") != NULL){
+		printf("SENDING THE MSG FROM THE JIT\n");
+		try{
+		  Client client;
+		  //TODO utilize protobuf features once protobufs are integrated into CogniCrypt
+		  client.writeClient(TCP::ClientMsgType::clientRequestInitAnalysis, "INITANALYSIS");
+		  client.writeClient(TCP::ClientMsgType::clientRequestInitAnalysis, compileeClass);
+		  client.closeClient();   
+		}catch(...){
+		  printf("Analysis request aborted");
+		}
+	      }
 	      break;
 	    }
 	  }
