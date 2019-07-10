@@ -55,13 +55,15 @@ int socketInit(){
   return(socketFd);
 }
 
-//generic handle error, maybe close file descriptor, exit always
+//generic handle error, maybe close file descriptor, throws an error
 void handleError(int closeFlag, int fd, const char *errorMsg){
 
   if(closeFlag == 1){
     close(fd);
   }
   perror(errorMsg);
-  exit(-1);
+  //since perror handles the message the exception will not have a message
+  throw "";
+  //  exit(-1);
 
 }
