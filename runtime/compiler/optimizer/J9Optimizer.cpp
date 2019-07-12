@@ -78,7 +78,7 @@
 #include "optimizer/UnsafeFastPath.hpp"
 #include "optimizer/VarHandleTransformer.hpp"
 #include "optimizer/StaticFinalFieldFolding.hpp"
-
+#include "optimizer/CogniTransformationOpt.hpp"
 
 static const OptimizationStrategy J9EarlyGlobalOpts[] =
    {
@@ -650,6 +650,7 @@ static const OptimizationStrategy cheapWarmStrategyOpts[] =
    { OMR::staticFinalFieldFolding,                                              },
    { OMR::osrGuardInsertion,                         OMR::IfVoluntaryOSR        },
    { OMR::osrExceptionEdgeRemoval                                               }, // most inlining is done by now
+   { OMR::cogniTransformation                                                         }, //perform after inlining
    { OMR::jProfilingBlock                                                       },
    { OMR::virtualGuardTailSplitter                                              }, // merge virtual guards
    { OMR::treeSimplification                                                    },
@@ -819,6 +820,8 @@ J9::Optimizer::Optimizer(TR::Compilation *comp, TR::ResolvedMethodSymbol *method
          new (comp->allocator()) TR::OptimizationManager(self(), TR_StaticFinalFieldFolding::create, OMR::staticFinalFieldFolding);
    // NOTE: Please add new J9 optimizations here!
 
+    _opts[OMR::cogniTransformation] =
+     new (comp->allocator()) TR::OptimizationManager(self(), TR_CogniTransformationOpt::create, OMR::cogniTransformation);
    // initialize additional J9 optimization groups
 
    _opts[OMR::loopAliasRefinerGroup] =
