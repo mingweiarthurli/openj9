@@ -37,7 +37,9 @@ TR_CogniWorklistOpt::shouldPerform() {
  */
 int32_t
 TR_CogniWorklistOpt::perform() {
-  
+
+  char *classToSearch = feGetEnv("TR_ClassToSearch");
+  if(classToSearch != NULL){
   //walking tree tops will be sufficient
   TR::TreeTop *tt = comp()->getStartTree();
   for(; tt; tt = tt->getNextTreeTop()){
@@ -69,15 +71,17 @@ TR_CogniWorklistOpt::perform() {
 	      char *compileeClass = feMethod->classNameChars();
 	      printf("Found the name of the method we are in: %s and the name of the class: %s\n", feMethod->nameChars(), compileeClass);
 	      //one item is enough
-	      //hardcode for now for testing
-	      if(strstr(compileeClass, "FileAsStr") != NULL){
+	      if(strstr(compileeClass, classToSearch) != NULL){
 		printf("SENDING THE MSG FROM THE JIT\n");
 		try{
 		  Client client;
 		  //TODO utilize protobuf features once protobufs are integrated into CogniCrypt
-		  client.writeClient(TCP::ClientMsgType::clientRequestInitAnalysis, "INITANALYSIS");
+		  client.writeClient(TCP::ClientMsgType::clientRequestInitAnalysis, "INITANALYSIS\n");
 		  client.writeClient(TCP::ClientMsgType::clientRequestInitAnalysis, compileeClass);
-		  client.closeClient();   
+		  client.writeClient(TCP::ClientMsgType::clientRequestInitAnalysis, "\n");
+		  client.closeClient();
+		  //setting the search item to null will stop the search
+		  classToSearch = NULL;
 		}catch(...){
 		  printf("Analysis request aborted");
 		}
@@ -88,6 +92,7 @@ TR_CogniWorklistOpt::perform() {
 	}
       }
     }
-  }  
+  }
+  }
   return 1;
 }

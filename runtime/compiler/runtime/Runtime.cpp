@@ -1949,8 +1949,8 @@ char * feGetEnv2(const char * s, const void * vm)
 
       j9sysinfo_get_env((char *)s, envSpace, envSize);
 
-      if (verboseQuery)
-         j9tty_printf(PORTLIB, "JIT: env var %s is set to %s\n", s, envSpace);
+      //      if (verboseQuery)
+      // j9tty_printf(PORTLIB, "JIT: env var %s is set to %s\n", s, envSpace);
       }
    return envSpace;
    }
