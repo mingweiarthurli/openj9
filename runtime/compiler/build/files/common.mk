@@ -153,6 +153,9 @@ JIT_PRODUCT_BACKEND_SOURCES+=\
     omr/compiler/infra/SimpleRegex.cpp \
     omr/compiler/infra/Timer.cpp \
     omr/compiler/infra/TreeServices.cpp \
+    omr/compiler/optimizer/AbsEnv.cpp \
+    omr/compiler/optimizer/AbsOpStack.cpp \
+    omr/compiler/optimizer/AbsVarArray.cpp \
     omr/compiler/optimizer/AsyncCheckInsertion.cpp \
     omr/compiler/optimizer/BackwardBitVectorAnalysis.cpp \
     omr/compiler/optimizer/BackwardIntersectionBitVectorAnalysis.cpp \
