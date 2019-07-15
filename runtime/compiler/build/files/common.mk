@@ -182,8 +182,18 @@ JIT_PRODUCT_BACKEND_SOURCES+=\
     omr/compiler/optimizer/InductionVariable.cpp \
     omr/compiler/optimizer/Inliner.cpp \
     omr/compiler/optimizer/BenefitInliner.cpp \
+    omr/compiler/optimizer/AbsOpStack.cpp \
+    omr/compiler/optimizer/AbsOpStackStatic.cpp \
+    omr/compiler/optimizer/AbsEnv.cpp \
+    omr/compiler/optimizer/AbsEnvStatic.cpp \
+    omr/compiler/optimizer/MethodSummary.cpp \
+    omr/compiler/optimizer/AbsVarArray.cpp \
+    omr/compiler/optimizer/AbsVarArrayStatic.cpp \
     omr/compiler/optimizer/IDT.cpp \
     omr/compiler/optimizer/InliningProposal.cpp \
+    omr/compiler/optimizer/Growable_2d_array.cpp \
+    omr/compiler/optimizer/PriorityPreorder.cpp \
+    omr/compiler/optimizer/InlinerPacking.cpp \
     omr/compiler/optimizer/IntersectionBitVectorAnalysis.cpp \
     omr/compiler/optimizer/IsolatedStoreElimination.cpp \
     omr/compiler/optimizer/Isolatedness.cpp \
