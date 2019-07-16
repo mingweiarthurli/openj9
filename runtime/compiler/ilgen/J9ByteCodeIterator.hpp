@@ -146,6 +146,7 @@ public:
    int32_t  next4BytesSigned(int32_t o = 1)       { return next4Bytes(o); }
 #endif
 
+   void printByteCode();
 protected:
    void stepOverVariableSizeBC();
 
@@ -157,7 +158,6 @@ protected:
    void printJumpIndex(int32_t offset);
 
    void printByteCodePrologue();
-   void printByteCode();
    void printByteCodeEpilogue();
 
    TR_J9VMBase *fe()             { return _fe; }
@@ -170,6 +170,7 @@ protected:
    static const uint8_t       _byteCodeFlags[];
    static const TR_J9ByteCode _opCodeToByteCodeEnum[256];
    static const uint8_t       _estimatedCodeSize[];
+   static const uint8_t       _realCodeSize[];
 
    static TR::ILOpCodes    _lcmpOps[];
    static TR::ILOpCodes    _fcmplOps[];

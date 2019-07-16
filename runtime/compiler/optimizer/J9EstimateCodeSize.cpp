@@ -322,7 +322,7 @@ static void setupNode(TR::Node *node, uint32_t bcIndex,
 //#define Block TR::CFGNode
 #define Block TR::Block
 static Block * getBlock(TR::Compilation *comp, Block * * blocks,
-      TR_ResolvedMethod *feMethod, int32_t i, TR::CFG * cfg)
+      TR_ResolvedMethod *feMethod, int32_t i, TR::CFG * cfg, TR::Region &region)
    {
    if (!blocks[i])
       {
@@ -333,7 +333,7 @@ static Block * getBlock(TR::Compilation *comp, Block * * blocks,
             NULL, TR::BBEnd, 0));
 
       startTree->join(endTree);
-      blocks[i] = new (comp->trStackMemory()) Block (startTree, endTree,
+      blocks[i] = new (region) Block (startTree, endTree,
             comp->trMemory());
 
       blocks[i]->setJ9EstimateCodeSizeMethod(feMethod);
@@ -738,12 +738,12 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
       if (bc == J9BCgenericReturn)
          {
          if (!calltarget->_calleeMethod->isSynchronized())
-            size += 1;
+            size += stopAfterCFG ? bci.size(bc) : 1;
          else
-            size += bci.estimatedCodeSize();
+            size += stopAfterCFG ? bci.size(bc) : bci.estimatedCodeSize();
          }
       else
-         size += bci.estimatedCodeSize();
+         size += stopAfterCFG ? bci.size(bc) : bci.estimatedCodeSize();
 
       switch (bc)
          {
@@ -1159,7 +1159,7 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
             {
             debugTrace(tracer(),"Calling getBlock.  blocks[%d] = %p", i, blocks[i]);
             TR::Block * newBlock = getBlock(comp(), blocks,
-                  calltarget->_calleeMethod, i, cfg);
+                  calltarget->_calleeMethod, i, cfg, region);
 
             if (i != startIndex)
                {
@@ -1242,20 +1242,20 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
                case J9BCifnonnull:
                   {
                   debugTrace(tracer(),"if branch.i = %d adding edge between blocks %p %d and %p %d",
-                                       i, currentBlock, currentBlock->getNumber(), getBlock(comp(), blocks, calltarget->_calleeMethod, i+ bci.relativeBranch(), cfg),
-                                       getBlock(comp(), blocks, calltarget->_calleeMethod, i + bci.relativeBranch(), cfg)->getNumber());
+                                       i, currentBlock, currentBlock->getNumber(), getBlock(comp(), blocks, calltarget->_calleeMethod, i+ bci.relativeBranch(), cfg, region),
+                                       getBlock(comp(), blocks, calltarget->_calleeMethod, i + bci.relativeBranch(), cfg, region)->getNumber());
 
-                  setupLastTreeTop(currentBlock, bc, i, getBlock(comp(), blocks, calltarget->_calleeMethod, i + bci.relativeBranch(), cfg), calltarget->_calleeMethod, comp());
+                  setupLastTreeTop(currentBlock, bc, i, getBlock(comp(), blocks, calltarget->_calleeMethod, i + bci.relativeBranch(), cfg, region), calltarget->_calleeMethod, comp());
                   cfg->addEdge(currentBlock, getBlock(comp(), blocks,
                         calltarget->_calleeMethod, i + bci.relativeBranch(),
-                        cfg));
+                        cfg, region));
                   addFallThruEdge = true;
                   break;
                   }
                case J9BCgoto:
                case J9BCgotow:
-                  setupLastTreeTop(currentBlock, bc, i, getBlock(comp(), blocks, calltarget->_calleeMethod, i + bci.relativeBranch(), cfg), calltarget->_calleeMethod, comp());
-                  cfg->addEdge(currentBlock, getBlock(comp(), blocks, calltarget->_calleeMethod, i + bci.relativeBranch(), cfg));
+                  setupLastTreeTop(currentBlock, bc, i, getBlock(comp(), blocks, calltarget->_calleeMethod, i + bci.relativeBranch(), cfg, region), calltarget->_calleeMethod, comp());
+                  cfg->addEdge(currentBlock, getBlock(comp(), blocks, calltarget->_calleeMethod, i + bci.relativeBranch(), cfg, region));
                   addFallThruEdge = false;
                   break;
                case J9BCgenericReturn:
@@ -1269,7 +1269,7 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
                   int32_t index = bci.defaultTargetIndex();
                   TR::Block *defaultBlock = getBlock(comp(), blocks,
                         calltarget->_calleeMethod, i + bci.nextSwitchValue(
-                              index), cfg);
+                              index), cfg, region);
                   setupLastTreeTop(currentBlock, bc, i, defaultBlock,
                         calltarget->_calleeMethod, comp());
                   cfg->addEdge(currentBlock, defaultBlock);
@@ -1278,7 +1278,7 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
                   for (int32_t j = 0; j < high; ++j)
                      cfg->addEdge(currentBlock, getBlock(comp(), blocks,
                            calltarget->_calleeMethod, i + bci.nextSwitchValue(
-                                 index), cfg));
+                                 index), cfg, region));
                   addFallThruEdge = false;
                   break;
                   }
@@ -1287,7 +1287,7 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
                   int32_t index = bci.defaultTargetIndex();
                   TR::Block *defaultBlock = getBlock(comp(), blocks,
                         calltarget->_calleeMethod, i + bci.nextSwitchValue(
-                              index), cfg);
+                              index), cfg, region);
                   setupLastTreeTop(currentBlock, bc, i, defaultBlock,
                         calltarget->_calleeMethod, comp());
                   cfg->addEdge(currentBlock, defaultBlock);
@@ -1297,7 +1297,7 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
                      index += 4; // match value
                      cfg->addEdge(currentBlock, getBlock(comp(), blocks,
                            calltarget->_calleeMethod, i + bci.nextSwitchValue(
-                                 index), cfg));
+                                 index), cfg, region));
                      }
                   addFallThruEdge = false;
                   break;
@@ -1382,7 +1382,7 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
          if (flags[i].testAny(bbStart))
             {
             currentInlinedBlock = getBlock(comp(), blocks,
-                  calltarget->_calleeMethod, i, cfg);
+                  calltarget->_calleeMethod, i, cfg, region);
             debugTrace(tracer(),"Found current block %p, number %d\n", currentInlinedBlock, (currentInlinedBlock) ? currentInlinedBlock->getNumber() : -1);
             }
 
