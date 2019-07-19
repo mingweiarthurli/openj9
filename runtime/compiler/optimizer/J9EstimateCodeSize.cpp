@@ -1202,7 +1202,7 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
                {
                //traceMsg(comp(), "assign1\n");
                int previousSize = currentBlock->getBlockSize();
-               currentBlock->setBlockSize(previousSize ? previousSize : i - blockStartSize);
+               stopAfterCFG ? currentBlock->setBlockSize(previousSize ? previousSize : i - blockStartSize) : currentBlock->setBlockSize(bcSizes[i] - blockStartSize);
                if (cfg->getMethodSymbol())
                   cfg->getMethodSymbol()->addProfilingOffsetInfo(currentBlock->getEntry()->getNode()->getByteCodeIndex(), currentBlock->getEntry()->getNode()->getByteCodeIndex() + currentBlock->getBlockSize());
                }
@@ -1222,10 +1222,10 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
                addFallThruEdge = true;
                }
             currentBlock = newBlock;
-            currentBlock->setBlockSize(0);
+            if (stopAfterCFG) currentBlock->setBlockSize(0);
 
             startIndex = i;
-            blockStartSize = previous_nonzero; //bcSizes[i];
+            blockStartSize = stopAfterCFG ? previous_nonzero : bcSizes[i];
             }
 
          if (bcSizes[i] != 0) {
@@ -1314,7 +1314,7 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
                case J9BCReturnZ:
                   setupLastTreeTop(currentBlock, bc, i, cfg->getEnd()->asBlock(), calltarget->_calleeMethod, comp());
                   cfg->addEdge(currentBlock, cfg->getEnd());
-                  currentBlock->setBlockSize(bcSizes[i] - blockStartSize);
+                  if (stopAfterCFG) currentBlock->setBlockSize(bcSizes[i] - blockStartSize);
                   addFallThruEdge = false;
                   break;
                case J9BCtableswitch:
