@@ -372,7 +372,12 @@ static TR::ILOpCodes convertBytecodeToIL (TR_J9ByteCode bc)
       case J9BClookupswitch: return TR::lookup;
       case J9BCgoto:
       case J9BCgotow: return TR::Goto;
-      case J9BCgenericReturn: return TR::Return;
+      case J9BCgenericReturn: 
+      case J9BCReturnC:
+      case J9BCReturnS:
+      case J9BCReturnB:
+      case J9BCReturnZ:
+      return TR::Return;
       case J9BCathrow: return TR::athrow;
       default:
          TR_ASSERT(0,"Unsupported conversion for now.");
@@ -715,6 +720,8 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
    // PHASE 1:  Bytecode Iteration
 
    TR_J9ByteCode bc = bci.first(), nextBC;
+   int lookupswitch = -1;
+   int tableswitch = -1;
    for (; bc != J9BCunknown; bc = bci.next())
       {
       nph.processByteCode();
@@ -727,6 +734,21 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
 
       newBCInfo.setByteCodeIndex(bci.bcIndex());
       int32_t i = bci.bcIndex();
+
+      if (stopAfterCFG && lookupswitch > -1)
+         {
+         bcSizes[lookupswitch] = i;
+         size = i;
+         lookupswitch = -1;
+         }
+
+      if (stopAfterCFG && tableswitch > -1)
+         {
+         bcSizes[tableswitch] = i;
+         size = i;
+         tableswitch = -1;
+         }
+        
 
       if (blockStart) //&& calltarget->_calleeSymbol)
          {
@@ -770,6 +792,10 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
             blockStart = true;
             break;
          case J9BCgenericReturn:
+         case J9BCReturnC:
+         case J9BCReturnS:
+         case J9BCReturnB:
+         case J9BCReturnZ:
             flags[i].set(isBranch);
             blockStart = true;
             break;
@@ -791,6 +817,7 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
             break;
          case J9BCtableswitch:
             {
+            tableswitch = i;
             flags[i].set(isBranch);
             int32_t index = bci.defaultTargetIndex();
             flags[i + bci.nextSwitchValue(index)].set(bbStart);
@@ -804,6 +831,7 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
             }
          case J9BClookupswitch:
             {
+            lookupswitch = i;
             flags[i].set(isBranch);
             int32_t index = bci.defaultTargetIndex();
             flags[i + bci.nextSwitchValue(index)].set(bbStart);
@@ -1030,6 +1058,10 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
          debugTrace(tracer(),"BC iteration at index %d.", i); //only print this index if we are debugging
 
       bcSizes[i] = size;
+      //bool bbStartf = flags[i].testAny(bbStart);
+      //bool isBranchf = flags[i].testAny(isBranch);
+      //bci.printByteCode();
+      //traceMsg(comp(), "\ni = %d, bcSizes[i] = %d, bbStart = %s, isBranch %s\n", i, size, bbStartf ? "true" : "false", isBranchf ? "true" : "false");
       }
 
    auto sizeBeforeAdjustment = size;
@@ -1153,8 +1185,13 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
       debugTrace(tracer(),"PECS: iterating over bc indexes in CFG creation. maxIndex =%d", maxIndex);
       int32_t blockStartSize = 0;
       int32_t startIndex = 0;
+      int32_t previous_nonzero = 0;
       for (i = 0; i < maxIndex; ++i)
          {
+         //size = bcSizes[i];
+         //bool bbStartf = flags[i].testAny(bbStart);
+         //bool isBranchf = flags[i].testAny(isBranch);
+         //traceMsg(comp(), "i = %d, bcSizes[i] = %d, bbStart = %s, isBranch %s, blockStartSize %d\n", i, size, bbStartf ? "true" : "false", isBranchf ? "true" : "false", blockStartSize);
          if (flags[i].testAny(bbStart))
             {
             debugTrace(tracer(),"Calling getBlock.  blocks[%d] = %p", i, blocks[i]);
@@ -1163,7 +1200,9 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
 
             if (i != startIndex)
                {
-               currentBlock->setBlockSize(bcSizes[i] - blockStartSize);
+               //traceMsg(comp(), "assign1\n");
+               int previousSize = currentBlock->getBlockSize();
+               stopAfterCFG ? currentBlock->setBlockSize(previousSize ? previousSize : i - blockStartSize) : currentBlock->setBlockSize(bcSizes[i] - blockStartSize);
                if (cfg->getMethodSymbol())
                   cfg->getMethodSymbol()->addProfilingOffsetInfo(currentBlock->getEntry()->getNode()->getByteCodeIndex(), currentBlock->getEntry()->getNode()->getByteCodeIndex() + currentBlock->getBlockSize());
                }
@@ -1183,9 +1222,14 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
                addFallThruEdge = true;
                }
             currentBlock = newBlock;
+            if (stopAfterCFG) currentBlock->setBlockSize(0);
 
             startIndex = i;
-            blockStartSize = bcSizes[i];
+            blockStartSize = stopAfterCFG ? previous_nonzero : bcSizes[i];
+            }
+
+         if (bcSizes[i] != 0) {
+            previous_nonzero = bcSizes[i];
             }
 
          if (flags[i].testAny(isCold))
@@ -1210,18 +1254,22 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
             {
             if (startIndex != i)
                {
+               //traceMsg(comp(), "assign2\n");
                currentBlock->setBlockSize(bcSizes[i] - blockStartSize);
                if (cfg->getMethodSymbol())
                   cfg->getMethodSymbol()->addProfilingOffsetInfo(currentBlock->getEntry()->getNode()->getByteCodeIndex(), currentBlock->getEntry()->getNode()->getByteCodeIndex() + currentBlock->getBlockSize());
                }
             else
                {
+               //traceMsg(comp(), "assign3\n");
                currentBlock->setBlockSize(1); // if there startIndex is the same as the current index then the block consists only of a branch
                if (cfg->getMethodSymbol())
                   cfg->getMethodSymbol()->addProfilingOffsetInfo(currentBlock->getEntry()->getNode()->getByteCodeIndex(), currentBlock->getEntry()->getNode()->getByteCodeIndex() + currentBlock->getBlockSize());
                }
 
             bci.setIndex(i);
+            //bci.printByteCode();
+
             switch (bc = bci.current())
                {
                case J9BCificmpeq:
@@ -1260,8 +1308,13 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
                   break;
                case J9BCgenericReturn:
                case J9BCathrow:
+               case J9BCReturnC:
+               case J9BCReturnS:
+               case J9BCReturnB:
+               case J9BCReturnZ:
                   setupLastTreeTop(currentBlock, bc, i, cfg->getEnd()->asBlock(), calltarget->_calleeMethod, comp());
                   cfg->addEdge(currentBlock, cfg->getEnd());
+                  if (stopAfterCFG) currentBlock->setBlockSize(bcSizes[i] - blockStartSize);
                   addFallThruEdge = false;
                   break;
                case J9BCtableswitch:
@@ -1308,6 +1361,8 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
             }
          //      printf("Iterating through sizes array.  bcSizes[%d] = %d maxIndex = %d\n",i,bcSizes[i],maxIndex);
          }
+
+      //currentBlock->setBlockSize(bci.maxByteCodeIndex() - currentBlock->getBlockBCIndex());
 
       for (i = 0; i < (int32_t) tryCatchInfo.size(); ++i)
          {
