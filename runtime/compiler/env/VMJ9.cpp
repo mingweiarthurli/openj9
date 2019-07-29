@@ -1296,7 +1296,7 @@ uintptrj_t
 TR_J9VMBase::getReferenceFieldAt(uintptrj_t objectPointer, uintptrj_t fieldOffset)
    {
    TR_ASSERT(haveAccess(), "Must haveAccess in getReferenceFieldAt");
-   return (uintptrj_t)J9OBJECT_OBJECT_LOAD(vmThread(), objectPointer, J9_OBJECT_HEADER_SIZE + fieldOffset);
+   return (uintptrj_t)J9OBJECT_OBJECT_LOAD(vmThread(), objectPointer, TR::Compiler->om.objectHeaderSizeInBytes() + fieldOffset);
    }
 
 uintptrj_t
@@ -1304,7 +1304,7 @@ TR_J9VMBase::getVolatileReferenceFieldAt(uintptrj_t objectPointer, uintptrj_t fi
    {
    TR_ASSERT(haveAccess(), "Must haveAccess in getVolatileReferenceFieldAt");
    return (uintptrj_t)vmThread()->javaVM->javaVM->memoryManagerFunctions->j9gc_objaccess_mixedObjectReadObject(vmThread(),
-      (J9Object*)objectPointer, J9_OBJECT_HEADER_SIZE + fieldOffset, IS_VOLATILE);
+      (J9Object*)objectPointer, TR::Compiler->om.objectHeaderSizeInBytes() + fieldOffset, IS_VOLATILE);
    }
 
 int32_t
@@ -1378,7 +1378,7 @@ void TR_J9VMBase::printVerboseLogHeader(TR::Options *cmdLineOptions)
    TR_VerboseLog::writeLine(TR_Vlog_INFO,"Version Information:");
    TR_VerboseLog::writeLine(TR_Vlog_INFO,"     JIT Level  - %s", getJ9JITConfig()->jitLevelName);
    TR_VerboseLog::writeLine(TR_Vlog_INFO,"     JVM Level  - %s", EsBuildVersionString);
-   TR_VerboseLog::writeLine(TR_Vlog_INFO,"     GC Level   - %s", Modron_ImportString);
+   TR_VerboseLog::writeLine(TR_Vlog_INFO,"     GC Level   - %s", J9VM_VERSION_STRING);
    TR_VerboseLog::writeLine(TR_Vlog_INFO,"");
 
    const char *vendorId;
@@ -1547,13 +1547,8 @@ bool TR_J9VMBase::generateCompressedPointers()
 
 bool TR_J9VMBase::generateCompressedLockWord()
    {
-#if defined(J9VM_THR_LOCK_NURSERY)
    if (sizeof(j9objectmonitor_t) == 4)
       return true;
-#else
-   if (sizeof((((J9Object *)NULL)->monitor)) == 4)
-      return true;
-#endif
    return false;
    }
 
@@ -1569,7 +1564,7 @@ int32_t *TR_J9VMBase::getCurrentLocalsMapForDLT(TR::Compilation *comp)
 
    numBundles = (numBundles+31)/32;
    currentBundles = (int32_t *)comp->trMemory()->allocateHeapMemory(numBundles * sizeof(int32_t));
-   jitConfig->javaVM->localMapFunction(_portLibrary, J9_CLASS_FROM_METHOD(j9method)->romClass, J9_ROM_METHOD_FROM_RAM_METHOD(j9method), comp->getDltBcIndex(), (U_32 *)currentBundles, NULL, NULL, NULL);
+   jitConfig->javaVM->localMapFunction(_portLibrary, J9_CLASS_FROM_METHOD(j9method)->romClass, getOriginalROMMethod(j9method), comp->getDltBcIndex(), (U_32 *)currentBundles, NULL, NULL, NULL);
 #endif
 
    return currentBundles;
@@ -2107,16 +2102,12 @@ TR_J9VMBase::getWriteBarrierGCFlagMaskAsByte()
 int32_t
 TR_J9VMBase::getByteOffsetToLockword(TR_OpaqueClassBlock * clazzPointer)
    {
-#if defined (J9VM_THR_LOCK_NURSERY)
    J9JavaVM * jvm = _jitConfig->javaVM;
 
    if (clazzPointer == NULL)
       return 0;
 
    return TR::Compiler->cls.convertClassOffsetToClassPtr(clazzPointer)->lockOffset;
-#else
-   return TMP_OFFSETOF_J9OBJECT_MONITOR;
-#endif
    }
 
 bool
@@ -4402,10 +4393,7 @@ TR_J9VMBase::initializeLocalObjectFlags(TR::Compilation * comp, TR::Node * alloc
 
 bool TR_J9VMBase::hasTwoWordObjectHeader()
   {
-#if defined(J9VM_THR_LOCK_NURSERY)
   return true;
-#endif
-  return false;;
   }
 
 // Create trees to initialize the header of an object that is being created

@@ -203,7 +203,6 @@ extern "C" {
 #cmakedefine J9VM_JIT_SUPPORTS_DIRECT_JNI
 #cmakedefine J9VM_JIT_TRANSACTION_DIAGNOSTIC_THREAD_BLOCK
 #cmakedefine J9VM_MATH_DIRECT_HELPERS
-#cmakedefine J9VM_MATH_USE_DIV_REM
 #cmakedefine J9VM_OPT_ANNOTATIONS
 #cmakedefine J9VM_OPT_BIG_INTEGER
 #cmakedefine J9VM_OPT_CUDA
@@ -237,7 +236,6 @@ extern "C" {
 #cmakedefine J9VM_OPT_PANAMA
 #cmakedefine J9VM_OPT_PHP_SUPPORT
 #cmakedefine J9VM_OPT_REFLECT
-#cmakedefine J9VM_OPT_REMOTE_CONSOLE_SUPPORT
 #cmakedefine J9VM_OPT_RESOURCE_MANAGED
 #cmakedefine J9VM_OPT_ROM_IMAGE_SUPPORT
 #cmakedefine J9VM_OPT_SHARED_CLASSES

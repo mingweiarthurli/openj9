@@ -424,6 +424,9 @@ inlineVectorizedStringIndexOf(TR::Node* node, TR::CodeGenerator* cg, bool isUTF1
       generateRRRInstruction(cg, TR::InstOpCode::getSubtractThreeRegOpCode(), node, loadLenReg, s1LenReg, s1VecStartIndexReg);
       generateRIEInstruction(cg, TR::InstOpCode::getCmpImmBranchRelOpCode(), node, loadLenReg, (int8_t)vectorSize, labelLoadLen16, TR::InstOpCode::COND_BNL);
       generateRRRInstruction(cg, TR::InstOpCode::getAddThreeRegOpCode(), node, tmpReg, s1ValueReg, s1VecStartIndexReg);
+      // Needs -1 because VLL's third operand is the highest index to load.
+      // e.g. If the load length is 8 bytes, the highest index is 7. Hence, the need for -1.
+      generateRIInstruction(cg, TR::InstOpCode::getAddHalfWordImmOpCode(), node, loadLenReg, -1);
       generateVRSbInstruction(cg, TR::InstOpCode::VLL, node, s1PartialVReg, loadLenReg, generateS390MemoryReference(tmpReg, headerSize, cg));
       generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, labelLoadLenDone);
 
@@ -917,17 +920,17 @@ TR::Register * caseConversionHelper(TR::Node* node, TR::CodeGenerator* cg, bool 
    }
 
 extern TR::Register *
-intrinsicIndexOf(TR::Node * node, TR::CodeGenerator * cg, bool isCompressed)
+inlineIntrinsicIndexOf(TR::Node * node, TR::CodeGenerator * cg, bool isLatin1)
    {
    cg->generateDebugCounter("z13/simd/indexOf", 1, TR::DebugCounter::Free);
 
-   TR::Register* address = cg->evaluate(node->getChild(1));
-   TR::Register* value = cg->evaluate(node->getChild(2));
-   TR::Register* index = cg->evaluate(node->getChild(3));
-   TR::Register* size = cg->gprClobberEvaluate(node->getChild(4));
+   TR::Register* array = cg->evaluate(node->getChild(1));
+   TR::Register* ch = cg->evaluate(node->getChild(2));
+   TR::Register* offset = cg->evaluate(node->getChild(3));
+   TR::Register* length = cg->gprClobberEvaluate(node->getChild(4));
 
    // load length isn't used after loop, size must is adjusted to become bytes left
-   TR::Register* loopCounter = size;
+   TR::Register* loopCounter = length;
    TR::Register* loadLength = cg->allocateRegister();
    TR::Register* indexRegister = cg->allocateRegister();
    TR::Register* offsetAddress = cg->allocateRegister();
@@ -946,13 +949,8 @@ intrinsicIndexOf(TR::Node * node, TR::CodeGenerator * cg, bool isCompressed)
    TR::LabelSymbol* failureLabel = generateLabelSymbol( cg);
    TR::LabelSymbol* cFlowRegionEnd = generateLabelSymbol( cg);
 
-   const int elementSizeMask = isCompressed ? 0x0 : 0x1;   // byte or halfword mask
-   uintptrj_t headerSize = TR::Compiler->om.contiguousArrayHeaderSizeInBytes();
-   const int8_t sizeOfVector = cg->machine()->getVRFSize();
-   const bool is64 = TR::Compiler->target.is64Bit();
-
-   TR::RegisterDependencyConditions * regDeps = new (cg->trHeapMemory()) TR::RegisterDependencyConditions(0, 8, cg);
-   regDeps->addPostCondition(address, TR::RealRegister::AssignAny);
+   TR::RegisterDependencyConditions* regDeps = new (cg->trHeapMemory()) TR::RegisterDependencyConditions(0, 8, cg);
+   regDeps->addPostCondition(array, TR::RealRegister::AssignAny);
    regDeps->addPostCondition(loopCounter, TR::RealRegister::AssignAny);
    regDeps->addPostCondition(indexRegister, TR::RealRegister::AssignAny);
    regDeps->addPostCondition(loadLength, TR::RealRegister::AssignAny);
@@ -961,28 +959,31 @@ intrinsicIndexOf(TR::Node * node, TR::CodeGenerator * cg, bool isCompressed)
    regDeps->addPostCondition(resultVector, TR::RealRegister::AssignAny);
    regDeps->addPostCondition(valueVector, TR::RealRegister::AssignAny);
 
-   generateVRRfInstruction(cg, TR::InstOpCode::VLVGP, node, valueVector, index, value);
-   generateVRIcInstruction(cg, TR::InstOpCode::VREP, node, valueVector, valueVector, (sizeOfVector / (1 << elementSizeMask)) - 1, elementSizeMask);
+   generateVRRfInstruction(cg, TR::InstOpCode::VLVGP, node, valueVector, offset, ch);
+   
+   // Byte or halfword mask
+   const int elementSizeMask = isLatin1 ? 0x0 : 0x1;
+   generateVRIcInstruction(cg, TR::InstOpCode::VREP, node, valueVector, valueVector, (cg->machine()->getVRFSize() / (1 << elementSizeMask)) - 1, elementSizeMask);
    generateVRIaInstruction(cg, TR::InstOpCode::VGBM, node, resultVector, 0, 0);
    generateVRIaInstruction(cg, TR::InstOpCode::VGBM, node, charBufferVector, 0, 0);
 
-   if (is64)
+   if (TR::Compiler->target.is64Bit())
       {
-      generateRREInstruction(cg, TR::InstOpCode::LLGFR, node, indexRegister, index);
+      generateRREInstruction(cg, TR::InstOpCode::LLGFR, node, indexRegister, offset);
       }
    else
       {
-      generateRRInstruction(cg, TR::InstOpCode::LR, node, indexRegister, index);
+      generateRRInstruction(cg, TR::InstOpCode::LR, node, indexRegister, offset);
       }
-   generateRRInstruction(cg, TR::InstOpCode::SR, node, size, index);
+   generateRRInstruction(cg, TR::InstOpCode::SR, node, length, offset);
 
-   if (!isCompressed)
+   if (!isLatin1)
       {
-      generateRSInstruction(cg, TR::InstOpCode::SLL, node, size, 1);
+      generateRSInstruction(cg, TR::InstOpCode::SLL, node, length, 1);
       generateRSInstruction(cg, TR::InstOpCode::SLL, node, indexRegister, 1);
       }
 
-   generateRRInstruction(cg, TR::InstOpCode::LR, node, loadLength, size);
+   generateRRInstruction(cg, TR::InstOpCode::LR, node, loadLength, length);
    generateRILInstruction(cg, TR::InstOpCode::NILF, node, loadLength, 0xF);
    generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, cFlowRegionStart);
    cFlowRegionStart->setStartInternalControlFlow();
@@ -991,7 +992,7 @@ intrinsicIndexOf(TR::Node * node, TR::CodeGenerator * cg, bool isCompressed)
    // VLL takes an index, not a count, so subtract 1 from the count
    generateRILInstruction(cg, TR::InstOpCode::SLFI, node, loadLength, 1);
 
-   generateRXInstruction(cg, TR::InstOpCode::LA, node, offsetAddress, generateS390MemoryReference(address, indexRegister, headerSize, cg));
+   generateRXInstruction(cg, TR::InstOpCode::LA, node, offsetAddress, generateS390MemoryReference(array, indexRegister, TR::Compiler->om.contiguousArrayHeaderSizeInBytes(), cg));
    generateVRSbInstruction(cg, TR::InstOpCode::VLL, node, charBufferVector, loadLength, generateS390MemoryReference(offsetAddress, 0, cg));
 
    generateVRRbInstruction(cg, TR::InstOpCode::VFEE, node, resultVector, charBufferVector, valueVector, 0x1, elementSizeMask);
@@ -1008,19 +1009,19 @@ intrinsicIndexOf(TR::Node * node, TR::CodeGenerator * cg, bool isCompressed)
 
    generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, fullVectorLabel);
 
-   generateRIEInstruction(cg, TR::InstOpCode::CIJ, node, size, sizeOfVector, failureLabel, TR::InstOpCode::COND_BL);
+   generateRIEInstruction(cg, TR::InstOpCode::CIJ, node, length, cg->machine()->getVRFSize(), failureLabel, TR::InstOpCode::COND_BL);
 
    // Set loopcounter to 1/16 of the length, remainder has already been accounted for
    generateRSInstruction(cg, TR::InstOpCode::SRL, node, loopCounter, loopCounter, 4);
 
    generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, loopLabel);
 
-   generateVRXInstruction(cg, TR::InstOpCode::VL, node, charBufferVector, generateS390MemoryReference(address, indexRegister, headerSize, cg));
+   generateVRXInstruction(cg, TR::InstOpCode::VL, node, charBufferVector, generateS390MemoryReference(array, indexRegister, TR::Compiler->om.contiguousArrayHeaderSizeInBytes(), cg));
 
    generateVRRbInstruction(cg, TR::InstOpCode::VFEE, node, resultVector, charBufferVector, valueVector, 0x1, elementSizeMask);
    generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_MASK4, node, foundLabel);
 
-   generateRILInstruction(cg, TR::InstOpCode::AFI, node, indexRegister, sizeOfVector);
+   generateRILInstruction(cg, TR::InstOpCode::AFI, node, indexRegister, cg->machine()->getVRFSize());
 
    generateS390BranchInstruction(cg, TR::InstOpCode::BRCT, node, loopCounter, loopLabel);
 
@@ -1034,7 +1035,7 @@ intrinsicIndexOf(TR::Node * node, TR::CodeGenerator * cg, bool isCompressed)
    generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, foundLabelExtractedScratch);
    generateRRInstruction(cg, TR::InstOpCode::AR, node, indexRegister, scratch);
 
-   if (!isCompressed)
+   if (!isLatin1)
       {
       generateRSInstruction(cg, TR::InstOpCode::SRL, node, indexRegister, indexRegister, 1);
       }
@@ -1051,11 +1052,13 @@ intrinsicIndexOf(TR::Node * node, TR::CodeGenerator * cg, bool isCompressed)
    cg->stopUsingRegister(valueVector);
 
    node->setRegister(indexRegister);
+
    cg->recursivelyDecReferenceCount(node->getChild(0));
    cg->decReferenceCount(node->getChild(1));
    cg->decReferenceCount(node->getChild(2));
    cg->decReferenceCount(node->getChild(3));
    cg->decReferenceCount(node->getChild(4));
+
    return indexRegister;
    }
 
@@ -2050,15 +2053,6 @@ J9::Z::TreeEvaluator::monexitEvaluator(TR::Node * node, TR::CodeGenerator * cg)
    }
 
 ///////////////////////////////////////////////////////////////////////////////////////
-// monexitfence -- do nothing, just a placeholder for live monitor meta data
-///////////////////////////////////////////////////////////////////////////////////////
-TR::Register *
-J9::Z::TreeEvaluator::monexitfenceEvaluator(TR::Node * node, TR::CodeGenerator * cg)
-   {
-   return NULL;
-   }
-
-///////////////////////////////////////////////////////////////////////////////////////
 // asynccheckEvaluator: GC point
 ///////////////////////////////////////////////////////////////////////////////////////
 TR::Register *
@@ -3008,41 +3002,6 @@ J9::Z::TreeEvaluator::arraylengthEvaluator(TR::Node *node, TR::CodeGenerator *cg
 
 
 ///////////////////////////////////////////////////////////////////////////////////////
-// resolveCHKEvaluator - Resolve check a static, field or method. child 1 is reference
-//   to be resolved. Symbolref indicates failure action/destination
-///////////////////////////////////////////////////////////////////////////////////////
-   TR::Register *
-J9::Z::TreeEvaluator::resolveCHKEvaluator(TR::Node * node, TR::CodeGenerator * cg)
-   {
-   // No code is generated for the resolve check. The child will reference an
-   // unresolved symbol and all check handling is done via the corresponding
-   // snippet.
-   //
-   TR::Node * firstChild = node->getFirstChild();
-   bool fixRefCount = false;
-   if (cg->comp()->useCompressedPointers())
-      {
-      // for stores under ResolveCHKs, artificially bump
-      // down the reference count before evaluation (since stores
-      // return null as registers)
-      //
-      if (node->getFirstChild()->getOpCode().isStoreIndirect() &&
-            node->getFirstChild()->getReferenceCount() > 1)
-         {
-         node->getFirstChild()->decReferenceCount();
-         fixRefCount = true;
-         }
-      }
-   cg->evaluate(firstChild);
-   if (fixRefCount)
-      firstChild->incReferenceCount();
-
-   cg->decReferenceCount(firstChild);
-   return NULL;
-   }
-
-
-///////////////////////////////////////////////////////////////////////////////////////
 // DIVCHKEvaluator - Divide by zero check. child 1 is the divide. Symbolref indicates
 //    failure action/destination
 ///////////////////////////////////////////////////////////////////////////////////////
@@ -3759,7 +3718,7 @@ J9::Z::TreeEvaluator::ArrayCopyBNDCHKEvaluator(TR::Node * node, TR::CodeGenerato
    }
 
 void
-J9::Z::TreeEvaluator::generateFillInDataBlockSequenceForUnresolvedField(TR::CodeGenerator *cg, TR::Node *node, TR::Snippet *dataSnippet, bool isWrite, TR::Register *sideEffectRegister)
+J9::Z::TreeEvaluator::generateFillInDataBlockSequenceForUnresolvedField(TR::CodeGenerator *cg, TR::Node *node, TR::Snippet *dataSnippet, bool isWrite, TR::Register *sideEffectRegister, TR::Register *dataSnippetRegister)
    {
    TR::LabelSymbol *unresolvedLabel = generateLabelSymbol(cg);
    TR::LabelSymbol *mergePointLabel = generateLabelSymbol(cg);
@@ -4016,7 +3975,7 @@ void generateReportFieldAccessOutlinedInstructions(TR::Node *node, TR::LabelSymb
    }
 
 void
-J9::Z::TreeEvaluator::generateTestAndReportFieldWatchInstructions(TR::CodeGenerator *cg, TR::Node *node, TR::Snippet *dataSnippet, bool isWrite, TR::Register *sideEffectRegister, TR::Register *valueReg)
+J9::Z::TreeEvaluator::generateTestAndReportFieldWatchInstructions(TR::CodeGenerator *cg, TR::Node *node, TR::Snippet *dataSnippet, bool isWrite, TR::Register *sideEffectRegister, TR::Register *valueReg, TR::Register *dataSnippetRegister)
    {
    bool isResolved = !node->getSymbolReference()->isUnresolved();
    TR::LabelSymbol *mergePointLabel = generateLabelSymbol(cg);
@@ -4066,7 +4025,7 @@ J9::Z::TreeEvaluator::generateTestAndReportFieldWatchInstructions(TR::CodeGenera
          }
       }
    // First load the class flags into a register.
-   generateRXInstruction(cg, TR::InstOpCode::getLoadOpCode(), node, fieldClassFlags, generateS390MemoryReference(fieldClassReg, cg->comp()->fej9()->getOffsetOfClassFlags(), cg));
+   generateRXInstruction(cg, TR::InstOpCode::L, node, fieldClassFlags, generateS390MemoryReference(fieldClassReg, cg->comp()->fej9()->getOffsetOfClassFlags(), cg));
    // Then test the bit to test with the relevant flag to check if fieldwatch is enabled.
    generateRIInstruction(cg, TR::InstOpCode::TMLL, node, fieldClassFlags, J9ClassHasWatchedFields);
    // If Condition Code from above test is not 0, then we branch to OOL (instructions) to report the fieldwatch event. Otherwise fall through to mergePointLabel.
@@ -6553,7 +6512,6 @@ J9::Z::TreeEvaluator::VMmonentEvaluator(TR::Node * node, TR::CodeGenerator * cg)
 
    int32_t numDeps = 4;
 
-#if defined (J9VM_THR_LOCK_NURSERY)
    if (lwOffset <=0)
       {
       numDeps +=2;
@@ -6562,7 +6520,6 @@ J9::Z::TreeEvaluator::VMmonentEvaluator(TR::Node * node, TR::CodeGenerator * cg)
          numDeps +=2; // extra one for lit pool reg in disableZ9 mode
          }
       }
-#endif
 
    if (comp->getOptions()->enableDebugCounters())
       numDeps += 5;
@@ -6585,7 +6542,6 @@ J9::Z::TreeEvaluator::VMmonentEvaluator(TR::Node * node, TR::CodeGenerator * cg)
    static const char * peekFirst = feGetEnv("TR_PeekingMonEnter");
    // This debug option is for printing the locking mechanism.
    static int printMethodSignature = feGetEnv("PrintMethodSignatureForLockResEnt")? 1 : 0;
-#if defined (J9VM_THR_LOCK_NURSERY)
    if (lwOffset <= 0)
       {
       inlineRecursive = false;
@@ -6740,7 +6696,6 @@ J9::Z::TreeEvaluator::VMmonentEvaluator(TR::Node * node, TR::CodeGenerator * cg)
       lwOffset = 0;
       baseReg = tempRegister;
    }
-#endif
 
    // Lock Reservation happens only for objects with lockword.
    // evaluateLockForReservation may output three different results:
@@ -6916,17 +6871,13 @@ J9::Z::TreeEvaluator::VMmonentEvaluator(TR::Node * node, TR::CodeGenerator * cg)
          }
 
    bool needDeps = false;
-#if defined (J9VM_THR_LOCK_NURSERY)
    if (lwOffset <= 0 && disableOOL)
       needDeps = true;
-#endif
 
    generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, cFlowRegionEnd, conditions);
 
-#if defined (J9VM_THR_LOCK_NURSERY)
    if (lwOffset <= 0 && disableOOL)
       cFlowRegionEnd->setEndInternalControlFlow();
-#endif
    cg->stopUsingRegister(monitorReg);
    if (wasteReg)
       cg->stopUsingRegister(wasteReg);
@@ -6988,7 +6939,6 @@ J9::Z::TreeEvaluator::VMmonexitEvaluator(TR::Node * node, TR::CodeGenerator * cg
    TR::LabelSymbol *returnLabel                    = generateLabelSymbol(cg);
 
    int32_t numDeps = 4;
-#if defined (J9VM_THR_LOCK_NURSERY)
    if (lwOffset <=0)
       {
       numDeps +=2;
@@ -6997,7 +6947,6 @@ J9::Z::TreeEvaluator::VMmonexitEvaluator(TR::Node * node, TR::CodeGenerator * cg
          numDeps +=2; // extra one for lit pool reg in disableZ9 mode
          }
       }
-#endif
 
    if (comp->getOptions()->enableDebugCounters())
          numDeps += 4;
@@ -7018,7 +6967,6 @@ J9::Z::TreeEvaluator::VMmonexitEvaluator(TR::Node * node, TR::CodeGenerator * cg
    conditions->addPostCondition(monitorReg, TR::RealRegister::AssignAny);
 
 
-#if defined (J9VM_THR_LOCK_NURSERY)
    if (lwOffset <= 0)
       {
       inlineRecursive = false; // should not happen often, only on a subset of objects that don't have a lockword, set with option -Xlockword
@@ -7189,7 +7137,6 @@ J9::Z::TreeEvaluator::VMmonexitEvaluator(TR::Node * node, TR::CodeGenerator * cg
       baseReg = tempRegister;
       simpleLocking = true;
       }
-#endif
 
    // Lock Reservation happens only for objects with lockword.
    if (!simpleLocking && comp->getOption(TR_ReservingLocks))
@@ -7348,17 +7295,13 @@ J9::Z::TreeEvaluator::VMmonexitEvaluator(TR::Node * node, TR::CodeGenerator * cg
       outlinedHelperCall->swapInstructionListsWithCompilation();
       }
    bool needDeps = false;
-#if defined (J9VM_THR_LOCK_NURSERY)
    if (lwOffset <= 0 && disableOOL)
       needDeps = true;
-#endif
 
    generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, cFlowRegionEnd, conditions);
 
-#if defined (J9VM_THR_LOCK_NURSERY)
    if (lwOffset <= 0 && disableOOL)
       cFlowRegionEnd->setEndInternalControlFlow();
-#endif
 
 
    cg->stopUsingRegister(monitorReg);
@@ -7834,38 +7777,6 @@ genInitObjectHeader(TR::Node * node, TR::Instruction *& iCursor, TR_OpaqueClassB
          }
 #endif /* J9VM_OPT_NEW_OBJECT_HASH */
 #endif /* FLAGS_IN_CLASS_SLOT */
-
-
-#if !defined(J9VM_THR_LOCK_NURSERY)
-      // Init monitor
-      if (zeroReg != NULL)
-         {
-
-         if (TR::Compiler->target.is64Bit() && fej9->generateCompressedLockWord())
-            iCursor = generateRXInstruction(cg, TR::InstOpCode::ST, node, zeroReg,
-                  generateS390MemoryReference(resReg, TMP_OFFSETOF_J9OBJECT_MONITOR, cg), iCursor);
-         else
-            iCursor = generateRXInstruction(cg, TR::InstOpCode::getStoreOpCode(), node, zeroReg,
-                  generateS390MemoryReference(resReg, TMP_OFFSETOF_J9OBJECT_MONITOR, cg), iCursor);
-         }
-#endif
-#if defined(J9VM_THR_LOCK_NURSERY) && defined(J9VM_THR_LOCK_NURSERY_FAT_ARRAYS)
-      // Initialize monitor slots
-      // for arrays that have a lock
-      // word
-      int32_t lwOffset = fej9->getByteOffsetToLockword(classAddress);
-      if ((zeroReg != NULL) &&
-            (node->getOpCodeValue() != TR::New) &&
-            (lwOffset > 0))
-         {
-         if (TR::Compiler->target.is64Bit() && fej9->generateCompressedLockWord())
-            iCursor = generateRXInstruction(cg, TR::InstOpCode::ST, node, zeroReg,
-                  generateS390MemoryReference(resReg, TMP_OFFSETOF_J9INDEXABLEOBJECT_MONITOR, cg), iCursor);
-         else
-            iCursor = generateRXInstruction(cg, TR::InstOpCode::getStoreOpCode(), node, zeroReg,
-                  generateS390MemoryReference(resReg, TMP_OFFSETOF_J9INDEXABLEOBJECT_MONITOR, cg), iCursor);
-         }
-#endif
       }
    else
       {
@@ -8908,59 +8819,6 @@ J9::Z::TreeEvaluator::VMarrayCheckEvaluator(TR::Node *node, TR::CodeGenerator *c
 
 /////////////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////
-static bool
-inlineMathSQRT(TR::Node * node, TR::CodeGenerator * cg)
-   {
-   TR::Node * firstChild = node->getFirstChild();
-   TR::Register * targetRegister = NULL;
-   static char * nosupportSQRT = feGetEnv("TR_NOINLINESQRT");
-
-   if (NULL != nosupportSQRT)
-      {
-      return false;
-      }
-
-
-   // Calculate it for ourselves
-   if (firstChild->getOpCode().isLoadConst())
-      {
-      union { double valD; int64_t valI; } result;
-      targetRegister = cg->allocateRegister(TR_FPR);
-      result.valD = sqrt(firstChild->getDouble());
-      TR::S390ConstantDataSnippet * cds = cg->findOrCreate8ByteConstant(node, result.valI);
-      generateRXInstruction(cg, TR::InstOpCode::LD, node, targetRegister, generateS390MemoryReference(cds, cg, 0, node));
-      }
-   else
-      {
-      TR::Register * opRegister = NULL;
-
-      //See whether to use SQDB or SQDBR depending on how many times it is referenced
-      if (firstChild->isSingleRefUnevaluated() && firstChild->getOpCodeValue() == TR::dloadi)
-         {
-         targetRegister = cg->allocateRegister(TR_FPR);
-         generateRXEInstruction(cg, TR::InstOpCode::SQDB, node, targetRegister, generateS390MemoryReference(firstChild, cg), 0);
-         }
-      else
-         {
-         opRegister = cg->evaluate(firstChild);
-
-         if (cg->canClobberNodesRegister(firstChild))
-            {
-            targetRegister = opRegister;
-            }
-         else
-            {
-            targetRegister = cg->allocateRegister(TR_FPR);
-            }
-         generateRRInstruction(cg, TR::InstOpCode::SQDBR, node, targetRegister, opRegister);
-         }
-      }
-
-   node->setRegister(targetRegister);
-   cg->decReferenceCount(firstChild);
-   return true;
-   }
-
 static bool inlineIsAssignableFrom(TR::Node *node, TR::CodeGenerator *cg)
    {
    static char *disable = feGetEnv("TR_disableInlineIsAssignableFrom");
@@ -9128,12 +8986,6 @@ J9::Z::TreeEvaluator::VMinlineCallEvaluator(TR::Node * node, bool indirect, TR::
       {
       switch (methodSymbol->getRecognizedMethod())
          {
-         case TR::java_lang_StrictMath_sqrt:
-         case TR::java_lang_Math_sqrt:
-            {
-            callWasInlined = inlineMathSQRT(node, cg);
-            break;
-            }
          case TR::java_lang_Class_isAssignableFrom:
             {
             callWasInlined = inlineIsAssignableFrom(node, cg);

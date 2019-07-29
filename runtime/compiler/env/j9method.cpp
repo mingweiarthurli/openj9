@@ -1726,7 +1726,6 @@ bool storeValidationRecordIfNecessary(TR::Compilation * comp, J9ConstantPool *co
    J9UTF8 *className = J9ROMCLASS_CLASSNAME(definingClass->romClass);
    traceMsg(comp, "\tdefiningClass name %.*s\n", J9UTF8_LENGTH(className), J9UTF8_DATA(className));
 
-   J9ROMClass *romClass = NULL;
    void *classChain = NULL;
 
    // all kinds of validations may need to rely on the entire class chain, so make sure we can build one first
@@ -1749,7 +1748,7 @@ bool storeValidationRecordIfNecessary(TR::Compilation * comp, J9ConstantPool *co
          if ((*info)->_reloKind == reloKind)
             {
             if (isStatic)
-               inLocalList = (romClass == ((J9Class *)((*info)->_clazz))->romClass);
+               inLocalList = (definingClass->romClass == ((J9Class *)((*info)->_clazz))->romClass);
             else
                inLocalList = (classChain == (*info)->_classChain &&
                               cpIndex == (*info)->_cpIndex &&
@@ -3984,6 +3983,12 @@ TR_ResolvedJ9Method::TR_ResolvedJ9Method(TR_OpaqueMethodBlock * aMethod, TR_Fron
       {  TR::unknownMethod}
       };
 
+   static X BruteArgumentMoverHandleMethods[] =
+      {
+      {  TR::java_lang_invoke_BruteArgumentMoverHandle_permuteArgs,     11, "permuteArgs",   (int16_t)-1, "*"},
+      {  TR::unknownMethod}
+      };
+
    static X PermuteHandleMethods[] =
       {
       {x(TR::java_lang_invoke_PermuteHandle_permuteArgs, "permuteArgs", "(I)I")},
@@ -4508,6 +4513,7 @@ TR_ResolvedJ9Method::TR_ResolvedJ9Method(TR_OpaqueMethodBlock * aMethod, TR_Fron
       { "org/apache/harmony/luni/platform/OSMemory", OSMemoryMethods },
       { "java/util/concurrent/atomic/AtomicBoolean", JavaUtilConcurrentAtomicBooleanMethods },
       { "java/util/concurrent/atomic/AtomicInteger", JavaUtilConcurrentAtomicIntegerMethods },
+      { "java/lang/invoke/BruteArgumentMoverHandle", BruteArgumentMoverHandleMethods },
       { 0 }
       };
 
@@ -7473,6 +7479,31 @@ getMethodHandleThunkDetails(TR_J9ByteCodeIlGenerator *ilgen, TR::Compilation *co
    return NULL;
    }
 
+static TR::DataType typeFromSig(char sig)
+   {
+   switch (sig)
+      {
+      case 'L':
+      case '[':
+         return TR::Address;
+      case 'I':
+      case 'Z':
+      case 'B':
+      case 'S':
+      case 'C':
+         return TR::Int32;
+      case 'J':
+         return TR::Int64;
+      case 'F':
+         return TR::Float;
+      case 'D':
+         return TR::Double;
+      default:
+         break;
+      }
+   return TR::NoType;
+   }
+
 bool
 TR_J9ByteCodeIlGenerator::runFEMacro(TR::SymbolReference *symRef)
    {
@@ -7487,8 +7518,9 @@ TR_J9ByteCodeIlGenerator::runFEMacro(TR::SymbolReference *symRef)
    char *nextHandleSignature = NULL;
 
    TR_J9VMBase *fej9 = (TR_J9VMBase *)fe();
+   TR::RecognizedMethod rm = symRef->getSymbol()->castToMethodSymbol()->getMandatoryRecognizedMethod();
 
-   switch (symRef->getSymbol()->castToMethodSymbol()->getMandatoryRecognizedMethod())
+   switch (rm)
       {
       case TR::java_lang_invoke_CollectHandle_numArgsToPassThrough:
       case TR::java_lang_invoke_CollectHandle_numArgsToCollect:
@@ -7578,6 +7610,8 @@ TR_J9ByteCodeIlGenerator::runFEMacro(TR::SymbolReference *symRef)
          //
          char *targetSig = methodDescriptor+1; // skip parenthesis
          int firstArgSlot = _methodSymbol->isStatic()? 0 : 1;
+         traceMsg(comp(), "sourceSig %s targetSig %.*s\n", sourceSig, methodDescriptorLength, methodDescriptor);
+
          for (
             int32_t argIndex = 0;
             sourceSig[0] != ')';
@@ -7642,30 +7676,43 @@ TR_J9ByteCodeIlGenerator::runFEMacro(TR::SymbolReference *symRef)
             if (targetType[0] == 'L')
                {
                uintptrj_t methodHandle;
-               uintptrj_t arguments;
-               TR_OpaqueClassBlock *parmClass;
+               uintptrj_t sourceArguments;
+               TR_OpaqueClassBlock *sourceParmClass;
+               uintptrj_t targetArguments;
+               TR_OpaqueClassBlock *targetParmClass;
 
                   {
                   TR::VMAccessCriticalSection targetTypeL(fej9);
                   // We've already loaded the handle once, but must reload it because we released VM access in between.
                   methodHandle = *thunkDetails->getHandleRef();
-                  arguments = fej9->getReferenceField(fej9->getReferenceField(fej9->getReferenceField(
+                  targetArguments = fej9->getReferenceField(fej9->getReferenceField(fej9->getReferenceField(
                      methodHandle,
                      "next",             "Ljava/lang/invoke/MethodHandle;"),
                      "type",             "Ljava/lang/invoke/MethodType;"),
                      "arguments",        "[Ljava/lang/Class;");
-                  parmClass = (TR_OpaqueClassBlock*)(intptrj_t)fej9->getInt64Field(fej9->getReferenceElement(arguments, argIndex),
+                  targetParmClass = (TR_OpaqueClassBlock*)(intptrj_t)fej9->getInt64Field(fej9->getReferenceElement(targetArguments, argIndex),
+                                                                                   "vmRef" /* should use fej9->getOffsetOfClassFromJavaLangClassField() */);
+                  // Load callsite type and check if two types are compatible
+                  sourceArguments = fej9->getReferenceField(fej9->getReferenceField(
+                     methodHandle,
+                     "type",             "Ljava/lang/invoke/MethodType;"),
+                     "arguments",        "[Ljava/lang/Class;");
+                  sourceParmClass = (TR_OpaqueClassBlock*)(intptrj_t)fej9->getInt64Field(fej9->getReferenceElement(sourceArguments, argIndex),
                                                                                    "vmRef" /* should use fej9->getOffsetOfClassFromJavaLangClassField() */);
                   }
 
-               if (fej9->isInterfaceClass(parmClass) && isExplicit)
+               if (fej9->isInterfaceClass(targetParmClass) && isExplicit)
                   {
                   // explicitCastArguments specifies that we must not checkcast interfaces
+                  }
+               else if (sourceParmClass == targetParmClass || fej9->isInstanceOf(sourceParmClass, targetParmClass, false /*objectTypeIsFixed*/, true /*castTypeIsFixed*/) == TR_yes)
+                  {
+                  traceMsg(comp(), "source type and target type are compatible, omit checkcast for arg %d\n", argIndex);
                   }
                else
                   {
                   push(argValue);
-                  loadClassObject(parmClass);
+                  loadClassObject(targetParmClass);
                   genCheckCast();
                   pop();
                   }
@@ -7798,6 +7845,7 @@ TR_J9ByteCodeIlGenerator::runFEMacro(TR::SymbolReference *symRef)
          }
          return true;
       case TR::java_lang_invoke_ArgumentMoverHandle_permuteArgs:
+      case TR::java_lang_invoke_BruteArgumentMoverHandle_permuteArgs:
          {
          J9::MethodHandleThunkDetails *thunkDetails = getMethodHandleThunkDetails(this, comp(), symRef);
          if (!thunkDetails)
@@ -7837,10 +7885,19 @@ TR_J9ByteCodeIlGenerator::runFEMacro(TR::SymbolReference *symRef)
          TR::Node *originalArgs;
          char * oldSignature;
          char * newSignature;
+         TR::Node* extraArrayNode = NULL;
+         TR::Node* extraL[5];
+         if (rm == TR::java_lang_invoke_BruteArgumentMoverHandle_permuteArgs)
+            {
+            extraArrayNode = pop();
+            for (int i=4; i>=0; i--)
+                extraL[i] = pop();
+            }
 
             {
             TR::VMAccessCriticalSection invokePermuteHandlePermuteArgs(fej9);
             uintptrj_t methodHandle = *thunkDetails->getHandleRef();
+
             uintptrj_t permuteArray = fej9->getReferenceField(methodHandle, "permute", "[I");
 
             // Create temporary placeholder to cause argument expressions to be expanded
@@ -7874,6 +7931,7 @@ TR_J9ByteCodeIlGenerator::runFEMacro(TR::SymbolReference *symRef)
                   char *argType = nthSignatureArgument(i, nextHandleSignature+1);
                   char  extraName[10];
                   char *extraSignature;
+
                   switch (argType[0])
                      {
                      case 'L':
@@ -7886,12 +7944,33 @@ TR_J9ByteCodeIlGenerator::runFEMacro(TR::SymbolReference *symRef)
                         extraSignature = artificialSignature(stackAlloc, "(L" JSR292_ArgumentMoverHandle ";I).@", nextHandleSignature, i);
                         break;
                      }
+
                   if (comp()->getOption(TR_TraceILGen))
                      traceMsg(comp(), "  permuteArgs:   %d: call to %s.%s%s\n", argIndex, JSR292_ArgumentMoverHandle, extraName, extraSignature);
-                  TR::SymbolReference *extra = comp()->getSymRefTab()->methodSymRefFromName(_methodSymbol, JSR292_ArgumentMoverHandle, extraName, extraSignature, TR::MethodSymbol::Static);
-                  loadAuto(TR::Address, 0);
-                  loadConstant(TR::iconst, argIndex);
-                  genInvokeDirect(extra);
+
+                  // Get the argument type of next handle
+                  TR::DataType dataType = typeFromSig(argType[0]);
+
+                  if (dataType == TR::Address && extraArrayNode)
+                     {
+                     if (-1 - argIndex < 5)
+                        {
+                        push(extraL[-1-argIndex]);
+                        }
+                     else
+                        {
+                        push(extraArrayNode);
+                        loadConstant(TR::iconst, -1 - argIndex);
+                        loadArrayElement(TR::Address, comp()->il.opCodeForIndirectArrayLoad(TR::Address), false);
+                        }
+                     }
+                  else
+                     {
+                     TR::SymbolReference *extra = comp()->getSymRefTab()->methodSymRefFromName(_methodSymbol, JSR292_ArgumentMoverHandle, extraName, extraSignature, TR::MethodSymbol::Static);
+                     loadAuto(TR::Address, 0);
+                     loadConstant(TR::iconst, argIndex);
+                     genInvokeDirect(extra);
+                     }
                   }
                }
             if (comp()->getOption(TR_TraceILGen))

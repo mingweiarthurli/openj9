@@ -3592,8 +3592,12 @@ TR_J9ByteCodeIlGenerator::genIfImpl(TR::ILOpCodes nodeop)
    TR::Node * second = pop();
    TR::Node * first = pop();
 
+   static char *disableIfFolding = feGetEnv("TR_DisableIfFolding");
+   bool trace = comp()->getOption(TR_TraceILGen);
+
    TR::DataType type = first->getDataType();
-   if (branchBC > _bcIndex &&
+   if (!disableIfFolding &&
+       branchBC > _bcIndex &&
        first->getOpCode().isLoadConst() &&
        second->getOpCode().isLoadConst() &&
        type != TR::Address &&
@@ -3629,15 +3633,30 @@ TR_J9ByteCodeIlGenerator::genIfImpl(TR::ILOpCodes nodeop)
 
       if (_blocksToInline)
          {
-         if (comp()->getOption(TR_TraceILGen))
+         if (trace)
             traceMsg(comp(), "Not folding the if because of partial inlining\n");
          }
       else
          {
-         if (comp()->getOption(TR_TraceILGen))
+         if (trace)
             traceMsg(comp(), "%s\n", branchTaken ? "taking the branch" : "fall through");
 
-         return branchTaken ? branchBC : fallThruBC;
+         if (branchTaken)
+            {
+            // Folding the if is equivalent to turning it into a goto. We can't just return
+            // branchBC because there can be arbitrary bytecodes between the `if` and branchBC.
+            // To get a correct CFG, a goto is required.
+            //
+            return genGoto(branchBC);
+            }
+         else
+            {
+            // In this case, folding the if is equivalent to removing the if bytecode. The fall
+            // through bytecodes can live in the same block as there is no branch out after the
+            // folding.
+            //
+            return fallThruBC;
+            }
          }
       }
 
@@ -4420,7 +4439,7 @@ TR_J9ByteCodeIlGenerator::genInvoke(TR::SymbolReference * symRef, TR::Node *indi
       return node;
       }
 
-#if !defined(TR_HOST_ARM)
+#if !defined(TR_HOST_ARM) && !defined(TR_HOST_ARM64)
 
    if (comp()->supportsQuadOptimization())
       {
@@ -4559,7 +4578,7 @@ TR_J9ByteCodeIlGenerator::genInvoke(TR::SymbolReference * symRef, TR::Node *indi
          	break;
          }
       }
-#endif // TR_HOST_ARM
+#endif
 
    if (symbol->getRecognizedMethod() == TR::com_ibm_Compiler_Internal__TR_Prefetch)
       {

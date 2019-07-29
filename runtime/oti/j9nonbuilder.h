@@ -1,6 +1,6 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
  *
+ * Copyright (c) 1991, 2019 IBM Corp. and others
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
  * distribution and is available at https://www.eclipse.org/legal/epl-2.0/
@@ -1293,6 +1293,7 @@ typedef struct J9SharedClassConfig {
 	void  ( *jvmPhaseChange)(struct J9VMThread *currentThread, UDATA phase);
 	void  (*storeGCHints)(struct J9VMThread* currentThread, UDATA heapSize1, UDATA heapSize2, BOOLEAN forceReplace);
 	IDATA  (*findGCHints)(struct J9VMThread* currentThread, UDATA *heapSize1, UDATA *heapSize2);
+	void  ( *updateClasspathOpenState)(struct J9JavaVM* vm, struct J9ClassPathEntry* classPathEntries, UDATA entryIndex, UDATA entryCount, BOOLEAN isOpen);
 	struct J9MemorySegment* metadataMemorySegment;
 	struct J9Pool* classnameFilterPool;
 	U_32 softMaxBytes;
@@ -1509,9 +1510,7 @@ typedef struct J9ObjectMonitor {
 	UDATA proDeflationCount;
 	UDATA antiDeflationCount;
 #endif /* J9VM_THR_SMART_DEFLATION */
-#if defined(J9VM_THR_LOCK_NURSERY)
 	j9objectmonitor_t alternateLockword;
-#endif /* J9VM_THR_LOCK_NURSERY */
 	U_32 hash;
 } J9ObjectMonitor;
 
@@ -1574,6 +1573,7 @@ typedef struct J9HiddenInstanceField {
 /* @ddr_namespace: map_to_type=J9ROMFieldOffsetWalkState */
 
 typedef struct J9ROMFieldOffsetWalkState {
+	struct J9JavaVM *vm;
 	struct J9ROMFieldWalkState fieldWalkState;
 	struct J9ROMFieldOffsetWalkResult result;
 	struct J9ROMClass* romClass;
@@ -2824,17 +2824,13 @@ typedef struct J9Object {
 #define OBJECT_HEADER_MONITOR_ENTER_INTERRUPTED  1
 #define OBJECT_HEADER_ILLEGAL_MONITOR_STATE  2
 
-typedef struct J9NonIndexableObject {
-	j9objectclass_t clazz;
-} J9NonIndexableObject;
-
-typedef struct J9NonIndexableObjectCompressed {
+typedef struct J9ObjectCompressed {
 	U_32 clazz;
-} J9NonIndexableObjectCompressed;
+} J9ObjectCompressed;
 
-typedef struct J9NonIndexableObjectFull {
+typedef struct J9ObjectFull {
 	UDATA clazz;
-} J9NonIndexableObjectFull;
+} J9ObjectFull;
 
 typedef struct J9IndexableObject {
 	j9objectclass_t clazz;
@@ -2978,6 +2974,8 @@ typedef struct J9Class {
 	UDATA* instanceLeafDescription;
 #endif /* J9VM_GC_LEAF_BITS */
 	UDATA instanceHotFieldDescription;
+	UDATA selfReferencingField1;
+	UDATA selfReferencingField2;
 	struct J9Method* initializerCache;
 	UDATA romableAotITable;
 	UDATA packageID;
@@ -3044,6 +3042,8 @@ typedef struct J9ArrayClass {
 	UDATA* instanceLeafDescription;
 #endif /* J9VM_GC_LEAF_BITS */
 	UDATA instanceHotFieldDescription;
+	UDATA selfReferencingField1;
+	UDATA selfReferencingField2;
 	struct J9Method* initializerCache;
 	UDATA romableAotITable;
 	UDATA packageID;
@@ -4702,9 +4702,7 @@ typedef struct J9InternalVMFunctions {
 	UDATA  ( *queryLogOptions)(struct J9JavaVM *vm, I_32 buffer_size, void *options_buffer, I_32 *data_size) ;
 	UDATA  ( *setLogOptions)(struct J9JavaVM *vm, char *options) ;
 	void  ( *exitJavaThread)(struct J9JavaVM * vm) ;
-#if defined(J9VM_THR_LOCK_NURSERY)
 	void  ( *cacheObjectMonitorForLookup)(struct J9JavaVM* vm, struct J9VMThread* vmStruct, struct J9ObjectMonitor* objectMonitor) ;
-#endif /* J9VM_THR_LOCK_NURSERY */
 	void*  ( *jniArrayAllocateMemoryFromThread)(struct J9VMThread* vmThread, UDATA sizeInBytes) ;
 	void  ( *jniArrayFreeMemoryFromThread)(struct J9VMThread* vmThread, void* location) ;
 	void  (JNICALL *sendForGenericInvoke)(struct J9VMThread *vmThread, j9object_t methodHandle, j9object_t methodType, UDATA dropFirstArg) ;
@@ -5041,7 +5039,7 @@ typedef struct J9VMThread {
 #define J9VMTHREAD_COMPRESS_OBJECT_REFERENCES(vmThread) FALSE
 #endif /* OMR_GC_COMPRESSED_POINTERS */
 #define J9VMTHREAD_REFERENCE_SIZE(vmThread) (J9VMTHREAD_COMPRESS_OBJECT_REFERENCES(vmThread) ? sizeof(U_32) : sizeof(UDATA))
-#define J9VMTHREAD_MIXED_HEADER_SIZE(vmThread) (J9VMTHREAD_COMPRESS_OBJECT_REFERENCES(vmThread) ? sizeof(J9NonIndexableObjectCompressed) : sizeof(J9NonIndexableObjectFull))
+#define J9VMTHREAD_OBJECT_HEADER_SIZE(vmThread) (J9VMTHREAD_COMPRESS_OBJECT_REFERENCES(vmThread) ? sizeof(J9ObjectCompressed) : sizeof(J9ObjectFull))
 #define J9VMTHREAD_CONTIGUOUS_HEADER_SIZE(vmThread) (J9VMTHREAD_COMPRESS_OBJECT_REFERENCES(vmThread) ? sizeof(J9IndexableObjectContiguousCompressed) : sizeof(J9IndexableObjectContiguousFull))
 #define J9VMTHREAD_DISCONTIGUOUS_HEADER_SIZE(vmThread) (J9VMTHREAD_COMPRESS_OBJECT_REFERENCES(vmThread) ? sizeof(J9IndexableObjectDiscontiguousCompressed) : sizeof(J9IndexableObjectDiscontiguousFull))
 
@@ -5493,7 +5491,7 @@ typedef struct J9JavaVM {
 #define J9JAVAVM_COMPRESS_OBJECT_REFERENCES(vm) FALSE
 #endif /* OMR_GC_COMPRESSED_POINTERS */
 #define J9JAVAVM_REFERENCE_SIZE(vm) (J9JAVAVM_COMPRESS_OBJECT_REFERENCES(vm) ? sizeof(U_32) : sizeof(UDATA))
-#define J9JAVAVM_MIXED_HEADER_SIZE(vm) (J9JAVAVM_COMPRESS_OBJECT_REFERENCES(vm) ? sizeof(J9NonIndexableObjectCompressed) : sizeof(J9NonIndexableObjectFull))
+#define J9JAVAVM_OBJECT_HEADER_SIZE(vm) (J9JAVAVM_COMPRESS_OBJECT_REFERENCES(vm) ? sizeof(J9ObjectCompressed) : sizeof(J9ObjectFull))
 #define J9JAVAVM_CONTIGUOUS_HEADER_SIZE(vm) (J9JAVAVM_COMPRESS_OBJECT_REFERENCES(vm) ? sizeof(J9IndexableObjectContiguousCompressed) : sizeof(J9IndexableObjectContiguousFull))
 #define J9JAVAVM_DISCONTIGUOUS_HEADER_SIZE(vm) (J9JAVAVM_COMPRESS_OBJECT_REFERENCES(vm) ? sizeof(J9IndexableObjectDiscontiguousCompressed) : sizeof(J9IndexableObjectDiscontiguousFull))
 

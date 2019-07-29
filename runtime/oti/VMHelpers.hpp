@@ -780,7 +780,17 @@ done:
 	static VMINLINE j9object_t
 	allocateIndexableObject(J9VMThread *currentThread, MM_ObjectAllocationAPI *objectAllocate, J9Class *arrayClass, U_32 size, bool initializeSlots = true, bool memoryBarrier = true, bool sizeCheck = true)
 	{
-		j9object_t instance = objectAllocate->inlineAllocateIndexableObject(currentThread, arrayClass, size, initializeSlots, memoryBarrier, sizeCheck);
+		j9object_t instance = NULL;
+
+#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+		if (J9_IS_J9CLASS_FLATTENED(arrayClass)) {
+			instance = objectAllocate->inlineAllocateIndexableValueTypeObject(currentThread, arrayClass, size, initializeSlots, memoryBarrier, sizeCheck);
+		} else
+#endif /* J9VM_OPT_VALHALLA_VALUE_TYPES */
+		{
+			instance = objectAllocate->inlineAllocateIndexableObject(currentThread, arrayClass, size, initializeSlots, memoryBarrier, sizeCheck);
+		}
+
 		if (NULL == instance) {
 			instance = currentThread->javaVM->memoryManagerFunctions->J9AllocateIndexableObject(currentThread, arrayClass, size, J9_GC_ALLOCATE_OBJECT_NON_INSTRUMENTABLE);
 			if (J9_UNEXPECTED(NULL == instance)) {
@@ -1429,41 +1439,6 @@ exit:
 	findNativeMethodFrame(J9VMThread *currentThread)
 	{
 		return (J9SFJNINativeMethodFrame*)((UDATA)currentThread->sp + (UDATA)currentThread->literals);
-	}
-
-	/**
-	 * Checks whether a ROM method is <clinit> or <init>
-	 *
-	 * @param romMethod[in] the J9ROMMethod to test
-	 * @param isStatic[in] true to check for <clinit>, false to check for <init>
-	 *
-	 * @returns true if the method is a constructor, false if not
-	 */
-	static VMINLINE bool
-	romMethodIsInitializer(J9ROMMethod *romMethod, bool isStatic)
-	{
-		U_8 *name = J9UTF8_DATA(J9ROMMETHOD_NAME(romMethod));
-		/* No method may have an empty name, so reading the first byte is always
-		 * legal. The verifier only allows <clinit> or <init> to start with "<",
-		 * so reading the second byte is legal if the first byte is "<".
-		 */
-		return ('<' == name[0]) && ((isStatic ? 'c' : 'i') == name[1]);
-	}
-
-	/**
-	 * Checks whether a class enforces the final field setting rules.
-	 * Classes which are class file version 53 or above enforce the rule
-	 * unless the class was defined in a way that exempts it from validation.
-	 *
-	 * @param ramClass[in] the J9Class to test
-	 *
-	 * @returns true if the class enforces the rules, false if not
-	 */
-	static VMINLINE bool
-	ramClassChecksFinalStores(J9Class *ramClass)
-	{
-		return (!J9CLASS_IS_EXEMPT_FROM_VALIDATION(ramClass))
-			&& (ramClass->romClass->majorVersion >= 53);
 	}
 
 };
