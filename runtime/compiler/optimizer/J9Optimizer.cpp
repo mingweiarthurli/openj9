@@ -752,7 +752,7 @@ J9::Optimizer::Optimizer(TR::Compilation *comp, TR::ResolvedMethodSymbol *method
    _opts[OMR::targetedInlining]->setOptPolicy(new (comp->allocator()) TR_J9JSR292InlinerPolicy(comp));
 
    _opts[OMR::trivialInlining] =
-      new (comp->allocator()) TR::OptimizationManager(self(), TR_TrivialInliner::create, OMR::trivialInlining);
+      new (comp->allocator()) TR::OptimizationManager(self(), TR::SelectOpt<TR_EnableBenefitInliner, OMR::BenefitInlinerWrapper, TR_TrivialInliner>::create, OMR::trivialInlining);
 
    _opts[OMR::dynamicLiteralPool] =
       new (comp->allocator()) TR::OptimizationManager(self(), TR_DynamicLiteralPool::create, OMR::dynamicLiteralPool);
