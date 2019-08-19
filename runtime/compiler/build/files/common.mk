@@ -184,7 +184,7 @@ JIT_PRODUCT_BACKEND_SOURCES+=\
     omr/compiler/optimizer/AbsOpStack.cpp \
     omr/compiler/optimizer/AbsOpStackStatic.cpp \
     omr/compiler/optimizer/AbsEnv.cpp \
-    omr/compiler/optimizer/AbsLoopAnalyzer.cpp \
+    omr/compiler/optimizer/AbstractInterpretation.cpp \
     omr/compiler/optimizer/AbsEnvStatic.cpp \
     omr/compiler/optimizer/MethodSummary.cpp \
     omr/compiler/optimizer/AbsVarArray.cpp \
