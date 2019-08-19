@@ -180,6 +180,7 @@ JIT_PRODUCT_BACKEND_SOURCES+=\
     omr/compiler/optimizer/InductionVariable.cpp \
     omr/compiler/optimizer/Inliner.cpp \
     omr/compiler/optimizer/BenefitInliner.cpp \
+    omr/compiler/optimizer/IDTConstructor.cpp \
     omr/compiler/optimizer/AbsOpStack.cpp \
     omr/compiler/optimizer/AbsOpStackStatic.cpp \
     omr/compiler/optimizer/AbsEnv.cpp \

@@ -668,7 +668,7 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
       return returnCleanup(1);
       }
 
-   int32_t size = calltarget->_myCallSite ? (calltarget->_myCallSite->_isIndirectCall ? 5 : 0) : 0;
+   int32_t size = stopAfterCFG ? 0 : calltarget->_myCallSite ? (calltarget->_myCallSite->_isIndirectCall ? 5 : 0) : 0;
 
    TR_J9ByteCodeIterator bci(0, static_cast<TR_ResolvedJ9Method *> (calltarget->_calleeMethod), static_cast<TR_J9VMBase *> (comp()->fej9()), comp());
 
@@ -1047,7 +1047,7 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
             flags[i].set(isUnsanitizeable);
             break;
          default:
-         	break;
+            break;
          }
 
       if (flags[i].testAny(isUnsanitizeable))
@@ -1058,10 +1058,10 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
          debugTrace(tracer(),"BC iteration at index %d.", i); //only print this index if we are debugging
 
       bcSizes[i] = size;
-      //bool bbStartf = flags[i].testAny(bbStart);
-      //bool isBranchf = flags[i].testAny(isBranch);
-      //bci.printByteCode();
-      //traceMsg(comp(), "\ni = %d, bcSizes[i] = %d, bbStart = %s, isBranch %s\n", i, size, bbStartf ? "true" : "false", isBranchf ? "true" : "false");
+      bool bbStartf = flags[i].testAny(bbStart);
+      bool isBranchf = flags[i].testAny(isBranch);
+      bci.printByteCode();
+      traceMsg(comp(), "\nbc = %d, i = %d, bcSizes[i] = %d, bbStart = %s, isBranch %s\n", bc, i, size, bbStartf ? "true" : "false", isBranchf ? "true" : "false");
       }
 
    auto sizeBeforeAdjustment = size;
