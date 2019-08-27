@@ -181,7 +181,6 @@ JIT_PRODUCT_BACKEND_SOURCES+=\
     omr/compiler/optimizer/GlobalRegisterAllocator.cpp \
     omr/compiler/optimizer/InductionVariable.cpp \
     omr/compiler/optimizer/Inliner.cpp \
-    omr/compiler/optimizer/SelectInliner.cpp \
     omr/compiler/optimizer/BenefitInliner.cpp \
     omr/compiler/optimizer/IDTConstructor.cpp \
     omr/compiler/optimizer/AbsOpStack.cpp \

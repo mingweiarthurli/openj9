@@ -683,10 +683,6 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
          case J9BCReturnB:
          case J9BCReturnZ:
          case J9BCgenericReturn:
-         case J9BCReturnC:
-         case J9BCReturnS:
-         case J9BCReturnB:
-         case J9BCReturnZ:
             flags[i].set(isBranch);
             blockStart = true;
             break;
@@ -951,7 +947,7 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
       bcSizes[i] = size;
       bool bbStartf = flags[i].testAny(bbStart);
       bool isBranchf = flags[i].testAny(isBranch);
-      bci.printByteCode();
+      //bci.printByteCode();
       traceMsg(comp(), "\nbc = %d, i = %d, bcSizes[i] = %d, bbStart = %s, isBranch %s\n", bc, i, size, bbStartf ? "true" : "false", isBranchf ? "true" : "false");
       }
 
@@ -1105,7 +1101,7 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
                debugTrace(tracer(),"adding a fallthrough edge between block %p %d and %p %d", currentBlock, currentBlock->getNumber(), newBlock, newBlock->getNumber());
                debugTrace(tracer(),"joining nodes between blocks %p %d and %p %d", currentBlock, currentBlock->getNumber(), newBlock, newBlock->getNumber());
                currentBlock->getExit()->join(newBlock->getEntry());
-               cfg.addEdge(currentBlock, newBlock);
+               cfg->addEdge(currentBlock, newBlock);
                } 
             else 
                {

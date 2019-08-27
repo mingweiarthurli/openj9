@@ -50,7 +50,6 @@
 #include "optimizer/Optimizations.hpp"
 #include "optimizer/PartialRedundancy.hpp"
 #include "optimizer/ProfileGenerator.hpp"
-#include "optimizer/SelectInliner.hpp"
 #include "optimizer/SequentialStoreSimplifier.hpp"
 #include "optimizer/SignExtendLoads.hpp"
 #include "optimizer/StringBuilderTransformer.hpp"
@@ -79,6 +78,8 @@
 #include "optimizer/UnsafeFastPath.hpp"
 #include "optimizer/VarHandleTransformer.hpp"
 #include "optimizer/StaticFinalFieldFolding.hpp"
+#include "optimizer/SelectOpt.hpp"
+#include "optimizer/BenefitInliner.hpp"
 
 
 static const OptimizationStrategy J9EarlyGlobalOpts[] =
@@ -253,7 +254,7 @@ static const OptimizationStrategy coldStrategyOpts[] =
    { OMR::coldBlockOutlining                                                    },
    { OMR::stringBuilderTransformer,                  OMR::IfNotQuickStart            },
    { OMR::stringPeepholes,                           OMR::IfNotQuickStart            }, // need stringpeepholes to catch bigdecimal patterns
-   { OMR::selectInliner                                                         },
+   { OMR::trivialInlining                                                       },
    { OMR::jProfilingBlock                                                       },
    { OMR::virtualGuardTailSplitter                                              },
    { OMR::recompilationModifier,                     OMR::IfEnabled                  },
@@ -384,7 +385,7 @@ static const OptimizationStrategy warmStrategyOpts[] =
 //
 static const OptimizationStrategy reducedWarmStrategyOpts[] =
    {
-   { OMR::selectInliner                                                        },
+   { OMR::inlining                                                              },
    { OMR::staticFinalFieldFolding,                                              },
    { OMR::osrGuardInsertion,                         OMR::IfVoluntaryOSR       },
    { OMR::osrExceptionEdgeRemoval                                               }, // most inlining is done by now
@@ -746,7 +747,7 @@ J9::Optimizer::Optimizer(TR::Compilation *comp, TR::ResolvedMethodSymbol *method
    // initialize additional J9 optimizations
 
    _opts[OMR::inlining] =
-      new (comp->allocator()) TR::OptimizationManager(self(), TR_Inliner::create, OMR::inlining);
+      new (comp->allocator()) TR::OptimizationManager(self(), TR::SelectOpt<TR_EnableBenefitInliner, OMR::BenefitInlinerWrapper, TR_Inliner>::create, OMR::inlining);
    _opts[OMR::targetedInlining] =
       new (comp->allocator()) TR::OptimizationManager(self(), TR_Inliner::create, OMR::targetedInlining);
    _opts[OMR::targetedInlining]->setOptPolicy(new (comp->allocator()) TR_J9JSR292InlinerPolicy(comp));
@@ -819,8 +820,6 @@ J9::Optimizer::Optimizer(TR::Compilation *comp, TR::ResolvedMethodSymbol *method
    _opts[OMR::staticFinalFieldFolding] =
          new (comp->allocator()) TR::OptimizationManager(self(), TR_StaticFinalFieldFolding::create, OMR::staticFinalFieldFolding);
    // NOTE: Please add new J9 optimizations here!
-   _opts[OMR::selectInliner] =
-      new (comp->allocator()) TR::OptimizationManager(self(), OMR::SelectInliner::create, OMR::selectInliner);
 
    // initialize additional J9 optimization groups
 
