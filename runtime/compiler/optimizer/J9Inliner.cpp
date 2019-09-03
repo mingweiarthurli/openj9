@@ -481,6 +481,7 @@ bool TR_InlinerBase::inlineCallTarget(TR_CallStack *callStack, TR_CallTarget *ca
       }
 
    bool successful = inlineCallTarget2(callStack, calltarget, cursorTreeTop, inlinefromgraph, 99);
+   popBenefitInlinerInformation();
 
    // if inlining fails, we need to tell decInlineDepth to remove elements that
    // we added during inlineCallTarget2
