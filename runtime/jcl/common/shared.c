@@ -70,6 +70,10 @@ typedef struct URLElements {
 	jstring protocolObj;
 } URLElements;
 
+typedef struct cacheInfo {
+  jlong romClassStart;
+  jint romClassSize;
+} cacheInfo;
 
 static J9ClassPathEntry* getCachedURL(JNIEnv* env, jint helperID, const char* pathChars, jsize pathLen, UDATA cpeType, U_16 cpeStatus);
 static const char* copyString(J9PortLibrary* portlib, const char* toCopy, UDATA length, J9SharedStringFarm** farmRoot, const J9UTF8** makeUTF8);
@@ -1593,6 +1597,45 @@ _error:
 	Trc_JCL_com_ibm_oti_shared_SharedClassURLClasspathHelperImpl_storeSharedClassImpl_ExitError(env);
 #endif		/* J9VM_OPT_SHARED_CLASSES */
 	return FALSE;
+}
+
+jbyteArray JNICALL
+Java_com_ibm_oti_shared_SharedClassURLClasspathHelperImpl_findSharedCacheImpl(JNIEnv* env, jobject thisObj, jint helperID,
+		jobject loaderObj, jobjectArray urlArrayObj, 
+                jint urlCount, jint confirmedCount)
+{
+#if defined(J9VM_OPT_SHARED_CLASSES)
+
+  //cookie layout: [cacheStartAddress, cacheSize]
+  int cacheInfoCookieSize = sizeof(uintptr_t)+sizeof(uint32_t);
+  jbyteArray cacheInfoCookie = (*env)->NewByteArray(env, cacheInfoCookieSize);
+  struct cacheInfo cacheInfoBuffer = {0};
+
+  J9VMThread* vmThread = ((J9VMThread*)env);
+  J9JavaVM* vm = vmThread->javaVM;
+  struct J9SharedClassConfig* sharedCacheConfig = vm->sharedClassConfig;
+
+  J9SharedClassJavacoreDataDescriptor javacoreData;
+  memset(&javacoreData, 0, sizeof(J9SharedClassJavacoreDataDescriptor));
+
+  if ( 1 == sharedCacheConfig->getJavacoreData(vm, &javacoreData) ) {
+    uintptr_t romClassStart = (uintptr_t) javacoreData.romClassStart;
+    uint32_t romClassSize = (uint32_t) (javacoreData.cacheEndAddress-javacoreData.romClassStart);
+
+    cacheInfoBuffer.romClassStart = romClassStart;
+    cacheInfoBuffer.romClassSize = romClassSize;
+
+    (*env)->SetByteArrayRegion(env, cacheInfoCookie, (jsize)0, cacheInfoCookieSize, (jbyte*)&cacheInfoBuffer);
+    return cacheInfoCookie;
+
+  }else{
+    //this fail should be handled by receiver
+    return 0;
+  }
+
+#endif          /* J9VM_OPT_SHARED_CLASSES */
+
+  return 0;
 }
 
 jint JNICALL 
