@@ -71,6 +71,8 @@ jboolean JNICALL
 Java_com_ibm_oti_shared_SharedClassTokenHelperImpl_findSharedClassImpl2(JNIEnv* env, jobject thisObj, jint helperID, jstring classNameObj, jobject loaderObj, jstring tokenObj, jboolean doFind, jboolean doStore, jbyteArray romClassCookie);
 jint JNICALL 
 Java_com_ibm_oti_shared_SharedClassTokenHelperImpl_storeSharedClassImpl2(JNIEnv* env, jobject thisObj, jint helperID, jobject loaderObj, jstring tokenObj, jclass clazzObj, jbyteArray nativeFlags);
+jbyteArray JNICALL
+Java_com_ibm_oti_shared_SharedClassURLClasspathHelperImpl_findSharedCacheImpl(JNIEnv* env, jobject thisObj, jint helperID, jobject loaderObj, jobjectArray urlArrayObj, jint urlCount, jint confirmedCount);
 jint JNICALL 
 Java_com_ibm_oti_shared_SharedClassURLClasspathHelperImpl_findSharedClassImpl2(JNIEnv* env, jobject thisObj, jint helperID, jstring partitionObj, jstring classNameObj, jobject loaderObj, jobjectArray urlArrayObj, jboolean doFind, jboolean doStore, jint urlCount, jint confirmedCount, jbyteArray romClassCookie);
 jint JNICALL 
