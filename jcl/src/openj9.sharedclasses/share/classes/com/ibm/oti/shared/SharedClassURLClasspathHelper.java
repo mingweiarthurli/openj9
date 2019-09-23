@@ -147,6 +147,14 @@ public interface SharedClassURLClasspathHelper extends SharedClassHelper {
 		public void setIndex(int index);
 	}
 
+    /**                                                                                                                               
+         * <p>Finds the shared cache start address.</p>             
+         *
+	 * @return              double.                                                                                                       
+         *                                      A double describing the address of the shared class cache found, or 0 for none found. 
+	 */
+        public byte[] findSharedCache();
+    
 	/**
 	 * <p>Finds a class in the shared cache by using the class name given (implicitly using the caller's classpath).</p>
 	 * 

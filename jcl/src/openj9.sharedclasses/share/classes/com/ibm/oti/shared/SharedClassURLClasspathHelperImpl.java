@@ -72,6 +72,9 @@ final class SharedClassURLClasspathHelperImpl extends SharedClassAbstractHelper 
 		}
 	}
 
+        private native byte[] findSharedCacheImpl(int loaderId, ClassLoader loader, URL[] loaderURLs,
+                        int loaderURLCount, int confirmedURLCount);
+    
 	private native int findSharedClassImpl2(int loaderId, String partition, String className, ClassLoader loader, URL[] loaderURLs, 
 			boolean doFind, boolean doStore, int loaderURLCount, int confirmedURLCount, byte[] romClassCookie);
 
@@ -83,7 +86,40 @@ final class SharedClassURLClasspathHelperImpl extends SharedClassAbstractHelper 
 	 * essentially flushes the classpath caches and forces them to rebuild.
 	 */
 	private native void notifyClasspathChange2(ClassLoader classloader);
-	
+    
+    @Override
+    public byte[] findSharedCache(){
+	  ClassLoader loader = getClassLoader();
+	  if (loader == null) {
+		    /*[MSG "K059f", "ClassLoader has been garbage collected. Returning null."]*/
+                        printVerboseInfo(Msg.getString("K059f")); //$NON-NLS-1$                                                           
+                        return null;
+                }
+                if (!canFind) {
+                        return null;
+                }
+                if (invalidURLExists) {
+		    /* Any URL which has its protocol other than 'jar:' or 'file:' is not supported by                                
+                         * shared class cache and is considered invalid.                                                                  
+                         * invalidURLExists = true indicates classpath contains an invalid URL,                                           
+                         * As such there is no point in calling native method findSharedClassImpl2()                                      
+                         * since it is bound to fail when creating classpath entries.                                                     
+                         */
+                        /*[MSG "K05a4", "Classpath contains an invalid URL. Returning null."]*/
+                        printVerboseInfo(Msg.getString("K05a4")); //$NON-NLS-1$                                                           
+                        return null;
+                }
+                /* Important not to call findSharedClassImpl if confirmedCount==0 as 0 means "confirmedCount not set" */
+                if (confirmedCount==0) {
+                        /*[MSG "K05a5", "There are no confirmed elements in the classpath. Returning null."]*/
+                        printVerboseInfo(Msg.getString("K05a5")); //$NON-NLS-1$                                                           
+                        return null;
+                }
+		byte[] cacheInfoCookie = findSharedCacheImpl(this.id, loader, this.urls, this.urlCount, this.confirmedCount);
+
+                return cacheInfoCookie;
+    }
+    
 	/* Notify the open state to all the jar/zip files on the URL classpath to force a timestamp check once */
 	private native void notifyClasspathChange3(int loaderId, ClassLoader classloader, URL[] loaderURLs, int urlIndex, int loaderURLCount, boolean isOpen);
 
