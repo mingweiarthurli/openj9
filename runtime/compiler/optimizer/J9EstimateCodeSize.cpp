@@ -948,7 +948,7 @@ TR_J9EstimateCodeSize::realEstimateCodeSize(TR_CallTarget *calltarget, TR_CallSt
       bool bbStartf = flags[i].testAny(bbStart);
       bool isBranchf = flags[i].testAny(isBranch);
       //bci.printByteCode();
-      traceMsg(comp(), "\nbc = %d, i = %d, bcSizes[i] = %d, bbStart = %s, isBranch %s\n", bc, i, size, bbStartf ? "true" : "false", isBranchf ? "true" : "false");
+      //traceMsg(comp(), "\nbc = %d, i = %d, bcSizes[i] = %d, bbStart = %s, isBranch %s\n", bc, i, size, bbStartf ? "true" : "false", isBranchf ? "true" : "false");
       }
 
    auto sizeBeforeAdjustment = size;
