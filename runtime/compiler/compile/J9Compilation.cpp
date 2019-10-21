@@ -95,7 +95,7 @@ void operator delete(void *)
    TR_ASSERT(0, "Invalid use of global operator delete");
    }
 #endif /* !defined(JITSERVER_SUPPORT) */
-*/
+
 
 
 

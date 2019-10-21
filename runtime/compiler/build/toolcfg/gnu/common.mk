@@ -105,13 +105,13 @@ CX_FLAGS+=\
     -fno-strict-aliasing \
     -fstack-protector
 
-#ifneq ($(JITSERVER_SUPPORT),)
+#ifneq ($(#JITSERVER_SUPPORT),)
     CXX_FLAGS+=\
         -std=c++11
 #else
 #    CXX_FLAGS+=\
 #        -std=c++0x
-endif
+#endif
 CXX_FLAGS+=\
     -fno-rtti \
     -fno-threadsafe-statics \
@@ -575,6 +575,12 @@ ifneq ($(JITSERVER_SUPPORT),)
 endif # JITSERVER_SUPPORT
 #for protbuf TODO guard like above later
 CXX_DEFINES+=GOOGLE_PROTOBUF_NO_RTTI
+
+#SOLINK_SLINK_STATIC=-l:libprotobuf.a
+PROTO_CMD?=protoc
+
+SOLINK_SLINK_STATIC=-l:libprotobuf.a
+
 
 SOLINK_LIBPATH+=/usr/local/lib
 SOLINK_SLINK+=protobuf
