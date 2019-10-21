@@ -1916,9 +1916,15 @@ char * feGetEnv2(const char * s, const void * vm)
 			//currently used in worklistopt
 			//      if (verboseQuery)
 			// j9tty_printf(PORTLIB, "JIT: env var %s is set to %s\n", s, envSpace);
-      }
+			}
+		 
+		 }
+	  }
+   
    return envSpace;
-   }
+}
+	  
+   
 
 char * feGetEnv(const char * s)
    {

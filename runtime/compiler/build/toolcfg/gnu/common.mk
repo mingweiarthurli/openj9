@@ -118,7 +118,7 @@ ifneq ($(J9VM_OPT_JITSERVER),)
 #else
 #    CXX_FLAGS+=\
 #        -std=c++0x
-endif
+#endif
 CXX_FLAGS+=\
     -fno-rtti \
     -fno-threadsafe-statics \
@@ -538,6 +538,12 @@ endif # J9VM_OPT_JITSERVER
 
 #for protbuf TODO guard like above later
 CXX_DEFINES+=GOOGLE_PROTOBUF_NO_RTTI
+
+#SOLINK_SLINK_STATIC=-l:libprotobuf.a
+PROTO_CMD?=protoc
+
+SOLINK_SLINK_STATIC=-l:libprotobuf.a
+
 
 SOLINK_LIBPATH+=/usr/local/lib
 SOLINK_SLINK+=protobuf
