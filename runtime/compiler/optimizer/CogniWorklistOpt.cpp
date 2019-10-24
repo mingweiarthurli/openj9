@@ -37,6 +37,8 @@ TR_CogniWorklistOpt::shouldPerform() {
 int32_t
 TR_CogniWorklistOpt::perform() {
 
+  if(comp()->getPersistentInfo()->getCogniCryptMode() == COGNICRYPT_MODE){
+  
   char *classToSearch = feGetEnv("TR_ClassToSearch");
   if(classToSearch != NULL){
   //walking tree tops will be sufficient
@@ -91,6 +93,7 @@ TR_CogniWorklistOpt::perform() {
 	}
       }
     }
+  }
   }
   }
   return 1;

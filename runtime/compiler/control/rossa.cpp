@@ -1598,6 +1598,10 @@ onLoadInternal(
             TR::Options::getCmdLineOptions()->getOption(TR_InhibitRecompilation)))
          persistentMemory->getPersistentInfo()->setRuntimeInstrumentationRecompilationEnabled(true);
       }
+ if(compInfo->getPersistentInfo()->getCogniCryptMode() == COGNICRYPT_MODE){
+     printf("Detected running in cognimode in rossa\n");
+ }
+   
 #if defined(JITSERVER_SUPPORT)
    if (compInfo->getPersistentInfo()->getRemoteCompilationMode() == JITServer::SERVER)
       {
