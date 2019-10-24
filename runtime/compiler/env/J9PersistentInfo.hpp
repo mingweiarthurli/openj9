@@ -61,6 +61,11 @@ enum IprofilerStates {
    IPROFILING_STATE_OFF,
 };
 
+enum CogniCryptModes {
+  NON_COGNICRYPT_MODE = 0,
+  COGNICRYPT_MODE,
+};
+
 #if defined(J9VM_OPT_JITSERVER)
 namespace JITServer
 {
@@ -129,6 +134,7 @@ class PersistentInfo : public OMR::PersistentInfoConnector
          _gpuInitMonitor(NULL),
          _runtimeInstrumentationEnabled(false),
          _runtimeInstrumentationRecompilationEnabled(false),
+		 _CogniCryptMode(NON_COGNICRYPT_MODE),
 #if defined(J9VM_OPT_JITSERVER)
          _remoteCompilationMode(JITServer::NONE),
          _JITServerAddress("localhost"),
@@ -295,8 +301,11 @@ class PersistentInfo : public OMR::PersistentInfoConnector
     */
    uint8_t _paddingBefore[128];
    int32_t _countForRecompile;
+	 
+   CogniCryptModes getCogniCryptMode() const { return _CogniCryptMode;}
+   void setCogniCryptMode(CogniCryptModes m) { _CogniCryptMode = m; }
 
-#if defined(J9VM_OPT_JITSERVER)
+#if defined(J9VM_OPT_JITSERVER)	 
    JITServer::RemoteCompilationModes getRemoteCompilationMode() const { return _remoteCompilationMode; }
    void setRemoteCompilationMode(JITServer::RemoteCompilationModes m) { _remoteCompilationMode = m; }
    const std::string &getJITServerAddress() const { return _JITServerAddress; }
@@ -391,7 +400,10 @@ class PersistentInfo : public OMR::PersistentInfoConnector
 
 
    int32_t _numLoadedClasses; ///< always increasing
-#if defined(J9VM_OPT_JITSERVER)
+
+   CogniCryptModes _CogniCryptMode; //NON_COGNICRYPT_MODE, COGNICRYPT_MODE
+
+#if defined(J9VM_OPT_JITSERVER)	 
    JITServer::RemoteCompilationModes _remoteCompilationMode; // JITServer::NONE, JITServer::CLIENT, JITServer::SERVER
    std::string _JITServerAddress;
    uint32_t    _JITServerPort;

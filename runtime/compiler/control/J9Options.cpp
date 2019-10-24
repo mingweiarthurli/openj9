@@ -2030,6 +2030,15 @@ J9::Options::fePreProcess(void * base)
       }
 #endif /* defined(J9VM_OPT_JITSERVER) */
 
+//check for option -XX:enableCogniCrypt
+   char *xxenableCogniCryptOption = "-XX:enableCogniCrypt";
+   int32_t xxenableCogniCryptArgIndex =  FIND_ARG_IN_VMARGS(STARTSWITH_MATCH, xxenableCogniCryptOption, 0);
+   if (xxenableCogniCryptArgIndex >= 0 || xxenableCogniCryptArgIndex >= 0)
+         {
+	   compInfo->getPersistentInfo()->setCogniCryptMode(COGNICRYPT_MODE);
+	   //TODO add parsing so that we can specify an address and port, so that its not localhost only
+	 }
+   
 #if (defined(TR_HOST_X86) || defined(TR_HOST_S390) || defined(TR_HOST_POWER)) && defined(TR_TARGET_64BIT)
    self()->setOption(TR_EnableSymbolValidationManager);
 #endif

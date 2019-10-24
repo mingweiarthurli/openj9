@@ -1629,6 +1629,10 @@ onLoadInternal(
          persistentMemory->getPersistentInfo()->setRuntimeInstrumentationRecompilationEnabled(true);
       }
 
+   if(compInfo->getPersistentInfo()->getCogniCryptMode() == COGNICRYPT_MODE){
+     printf("Detected running in cognimode in rossa\n");
+ }
+   
    TR_PersistentCHTable *chtable;
 #if defined(J9VM_OPT_JITSERVER)
    if (persistentMemory->getPersistentInfo()->getRemoteCompilationMode() == JITServer::SERVER)
@@ -1654,7 +1658,8 @@ onLoadInternal(
       if (!JITServer::loadLibsslAndFindSymbols())
          return -1;
       }
-
+ 
+#if defined(J9VM_OPT_JITSERVER)   
    if (compInfo->getPersistentInfo()->getRemoteCompilationMode() == JITServer::SERVER)
       {
       JITServer::CommunicationStream::initConfigurationFlags();
