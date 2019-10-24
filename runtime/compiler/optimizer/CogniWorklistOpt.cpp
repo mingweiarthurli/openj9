@@ -24,6 +24,7 @@
 #include "il/SymbolReference.hpp"
 #include "tcp/client.hpp"
 #include "tcp/server.hpp"
+#include "il/Node_inlines.hpp"
 
 bool
 TR_CogniWorklistOpt::shouldPerform() {
