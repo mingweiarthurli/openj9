@@ -22,6 +22,7 @@
 #include "socket.hpp"
 #include "out/compile.pb.h"
 
+#define PORT 38400
 
 //currently going to be hardcoded to use localhost as server address
 class Client {

@@ -19,6 +19,9 @@
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
+#ifndef SOCKET_H
+#define SOCKET_H
+
 #include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,42 +31,8 @@
 #include <netdb.h>
 #include "stream.hpp"
 
-#define PORT 38400
-
 int socketInit();
 void handleError(int close, int fd, const char *errorMsg);
 TCP::Stream initStream();
 
-
-//intializes a stream object for the server/client
-TCP::Stream initStream(){
-
-  TCP::Stream stream;
-  return(stream);
-
-  }
-
-//ret socket file descriptor
-int socketInit(){
-
-  int socketFd;
-
-  socketFd = socket(AF_INET, SOCK_STREAM, 0);
-  if(socketFd < 0){
-    handleError(0, 0, "Cannot open socket");
-  }
-  return(socketFd);
-}
-
-//generic handle error, maybe close file descriptor, throws an error
-void handleError(int closeFlag, int fd, const char *errorMsg){
-
-  if(closeFlag == 1){
-    close(fd);
-  }
-  perror(errorMsg);
-  //since perror handles the message the exception will not have a message
-  throw "";
-  //  exit(-1);
-
-}
+#endif //SOCKET_H

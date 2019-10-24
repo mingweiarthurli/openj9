@@ -254,6 +254,7 @@ JIT_PRODUCT_BACKEND_SOURCES+=\
     omr/compiler/ras/Tree.cpp
 
 JIT_PRODUCT_SOURCE_FILES+=\
+	compiler/tcp/socket.cpp \
     compiler/codegen/CodeGenGC.cpp \
     compiler/codegen/CodeGenGPU.cpp \
     compiler/codegen/CodeGenRA.cpp \
