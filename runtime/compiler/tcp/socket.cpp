@@ -19,28 +19,37 @@
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
-#ifndef COGNICRYPT_INC
-#define COGNICRYPT_INC
-#pragma once
+#include "socket.hpp"
 
+//intializes a stream object for the server/client
+TCP::Stream initStream(){
 
-#include "tcp/client.hpp"
-#include "optimizer/Optimization.hpp" // for optimization
-#include "optimizer/OptimizationManager.hpp" // for optimization manager
+  TCP::Stream stream;
+  return(stream);
 
+  }
 
-  class TR_CogniWorklistOpt : public TR::Optimization {
-      public:
-         TR_CogniWorklistOpt(TR::OptimizationManager *m) : TR::Optimization(m) {};
-         static TR::Optimization *create (TR::OptimizationManager *m) {
-            return new (m->allocator()) TR_CogniWorklistOpt(m);
-         };
-         virtual bool shouldPerform();
-         virtual int32_t perform();
-         virtual const char * optDetailString() const throw()
-         {
-            return "O^O COGNI worklist generation";
-         };
-   };
+//ret socket file descriptor
+int socketInit(){
 
-#endif
+  int socketFd;
+
+  socketFd = socket(AF_INET, SOCK_STREAM, 0);
+  if(socketFd < 0){
+    handleError(0, 0, "Cannot open socket");
+  }
+  return(socketFd);
+}
+
+//generic handle error, maybe close file descriptor, throws an error
+void handleError(int closeFlag, int fd, const char *errorMsg){
+
+  if(closeFlag == 1){
+    close(fd);
+  }
+  perror(errorMsg);
+  //since perror handles the message the exception will not have a message
+  throw "";
+  //  exit(-1);
+
+}
