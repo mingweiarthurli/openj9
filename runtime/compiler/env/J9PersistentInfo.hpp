@@ -37,6 +37,9 @@ namespace J9 { typedef J9::PersistentInfo PersistentInfoConnector; }
 #include <string>
 #endif /* defined(J9VM_OPT_JITSERVER) */
 #include "env/jittypes.h"
+#include <vector>
+
+#include "tcp/client.hpp"
 
 class TR_FrontEnd;
 class TR_PersistentMemory;
@@ -135,6 +138,8 @@ class PersistentInfo : public OMR::PersistentInfoConnector
          _runtimeInstrumentationEnabled(false),
          _runtimeInstrumentationRecompilationEnabled(false),
 		 _CogniCryptMode(NON_COGNICRYPT_MODE),
+		 _CogniClient(),
+		 _CogniAnalysisSeeds(),
 #if defined(J9VM_OPT_JITSERVER)
          _remoteCompilationMode(JITServer::NONE),
          _JITServerAddress("localhost"),
@@ -302,10 +307,16 @@ class PersistentInfo : public OMR::PersistentInfoConnector
    uint8_t _paddingBefore[128];
    int32_t _countForRecompile;
 	 
-   CogniCryptModes getCogniCryptMode() const { return _CogniCryptMode;}
+   CogniCryptModes getCogniCryptMode() const { return _CogniCryptMode; }
    void setCogniCryptMode(CogniCryptModes m) { _CogniCryptMode = m; }
 
-#if defined(J9VM_OPT_JITSERVER)	 
+	 Client *getCogniCryptClient() { return _CogniClient; }
+	 void setCogniCryptClient(Client *c) { _CogniClient = c;}
+
+	 std::vector<std::string> getCogniAnalysisSeeds() const { return _CogniAnalysisSeeds; }
+	 void setCogniAnalysisSeeds(std::vector<std::string> seeds) { _CogniAnalysisSeeds = seeds; }
+
+#if defined(J9VM_OPT_JITSERVER)
    JITServer::RemoteCompilationModes getRemoteCompilationMode() const { return _remoteCompilationMode; }
    void setRemoteCompilationMode(JITServer::RemoteCompilationModes m) { _remoteCompilationMode = m; }
    const std::string &getJITServerAddress() const { return _JITServerAddress; }
@@ -402,8 +413,10 @@ class PersistentInfo : public OMR::PersistentInfoConnector
    int32_t _numLoadedClasses; ///< always increasing
 
    CogniCryptModes _CogniCryptMode; //NON_COGNICRYPT_MODE, COGNICRYPT_MODE
+	 std::vector<std::string> _CogniAnalysisSeeds;
+	 Client *_CogniClient;
 
-#if defined(J9VM_OPT_JITSERVER)	 
+#if defined(J9VM_OPT_JITSERVER)
    JITServer::RemoteCompilationModes _remoteCompilationMode; // JITServer::NONE, JITServer::CLIENT, JITServer::SERVER
    std::string _JITServerAddress;
    uint32_t    _JITServerPort;

@@ -26,6 +26,7 @@
 #include <google/protobuf/io/zero_copy_stream.h>
 #include <google/protobuf/io/zero_copy_stream_impl.h>
 #include "out/compile.pb.h"
+#include <endian.h>
 
 namespace TCP
 
@@ -48,14 +49,13 @@ public:
   ServerMsg srvmsg;
   ClientMsg clientmsg;
 
-  
+
+  //TODO this could use a refactor, dead code
   void startStream(int fd){
 
-  std::cout << "file descripor\n" ;
-   std::cout << fd;
-   std::cout << "\n";
-   //  rawOutput = new FileOutputStream(fd);
-   //rawInput = new FileInputStream(fd);
+	//std::cout << "file descripor\n" ;
+	//std::cout << fd;
+	//std::cout << "\n";
   
   }
 
@@ -65,9 +65,35 @@ public:
     delete rawInput;
   }
 
+  //protobuf CodedInputStream does not expose api for big endian order
+  //which is what java.io.DataOutputStream insists upon, ick
+  int streamReadInt(int fd){
+	rawInput = new FileInputStream(fd);
+	codedInput = new CodedInputStream(rawInput);
+
+	uint32_t sentInt;
+	if (!codedInput->ReadLittleEndian32(&sentInt)){
+	  return 0;
+	}else{
+	  return htobe32(sentInt);
+	}
+  }
+
+  std::string streamReadString(int fd){
+	rawInput = new FileInputStream(fd);
+	codedInput = new CodedInputStream(rawInput);
+	std::string receivedString;
+	
+	//a badish way of dealing with java.io.DataOutputStream.writeUTF's 2byte size hint
+	uint16_t msgsize;
+	if (codedInput->ReadRaw(&msgsize, 2)) {
+	  codedInput->ReadString( &receivedString, htobe16(msgsize));
+	}
+	return receivedString;
+  }
+  
 template <typename T>
 void streamRead(T &val, int fd){
-
 
   rawInput = new FileInputStream(fd);
   codedInput = new CodedInputStream(rawInput);
@@ -79,9 +105,9 @@ void streamRead(T &val, int fd){
     std::cout << "Message size read" ;
 
   }
+  
   std::cout << msgsize ;
-  std::cout << "here2\n" ;
- auto limit = codedInput->PushLimit(msgsize);
+  auto limit = codedInput->PushLimit(msgsize);
   //read bytes of message now
   if (!val.ParseFromCodedStream(codedInput)){
     std::cout << "Could not read from stream\n" ;
@@ -117,8 +143,8 @@ void streamWrite(const T &val, int fd){
   //get size of message and write that then message
   size_t msgSize = val.ByteSizeLong();
 
-  std::cout << "message size sent" ;
-  std::cout << msgSize ;
+  //std::cout << "message size sent" ;
+  //std::cout << msgSize ;
   
   codedOutput->WriteLittleEndian32(msgSize);
   val.SerializeToCodedStream(codedOutput);
@@ -131,7 +157,7 @@ void streamWrite(const T &val, int fd){
 
      delete codedOutput;
   delete rawOutput;
-std::cout << "Wrote a message!" ; 
+  //std::cout << "Wrote a message!" ; 
   //flush the buffer
 // if(!((FileOutputStream*)rawOutput)->Flush()){
 //std::cout << "Error flushing buffer" ;

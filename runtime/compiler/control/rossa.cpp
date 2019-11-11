@@ -117,6 +117,9 @@
 #include "runtime/JITServerIProfiler.hpp"
 #endif
 
+//for cognicrypt
+#include "tcp/client.hpp"
+
 extern "C" int32_t encodeCount(int32_t count);
 
 #if defined(TR_HOST_POWER)
@@ -1628,9 +1631,32 @@ onLoadInternal(
             TR::Options::getCmdLineOptions()->getOption(TR_InhibitRecompilation)))
          persistentMemory->getPersistentInfo()->setRuntimeInstrumentationRecompilationEnabled(true);
       }
+ if(compInfo->getPersistentInfo()->getCogniCryptMode() == COGNICRYPT_MODE){
+   //TODO rm later
+   printf("--------------------------------------\n");
+   printf("VM: Started up in CogniCrypt mode.\n");
+   printf("--------------------------------------\n");
+	 Client *client = new (PERSISTENT_NEW) Client();
+	 //TODO guard for setup fail
+	 client->writeClient(TCP::ClientMsgType::clientRequestInitAnalysis, "REQUESTSEEDS\n");
+	 persistentMemory->getPersistentInfo()->setCogniCryptClient(client);
 
-   if(compInfo->getPersistentInfo()->getCogniCryptMode() == COGNICRYPT_MODE){
-     printf("Detected running in cognimode in rossa\n");
+	 //TODO for now to test seed access
+     std::vector<std::string> received;
+
+	 //expect an int followed by int number of strings
+	 int seedLength = client->readInt();
+	 printf("--------------------------------------\n");
+	 printf("VMCLIENT: reading %d seeds.\n", seedLength);
+	 for (int i = 0; i < seedLength; i++) {
+	   std::string readSeed = client->readString();
+	   if (!readSeed.empty()){
+		 std::cout << "VMCLIENT: read seed: " << readSeed << "\n" ;
+		 received.push_back(readSeed); 
+	   }
+	 }
+	 printf("--------------------------------------\n");
+	 persistentMemory->getPersistentInfo()->setCogniAnalysisSeeds(received);
  }
    
    TR_PersistentCHTable *chtable;

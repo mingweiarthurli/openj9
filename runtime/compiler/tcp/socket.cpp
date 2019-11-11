@@ -49,7 +49,8 @@ void handleError(int closeFlag, int fd, const char *errorMsg){
   }
   perror(errorMsg);
   //since perror handles the message the exception will not have a message
-  throw "";
+  printf("Cannot perform CogniCrypt analysis on this run. Application will continue.\n");
+  //throw "";
   //  exit(-1);
 
 }

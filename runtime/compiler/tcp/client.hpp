@@ -19,6 +19,9 @@
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
+#ifndef CLIENT_H
+#define CLIENT_H
+
 #include "socket.hpp"
 #include "out/compile.pb.h"
 
@@ -59,6 +62,7 @@ int setupConnection(){
   connectSock = connect(socketFd, (struct sockaddr *) &server, sizeof(server));
   if(connectSock < 0){
     handleError(1, socketFd, "Could not connect client to server");
+	return(-1);
   }
   
   return(socketFd);
@@ -71,11 +75,15 @@ int setupConnection(){
   stream.streamWrite(stream.clientmsg, fd);
 
 }
-  
-  
-void clientRead(){
 
-  stream.streamRead(stream.clientmsg, fd);
+  //"custom" serialization interfaces for reading native types
+  int readInt(){
+	return stream.streamReadInt(fd);
+  }
+  
+  std::string readString(){
+
+	return stream.streamReadString(fd);
 
 }
 
@@ -84,3 +92,4 @@ void clientRead(){
  }
  
 };
+#endif //CLIENT_H 
