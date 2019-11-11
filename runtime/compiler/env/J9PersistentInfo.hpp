@@ -37,6 +37,9 @@ namespace J9 { typedef J9::PersistentInfo PersistentInfoConnector; }
 #include <string>
 #endif /* defined(JITSERVER_SUPPORT) */
 #include "env/jittypes.h"
+#include <vector>
+
+#include "tcp/client.hpp"
 
 class TR_FrontEnd;
 class TR_PersistentMemory;
@@ -134,7 +137,9 @@ class PersistentInfo : public OMR::PersistentInfoConnector
          _gpuInitMonitor(NULL),
          _runtimeInstrumentationEnabled(false),
          _runtimeInstrumentationRecompilationEnabled(false),
-		  _CogniCryptMode(NON_COGNICRYPT_MODE),
+		 _CogniCryptMode(NON_COGNICRYPT_MODE),
+		 _CogniClient(),
+		 _CogniAnalysisSeeds(),
 #if defined(JITSERVER_SUPPORT)
          _remoteCompilationMode(JITServer::NONE),
          _JITServerAddress("localhost"),
@@ -302,8 +307,14 @@ class PersistentInfo : public OMR::PersistentInfoConnector
    uint8_t _paddingBefore[128];
    int32_t _countForRecompile;
 	 
-   CogniCryptModes getCogniCryptMode() const { return _CogniCryptMode;}
+   CogniCryptModes getCogniCryptMode() const { return _CogniCryptMode; }
    void setCogniCryptMode(CogniCryptModes m) { _CogniCryptMode = m; }
+
+	 Client *getCogniCryptClient() { return _CogniClient; }
+	 void setCogniCryptClient(Client *c) { _CogniClient = c;}
+
+	 std::vector<std::string> getCogniAnalysisSeeds() const { return _CogniAnalysisSeeds; }
+	 void setCogniAnalysisSeeds(std::vector<std::string> seeds) { _CogniAnalysisSeeds = seeds; }
 	 
 #if defined(JITSERVER_SUPPORT)
    JITServer::RemoteCompilationModes getRemoteCompilationMode() const { return _remoteCompilationMode; }
@@ -402,6 +413,8 @@ class PersistentInfo : public OMR::PersistentInfoConnector
    int32_t _numLoadedClasses; ///< always increasing
 
    CogniCryptModes _CogniCryptMode; //NON_COGNICRYPT_MODE, COGNICRYPT_MODE
+	 std::vector<std::string> _CogniAnalysisSeeds;
+	 Client *_CogniClient;
 	 
 #if defined(JITSERVER_SUPPORT)
    JITServer::RemoteCompilationModes _remoteCompilationMode; // JITServer::NONE, JITServer::CLIENT, JITServer::SERVER

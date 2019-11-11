@@ -40,7 +40,7 @@ TR_CogniWorklistOpt::perform() {
   if(comp()->getPersistentInfo()->getCogniCryptMode() == COGNICRYPT_MODE){
   
   char *classToSearch = feGetEnv("TR_ClassToSearch");
-  if(classToSearch != NULL){
+  
   //walking tree tops will be sufficient
   TR::TreeTop *tt = comp()->getStartTree();
   for(; tt; tt = tt->getNextTreeTop()){
@@ -66,23 +66,29 @@ TR_CogniWorklistOpt::perform() {
 
 	    //TODO: replace hardcoded search for method signatures containing JCA API packages
 	    if(((strstr(sig, "java/security") != NULL)) || ((strstr(sig, "javax/crypto") != NULL))){
-	      printf("Found a signature from package of interest: %s\n", sig);
 	      //compilee method and class
 	      TR_ResolvedMethod *feMethod = comp()->getCurrentMethod();
 	      char *compileeClass = feMethod->classNameChars();
-	      printf("Found the name of the method we are in: %s and the name of the class: %s\n", feMethod->nameChars(), compileeClass);
+	      printf("JITCLIENT: Found a method that uses a crypto API:  %s.%s(...)\n", compileeClass, feMethod->nameChars());
 	      //one item is enough
-	      if(strstr(compileeClass, classToSearch) != NULL){
-		printf("SENDING THE MSG FROM THE JIT\n");
-		try{
-		  Client client;
-		  //TODO utilize protobuf features once protobufs are integrated into CogniCrypt
-		  client.writeClient(TCP::ClientMsgType::clientRequestInitAnalysis, "INITANALYSIS\n");
-		  client.writeClient(TCP::ClientMsgType::clientRequestInitAnalysis, compileeClass);
-		  client.writeClient(TCP::ClientMsgType::clientRequestInitAnalysis, "\n");
-		  client.closeClient();
-		  //setting the search item to null will stop the search
-		  classToSearch = NULL;
+	      if(strncmp(compileeClass, classToSearch, strlen(classToSearch)) == 0){
+			//grab exact string                                                                              
+			char compilee[strlen(classToSearch)];
+			strncpy(compilee, compileeClass, strlen(classToSearch));
+
+			printf("JITCLIENT: sending class to analyse: %s\n", compilee);
+			try{
+			  Client *client = comp()->getPersistentInfo()->getCogniCryptClient();
+			  //TODO utilize protobuf features once protobufs are integrated into CogniCrypt
+			  client->writeClient(TCP::ClientMsgType::clientRequestInitAnalysis, "INITANALYSIS\n");
+			  
+			  client->writeClient(TCP::ClientMsgType::clientRequestInitAnalysis, compilee);
+			  client->writeClient(TCP::ClientMsgType::clientRequestInitAnalysis, "\n");
+			  client->writeClient(TCP::ClientMsgType::clientRequestInitAnalysis, "END\n");
+			  printf("JITCLIENT: done search...\n");
+			  //TODO reenable, or find more reasonable way to turn it off after one success 
+			  comp()->getPersistentInfo()->setCogniCryptMode(NON_COGNICRYPT_MODE);
+			  
 		}catch(...){
 		  printf("Analysis request aborted");
 		}
@@ -90,10 +96,10 @@ TR_CogniWorklistOpt::perform() {
 	      break;
 	    }
 	  }
+	  
 	}
-      }
-    }
-  }
+	  }
+	}
   }
   }
   return 1;
