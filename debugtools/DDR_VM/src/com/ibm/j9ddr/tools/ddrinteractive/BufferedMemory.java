@@ -19,12 +19,14 @@
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
-package com.ibm.j9ddr.tools.ddrinteractive;
+package com.ibm.j9ddr.corereaders.memory;
 
 import java.util.Collection;
 import java.util.Collections;
 import java.nio.ByteOrder;
 import java.util.Properties;
+import java.util.LinkedList;
+import java.util.List;
 
 import com.ibm.j9ddr.corereaders.memory.AbstractMemory;
 import com.ibm.j9ddr.corereaders.memory.IAddressSpace;
@@ -36,13 +38,15 @@ import com.ibm.j9ddr.corereaders.memory.MemoryFault;
 import com.ibm.j9ddr.CorruptDataException;
 import com.ibm.j9ddr.DataUnavailableException;
 import com.ibm.j9ddr.corereaders.osthread.IOSThread;
+import com.ibm.j9ddr.corereaders.ICore;
+import com.ibm.j9ddr.corereaders.memory.SymbolUtil;
 
 /**
  * Object representing a single live
  * process model where a section of
  * memory in a the process can be represented
  * in a byte buffer as its source
- * @see com.ibm.j9ddr.tools.ddrinteractive.CacheMemorySource
+ * @see com.ibm.j9ddr.tools.ddrinteractive.BufferedMemorySource
  *
  * Can be used for inspection of the
  * scc, without the need of a core file
@@ -50,10 +54,10 @@ import com.ibm.j9ddr.corereaders.osthread.IOSThread;
  * used to inspect romMethods:
  *
  * <code>
- * CacheMemory memory = new CacheMemory(ByteOrder.nativeOrder());
+ * BufferedMemory memory = new BufferedMemory(ByteOrder.nativeOrder());
  * IVMData aVMData = VMDataFactory.getVMData((IProcess)memory);
  * //this address denotes the beginning of range of interest, not shown here
- * memory.addMemorySource(new CacheMemorySource(sourceStartAddress, size));
+ * memory.addMemorySource(new BufferedMemorySource(sourceStartAddress, size));
  * aVMData.bootstrap("com.ibm.j9ddr.vm29.SomeDebugHandler");
  *
  * public class SomeDebugHandler {
@@ -74,15 +78,34 @@ import com.ibm.j9ddr.corereaders.osthread.IOSThread;
  *
  */
 
-public class CacheMemory extends AbstractMemory implements IProcess
+public class BufferedMemory extends AbstractMemory implements IProcess, IAddressSpace
 {
-	public CacheMemory(ByteOrder byteOrder) {
+	public BufferedMemory(ByteOrder byteOrder) {
 		super(byteOrder);
 	}
 
 	@Override
 	public Platform getPlatform() {
-		return null;
+		String platform = System.getProperty("os.name").toLowerCase();
+		if (platform.contains("aix")) {
+			return Platform.AIX;
+		}
+		else if (platform.contains("windows")) {
+			return Platform.WINDOWS;
+		}
+		else if	(platform.contains("z/os")) {
+			return Platform.ZOS;
+		}
+		else if	(platform.contains("linux")) {
+			return Platform.LINUX;
+		}
+		else if (platform.contains("mac")) {
+			return Platform.OSX;
+        }
+		else {
+			//do not expect to reach here
+			return null;
+		}
 	}
 
 	/**
@@ -91,12 +114,16 @@ public class CacheMemory extends AbstractMemory implements IProcess
 	 */
 	@Override
 	public IAddressSpace getAddressSpace() {
-		return null;
+		return this;
 	}
 
 	@Override
 	public long getPointerAt(long address) throws MemoryFault {
-		return 0;
+		if (bytesPerPointer() == 8) {
+			return getLongAt(address);
+		} else {
+			return (0xFFFFFFFFL & getIntAt(address));
+		}
 	}
 
 	/**
@@ -105,7 +132,7 @@ public class CacheMemory extends AbstractMemory implements IProcess
 	 */
 	@Override
 	public int bytesPerPointer() {
-		return 0;
+		return Integer.parseInt(System.getProperty("sun.arch.data.model"));
 	}
 
 	/**
@@ -124,7 +151,11 @@ public class CacheMemory extends AbstractMemory implements IProcess
 	 */
 	@Override
 	public Properties getEnvironmentVariables() throws DataUnavailableException, CorruptDataException {
-		return new Properties();
+		Properties env = new Properties();
+		System.getenv().forEach((k, v) -> {
+				env.setProperty(k, v);
+			});
+		return env;
 	}
 
 	@Override
@@ -153,7 +184,7 @@ public class CacheMemory extends AbstractMemory implements IProcess
 
 	@Override
 	public String getProcedureNameForAddress(long address, boolean dtfjFormat) throws DataUnavailableException, CorruptDataException {
-		return "Error no process in this address space";
+		return SymbolUtil.getProcedureNameForAddress(this, address, dtfjFormat);
 	}
 
 	@Override
@@ -169,5 +200,26 @@ public class CacheMemory extends AbstractMemory implements IProcess
 	@Override
 	public boolean isFailingProcess() throws DataUnavailableException {
 		return false;
+	}
+	
+	@Override
+	public ICore getCore(){
+		//not backed by underlying core file
+		return null;
+	}
+	
+	@Override
+	public List<IProcess> getProcesses()
+	{
+		List<IProcess> toReturn = new LinkedList<IProcess>();
+		toReturn.add(this);
+
+		return toReturn;
+	}
+
+	@Override
+	public int getAddressSpaceId()
+	{
+		return 0;
 	}
 }

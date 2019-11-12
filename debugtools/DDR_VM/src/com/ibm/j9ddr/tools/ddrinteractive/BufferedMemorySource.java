@@ -20,7 +20,7 @@
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
-package com.ibm.j9ddr.tools.ddrinteractive;
+package com.ibm.j9ddr.corereaders.memory;
 
 import java.nio.ByteOrder;
 import java.nio.ByteBuffer;
@@ -34,17 +34,17 @@ import java.nio.BufferUnderflowException;
 /**
  * Serves as a ByteBuffer backed memory source.
  *
- * @see com.ibm.j9ddr.tools.ddrinteractive.CacheMemory
+ * @see com.ibm.j9ddr.tools.ddrinteractive.BufferedMemory
  *
  * @author knewbury01
  *
  */
 
-public class CacheMemorySource extends ProtectedMemoryRange implements IMemorySource
+public class BufferedMemorySource extends ProtectedMemoryRange implements IMemorySource
 {
 	private ByteBuffer source;
 
-	public CacheMemorySource(long address,
+	public BufferedMemorySource(long address,
 							 ByteBuffer source)
 	{
 		super(address,(long)source.capacity());
@@ -58,12 +58,7 @@ public class CacheMemorySource extends ProtectedMemoryRange implements IMemorySo
 	// as opposed to a getBytes (rewrapped) result
 	//
 	public int getUnsignedShort(long address) throws MemoryFault {
-		int index = checkIndex(address, Short.BYTES);
-		if (source.order() == ByteOrder.BIG_ENDIAN){
-			return ((source.get(index) & 0xFF) << 8) | (source.get(index + 1) & 0xFF);
-		} else {
-			return ((source.get(index + 1) & 0xFF) << 8) | (source.get(index) & 0xFF);
-		}
+		return getShort(address) & 0xFFFF;
 	}
 
 	public short getShort(long address) throws MemoryFault {
@@ -92,7 +87,7 @@ public class CacheMemorySource extends ProtectedMemoryRange implements IMemorySo
 	{
 		int index = checkIndex(address, length);
 		for (int i = 0; i < length; i++) {
-			buffer[i] = source.get(index + i);
+			buffer[offset + i] = source.get(index + i);
 		}
 		return length;
 	}
