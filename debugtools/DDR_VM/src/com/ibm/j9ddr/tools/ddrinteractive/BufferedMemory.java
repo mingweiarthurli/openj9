@@ -25,7 +25,6 @@ import java.util.Collection;
 import java.util.Collections;
 import java.nio.ByteOrder;
 import java.util.Properties;
-import java.util.LinkedList;
 import java.util.List;
 
 import com.ibm.j9ddr.corereaders.memory.AbstractMemory;
@@ -80,8 +79,11 @@ import com.ibm.j9ddr.corereaders.memory.SymbolUtil;
 
 public class BufferedMemory extends AbstractMemory implements IProcess, IAddressSpace
 {
+	private final int bitness;
+	
 	public BufferedMemory(ByteOrder byteOrder) {
 		super(byteOrder);
+		bitness = Integer.parseInt(System.getProperty("sun.arch.data.model"));
 	}
 
 	@Override
@@ -89,20 +91,15 @@ public class BufferedMemory extends AbstractMemory implements IProcess, IAddress
 		String platform = System.getProperty("os.name").toLowerCase();
 		if (platform.contains("aix")) {
 			return Platform.AIX;
-		}
-		else if (platform.contains("windows")) {
+		} else if (platform.contains("windows")) {
 			return Platform.WINDOWS;
-		}
-		else if	(platform.contains("z/os")) {
+		} else if	(platform.contains("z/os")) {
 			return Platform.ZOS;
-		}
-		else if	(platform.contains("linux")) {
+		} else if	(platform.contains("linux")) {
 			return Platform.LINUX;
-		}
-		else if (platform.contains("mac")) {
+		} else if (platform.contains("mac")) {
 			return Platform.OSX;
-        }
-		else {
+        } else {
 			//do not expect to reach here
 			return null;
 		}
@@ -132,7 +129,7 @@ public class BufferedMemory extends AbstractMemory implements IProcess, IAddress
 	 */
 	@Override
 	public int bytesPerPointer() {
-		return Integer.parseInt(System.getProperty("sun.arch.data.model"));
+		return bitness/8;
 	}
 
 	/**
@@ -141,7 +138,7 @@ public class BufferedMemory extends AbstractMemory implements IProcess, IAddress
 	 */
 	@Override
 	public String getCommandLine() throws DataUnavailableException, CorruptDataException {
-		return null;
+		throw new DataUnavailableException("DDR not invoked via command line.");
 	}
 
 	/**
@@ -203,23 +200,18 @@ public class BufferedMemory extends AbstractMemory implements IProcess, IAddress
 	}
 	
 	@Override
-	public ICore getCore(){
+	public ICore getCore() {
 		//not backed by underlying core file
 		return null;
 	}
 	
 	@Override
-	public List<IProcess> getProcesses()
-	{
-		List<IProcess> toReturn = new LinkedList<IProcess>();
-		toReturn.add(this);
-
-		return toReturn;
+	public List<IProcess> getProcesses() {
+		return Collections.singletonList(this);
 	}
 
 	@Override
-	public int getAddressSpaceId()
-	{
+	public int getAddressSpaceId() {
 		return 0;
 	}
 }

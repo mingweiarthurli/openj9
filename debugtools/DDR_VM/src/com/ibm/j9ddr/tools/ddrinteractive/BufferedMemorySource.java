@@ -42,12 +42,10 @@ import java.nio.BufferUnderflowException;
 
 public class BufferedMemorySource extends ProtectedMemoryRange implements IMemorySource
 {
-	private ByteBuffer source;
+	private final ByteBuffer source;
 
-	public BufferedMemorySource(long address,
-							 ByteBuffer source)
-	{
-		super(address,(long)source.capacity());
+	public BufferedMemorySource(long address, ByteBuffer source) {
+		super(address, source.capacity());
 		this.source = source;
 	}
 
@@ -82,9 +80,7 @@ public class BufferedMemorySource extends ProtectedMemoryRange implements IMemor
 	}
 
 	@Override
-	public int getBytes(long address, byte[] buffer, int offset, int length)
-		throws MemoryFault
-	{
+	public int getBytes(long address, byte[] buffer, int offset, int length) throws MemoryFault	{
 		int index = checkIndex(address, length);
 		for (int i = 0; i < length; i++) {
 			buffer[offset + i] = source.get(index + i);
