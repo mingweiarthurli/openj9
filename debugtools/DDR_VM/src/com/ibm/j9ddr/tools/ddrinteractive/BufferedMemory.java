@@ -60,11 +60,11 @@ import com.ibm.j9ddr.corereaders.memory.SymbolUtil;
  * aVMData.bootstrap("com.ibm.j9ddr.vm29.SomeDebugHandler");
  *
  * public class SomeDebugHandler {
- *   //can fetch this address from a ROMClass Cookie
- *   J9ROMClassPointer pointer = J9ROMClassPointer.cast(romStartAddress);
- *   J9ROMMethodPointer romMethod = pointer.romMethods();
- *   long dumpFlags = (ByteOrder.nativeOrder() == ByteOrder.BIG_ENDIAN) ? 1 : 0;
- *   J9BCUtil.j9bcutil_dumpRomMethod(System.out, romMethod, pointer, dumpFlags, J9BCUtil.BCUtil_DumpAnnotations);
+ *	 //can fetch this address from a ROMClass Cookie
+ *	 J9ROMClassPointer pointer = J9ROMClassPointer.cast(romStartAddress);
+ *	 J9ROMMethodPointer romMethod = pointer.romMethods();
+ *	 long dumpFlags = (ByteOrder.nativeOrder() == ByteOrder.BIG_ENDIAN) ? 1 : 0;
+ *	 J9BCUtil.j9bcutil_dumpRomMethod(System.out, romMethod, pointer, dumpFlags, J9BCUtil.BCUtil_DumpAnnotations);
  * }
  * </code>
  *
@@ -79,11 +79,11 @@ import com.ibm.j9ddr.corereaders.memory.SymbolUtil;
 
 public class BufferedMemory extends AbstractMemory implements IProcess, IAddressSpace
 {
-	private final int bitness;
-	
+	private final int bytesPerPointer;
+
 	public BufferedMemory(ByteOrder byteOrder) {
 		super(byteOrder);
-		bitness = Integer.parseInt(System.getProperty("sun.arch.data.model"));
+		bytesPerPointer = Integer.parseInt(System.getProperty("sun.arch.data.model")) / 8;
 	}
 
 	@Override
@@ -93,15 +93,15 @@ public class BufferedMemory extends AbstractMemory implements IProcess, IAddress
 			return Platform.AIX;
 		} else if (platform.contains("windows")) {
 			return Platform.WINDOWS;
-		} else if	(platform.contains("z/os")) {
+		} else if (platform.contains("z/os")) {
 			return Platform.ZOS;
-		} else if	(platform.contains("linux")) {
+		} else if (platform.contains("linux")) {
 			return Platform.LINUX;
 		} else if (platform.contains("mac")) {
 			return Platform.OSX;
-        } else {
+		} else {
 			//do not expect to reach here
-			return null;
+			throw new InternalError("Unsupported platform");
 		}
 	}
 
@@ -116,10 +116,10 @@ public class BufferedMemory extends AbstractMemory implements IProcess, IAddress
 
 	@Override
 	public long getPointerAt(long address) throws MemoryFault {
-		if (bytesPerPointer() == 8) {
+		if (bytesPerPointer == 8) {
 			return getLongAt(address);
 		} else {
-			return (0xFFFFFFFFL & getIntAt(address));
+			return 0xFFFFFFFFL & getIntAt(address);
 		}
 	}
 
@@ -129,7 +129,7 @@ public class BufferedMemory extends AbstractMemory implements IProcess, IAddress
 	 */
 	@Override
 	public int bytesPerPointer() {
-		return bitness/8;
+		return bytesPerPointer;
 	}
 
 	/**
@@ -198,13 +198,13 @@ public class BufferedMemory extends AbstractMemory implements IProcess, IAddress
 	public boolean isFailingProcess() throws DataUnavailableException {
 		return false;
 	}
-	
+
 	@Override
 	public ICore getCore() {
 		//not backed by underlying core file
 		return null;
 	}
-	
+
 	@Override
 	public List<IProcess> getProcesses() {
 		return Collections.singletonList(this);
