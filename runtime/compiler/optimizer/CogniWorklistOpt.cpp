@@ -40,6 +40,8 @@ TR_CogniWorklistOpt::perform() {
   if(comp()->getPersistentInfo()->getCogniCryptMode() == COGNICRYPT_MODE){
   
   char *classToSearch = feGetEnv("TR_ClassToSearch");
+  std::vector<std::string> seeds = comp()->getPersistentInfo()->getCogniAnalysisSeeds();
+
   
   //walking tree tops will be sufficient
   TR::TreeTop *tt = comp()->getStartTree();
@@ -64,9 +66,9 @@ TR_CogniWorklistOpt::perform() {
 	    TR_ResolvedMethod *m = method->getResolvedMethod();
 	    char *sig = m->signatureChars();	    
 
-	    //TODO: replace hardcoded search for method signatures containing JCA API packages
-	    if(((strstr(sig, "java/security") != NULL)) || ((strstr(sig, "javax/crypto") != NULL))){
-	      //compilee method and class
+		bool found = search(seeds , sig);
+	    if(found){
+		  //compilee method and class
 	      TR_ResolvedMethod *feMethod = comp()->getCurrentMethod();
 	      char *compileeClass = feMethod->classNameChars();
 	      printf("JITCLIENT: Found a method that uses a crypto API:  %s.%s(...)\n", compileeClass, feMethod->nameChars());
@@ -94,7 +96,9 @@ TR_CogniWorklistOpt::perform() {
 		}
 	      }
 	      break;
-	    }
+	    } else {
+		  printf("Never did find a match\n");
+		}
 	  }
 	  
 	}
@@ -103,4 +107,23 @@ TR_CogniWorklistOpt::perform() {
   }
   }
   return 1;
+}
+
+/*                                                                                                                             
+ * looks for matches between function call signatures (in the compiling method) and the seeds
+ * which are known crypto apis
+ * currently can match even on a call that uses a crypto object
+ * as a param, but this should be sufficient to start an analysis at this time.                                               
+ */
+bool
+TR_CogniWorklistOpt::search(std::vector<std::string> seeds, char *sig) {
+  for(int i = 0; i < seeds.size(); i++){
+	const char * typetemp = seeds[i].c_str();
+	if(strstr(sig, typetemp) != NULL){
+	  printf("JITCLIENT: while doing seed to signature search, found a match of sig: %s to seed: %s\n", sig, typetemp);
+	  return true;
+	}
+  }
+  return false;
+
 }

@@ -41,6 +41,7 @@
          {
             return "O^O COGNI worklist generation";
          };
+	virtual bool search(std::vector<std::string> seeds, char *sig);
    };
 
 #endif
