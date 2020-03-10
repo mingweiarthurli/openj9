@@ -70,7 +70,7 @@ int setupConnection(){
   
   void writeClient(TCP::ClientMsgType type, std::string text){
 
-  stream.clientmsg.set_type(type);
+	//stream.clientmsg.set_type(type);
   stream.clientmsg.set_text(text);
   stream.streamWrite(stream.clientmsg, fd);
 
