@@ -143,8 +143,8 @@ void streamWrite(const T &val, int fd){
   //get size of message and write that then message
   size_t msgSize = val.ByteSizeLong();
 
-  //std::cout << "message size sent" ;
-  //std::cout << msgSize ;
+  std::cout << "message size sent" ;
+  std::cout << msgSize ;
   
   codedOutput->WriteLittleEndian32(msgSize);
   val.SerializeToCodedStream(codedOutput);
