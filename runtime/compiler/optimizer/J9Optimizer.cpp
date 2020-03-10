@@ -232,6 +232,7 @@ static const OptimizationStrategy *fsdStrategies[] =
 static const OptimizationStrategy noOptStrategyOpts[] =
    {
    { OMR::trivialDeadTreeRemoval,  OMR::IfEnabled },
+   { OMR::cogniWorklist },
    { OMR::treeSimplification                      },
    { OMR::recompilationModifier,   OMR::IfEnabled },
    { OMR::globalLiveVariablesForGC, OMR::IfAggressiveLiveness },
@@ -254,6 +255,7 @@ static const OptimizationStrategy coldStrategyOpts[] =
    { OMR::stringPeepholes,                           OMR::IfNotQuickStart            }, // need stringpeepholes to catch bigdecimal patterns
    { OMR::trivialInlining                                                       },
    { OMR::jProfilingBlock                                                       },
+    { OMR::cogniWorklist                                                         }, //perform after inlining 
    { OMR::virtualGuardTailSplitter                                              },
    { OMR::recompilationModifier,                     OMR::IfEnabled                  },
    { OMR::samplingJProfiling                                                    },
@@ -422,6 +424,7 @@ const OptimizationStrategy hotStrategyOpts[] =
    { OMR::expensiveGlobalValuePropagationGroup                            },
    { OMR::dataAccessAccelerator                                           },
    { OMR::osrGuardRemoval,                       OMR::IfEnabled           }, // run after calls/monents/asyncchecks have been removed
+   { OMR::cogniWorklist                                                         }, //perform after inlining 
    { OMR::globalDeadStoreGroup,                                           },
    { OMR::idiomRecognition,                      OMR::IfLoopsAndNotProfiling   }, // Early pass of idiomRecognition - Loop Canonicalizer transformations break certain idioms (i.e. arrayTranslateAndTest)
    { OMR::globalCopyPropagation,                 OMR::IfNoLoops       },
@@ -650,8 +653,8 @@ static const OptimizationStrategy cheapWarmStrategyOpts[] =
    { OMR::staticFinalFieldFolding,                                              },
    { OMR::osrGuardInsertion,                         OMR::IfVoluntaryOSR        },
    { OMR::osrExceptionEdgeRemoval                                               }, // most inlining is done by now
-   { OMR::cogniWorklist                                                         }, //perform after inlining
    { OMR::jProfilingBlock                                                       },
+   { OMR::cogniWorklist                                                         }, //perform after inlining   
    { OMR::virtualGuardTailSplitter                                              }, // merge virtual guards
    { OMR::treeSimplification                                                    },
 #ifdef TR_HOST_S390
