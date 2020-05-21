@@ -25,7 +25,7 @@
 #include "socket.hpp"
 #include "out/compile.pb.h"
 
-#define PORT 38400
+#define PORT 38401
 
 //currently going to be hardcoded to use localhost as server address
 class Client {
@@ -58,7 +58,20 @@ int setupConnection(){
    memcpy(&server.sin_addr.s_addr, host->h_addr, host->h_length);
    server.sin_family = AF_INET;
    server.sin_port = htons(PORT);
-  
+
+
+   struct timeval timeout;      
+   timeout.tv_sec = 300; //5min timeout on send and receive
+    timeout.tv_usec = 0;
+
+    if (setsockopt (socketFd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout,
+                sizeof(timeout)) < 0)
+	  handleError(1, socketFd, "setsockopt failed\n");
+
+	if (setsockopt (socketFd, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeout,
+					sizeof(timeout)) < 0)
+	  handleError(1, socketFd, "setsockopt failed\n");
+	  
   connectSock = connect(socketFd, (struct sockaddr *) &server, sizeof(server));
   if(connectSock < 0){
     handleError(1, socketFd, "Could not connect client to server");
@@ -68,12 +81,13 @@ int setupConnection(){
   return(socketFd);
 }
   
-  void writeClient(TCP::ClientMsgType type, std::string text){
+  void writeClient(TCP::ClientMsgType type, char * text){
 
+	std::cout << "write client setting text: " << text; 
 	//stream.clientmsg.set_type(type);
-  stream.clientmsg.set_text(text);
-  stream.streamWrite(stream.clientmsg, fd);
-
+	//  stream.clientmsg.set_text(text);
+	//stream.streamWrite(stream.clientmsg, fd);
+	send(fd, text, strlen(text), 0);
 }
 
   //"custom" serialization interfaces for reading native types

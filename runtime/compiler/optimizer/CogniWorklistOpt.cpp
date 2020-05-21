@@ -89,10 +89,19 @@ TR_CogniWorklistOpt::perform() {
 			  Client *client = comp()->getPersistentInfo()->getCogniCryptClient();
 			  //TODO utilize protobuf features once protobufs are integrated into CogniCrypt
 			  client->writeClient(TCP::ClientMsgType::clientRequestInitAnalysis, "INITANALYSIS\n");
-			  
+
 			  client->writeClient(TCP::ClientMsgType::clientRequestInitAnalysis, compileeClass);
-			  client->writeClient(TCP::ClientMsgType::clientRequestInitAnalysis, "\n");
-			  client->writeClient(TCP::ClientMsgType::clientRequestInitAnalysis, "END\n");
+              client->writeClient(TCP::ClientMsgType::clientRequestInitAnalysis, "\n");
+
+			  printf("JITCLIENT: there are this many callsites inlined: %d\n", comp()->getNumInlinedCallSites());
+			  for (int32_t i = 0; i < comp()->getNumInlinedCallSites(); ++i) {
+				printf("JITCLIENT: sending class to analyse: %s\n", comp()->getInlinedResolvedMethod(i)->classNameChars());
+				client->writeClient(TCP::ClientMsgType::clientRequestInitAnalysis, comp()->getInlinedResolvedMethod(i)->classNameChars());
+				client->writeClient(TCP::ClientMsgType::clientRequestInitAnalysis, "\n");
+				
+			  }
+			  
+			  client->writeClient(TCP::ClientMsgType::clientRequestInitAnalysis, "ENDCLASSES\n");
 			  printf("JITCLIENT: done search...\n");
 			  
 		}catch(...){
