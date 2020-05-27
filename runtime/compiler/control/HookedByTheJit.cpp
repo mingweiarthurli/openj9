@@ -2915,7 +2915,12 @@ void jitClassesRedefined(J9VMThread * currentThread, UDATA classCount, J9JITRede
          int32_t length;
          char *name = fe->getClassNameChars((TR_OpaqueClassBlock*)freshClass, length);
          reportHookDetail(currentThread, "jitClassesRedefined", "Redefined class old=%p new=%p stale=%p fresh=%p %.*s", oldClass, newClass, staleClass, freshClass, length, name);
-
+		 printf("VM: redefining class old=%p new=%p stale=%p fresh=%p %.*s\n", oldClass, newClass, staleClass, freshClass, length, name);
+		 timespec tsAtPoint;
+		 clock_gettime(CLOCK_REALTIME, &tsAtPoint);
+		 printf("VM: redefine start point time: %lld.%.9ld\n", (long long)tsAtPoint.tv_sec, tsAtPoint.tv_nsec);
+		 printf("VM: redefine start point time (in ms) %lld\n",(long)((tsAtPoint.tv_sec) * 1000 + (tsAtPoint.tv_nsec) / 1000000));
+		 
          compInfo->getLowPriorityCompQueue().purgeEntriesOnClassRedefinition((J9Class*)staleClass);
 
          // Step 1 remove from compilation request queue any methods that are redefined
@@ -3045,6 +3050,11 @@ void jitClassesRedefined(J9VMThread * currentThread, UDATA classCount, J9JITRede
       TR::Options::getCmdLineOptions()->setOption(TR_MimicInterpreterFrameShape);
 
    reportHookFinished(currentThread, "jitClassesRedefined");
+   timespec ts;
+   clock_gettime(CLOCK_REALTIME, &ts);
+   printf("VM: redefine finish time: %lld.%.9ld\n", (long long)ts.tv_sec, ts.tv_nsec);
+   printf("VM: redefine finish time (in ms) %lld\n",(long)((ts.tv_sec) * 1000 + (ts.tv_nsec) / 1000000));
+   
    }
 
 void jitFlushCompilationQueue(J9VMThread * currentThread, J9JITFlushCompilationQueueReason reason)
