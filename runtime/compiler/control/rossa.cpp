@@ -605,15 +605,18 @@ freeJITConfig(J9JITConfig * jitConfig)
    if (jitConfig)
       {
 
-		//cleanup the client connection
-		printf("--------------------------------------\n");
-		printf("JIT: shutting down client connection.\n");
-		printf("--------------------------------------\n");
-
 		TR::CompilationInfo * compInfo = getCompilationInfo(jitConfig);
-		Client *client = compInfo->getPersistentInfo()->getCogniCryptClient();
-		client->writeClient(TCP::ClientMsgType::clientRequestInitAnalysis, "END\n");
-		client->closeClient();
+		if(compInfo->getPersistentInfo()->getCogniCryptMode() == COGNICRYPT_MODE){
+		  //cleanup the client connection
+		  printf("--------------------------------------\n");
+		  printf("JIT: shutting down client connection.\n");
+		  printf("--------------------------------------\n");
+		  
+		  Client *client = compInfo->getPersistentInfo()->getCogniCryptClient();
+		  client->writeClient(TCP::ClientMsgType::clientRequestInitAnalysis, "END\n");
+		  client->closeClient();
+		  
+		}
 		
       // Do all JIT compiler present freeing.
       //
