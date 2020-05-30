@@ -81,13 +81,18 @@ int setupConnection(){
   return(socketFd);
 }
   
-  void writeClient(TCP::ClientMsgType type, char * text){
+  void writeClient(TCP::ClientMsgType type, char * text, int nameLen){
 
-	std::cout << "write client setting text: " << text; 
+	std::cout << "write client setting text: " << text << " with custom len: " << nameLen ;
+	
 	//stream.clientmsg.set_type(type);
 	//  stream.clientmsg.set_text(text);
 	//stream.streamWrite(stream.clientmsg, fd);
-	send(fd, text, strlen(text), 0);
+	if(nameLen == 0){
+	  send(fd, text, strlen(text), 0);
+	} else {
+	  send(fd, text, nameLen, 0);
+	}
 }
 
   //"custom" serialization interfaces for reading native types

@@ -613,7 +613,7 @@ freeJITConfig(J9JITConfig * jitConfig)
 		  printf("--------------------------------------\n");
 		  
 		  Client *client = compInfo->getPersistentInfo()->getCogniCryptClient();
-		  client->writeClient(TCP::ClientMsgType::clientRequestInitAnalysis, "END\n");
+		  client->writeClient(TCP::ClientMsgType::clientRequestInitAnalysis, "END\n", 0);
 		  client->closeClient();
 		  
 		}
@@ -1652,7 +1652,7 @@ onLoadInternal(
    printf("--------------------------------------\n");
 	 Client *client = new (PERSISTENT_NEW) Client();
 	 //TODO guard for setup fail
-	 client->writeClient(TCP::ClientMsgType::clientRequestInitAnalysis, "REQUESTSEEDS\n");
+	 client->writeClient(TCP::ClientMsgType::clientRequestInitAnalysis, "REQUESTSEEDS\n", 0);
 	 persistentMemory->getPersistentInfo()->setCogniCryptClient(client);
 
 	 //TODO for now to test seed access
