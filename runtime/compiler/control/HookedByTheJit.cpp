@@ -4772,6 +4772,17 @@ void JitShutdown(J9JITConfig * jitConfig)
       }
 #endif
 
+   //cleanup the client connection                                                                                               
+   if(compInfo->getPersistentInfo()->getCogniCryptMode() == COGNICRYPT_MODE){
+     printf("--------------------------------------\n");
+     printf("JIT: shutting down client connection.\n");
+     printf("--------------------------------------\n");
+
+     Client *client = compInfo->getPersistentInfo()->getCogniCryptClient();
+     client->writeClient(TCP::ClientMsgType::clientRequestInitAnalysis, "END\n", 0);
+     client->closeClient();
+   }
+
    TR_DebuggingCounters::report();
    accumulateAndPrintDebugCounters(jitConfig);
 

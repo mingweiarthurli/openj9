@@ -604,19 +604,6 @@ freeJITConfig(J9JITConfig * jitConfig)
    // This method must be called only when we are sure that there are no other java threads running
    if (jitConfig)
       {
-
-		TR::CompilationInfo * compInfo = getCompilationInfo(jitConfig);
-		if(compInfo->getPersistentInfo()->getCogniCryptMode() == COGNICRYPT_MODE){
-		  //cleanup the client connection
-		  printf("--------------------------------------\n");
-		  printf("JIT: shutting down client connection.\n");
-		  printf("--------------------------------------\n");
-		  
-		  Client *client = compInfo->getPersistentInfo()->getCogniCryptClient();
-		  client->writeClient(TCP::ClientMsgType::clientRequestInitAnalysis, "END\n", 0);
-		  client->closeClient();
-		  
-		}
 		
       // Do all JIT compiler present freeing.
       //
