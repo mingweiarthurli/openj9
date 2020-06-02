@@ -39,7 +39,6 @@ TR_CogniWorklistOpt::perform() {
 
   if(comp()->getPersistentInfo()->getCogniCryptMode() == COGNICRYPT_MODE){
   
-  //  printf("JITCLIENT: using class to search: %s\n", classToSearch);
   std::vector<std::string> seeds = comp()->getPersistentInfo()->getCogniAnalysisSeeds();
 
   //todo cleanup
@@ -53,12 +52,8 @@ TR_CogniWorklistOpt::perform() {
   for(; tt; tt = tt->getNextTreeTop()){
     
     TR::Node *node = tt->getNode();
-    
-    if(node->getNumChildren() > 0){
-      if(node->getOpCodeValue() == TR::treetop) // jump over TreeTop
-	node = node->getFirstChild();
-      
-      if(node->getNumChildren() > 0 &&
+          
+	if(node->getNumChildren() > 0 &&
 	 (node->getFirstChild()->getOpCode().isFunctionCall() || node->getFirstChild()->getOpCode().isCall())){
 	
 	TR::Node *classNode = node->getFirstChild();
@@ -70,13 +65,16 @@ TR_CogniWorklistOpt::perform() {
 
 	    TR_ResolvedMethod *m = method->getResolvedMethod();
 	    char *sig = m->signatureChars();	    
+		char *callerClassName =  m->classNameChars();
 
+		//get the class.methodsig combo
+		char *nameAndSig = (char*) malloc(strlen(callerClassName) + strlen(sig));
+		memcpy(nameAndSig, callerClassName, strlen(callerClassName));
+		memcpy(nameAndSig+strlen(callerClassName), sig, strlen(sig));
 
-		//TR_ResolvedMethod *feMethodpre = comp()->getCurrentMethod();
-		//char *compileeClasspre = feMethodpre->classNameChars();
-		//printf("The name of the method we are in: %s and the name of the class: %s\n", feMethodpre->nameChars(), compileeClasspre);
+		//printf("JITCLIENT: looking at %s\n", nameAndSig);
 		
-		bool found = search(seeds , sig);
+		bool found = search(seeds , nameAndSig);
 	    if(found){
 		  //compilee method and class
 	      TR_ResolvedMethod *feMethod = comp()->getCurrentMethod();
@@ -114,7 +112,7 @@ TR_CogniWorklistOpt::perform() {
 	  
 	}
 	  }
-	}
+	
   }
   }
   return 1;
