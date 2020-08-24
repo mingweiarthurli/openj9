@@ -70,6 +70,10 @@ class AbsInterpreter
 
    void transferBlockStatesFromPredeccesors(TR::Block* block, bool insideLoop);
 
+   bool interpretStructure(TR_Structure* structure, bool insideLoop, bool lastTimeThrough);
+   bool interpretRegionStructure(TR_RegionStructure* regionStructure, bool insideLoop, bool lastTimeThrough);
+   bool interpretBlockStructure(TR_BlockStructure* blockStructure, bool insideLoop, bool lastTimeThrough);
+
    bool interpretBlock(TR::Block* block, bool insideLoop, bool lastTimeThrough);
 
    TR::AbsVisitor* _visitor;

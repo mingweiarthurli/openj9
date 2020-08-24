@@ -110,16 +110,46 @@ bool TR::AbsInterpreter::interpret()
    if (comp()->getOption(TR_TraceAbstractInterpretation))
       traceMsg(comp(), "\nStarting to abstract interpret method %s ...\n", _callerMethod->signature(comp()->trMemory()));
 
-   TR::ReversePostorderSnapshotBlockIterator blockIt(_cfg, comp());
-
-   while (blockIt.currentBlock())
+   // abstract interpret the whole method, methods with and without loops will be interpreted differently
+   //
+   if (_cfg->hasBackEdges()) // may have loops, do the structural analysis
       {
-      bool success = interpretBlock(blockIt.currentBlock(), false, true);
-      if (!success)
-         return false;
+      TR_Structure* structure = TR_RegionAnalysis::getRegions(comp(), _cfg); // generating the structures
+      if (!structure) //Fail to generate structures
+         {
+         TR::ReversePostorderSnapshotBlockIterator blockIt(_cfg, comp());
+
+         while (blockIt.currentBlock())
+            {
+            bool success = interpretBlock(blockIt.currentBlock(), false, true);
+            if (!success)
+               return false;
+
+            blockIt.stepForward();
+            }
+         }
+      else
+         {
+         bool success = interpretRegionStructure(structure->asRegion(), false, true);
+
+         if (!success)
+            return false;
+         }
+
+      }
+   else // do not have loops, walk the CFG blocks
+      {
+      TR::ReversePostorderSnapshotBlockIterator blockIt(_cfg, comp());
+
+      while (blockIt.currentBlock())
+         {
+         bool success = interpretBlock(blockIt.currentBlock(), false, true);
+         if (!success)
+            return false;
 
 
-      blockIt.stepForward();
+         blockIt.stepForward();
+         }
       }
 
    if (comp()->getOption(TR_TraceAbstractInterpretation))
@@ -129,6 +159,51 @@ bool TR::AbsInterpreter::interpret()
       _inliningMethodSummary->trace(comp());
 
    return true;
+   }
+
+bool TR::AbsInterpreter::interpretStructure(TR_Structure* structure, bool insideLoop, bool lastTimeThrough)
+   {
+   if (structure->asBlock())
+      return interpretBlockStructure(structure->asBlock(), insideLoop, lastTimeThrough);
+   else if (structure->asRegion())
+      return interpretRegionStructure(structure->asRegion(), insideLoop, lastTimeThrough);
+
+   return false;
+   }
+
+bool TR::AbsInterpreter::interpretRegionStructure(TR_RegionStructure* regionStructure, bool insideLoop, bool lastTimeThrough)
+   {
+   if (regionStructure->isNaturalLoop())
+      {
+      for (RegionIterator ri(regionStructure, _region); ri.getCurrent(); ri.next())
+         {
+         TR_StructureSubGraphNode *node = ri.getCurrent();
+         bool success = interpretStructure(node->getStructure(), true, false);
+
+         if (!success)
+            return false;
+         }
+      }
+   else if (!regionStructure->isAcyclic()) // improper region, do not interpret.
+      {
+      return true;
+      }
+
+   for (RegionIterator ri(regionStructure, _region); ri.getCurrent(); ri.next())
+      {
+      TR_StructureSubGraphNode *node = ri.getCurrent();
+      bool success = interpretStructure(node->getStructure(), regionStructure->isNaturalLoop()? true : insideLoop, lastTimeThrough);
+
+      if (!success)
+         return false;
+      }
+
+   return true;
+   }
+
+bool TR::AbsInterpreter::interpretBlockStructure(TR_BlockStructure* blockStructure, bool insideLoop, bool lastTimeThrough)
+   {
+   return interpretBlock(blockStructure->getBlock(), insideLoop, lastTimeThrough);
    }
 
 void TR::AbsInterpreter::transferBlockStatesFromPredeccesors(TR::Block* block, bool insideLoop)
