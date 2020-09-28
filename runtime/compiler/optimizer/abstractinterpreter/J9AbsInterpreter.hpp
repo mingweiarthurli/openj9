@@ -30,7 +30,7 @@
 
 
 namespace J9 {
-   
+
 /*
  * The abstract interpreter for Java Bytecode.
  * It interprets the method and simluates the JVM state.
@@ -98,6 +98,8 @@ class AbsInterpreter : public TR_J9ByteCodeIterator, public TR::ReversePostorder
    void transferBlockStatesFromPredeccesors();
    
    bool interpretByteCode();
+
+   void foldTheBranch(TR::Block* parentBlock, int32_t label, bool takeBranch); //true: take the branch, false: not take the branch
       
    /** For interpreting bytecode and updating abstract state **/
 
@@ -131,7 +133,7 @@ class AbsInterpreter : public TR_J9ByteCodeIterator, public TR::ReversePostorder
    void comparison(TR::DataType type, ComparisonOperator op);
 
    void goto_(int32_t label);
-   void conditionalBranch(TR::DataType type, int32_t label, ConditionalBranchOperator op);
+   void conditionalBranch(TR::DataType type, int32_t offset, ConditionalBranchOperator op);
 
    void return_(TR::DataType type, bool oneBit=false);
 

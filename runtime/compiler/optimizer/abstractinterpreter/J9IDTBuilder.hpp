@@ -70,7 +70,7 @@ class IDTBuilder : public OMR::IDTBuilderConnector
     * @param arguments the arguments passed from the caller method.
     * @param callerIndex the caller index for call site
     */
-   void performAbstractInterpretation(TR::IDTNode* node, TR::IDTBuilderVisitor& visitor, TR::AbsArguments* arguments, int32_t callerIndex);
+   void performAbstractInterpretation(TR::IDTNode* node, TR::IDTBuilderVisitor& visitor, TR::AbsArguments* arguments, TR::AbsValue** returnValue, int32_t callerIndex);
 
    TR_J9EstimateCodeSize* _cfgGen;
    };
