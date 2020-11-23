@@ -1632,11 +1632,13 @@ onLoadInternal(
             TR::Options::getCmdLineOptions()->getOption(TR_InhibitRecompilation)))
          persistentMemory->getPersistentInfo()->setRuntimeInstrumentationRecompilationEnabled(true);
       }
+   
  if(compInfo->getPersistentInfo()->getCogniCryptMode() == COGNICRYPT_MODE){
    //TODO rm later
    printf("--------------------------------------\n");
    printf("VM: Started up in CogniCrypt mode.\n");
    printf("--------------------------------------\n");
+   fflush(stdout);
 	 Client *client = new (PERSISTENT_NEW) Client();
 	 //TODO guard for setup fail
 	 client->writeClient(TCP::ClientMsgType::clientRequestInitAnalysis, "REQUESTSEEDS\n", 0);
@@ -1687,7 +1689,6 @@ onLoadInternal(
          return -1;
       }
  
-#if defined(J9VM_OPT_JITSERVER)   
    if (compInfo->getPersistentInfo()->getRemoteCompilationMode() == JITServer::SERVER)
       {
       JITServer::CommunicationStream::initConfigurationFlags();

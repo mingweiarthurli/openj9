@@ -116,6 +116,9 @@ struct LDA {
 
 #define STACK_WALK_DEPTH 16
 
+//static bool just for filtering printing in jit comp thread
+static bool  redefinitionEventHasOccured = false;
+
 // struct to remember a method for JIT dump
 typedef struct TR_MethodToBeCompiledForDump {
    J9Method   *_method;
@@ -3093,7 +3096,7 @@ void jitClassesRedefined(J9VMThread * currentThread, UDATA classCount, J9JITRede
    clock_gettime(CLOCK_REALTIME, &ts);
    printf("VM: redefine finish time: %lld.%.9ld\n", (long long)ts.tv_sec, ts.tv_nsec);
    printf("VM: redefine finish time (in ms) %lld\n",(long)((ts.tv_sec) * 1000 + (ts.tv_nsec) / 1000000));
-   
+   jitConfig->redefinitionEventHasOccured = true;
    }
 
 void jitFlushCompilationQueue(J9VMThread * currentThread, J9JITFlushCompilationQueueReason reason)
@@ -5481,6 +5484,7 @@ static void jitStateLogic(J9JITConfig * jitConfig, TR::CompilationInfo * compInf
                       compInfo->getMethodQueueSize(),
                       persistentInfo->isClassLoadingPhase()?"ON":"OFF",
                       avgJvmCpuUtil);
+		 
          }
 
       // Turn on/off profiling in the jit

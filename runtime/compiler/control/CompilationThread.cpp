@@ -10739,6 +10739,25 @@ void TR::CompilationInfoPerThreadBase::logCompilationSuccess(
             TR_VerboseLog::write(" Q_SZ=%d Q_SZI=%d QW=%d", _compInfo.getMethodQueueSize(),
                                  _compInfo.getNumQueuedFirstTimeCompilations(), _compInfo.getQueueWeight());
 
+			//only for purpose of knowing when to take measurements
+			if (_compInfo.getMethodQueueSize() <= 2) {
+			  if(_jitConfig->redefinitionEventHasOccured){
+				timespec tsAtPoint;
+				clock_gettime(CLOCK_REALTIME, &tsAtPoint);
+				TR_VerboseLog::write("VM: queue is less than (or equal to) 2 at this time (in ms) %lld\n",(long)((tsAtPoint.tv_sec) * 1000 + (tsAtPoint.tv_nsec)/ 1000000));
+				if(_jitConfig->redefinitionTimeLatest) {
+				  uint64_t now = (uint64_t)((tsAtPoint.tv_sec) * 1000 + (tsAtPoint.tv_nsec)/ 1000000);
+				  if((now - _jitConfig->redefinitionTimeLatest) >= 2000) {
+					TR_VerboseLog::write("VM: MEASUREMENT WINDOW START: %lld\n", (long)now);
+				  }
+				} else {
+					_jitConfig->redefinitionTimeLatest = (uint64_t)((tsAtPoint.tv_sec) * 1000 + (tsAtPoint.tv_nsec)/ 1000000);
+				  }				
+			  }
+			} else if(_jitConfig->redefinitionEventHasOccured && _jitConfig->redefinitionTimeLatest && _compInfo.getMethodQueueSize() > 2) {
+			  _jitConfig->redefinitionTimeLatest = 0;
+			}
+			  
             TR_VerboseLog::write(" j9m=%p bcsz=%u", method, bytecodeSize);
 
             if (_compInfo.useSeparateCompilationThread() && !_methodBeingCompiled->_async)

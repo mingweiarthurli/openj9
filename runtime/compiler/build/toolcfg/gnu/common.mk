@@ -112,7 +112,7 @@ CX_FLAGS+=\
     -fno-strict-aliasing \
     -fstack-protector
 
-ifneq ($(J9VM_OPT_JITSERVER),)
+#ifneq ($(J9VM_OPT_JITSERVER),)
     CXX_FLAGS+=\
         -std=c++11
 #else
