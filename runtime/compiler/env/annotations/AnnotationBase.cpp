@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -78,7 +78,7 @@ void TR_AnnotationBase::loadExpectedAnnotationClasses(J9VMThread * vmThread)
   acquireVMAccess(vmThread); // this is not the comp thread so suspension is possible
   for(i=0;i < kLastAnnotationSignature;++i)
      {
-     // Strip off 'L' prefix and ';' suffix
+     // Strip off 'L' prefix or 'Q' prefix and ';' suffix
      const char *name = recognizedAnnotations[i].name;
      int32_t nameLen = recognizedAnnotations[i].nameLen;
      TR_ASSERT(strlen(name) == nameLen,"Table entry for %s is %d but should be %d\n",name,nameLen,strlen(name));
@@ -115,8 +115,7 @@ bool TR_AnnotationBase::scanForKnownAnnotationsAndRecord(TR::CompilationInfo *co
       }
 
    TR_PersistentClassInfo *classInfo=NULL;
-   if(TR::Options::getCmdLineOptions()->allowRecompilation() &&
-      !TR::Options::getCmdLineOptions()->getOption(TR_DisableCHOpts) &&
+   if(!TR::Options::getCmdLineOptions()->getOption(TR_DisableCHOpts) &&
       compInfo->getPersistentInfo()->getPersistentCHTable())
       {
       TR_OpaqueClassBlock *cl=J9JitMemory::convertClassPtrToClassOffset(clazz);
@@ -252,7 +251,7 @@ TR_AnnotationBase::getDefaultAnnotationInfo(const char *annotationName)
          }
       }
    if(NULL == clazz) return NULL;
-   const char * className = annotationName+1; // strip off leading 'L';
+   const char * className = annotationName+1; // strip off leading 'L' or 'Q';
    int32_t classNameLength = strlen (className) -1; // strip off trailing ';'
    J9AnnotationInfoEntry *defaultEntry = intFunc->getAnnotationDefaultsForNamedAnnotation(vmThread, clazz, (char *)className, classNameLength,
                                                                                           J9_FINDCLASS_FLAG_EXISTING_ONLY);
@@ -515,7 +514,7 @@ bool TR_AnnotationBase::extractValue(J9AnnotationInfoEntry * annotationInfoEntry
      ++dataPtr;// point at data
      *(int32_t* *)ptr = dataPtr;
      return true;
-   } while(namePtr = intFunc->annotationElementIteratorNext(&state,&data));
+   } while((namePtr = intFunc->annotationElementIteratorNext(&state,&data)));
     if(trace) printf("Search failed\n");
     return false;
   }

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -1356,7 +1356,7 @@ char const *indexPattern = "index%d/";
 /**
  * Scan the /sys filesystem for the correct descriptor and read it.
  * Stop when a descriptor matching the CPU, level, and one of the types in cacheType matches.
- * Note that if if the cache is unified, it will match a query for any type.
+ * Note that if the cache is unified, it will match a query for any type.
  * @param [in]  portLibrary port library
  * @param [in]  cpu which CPU to query
  * @param [in]  level which cache level to query. Must be >= 1
@@ -1594,6 +1594,11 @@ getCacheLevels(struct J9PortLibrary *portLibrary,
 {
 	return 2;
 }
+/* getsystemcfg() isn't supported on i 7.1 so there's no need to define the 
+ * functions `getCacheTypes` & `getCacheSize` on the i-series platforms
+ */
+#if !defined(J9OS_I5_V6R1)
+
 
 static int32_t
 getCacheTypes(struct J9PortLibrary *portLibrary,
@@ -1657,6 +1662,7 @@ getCacheSize(struct J9PortLibrary *portLibrary,
 	}
 	return result;
 }
+#endif /* defined(J9OS_I5_V6R1) */
 #endif /* defined(AIXPPC) */
 
 /*

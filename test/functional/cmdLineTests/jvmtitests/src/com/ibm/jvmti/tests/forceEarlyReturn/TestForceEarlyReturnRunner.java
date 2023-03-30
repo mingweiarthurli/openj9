@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2018 IBM Corp. and others
+ * Copyright (c) 2001, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -128,7 +128,7 @@ public class TestForceEarlyReturnRunner extends Thread
 
 		ret = earlyReturnInt(0xC0DECAFE, 0xDECAFBAD);
 		
-		/* The agent code will force a return of a a specific int value */
+		/* The agent code will force a return of a specific int value */
 		if (ret != 10002000) {
 			System.out.println("    Error [testEarlyReturnInt]: Incorrect return value [" + ret + "]");
 			return false;
@@ -154,7 +154,7 @@ public class TestForceEarlyReturnRunner extends Thread
 		
 		ret = earlyReturnFloat(0xC0DECAFE, 0xDECAFBAD);
 
-		/* The agent code will force a return of a a specific int value */
+		/* The agent code will force a return of a specific int value */
 		if (ret != 10002000.0) {
 			System.out.println("    Error [testReturnFloat]: Incorrect return value [" + ret + "]");
 			return false;
@@ -180,7 +180,7 @@ public class TestForceEarlyReturnRunner extends Thread
 
 		ret = earlyReturnLong(0xC0DECAFE, 0xDECAFBAD);
 		
-		/* The agent code will force a return of a a specific int value */
+		/* The agent code will force a return of a specific int value */
 		if (ret != 100020003000L) {
 			System.out.println("    Error [testReturnLong]: Incorrect return value [" + ret + "]");
 			return false;
@@ -206,7 +206,7 @@ public class TestForceEarlyReturnRunner extends Thread
 
 		ret = earlyReturnDouble(0xC0DECAFE, 0xDECAFBAD);
 		
-		/* The agent code will force a return of a a specific int value */
+		/* The agent code will force a return of a specific int value */
 		if (ret != 100020003000.0) {
 			System.out.println("    Error [testReturnDouble]: Incorrect return value [" + ret + "]");
 			return false;

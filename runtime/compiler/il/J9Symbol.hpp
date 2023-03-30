@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -148,11 +148,16 @@ public:
       Java_lang_Throwable_stackTrace,
       Java_lang_invoke_BruteArgumentMoverHandle_extra,
       Java_lang_invoke_DynamicInvokerHandle_site,
+      Java_lang_invoke_CallSite_target,
+      Java_lang_invoke_LambdaForm_vmentry,
       Java_lang_invoke_MutableCallSite_target,
       Java_lang_invoke_MutableCallSiteDynamicInvokerHandle_mutableSite,
+      Java_lang_invoke_MemberName_vmtarget,
+      Java_lang_invoke_MemberName_vmindex,
+      Java_lang_invoke_MethodHandle_form,
       Java_lang_invoke_MethodHandle_thunks,
       Java_lang_invoke_MethodHandle_type,
-      Java_lang_invoke_MethodType_arguments,
+      Java_lang_invoke_MethodType_ptypes,
       Java_lang_invoke_PrimitiveHandle_rawModifiers,
       Java_lang_invoke_PrimitiveHandle_defc,
       Java_lang_invoke_ThunkTuple_invokeExactThunk,
@@ -160,6 +165,7 @@ public:
       Java_math_BigInteger_ZERO,
       Java_math_BigInteger_useLongRepresentation,
       Java_lang_invoke_VarHandle_handleTable,
+      Java_lang_invoke_MethodHandleImpl_LoopClauses_clauses,
       Java_lang_Integer_value,
       Java_lang_Long_value,
       Java_lang_Float_value,
@@ -197,8 +203,31 @@ private:
    RecognizedField _recognizedField;
    /** @} */
 
+public:
+
+   // These two methods are primarily for direct analysis of bytecode. If
+   // generating trees, use SymbolReferenceTable instead.
+
+   template <typename AllocatorType>
+   static TR::Symbol * createPossiblyRecognizedShadowWithFlags(
+      AllocatorType m,
+      TR::DataType type,
+      bool isVolatile,
+      bool isFinal,
+      bool isPrivate,
+      RecognizedField recognizedField);
+
+   template <typename AllocatorType>
+   static TR::Symbol * createPossiblyRecognizedShadowFromCP(
+      TR::Compilation *comp,
+      AllocatorType m,
+      TR_ResolvedMethod *owningMethod,
+      int32_t cpIndex,
+      TR::DataType *type,
+      uint32_t *offset,
+      bool needsAOTValidation);
+
    };
 }
 
 #endif
-

@@ -1,6 +1,6 @@
 
 /*******************************************************************************
- * Copyright (c) 1991, 2014 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -36,32 +36,36 @@
  * @return the next slot containing an object reference
  * @return NULL if there are no more such slots
  */
-J9Class **
+J9Class *
 GC_ClassArrayClassSlotIterator::nextSlot() 
 {
-	J9Class **slotPtr;
-
-	switch(_state) {
-	case classArrayClassSlotIterator_state_arrayClass:
-		slotPtr = (J9Class **)&_iterateClazz->arrayClass;
-		if(!_isArrayClass) {
-			_state = classArrayClassSlotIterator_state_done;
-		} else {
+	J9Class *classPtr = NULL;
+	while (_state != classArrayClassSlotIterator_state_done) {
+		switch (_state) {
+		case classArrayClassSlotIterator_state_arrayClass:
+			classPtr = (J9Class *)_iterateClazz->arrayClass;
+			if (!_isArrayClass) {
+				_state = classArrayClassSlotIterator_state_done;
+			} else {
+				_state += 1;
+			}
+			break;
+		case classArrayClassSlotIterator_state_componentType:
+			classPtr = ((J9ArrayClass *)_iterateClazz)->componentType;
 			_state += 1;
+			break;
+		case classArrayClassSlotIterator_state_leafComponentType:
+			classPtr = ((J9ArrayClass *)_iterateClazz)->leafComponentType;
+			_state += 1;
+			break;
+		case classArrayClassSlotIterator_state_done:
+		default:
+			break;
 		}
-		break;
-	case classArrayClassSlotIterator_state_componentType:
-		slotPtr = &((J9ArrayClass *)_iterateClazz)->componentType;
-		_state += 1;
-		break;
-	case classArrayClassSlotIterator_state_leafComponentType:
-		slotPtr = &((J9ArrayClass *)_iterateClazz)->leafComponentType;
-		_state += 1;
-		break;
-	default:
-		return NULL;
-		break;
+		if (NULL != classPtr) {
+			break;
+		}
 	}
-	return slotPtr;
+	return classPtr;
 }
 

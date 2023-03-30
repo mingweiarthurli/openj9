@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,22 +15,20 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
 
 #include "il/IL.hpp"
 #include "il/ILOpCodes.hpp"
+#include "il/OMRILOps.hpp"
 #include "il/DataTypes.hpp"
 #include "infra/Assert.hpp"
 
 
 TR::ILOpCodes J9::IL::opCodesForConst[] =
    {
-   TR::dfconst,    // TR::DecimalFloat
-   TR::ddconst,    // TR::DecimalDouble
-   TR::deconst,    // TR::DecimalLongDouble
    TR::BadILOp,    // TR::PackedDecimal
    TR::BadILOp,    // TR::ZonedDecimal
    TR::BadILOp,    // TR::ZonedDecimalSignLeadingEmbedded
@@ -43,9 +41,6 @@ TR::ILOpCodes J9::IL::opCodesForConst[] =
 
 TR::ILOpCodes J9::IL::opCodesForDirectLoad[] =
    {
-   TR::dfload,     // TR::DecimalFloat
-   TR::ddload,     // TR::DecimalDouble
-   TR::deload,     // TR::DecimalLongDouble
    TR::pdload,     // TR::PackedDecimal
    TR::zdload,     // TR::ZonedDecimal
    TR::zdsleLoad,  // TR::ZonedDecimalSignLeadingEmbedded
@@ -58,9 +53,6 @@ TR::ILOpCodes J9::IL::opCodesForDirectLoad[] =
 
 TR::ILOpCodes J9::IL::opCodesForDirectStore[] =
    {
-   TR::dfstore,    // TR::DecimalFloat
-   TR::ddstore,    // TR::DecimalDouble
-   TR::destore,    // TR::DecimalLongDouble
    TR::pdstore,    // TR::PackedDecimal
    TR::zdstore,    // TR::ZonedDecimal
    TR::zdsleStore, // TR::ZonedDecimalSignLeadingEmbedded
@@ -73,9 +65,6 @@ TR::ILOpCodes J9::IL::opCodesForDirectStore[] =
 
 TR::ILOpCodes J9::IL::opCodesForIndirectLoad[] =
    {
-   TR::dfloadi,    // TR::DecimalFloat
-   TR::ddloadi,    // TR::DecimalDouble
-   TR::deloadi,    // TR::DecimalLongDouble
    TR::pdloadi,    // TR::PackedDecimal
    TR::zdloadi,    // TR::ZonedDecimal
    TR::zdsleLoadi, // TR::ZonedDecimalSignLeadingEmbedded
@@ -88,9 +77,6 @@ TR::ILOpCodes J9::IL::opCodesForIndirectLoad[] =
 
 TR::ILOpCodes J9::IL::opCodesForIndirectStore[] =
    {
-   TR::dfstorei,    // TR::DecimalFloat
-   TR::ddstorei,    // TR::DecimalDouble
-   TR::destorei,    // TR::DecimalLongDouble
    TR::pdstorei,    // TR::PackedDecimal
    TR::zdstorei,    // TR::ZonedDecimal
    TR::zdsleStorei, // TR::ZonedDecimalSignLeadingEmbedded
@@ -103,9 +89,6 @@ TR::ILOpCodes J9::IL::opCodesForIndirectStore[] =
 
 TR::ILOpCodes J9::IL::opCodesForIndirectArrayLoad[] =
    {
-   TR::dfloadi,    // TR::DecimalFloat
-   TR::ddloadi,    // TR::DecimalDouble
-   TR::deloadi,    // TR::DecimalLongDouble
    TR::pdloadi,    // TR::PackedDecimal
    TR::zdloadi,    // TR::ZonedDecimal
    TR::zdsleLoadi, // TR::ZonedDecimalSignLeadingEmbedded
@@ -118,9 +101,6 @@ TR::ILOpCodes J9::IL::opCodesForIndirectArrayLoad[] =
 
 TR::ILOpCodes J9::IL::opCodesForIndirectArrayStore[] =
    {
-   TR::dfstorei,    // TR::DecimalFloat
-   TR::ddstorei,    // TR::DecimalDouble
-   TR::destorei,    // TR::DecimalLongDouble
    TR::pdstorei,    // TR::PackedDecimal
    TR::zdstorei,    // TR::ZonedDecimal
    TR::zdsleStorei, // TR::ZonedDecimalSignLeadingEmbedded
@@ -133,9 +113,6 @@ TR::ILOpCodes J9::IL::opCodesForIndirectArrayStore[] =
 
 TR::ILOpCodes J9::IL::opCodesForRegisterLoad[] =
    {
-   TR::dfRegLoad,  // TR::DecimalFloat
-   TR::ddRegLoad,  // TR::DecimalDouble
-   TR::deRegLoad,  // TR::DecimalLongDouble
    TR::BadILOp,    // TR::PackedDecimal
    TR::BadILOp,    // TR::ZonedDecimal
    TR::BadILOp,    // TR::ZonedDecimalSignLeadingEmbedded
@@ -148,9 +125,6 @@ TR::ILOpCodes J9::IL::opCodesForRegisterLoad[] =
 
 TR::ILOpCodes J9::IL::opCodesForRegisterStore[] =
    {
-   TR::dfRegStore, // TR::DecimalFloat
-   TR::ddRegStore, // TR::DecimalDouble
-   TR::deRegStore, // TR::DecimalLongDouble
    TR::BadILOp,    // TR::PackedDecimal
    TR::BadILOp,    // TR::ZonedDecimal
    TR::BadILOp,    // TR::ZonedDecimalSignLeadingEmbedded
@@ -163,9 +137,6 @@ TR::ILOpCodes J9::IL::opCodesForRegisterStore[] =
 
 TR::ILOpCodes J9::IL::opCodesForCompareEquals[] =
    {
-   TR::dfcmpeq,    // TR::DecimalFloat
-   TR::ddcmpeq,    // TR::DecimalDouble
-   TR::decmpeq,    // TR::DecimalLongDouble
    TR::pdcmpeq,    // TR::PackedDecimal
    TR::BadILOp,    // TR::ZonedDecimal
    TR::BadILOp,    // TR::ZonedDecimalSignLeadingEmbedded
@@ -178,9 +149,6 @@ TR::ILOpCodes J9::IL::opCodesForCompareEquals[] =
 
 TR::ILOpCodes J9::IL::opCodesForCompareNotEquals[] =
    {
-   TR::dfcmpne,    // TR::DecimalFloat
-   TR::ddcmpne,    // TR::DecimalDouble
-   TR::decmpne,    // TR::DecimalLongDouble
    TR::pdcmpne,    // TR::PackedDecimal
    TR::BadILOp,    // TR::ZonedDecimal
    TR::BadILOp,    // TR::ZonedDecimalSignLeadingEmbedded
@@ -228,17 +196,13 @@ static_assert(TR::LastJ9Type - TR::FirstJ9Type + 1 == (sizeof(J9::IL::opCodesFor
 TR::ILOpCodes
 J9::IL::opCodeForCorrespondingIndirectLoad(TR::ILOpCodes loadOpCode)
    {
-
-   if (loadOpCode <= TR::LastOMROp)
+   if (OMR::ILOpCode::isOMROpCode(loadOpCode))
       {
       return OMR::IL::opCodeForCorrespondingIndirectLoad(loadOpCode);
       }
 
    switch (loadOpCode)
       {
-      case TR::dfloadi: return TR::dfstorei;
-      case TR::ddloadi: return TR::ddstorei;
-      case TR::deloadi: return TR::destorei;
       case TR::pdloadi: return TR::pdstorei;
       case TR::zdloadi: return TR::zdstorei;
       case TR::zdsleLoadi: return TR::zdsleStorei;
@@ -247,9 +211,6 @@ J9::IL::opCodeForCorrespondingIndirectLoad(TR::ILOpCodes loadOpCode)
       case TR::udLoadi: return TR::udStorei;
       case TR::udslLoadi: return TR::udslStorei;
       case TR::udstLoadi: return TR::udstStorei;
-      case TR::irsload: return TR::irsstore;
-      case TR::iriload: return TR::iristore;
-      case TR::irlload: return TR::irlstore;
       default: return OMR::IL::opCodeForCorrespondingIndirectLoad(loadOpCode);
       }
 
@@ -262,16 +223,13 @@ TR::ILOpCodes
 J9::IL::opCodeForCorrespondingIndirectStore(TR::ILOpCodes storeOpCode)
    {
 
-   if (storeOpCode <= TR::LastOMROp)
+   if (OMR::ILOpCode::isOMROpCode(storeOpCode))
       {
       return OMR::IL::opCodeForCorrespondingIndirectStore(storeOpCode);
       }
 
    switch (storeOpCode)
       {
-      case TR::dfstorei: return TR::dfloadi;
-      case TR::ddstorei: return TR::ddloadi;
-      case TR::destorei: return TR::deloadi;
       case TR::pdstorei: return TR::pdloadi;
       case TR::zdstorei: return TR::zdloadi;
       case TR::zdsleStorei: return TR::zdsleLoadi;
@@ -280,9 +238,6 @@ J9::IL::opCodeForCorrespondingIndirectStore(TR::ILOpCodes storeOpCode)
       case TR::udStorei: return TR::udLoadi;
       case TR::udslStorei: return TR::udslLoadi;
       case TR::udstStorei: return TR::udstLoadi;
-      case TR::irsstore: return TR::irsload;
-      case TR::iristore: return TR::iriload;
-      case TR::irlstore: return TR::irlload;
       default: return OMR::IL::opCodeForCorrespondingIndirectStore(storeOpCode);
       }
 
@@ -290,6 +245,58 @@ J9::IL::opCodeForCorrespondingIndirectStore(TR::ILOpCodes storeOpCode)
    return TR::BadILOp;
    }
 
+TR::ILOpCodes
+J9::IL::opCodeForCorrespondingDirectLoad(TR::ILOpCodes loadOpCode)
+   {
+
+   if (OMR::ILOpCode::isOMROpCode(loadOpCode))
+      {
+      return OMR::IL::opCodeForCorrespondingDirectLoad(loadOpCode);
+      }
+
+   switch (loadOpCode)
+      {
+      case TR::pdload: return TR::pdstore;
+      case TR::zdload: return TR::zdstore;
+      case TR::zdsleLoad: return TR::zdsleStore;
+      case TR::zdslsLoad: return TR::zdslsStore;
+      case TR::zdstsLoad: return TR::zdstsStore;
+      case TR::udLoad: return TR::udStore;
+      case TR::udslLoad: return TR::udslStore;
+      case TR::udstLoad: return TR::udstStore;
+      default: return OMR::IL::opCodeForCorrespondingDirectLoad(loadOpCode);
+      }
+
+   TR_ASSERT(0, "no corresponding store opcode for specified load opcode");
+   return TR::BadILOp;
+   }
+
+
+TR::ILOpCodes
+J9::IL::opCodeForCorrespondingDirectStore(TR::ILOpCodes storeOpCode)
+   {
+
+   if (OMR::ILOpCode::isOMROpCode(storeOpCode))
+      {
+      return OMR::IL::opCodeForCorrespondingDirectStore(storeOpCode);
+      }
+
+   switch (storeOpCode)
+      {
+      case TR::pdstore: return TR::pdload;
+      case TR::zdstore: return TR::zdload;
+      case TR::zdsleStore: return TR::zdsleLoad;
+      case TR::zdslsStore: return TR::zdslsLoad;
+      case TR::zdstsStore: return TR::zdstsLoad;
+      case TR::udStore: return TR::udLoad;
+      case TR::udslStore: return TR::udslLoad;
+      case TR::udstStore: return TR::udstLoad;
+      default: return OMR::IL::opCodeForCorrespondingDirectStore(storeOpCode);
+      }
+
+   TR_ASSERT(0, "no corresponding load opcode for specified store opcode");
+   return TR::BadILOp;
+   }
 
 TR::ILOpCodes
 J9::IL::opCodeForConst(TR::DataType dt)
@@ -299,7 +306,7 @@ J9::IL::opCodeForConst(TR::DataType dt)
       return TR::iconst;
       }
 
-   if (dt < TR::FirstJ9Type)
+   if (dt.isOMRDataType())
       {
       return OMR::IL::opCodeForConst(dt);
       }
@@ -327,7 +334,7 @@ J9::IL::opCodeForDirectLoad(TR::DataType dt)
       return TR::iload;
       }
 
-   if (dt < TR::FirstJ9Type)
+   if (dt.isOMRDataType())
       {
       return OMR::IL::opCodeForDirectLoad(dt);
       }
@@ -343,7 +350,7 @@ J9::IL::opCodeForDirectStore(TR::DataType dt)
       return TR::istore;
       }
 
-   if (dt < TR::FirstJ9Type)
+   if (dt.isOMRDataType())
       {
       return OMR::IL::opCodeForDirectStore(dt);
       }
@@ -381,7 +388,7 @@ J9::IL::opCodeForIndirectLoad(TR::DataType dt)
       return TR::iloadi;
       }
 
-   if (dt < TR::FirstJ9Type)
+   if (dt.isOMRDataType())
       {
       return OMR::IL::opCodeForIndirectLoad(dt);
       }
@@ -397,7 +404,7 @@ J9::IL::opCodeForIndirectStore(TR::DataType dt)
       return TR::istorei;
       }
 
-   if (dt < TR::FirstJ9Type)
+   if (dt.isOMRDataType())
       {
       return OMR::IL::opCodeForIndirectStore(dt);
       }
@@ -420,7 +427,7 @@ J9::IL::opCodeForIndirectWriteBarrier(TR::DataType dt)
 TR::ILOpCodes
 J9::IL::opCodeForIndirectArrayLoad(TR::DataType dt)
    {
-   if (dt < TR::FirstJ9Type)
+   if (dt.isOMRDataType())
       {
       return OMR::IL::opCodeForIndirectArrayLoad(dt);
       }
@@ -431,7 +438,7 @@ J9::IL::opCodeForIndirectArrayLoad(TR::DataType dt)
 TR::ILOpCodes
 J9::IL::opCodeForIndirectArrayStore(TR::DataType dt)
    {
-   if (dt < TR::FirstJ9Type)
+   if (dt.isOMRDataType())
       {
       return OMR::IL::opCodeForIndirectArrayStore(dt);
       }
@@ -442,7 +449,7 @@ J9::IL::opCodeForIndirectArrayStore(TR::DataType dt)
 TR::ILOpCodes
 J9::IL::opCodeForRegisterLoad(TR::DataType dt)
    {
-   if (dt < TR::FirstJ9Type)
+   if (dt.isOMRDataType())
       {
       return OMR::IL::opCodeForRegisterLoad(dt);
       }
@@ -453,7 +460,7 @@ J9::IL::opCodeForRegisterLoad(TR::DataType dt)
 TR::ILOpCodes
 J9::IL::opCodeForRegisterStore(TR::DataType dt)
    {
-   if (dt < TR::FirstJ9Type)
+   if (dt.isOMRDataType())
       {
       return OMR::IL::opCodeForRegisterStore(dt);
       }
@@ -469,7 +476,7 @@ J9::IL::opCodeForCompareEquals(TR::DataType dt)
       return TR::icmpeq;
       }
 
-   if (dt < TR::FirstJ9Type)
+   if (dt.isOMRDataType())
       {
       return OMR::IL::opCodeForCompareEquals(dt);
       }
@@ -485,7 +492,7 @@ J9::IL::opCodeForCompareNotEquals(TR::DataType dt)
       return TR::icmpne;
       }
 
-   if (dt < TR::FirstJ9Type)
+   if (dt.isOMRDataType())
       {
       return OMR::IL::opCodeForCompareNotEquals(dt);
       }

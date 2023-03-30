@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -385,8 +385,20 @@ typedef struct J9PortLibrary {
 	/** see @ref j9gs.c::j9gs_isEnabled "j9gs_isEnabled"*/
 	int32_t ( *gs_isEnabled)(struct J9PortLibrary *portLibrary, struct J9GSParameters *gsParams, void** baseAddress, uint64_t* perBitSectionSize, uint64_t* bitMask);
 #endif /* OMR_GC_CONCURRENT_SCAVENGER */
-	/** see @ref j9j9portcontrol.c::j9port_control "j9port_control"*/
+	/** see @ref j9portcontrol.c::j9port_control "j9port_control"*/
 	int32_t (*port_control)(struct J9PortLibrary *portLibrary, const char *key, uintptr_t value) ;
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+	/* The delta between Checkpoint and Restore of j9time_current_time_nanos() return values.
+	 * It is initialized to 0 before Checkpoint, and set after restore.
+	 * Only supports one Checkpoint, could be restored multiple times.
+	 */
+	int64_t nanoTimeMonotonicClockDelta;
+	/* Invoking j9sysinfo_get_username()/getpwuid() with SSSD enabled can cause checkpoint failure.
+	 * It is safe to call those methods if checkpoint is disallowed after a final restore.
+	 * https://github.com/eclipse-openj9/openj9/issues/15800
+	 */
+	BOOLEAN finalRestore;
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
 } J9PortLibrary;
 
 #if defined(OMR_PORT_CAN_RESERVE_SPECIFIC_ADDRESS)
@@ -467,7 +479,12 @@ extern J9_CFUNC int32_t j9port_isCompatible(struct J9PortLibraryVersion *expecte
 #define j9time_usec_clock() OMRPORT_FROM_J9PORT(privatePortLibrary)->time_usec_clock(OMRPORT_FROM_J9PORT(privatePortLibrary))
 #define j9time_current_time_nanos(param1) OMRPORT_FROM_J9PORT(privatePortLibrary)->time_current_time_nanos(OMRPORT_FROM_J9PORT(privatePortLibrary),param1)
 #define j9time_current_time_millis() OMRPORT_FROM_J9PORT(privatePortLibrary)->time_current_time_millis(OMRPORT_FROM_J9PORT(privatePortLibrary))
-#define j9time_nano_time() OMRPORT_FROM_J9PORT(privatePortLibrary)->time_nano_time(OMRPORT_FROM_J9PORT(privatePortLibrary))
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+#define NANO_TIME_ADJUSTMENT privatePortLibrary->nanoTimeMonotonicClockDelta
+#else /* defined(J9VM_OPT_CRIU_SUPPORT) */
+#define NANO_TIME_ADJUSTMENT 0
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
+#define j9time_nano_time() (OMRPORT_FROM_J9PORT(privatePortLibrary)->time_nano_time(OMRPORT_FROM_J9PORT(privatePortLibrary)) - NANO_TIME_ADJUSTMENT)
 #define j9time_hires_clock() OMRPORT_FROM_J9PORT(privatePortLibrary)->time_hires_clock(OMRPORT_FROM_J9PORT(privatePortLibrary))
 #define j9time_hires_frequency() OMRPORT_FROM_J9PORT(privatePortLibrary)->time_hires_frequency(OMRPORT_FROM_J9PORT(privatePortLibrary))
 #define j9time_hires_delta(param1,param2,param3) OMRPORT_FROM_J9PORT(privatePortLibrary)->time_hires_delta(OMRPORT_FROM_J9PORT(privatePortLibrary),param1,param2,param3)
@@ -648,7 +665,7 @@ extern J9_CFUNC int32_t j9port_isCompatible(struct J9PortLibraryVersion *expecte
 #define j9sig_map_os_signal_to_portlib_signal(param1) OMRPORT_FROM_J9PORT(privatePortLibrary)->sig_map_os_signal_to_portlib_signal((OMRPortLibrary*)privatePortLibrary,param1)
 #define j9sig_map_portlib_signal_to_os_signal(param1) OMRPORT_FROM_J9PORT(privatePortLibrary)->sig_map_portlib_signal_to_os_signal((OMRPortLibrary*)privatePortLibrary,param1)
 #define j9sig_register_os_handler(param1,param2,param3) OMRPORT_FROM_J9PORT(privatePortLibrary)->sig_register_os_handler((OMRPortLibrary*)privatePortLibrary,param1,(void *)param2,param3)
-#define j9sig_is_master_signal_handler(param1) OMRPORT_FROM_J9PORT(privatePortLibrary)->sig_is_master_signal_handler((OMRPortLibrary*)privatePortLibrary,(void *)param1)
+#define j9sig_is_main_signal_handler(param1) OMRPORT_FROM_J9PORT(privatePortLibrary)->sig_is_main_signal_handler((OMRPortLibrary*)privatePortLibrary,(void *)param1)
 #define j9sig_is_signal_ignored(param1,param2) OMRPORT_FROM_J9PORT(privatePortLibrary)->sig_is_signal_ignored((OMRPortLibrary*)privatePortLibrary,param1,param2)
 #define j9sig_info(param1,param2,param3,param4,param5) OMRPORT_FROM_J9PORT(privatePortLibrary)->sig_info(OMRPORT_FROM_J9PORT(privatePortLibrary),param1,param2,param3,param4,param5)
 #define j9sig_info_count(param1,param2) OMRPORT_FROM_J9PORT(privatePortLibrary)->sig_info_count(OMRPORT_FROM_J9PORT(privatePortLibrary),param1,param2)
@@ -680,7 +697,6 @@ extern J9_CFUNC int32_t j9port_isCompatible(struct J9PortLibraryVersion *expecte
 #define j9sock_getaddrinfo_length(param1,param2) privatePortLibrary->sock_getaddrinfo_length(privatePortLibrary,param1,param2)
 #define j9sock_getaddrinfo_name(param1,param2,param3) privatePortLibrary->sock_getaddrinfo_name(privatePortLibrary,param1,param2,param3)
 #define j9sock_error_message() privatePortLibrary->sock_error_message(privatePortLibrary)
-#define j9str_ftime(param1,param2,param3,param4) OMRPORT_FROM_J9PORT(privatePortLibrary)->str_ftime(OMRPORT_FROM_J9PORT(privatePortLibrary),param1,param2,param3,param4)
 #define j9mmap_startup() OMRPORT_FROM_J9PORT(privatePortLibrary)->mmap_startup(OMRPORT_FROM_J9PORT(privatePortLibrary))
 #define j9mmap_shutdown() OMRPORT_FROM_J9PORT(privatePortLibrary)->mmap_shutdown(OMRPORT_FROM_J9PORT(privatePortLibrary))
 #define j9mmap_capabilities() OMRPORT_FROM_J9PORT(privatePortLibrary)->mmap_capabilities(OMRPORT_FROM_J9PORT(privatePortLibrary))
@@ -761,11 +777,6 @@ extern J9_CFUNC int32_t j9port_isCompatible(struct J9PortLibraryVersion *expecte
 #define j9process_getStream(param1,param2,param3) privatePortLibrary->process_getStream(privatePortLibrary,param1,param2,param3)
 #define j9process_isComplete(param1) privatePortLibrary->process_isComplete(privatePortLibrary,param1)
 #define j9process_get_exitCode(param1) privatePortLibrary->process_get_exitCode(privatePortLibrary,param1)
-#define j9introspect_threads_startDo(param1,param2) OMRPORT_FROM_J9PORT(privatePortLibrary)->introspect_threads_startDo(OMRPORT_FROM_J9PORT(privatePortLibrary),param1,param2)
-#define j9introspect_threads_startDo_with_signal(param1,param2,param3) OMRPORT_FROM_J9PORT(privatePortLibrary)->introspect_threads_startDo_with_signal(OMRPORT_FROM_J9PORT(privatePortLibrary),param1,param2,param3)
-#define j9introspect_threads_nextDo(param1) OMRPORT_FROM_J9PORT(privatePortLibrary)->introspect_threads_nextDo(param1)
-#define j9introspect_backtrace_thread(param1,param2,param3) OMRPORT_FROM_J9PORT(privatePortLibrary)->introspect_backtrace_thread(OMRPORT_FROM_J9PORT(privatePortLibrary),param1,param2,param3)
-#define j9introspect_backtrace_symbols(param1,param2) OMRPORT_FROM_J9PORT(privatePortLibrary)->introspect_backtrace_symbols(OMRPORT_FROM_J9PORT(privatePortLibrary),param1,param2)
 #define j9syslog_query() OMRPORT_FROM_J9PORT(privatePortLibrary)->syslog_query(OMRPORT_FROM_J9PORT(privatePortLibrary))
 #define j9syslog_set(param1) OMRPORT_FROM_J9PORT(privatePortLibrary)->syslog_set(OMRPORT_FROM_J9PORT(privatePortLibrary),param1)
 #define j9mem_walk_categories(param1) OMRPORT_FROM_J9PORT(privatePortLibrary)->mem_walk_categories(OMRPORT_FROM_J9PORT(privatePortLibrary),param1)

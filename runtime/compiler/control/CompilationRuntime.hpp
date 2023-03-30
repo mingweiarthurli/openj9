@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -28,9 +28,8 @@
 #include "AtomicSupport.hpp"
 #include "compile/CompilationTypes.hpp"
 #include "control/CompilationPriority.hpp"
-#include "control/CompilationOperations.hpp"
-#include "control/CompilationTracingFacility.hpp"
 #include "control/ClassHolder.hpp"
+#include "control/MethodToBeCompiled.hpp"
 #include "env/CpuUtilization.hpp"
 #include "env/Processors.hpp"
 #include "env/ProcessorInfo.hpp"
@@ -77,6 +76,9 @@ template <typename T> class TR_PersistentArray;
 typedef J9JITExceptionTable TR_MethodMetaData;
 #if defined(J9VM_OPT_JITSERVER)
 class ClientSessionHT;
+class JITServerAOTCacheMap;
+class JITServerAOTDeserializer;
+class JITServerSharedROMClassCache;
 #endif /* defined(J9VM_OPT_JITSERVER) */
 
 struct TR_SignatureCountPair
@@ -98,14 +100,10 @@ struct TR_SignatureCountPair
    int32_t count;
 };
 
-#ifndef J9_INVOCATION_COUNT_MASK
-#define J9_INVOCATION_COUNT_MASK                   0x00000000FFFFFFFF
-#endif
 
 class TR_LowPriorityCompQueue
    {
    public:
-      friend class TR_DebugExt;
       TR_PERSISTENT_ALLOC(TR_Memory::PersistentInfo); // TODO: define its own category
       static const uint32_t HT_SIZE = (1 << 13); // power of two for cheap modulo
       TR_LowPriorityCompQueue();
@@ -120,7 +118,7 @@ class TR_LowPriorityCompQueue
       void enqueueCompReqToLPQ(TR_MethodToBeCompiled *compReq);
       bool createLowPriorityCompReqAndQueueIt(TR::IlGeneratorMethodDetails &details, void *startPC, uint8_t reason);
       bool addFirstTimeCompReqToLPQ(J9Method *j9method, uint8_t reason);
-      bool addUpgradeReqToLPQ(TR_MethodToBeCompiled*);
+      bool addUpgradeReqToLPQ(TR_MethodToBeCompiled*, uint8_t reason = TR_MethodToBeCompiled::REASON_UPGRADE);
       int32_t getLowPriorityQueueSize() const { return _sizeLPQ; }
       int32_t getLPQWeight() const { return _LPQWeight; }
       void increaseLPQWeightBy(uint8_t weight) { _LPQWeight += (int32_t)weight; }
@@ -183,7 +181,6 @@ class TR_LowPriorityCompQueue
 class TR_JProfilingQueue
    {
    public:
-      friend class TR_DebugExt;
       TR_PERSISTENT_ALLOC(TR_Memory::PersistentInfo); // TODO: define its own category
       TR_JProfilingQueue() : _firstQentry(NULL), _lastQentry(NULL), _size(0), _weight(0), _allowProcessing(false) {};
       void setCompInfo(TR::CompilationInfo *compInfo) { _compInfo = compInfo; }
@@ -336,7 +333,6 @@ namespace TR
 class CompilationInfo
    {
 public:
-   friend class ::TR_DebugExt;
    friend class TR::CompilationInfoPerThreadBase;
    friend class TR::CompilationInfoPerThread;
    friend class ::TR_LowPriorityCompQueue;
@@ -392,6 +388,17 @@ public:
       SUSPEND_COMP_THREAD_EMPTY_QUEUE,
       UNDEFINED_ACTION
       };
+
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+   enum TR_CheckpointStatus
+      {
+      NO_CHECKPOINT_IN_PROGRESS,
+      COMPILE_METHODS_FOR_CHECKPOINT,
+      SUSPEND_THREADS_FOR_CHECKPOINT,
+      INTERRUPT_CHECKPOINT,
+      READY_FOR_CHECKPOINT_RESTORE
+      };
+#endif
 
    struct DLT_record
       {
@@ -449,7 +456,6 @@ public:
    static bool shouldRetryCompilation(TR_MethodToBeCompiled *entry, TR::Compilation *comp);
    static bool shouldAbortCompilation(TR_MethodToBeCompiled *entry, TR::PersistentInfo *persistentInfo);
    static bool canRelocateMethod(TR::Compilation * comp);
-   static bool useSeparateCompilationThread();
    static int computeCompilationThreadPriority(J9JavaVM *vm);
    static void *compilationEnd(J9VMThread *context, TR::IlGeneratorMethodDetails & details, J9JITConfig *jitConfig, void * startPC,
                                void *oldStartPC, TR_FrontEnd *vm=0, TR_MethodToBeCompiled *entry=NULL, TR::Compilation *comp=NULL);
@@ -457,6 +463,14 @@ public:
    static JITServer::ServerStream *getStream();
 #endif /* defined(J9VM_OPT_JITSERVER) */
    static bool isInterpreted(J9Method *method) { return !isCompiled(method); }
+
+   /**
+    * @brief Determines if a J9Method is compiled
+    *
+    * @param method pointer to the J9Method
+    *
+    * @return true if compiled, false otherwise
+    */
    static bool isCompiled(J9Method *method)
       {
 #if defined(J9VM_OPT_JITSERVER)
@@ -466,8 +480,34 @@ public:
          return std::get<0>(stream->read<bool>());
          }
 #endif /* defined(J9VM_OPT_JITSERVER) */
-      return (((uintptr_t)method->extra) & J9_STARTPC_NOT_TRANSLATED) == 0;
+
+      return (getPCIfCompiled(method) != NULL);
       }
+
+   /**
+    * @brief Returns the PC of a method that is compiled
+    *
+    * @param method pointer to the J9Method
+    *
+    * @return The start PC if compiled, NULL otherwise
+    */
+   static void* getPCIfCompiled(J9Method *method)
+      {
+#if defined(J9VM_OPT_JITSERVER)
+      if (auto stream = getStream())
+         {
+         stream->write(JITServer::MessageType::CompInfo_getPCIfCompiled, method);
+         return std::get<0>(stream->read<void *>());
+         }
+#endif /* defined(J9VM_OPT_JITSERVER) */
+
+      /* Read extra field only once */
+      void *extra = method->extra;
+
+      /* Return extra field if compiled, NULL otherwise */
+      return ((uintptr_t)extra & J9_STARTPC_NOT_TRANSLATED) == 0 ? extra : NULL;
+      }
+
    static bool isJNINative(J9Method *method)
       {
 #if defined(J9VM_OPT_JITSERVER)
@@ -481,6 +521,8 @@ public:
       // and so we don't have to care if the VM has a FastJNI version
       return (((uintptr_t)method->constantPool) & J9_STARTPC_JNI_NATIVE) != 0;
       }
+
+   static const intptr_t J9_INVOCATION_COUNT_MASK = 0xffffffff;
 
    static int32_t getInvocationCount(J9Method *method)
       {
@@ -516,14 +558,6 @@ public:
 #endif /* defined(J9VM_OPT_JITSERVER) */
       return (int32_t)((intptr_t)method->extra);
       }
-   static uint32_t getJ9MethodJITExtra(J9Method *method)
-      {
-#if defined(J9VM_OPT_JITSERVER)
-      TR_ASSERT_FATAL(!TR::CompilationInfo::getStream(), "not yet implemented for JITServer");
-#endif /* defined(J9VM_OPT_JITSERVER) */
-      TR_ASSERT((intptr_t)method->extra & J9_STARTPC_NOT_TRANSLATED, "MethodExtra Already Jitted!");
-      return (uint32_t)((uintptr_t)method->extra >> 32);
-      }
    static void * getJ9MethodStartPC(J9Method *method)
       {
 #if defined(J9VM_OPT_JITSERVER)
@@ -535,8 +569,10 @@ public:
       else
 #endif /* defined(J9VM_OPT_JITSERVER) */
          {
-         TR_ASSERT(!((intptr_t)method->extra & J9_STARTPC_NOT_TRANSLATED), "Method NOT Jitted!");
-         return (void *)method->extra;
+         /* Read extra field only once */
+         void *extra = method->extra;
+         TR_ASSERT(!((intptr_t)extra & J9_STARTPC_NOT_TRANSLATED), "Method NOT Jitted!");
+         return extra;
          }
       }
    static void setJ9MethodExtra(J9Method *method, intptr_t newValue)
@@ -574,8 +610,6 @@ public:
       TR_ASSERT_FATAL(!TR::CompilationInfo::getStream(), "not yet implemented for JITServer");
 #endif /* defined(J9VM_OPT_JITSERVER) */
       intptr_t oldValue = (intptr_t)method->extra;
-      //intptr_t newValue = oldValue & (intptr_t)~J9_INVOCATION_COUNT_MASK;
-      //newValue |= (intptr_t)value;
       intptr_t newValue = (intptr_t)value;
       return setJ9MethodExtraAtomic(method, oldValue, newValue);
       }
@@ -588,7 +622,7 @@ public:
          return std::get<0>(stream->read<bool>());
          }
 #endif /* defined(J9VM_OPT_JITSERVER) */
-      newCount = (newCount << 1) | 1;
+      newCount = (newCount << 1) | J9_STARTPC_NOT_TRANSLATED;
       if (newCount < 1)
          return false;
       return setJ9MethodVMExtra(method, newCount);
@@ -602,8 +636,8 @@ public:
          return std::get<0>(stream->read<bool>());
          }
 #endif /* defined(J9VM_OPT_JITSERVER) */
-      newCount = (newCount << 1) | 1;
-      oldCount = (oldCount << 1) | 1;
+      newCount = (newCount << 1) | J9_STARTPC_NOT_TRANSLATED;
+      oldCount = (oldCount << 1) | J9_STARTPC_NOT_TRANSLATED;
       if (newCount < 0)
          return false;
       intptr_t oldMethodExtra = (intptr_t) method->extra & (intptr_t)(~J9_INVOCATION_COUNT_MASK);
@@ -618,15 +652,34 @@ public:
          }
       return success;
       }
+   // If the invocation count is 0, set it to the value indicated by newCount
+   static bool replenishInvocationCountIfExpired(J9Method *method, int32_t newCount)
+      {
+      intptr_t oldMethodExtra = (intptr_t) method->extra;
+      if ((oldMethodExtra & J9_STARTPC_NOT_TRANSLATED) == 0)
+         return false; // Do not touch compiled methods
+
+      int32_t oldCount = (int32_t)oldMethodExtra;
+      if (oldCount < 0)
+         return false; // Do not touch uncountable methods
+      oldCount >>= 1; // Eliminate the J9_STARTPC_NOT_TRANSLATED bit
+      if (oldCount != 0)
+         return false; // Only replenish invocation count if it expired
+      // Prepare the new method->extra
+      intptr_t oldMethodExtraUpperPart = oldMethodExtra & (~J9_INVOCATION_COUNT_MASK);
+      newCount = (newCount << 1) | J9_STARTPC_NOT_TRANSLATED;
+      intptr_t newMethodExtra = oldMethodExtraUpperPart | newCount;
+      return setJ9MethodExtraAtomic(method, oldMethodExtra, newMethodExtra);
+      }
    static void setInitialInvocationCountUnsynchronized(J9Method *method, int32_t value)
       {
 #if defined(J9VM_OPT_JITSERVER)
       TR_ASSERT_FATAL(!TR::CompilationInfo::getStream(), "not yet implemented for JITServer");
 #endif /* defined(J9VM_OPT_JITSERVER) */
-      value = (value << 1) | 1;
+      value = (value << 1) | J9_STARTPC_NOT_TRANSLATED;
       if (value < 0)
           value = INT_MAX;
-      method->extra = reinterpret_cast<void *>(value);
+      method->extra = reinterpret_cast<void *>(static_cast<intptr_t>(value));
       }
 
    static uint32_t getMethodBytecodeSize(const J9ROMMethod * romMethod);
@@ -641,12 +694,36 @@ public:
 #endif
 
    void * operator new(size_t s, void * p) throw() { return p; }
+   void operator delete (void *, void * p) {}
    CompilationInfo (J9JITConfig *jitConfig);
    TR::Monitor *getCompilationMonitor() {return _compilationMonitor;}
    void acquireCompMonitor(J9VMThread *vmThread); // used when we know we have a compilation monitor
    void releaseCompMonitor(J9VMThread *vmThread); // used when we know we have a compilation monitor
    void waitOnCompMonitor(J9VMThread *vmThread);
    intptr_t waitOnCompMonitorTimed(J9VMThread *vmThread, int64_t millis, int32_t nanos);
+
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+   /* The CR Monitor (Checkpoint/Restore Monitor) must always be acquired with the Comp Monitor
+    * in hand. If waiting on the CR Monitor, the Comp Monitor should be released. After being
+    * notified, the CR Monitor should be released before re-acquiring the Comp Monitor.
+    */
+   TR::Monitor *getCRMonitor() { return _crMonitor; }
+   void acquireCRMonitor();
+   void releaseCRMonitor();
+   void waitOnCRMonitor();
+
+   /* The following APIs should only be invoked with the Comp Monitor in hand. */
+   bool isCheckpointInProgress()            { return _checkpointStatus != TR_CheckpointStatus::NO_CHECKPOINT_IN_PROGRESS;      }
+   void resetCheckpointInProgress()         {        _checkpointStatus  = TR_CheckpointStatus::NO_CHECKPOINT_IN_PROGRESS;      }
+   bool shouldCompileMethodsForCheckpoint() { return _checkpointStatus == TR_CheckpointStatus::COMPILE_METHODS_FOR_CHECKPOINT; }
+   void setCompileMethodsForCheckpoint()    {        _checkpointStatus  = TR_CheckpointStatus::COMPILE_METHODS_FOR_CHECKPOINT; }
+   bool shouldSuspendThreadsForCheckpoint() { return _checkpointStatus == TR_CheckpointStatus::SUSPEND_THREADS_FOR_CHECKPOINT; }
+   void setSuspendThreadsForCheckpoint()    {        _checkpointStatus  = TR_CheckpointStatus::SUSPEND_THREADS_FOR_CHECKPOINT; }
+   bool readyForCheckpointRestore()         { return _checkpointStatus == TR_CheckpointStatus::READY_FOR_CHECKPOINT_RESTORE;   }
+   void setReadyForCheckpointRestore()      {        _checkpointStatus  = TR_CheckpointStatus::READY_FOR_CHECKPOINT_RESTORE;   }
+   bool shouldCheckpointBeInterrupted()     { return _checkpointStatus == TR_CheckpointStatus::INTERRUPT_CHECKPOINT;           }
+   void interruptCheckpoint()               {        _checkpointStatus  = TR_CheckpointStatus::INTERRUPT_CHECKPOINT;           }
+#endif
 
    TR_PersistentMemory *     persistentMemory() { return _persistentMemory; }
 
@@ -691,18 +768,166 @@ public:
    void freeAllResources();
 
    uintptr_t startCompilationThread(int32_t priority, int32_t id, bool isDiagnosticThread);
-   bool initializeCompilationOnApplicationThread();
    bool  asynchronousCompilation();
    void stopCompilationThreads();
-   void suspendCompilationThread();
+
+   /**
+    * @brief
+    *    Stops a compilation thread by issuing an interruption request at the threads next yield point and by changing
+    *    its state to signal termination. Note that there can be a delay between making this request and the thread
+    *    state changing to `COMPTHREAD_STOPPED`.
+    *
+    * @param compInfoPT
+    *    The thread to be stopped.
+    */
+   void stopCompilationThread(CompilationInfoPerThread* compInfoPT);
+
+   /**
+    * @brief Suspends all compilation threads. By default it also purges the comp queue.
+    *
+    * @param purgeCompQueue bool to determine whether or not to purge the comp queue.
+    */
+   void suspendCompilationThread(bool purgeCompQueue = true);
+
+   /**
+    * @brief Resumes suspended compilation threads; the number of threads that are
+    *        resumed depends on several factors, such as the queue size and available
+    *        CPU resources.
+    */
    void resumeCompilationThread();
+
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+   /**
+    * @brief Work that is necessary prior to taking a snapshot. This includes:
+    *        - Setting the _checkpointStatus state.
+    *        - Suspending all compilation threads.
+    *        - Waiting until all compilation threads are suspended.
+    *
+    * Normal Execution (steps 5&6 can be interchanged)
+    * ================================================
+    * 1. Hook Thread acquires Comp Monitor
+    * 2. Hook Thread signals Comp Threads to suspend
+    * 3. Hook Thread acquires CR Monitor, releases Comp Monitor, and waits on
+    *    CR Monitor
+    * 4. Comp Threads acquire Comp Monitor and CompThread Monitor, and change
+    *    state to COMPTHREAD_SUSPENDED
+    * 5. Comp Threads acquire CR Monitor, call notifyAll, and release CR
+    *    Monitor
+    * 6. Hook Thread wakes up with CR Monitor in hand, releases CR Monitor, and
+    *    blocks on Comp Monitor
+    * 7. Comp Threads release Comp Monitor and wait on CompThread Monitor
+    * 8. Hook Thread acquires Comp Monitor, ensures state has changed to
+    *    COMPTHREAD_SUSPENDED for the current compInfoPT
+    * 9. Hook Thread checks the next compInfoPT, waiting on the CR Monitor if
+    *    needed (it will release the Comp Monitor prior to waiting)
+    * 10. Hook Thread releases Comp Monitor, returns from the hook
+    *
+    *
+    * JIT Dump
+    * ========
+    * - Crash on application thread:
+    *    - Hook Thread running prepareForCheckpoint will run as normal
+    *       - Comp Threads will suspend themselves
+    *       - Hook Thread will wait till all Comp Threads are suspended
+    *       - Hook Thread will return from the jit hook
+    *       - VM will need to ensure it doesn't invoke criu API
+    *
+    * - Crash on compilation thread:
+    *    - Crashing Comp Thread will return to the VM and terminate process
+    *      (https://github.com/eclipse-openj9/openj9/blob/500e0a26e2c5be6ead0f838495ae8d8cc34821e1/runtime/compiler/control/CompilationThread.cpp#L3442-L3447)
+    *    - Possible scenarios for Hook Thread:
+    *       1. Hook Thread will try to acquire the Comp Monitor to signal Comp
+    *          Threads to suspend but will end up blocking until the JVM
+    *          terminates
+    *       2. Hook Thread will manage to signal Comp Threads to suspend, but
+    *          will remain waiting on the CR Monitor for the crashed Comp
+    *          Thread to suspend until the JVM terminates
+    *    - VM will need to ensure it doesn't invoke criu API
+    *
+    *
+    * Normal Shutdown
+    * ===============
+    * - Scenario 1
+    *    1. Hook Thread waits on CR Monitor
+    *    2. Comp Thread goes to suspend, already has Comp Monitor in hand
+    *    3. Shutdown Thread blocks on the Comp Monitor
+    *    4. Comp Thread updates state to COMPTHREAD_SUSPENDED, acquires CR
+    *       Monitor, and calls notifyAll
+    *    5. Comp Thread releases CR Monitor, releases Comp Monitor, and waits
+    *       on CompThread Monitor
+    *    6. Hook Thread wakes up with CR Monitor in hand, releases CR Monitor,
+    *       acquires Comp Monitor and continues on to next thread
+    *    7. Hook Thread checks state and moves onto the next threads possibly
+    *       finding them all suspended.
+    *    8. Hook Thread release Comp Monitor and returns from hook
+    *    9. Shutdown Thread goes through the sequence of stopping all threads
+    *
+    * - Scenario 2
+    *    Repeat steps 1-5 from Scenario 1
+    *    6. Shutdown Thread acquires Comp Monitor
+    *    7. Hook Thread wakes up with CR Monitor in hand, releases CR Monitor
+    *       and blocks on the Comp Monitor
+    *    8. Shutdown Thread sets checkpoint to be interrupted flag.
+    *       Additionally (though irrelevant in this scenario) it also
+    *       acquires the CR Monitor, calls notify, and releases CR Monitor.
+    *    9. Shutdown Thread finishes stopping all threads, releases Comp
+    *       Monitor
+    *    10. Hook Thread acquires Comp Monitor, sees that the checkpoint should
+    *        be interrupted
+    *    11. Hook Thread breaks out of the loops, releases Comp Monitor, and
+    *        returns from hook
+    *
+    * - Scenario 3
+    *    1. Hook Thread waits on CR Monitor
+    *    2. Shutdown Thread acquires Comp Monitor
+    *    3. Comp Thread blocks on the Comp Monitor in order to (eventually)
+    *       suspend itself
+    *    4. Shutdown Thread sets checkpoint to be interrupted flag, acquires CR
+    *       Monitor, calls notify, and releases CR Monitor
+    *    5. Shutdown Thread goes about the task of stopping Comp Threads
+    *    6. Hook Thread wakes up with CR Monitor in hand, releases CR Monitor
+    *       and blocks on the Comp Monitor
+    *    7. Shutdown Thread finishes stopping all threads, releases Comp
+    *       Monitor (steps 5 & 6 can be interchanged with the same following
+    *       steps)
+    *    8. Hook Thread acquires Comp Monitor, sees that the checkpoint should
+    *       be interrupted
+    *    9. Hook Thread breaks out of the loops, releases Comp Monitor, and
+    *       returns from hook
+    *
+    * It should be noted that when the Hook Thread runs prepareForCheckpoint,
+    * either it will succeed in signalling the Comp Threads to suspend, or it
+    * will wait indefinitely on the Comp Monitor (in the case of a JIT Dump) or
+    * it will abort after acquring the Comp Monitor if the Shutdown Thread
+    * already finished its task. Once the Hook Thread reaches the point where
+    * it waits on the CR Monitor, the scenarioes above can occur.
+    *
+    *
+    * Shutdown during JIT Dump
+    * ========================
+    * - Crash on application thread
+    *    - same as Normal Shutdown
+    *
+    * - Crash on compilation thread
+    *    - In all of the above scenarios:
+    *       - Hook Thread remains waiting on CR Monitor
+    *       - Shutdown Thread blocks on the Comp Monitor
+    *       - Comp Thread returns to VM and terminates the process
+    */
+   void prepareForCheckpoint();
+
+   /**
+    * @brief Work that is necessary after the JVM has been restored. This includes:
+    *        - Resetting the _checkpointStatus state.
+    *        - Resuming all suspended compilation threads.
+    */
+   void prepareForRestore();
+#endif
+
    void purgeMethodQueue(TR_CompilationErrorCode errorCode);
    void *compileMethod(J9VMThread * context, TR::IlGeneratorMethodDetails &details, void *oldStartPC,
       TR_YesNoMaybe async, TR_CompilationErrorCode *, bool *queued, TR_OptimizationPlan *optPlan);
 
-   void *compileOnApplicationThread(J9VMThread * context, TR::IlGeneratorMethodDetails &details, void *oldStartPC,
-                                    TR_CompilationErrorCode *,
-                                    TR_OptimizationPlan *optPlan);
    void *compileOnSeparateThread(J9VMThread * context, TR::IlGeneratorMethodDetails &details, void *oldStartPC,
                                  TR_YesNoMaybe async, TR_CompilationErrorCode*,
                                  bool *queued, TR_OptimizationPlan *optPlan);
@@ -738,10 +963,6 @@ public:
    TR::Monitor *createLogMonitor();
    void acquireLogMonitor();
    void releaseLogMonitor();
-
-   // Handling of ordered compiles
-   //
-   void triggerOrderedCompiles(TR_FrontEnd *vm, intptr_t tickCount);
 
    int32_t getQueueWeight() const { return _queueWeight; }
    void increaseQueueWeightBy(uint8_t w) { _queueWeight += (int32_t)w; }
@@ -799,6 +1020,9 @@ public:
    bool              isInZOSSupervisorState() {return _flags.testAny(IsInZOSSupervisorState);}
    void              setIsInZOSSupervisorState() { _flags.set(IsInZOSSupervisorState);}
 
+   bool              isInShutdownMode() {return _isInShutdownMode;}
+   void              setIsInShutdownMode() {_isInShutdownMode = true;}
+
    TR_LinkHead0<TR_ClassHolder> *getListOfClassesToCompile() { return &_classesToCompileList; }
    int32_t getCompilationLag();
    int32_t getCompilationLagUnlocked() { return getCompilationLag(); } // will go away
@@ -822,7 +1046,7 @@ public:
    UDATA getVMStateOfCrashedThread() { return _vmStateOfCrashedThread; }
    void setVMStateOfCrashedThread(UDATA vmState) { _vmStateOfCrashedThread = vmState; }
    void printCompQueue();
-   TR::CompilationInfoPerThread *getCompilationInfoForDumpThread() const { return _compInfoForDiagnosticCompilationThread; }
+   TR::CompilationInfoPerThread *getCompilationInfoForDiagnosticThread() const { return _compInfoForDiagnosticCompilationThread; }
    TR::CompilationInfoPerThread * const *getArrayOfCompilationInfoPerThread() const { return _arrayOfCompilationInfoPerThread; }
    uint32_t getAotQueryTime() { return _statTotalAotQueryTime; }
    void     setAotQueryTime(uint32_t queryTime) { _statTotalAotQueryTime = queryTime; }
@@ -831,7 +1055,6 @@ public:
    void    incrementNumMethodsFoundInSharedCache() { _numMethodsFoundInSharedCache++; }
    int32_t numMethodsFoundInSharedCache() { return _numMethodsFoundInSharedCache; }
    int32_t getNumInvRequestsInCompQueue() const { return _numInvRequestsInCompQueue; }
-   TR::CompilationInfoPerThreadBase *getCompInfoForCompOnAppThread() const { return _compInfoForCompOnAppThread; }
    J9JITConfig *getJITConfig() { return _jitConfig; }
    TR::CompilationInfoPerThread *getCompInfoForThread(J9VMThread *vmThread);
    int32_t getNumUsableCompilationThreads() const { return _numCompThreads; }
@@ -855,8 +1078,6 @@ public:
    double getGuestCpuEntitlement() const { return _cpuEntitlement.getGuestCpuEntitlement(); }
    void computeAndCacheCpuEntitlement() { _cpuEntitlement.computeAndCacheCpuEntitlement(); }
    double getJvmCpuEntitlement() const { return _cpuEntitlement.getJvmCpuEntitlement(); }
-
-   void setProcessorByDebugOption();
 
    bool importantMethodForStartup(J9Method *method);
    bool shouldDowngradeCompReq(TR_MethodToBeCompiled *entry);
@@ -890,16 +1111,10 @@ public:
    enum {SMALL_LAG=1, MEDIUM_LAG, LARGE_LAG};
    bool methodCanBeCompiled(TR_FrontEnd *, TR_ResolvedMethod *compilee, TR_FilterBST *&filter);
 
-   void emitJvmpiExtendedDataBuffer(TR::Compilation *&compiler, J9VMThread *vmThread, J9Method *&_method, TR_MethodMetaData *metaData);
-   void emitJvmpiCallSites(TR::Compilation *&compiler, J9VMThread *vmThread, J9Method *&_method);
-
    void setAllCompilationsShouldBeInterrupted();
 
    int32_t getIprofilerMaxCount() const { return _iprofilerMaxCount; }
    void setIprofilerMaxCount(int32_t n) { _iprofilerMaxCount = n; }
-
-   bool compTracingEnabled() const { return _compilationTracingFacility.isInitialized(); }
-   void addCompilationTraceEntry(J9VMThread * vmThread, TR_CompilationOperations op, uint32_t otherData=0);
 
    TR_SharedCacheRelocationRuntime  *reloRuntime() { return &_sharedCacheReloRuntime; }
 
@@ -1014,8 +1229,11 @@ public:
    TR::Monitor *getSequencingMonitor() const { return _sequencingMonitor; }
    uint32_t getCompReqSeqNo() const { return _compReqSeqNo; }
    uint32_t incCompReqSeqNo() { return ++_compReqSeqNo; }
-   void markCHTableUpdateDone(uint8_t threadId) { _chTableUpdateFlags |= (1 << threadId); }
-   void resetCHTableUpdateDone(uint8_t threadId) { _chTableUpdateFlags &= ~(1 << threadId); }
+   uint32_t getLastCriticalSeqNo() const { return _lastCriticalCompReqSeqNo; }
+   void setLastCriticalSeqNo(uint32_t seqNo) { _lastCriticalCompReqSeqNo = seqNo; }
+
+   void markCHTableUpdateDone(int32_t threadId) { _chTableUpdateFlags |= (1 << threadId); }
+   void resetCHTableUpdateDone(int32_t threadId) { _chTableUpdateFlags &= ~(1 << threadId); }
    uint8_t getCHTableUpdateDone() const { return _chTableUpdateFlags; }
 
    const PersistentVector<std::string> &getJITServerSslKeys() const { return _sslKeys; }
@@ -1025,6 +1243,25 @@ public:
    void  addJITServerSslCert(const std::string &cert) { _sslCerts.push_back(cert); }
    const std::string &getJITServerSslRootCerts() const { return _sslRootCerts; }
    void  setJITServerSslRootCerts(const std::string &cert) { _sslRootCerts = cert; }
+   const PersistentVector<std::string> &getJITServerMetricsSslKeys() const { return _metricsSslKeys; }
+   void  addJITServerMetricsSslKey(const std::string &key) { _metricsSslKeys.push_back(key); }
+   const PersistentVector<std::string> &getJITServerMetricsSslCerts() const { return _metricsSslCerts; }
+   void  addJITServerMetricsSslCert(const std::string &cert) { _metricsSslCerts.push_back(cert); }
+   bool  useSSL() const { return (_sslKeys.size() || _sslCerts.size() || _sslRootCerts.size() ||
+                                  _metricsSslKeys.size() || _metricsSslCerts.size()); }
+
+   void setCompThreadActivationPolicy(JITServer::CompThreadActivationPolicy newPolicy) { _activationPolicy = newPolicy; }
+   JITServer::CompThreadActivationPolicy getCompThreadActivationPolicy() const { return _activationPolicy; }
+   uint64_t getCachedFreePhysicalMemoryB() const { return _cachedFreePhysicalMemoryB; }
+
+   JITServerSharedROMClassCache *getJITServerSharedROMClassCache() const { return _sharedROMClassCache; }
+   void setJITServerSharedROMClassCache(JITServerSharedROMClassCache *cache) { _sharedROMClassCache = cache; }
+
+   JITServerAOTCacheMap *getJITServerAOTCacheMap() const { return _JITServerAOTCacheMap; }
+   void setJITServerAOTCacheMap(JITServerAOTCacheMap *map) { _JITServerAOTCacheMap = map; }
+
+   JITServerAOTDeserializer *getJITServerAOTDeserializer() const { return _JITServerAOTDeserializer; }
+   void setJITServerAOTDeserializer(JITServerAOTDeserializer *deserializer) { _JITServerAOTDeserializer = deserializer; }
 #endif /* defined(J9VM_OPT_JITSERVER) */
 
    static void replenishInvocationCount(J9Method* method, TR::Compilation* comp);
@@ -1041,16 +1278,18 @@ public:
    static int32_t         LARGE_QUEUE;
    static int32_t         VERY_LARGE_QUEUE;
 
-   static const char     *OperationNames[];
-
    struct CompilationStatistics _stats;
    struct CompilationStatsPerInterval _intervalStats;
    TR_PersistentArray<TR_SignatureCountPair *> *_persistedMethods;
 
-   // Must be less than 8 at the JITClient or non-JITServer mode.
-   // Because in some parts of the code (CHTable) we keep flags on a byte variable.
-   static const uint32_t MAX_CLIENT_USABLE_COMP_THREADS = 7;  // For JITClient and non-JITServer mode
-   static const uint32_t MAX_SERVER_USABLE_COMP_THREADS = 63; // JITServer
+   // Must be less than 16 at the JITClient or non-JITServer mode because
+   // in some parts of the code (CHTable) we keep flags on a 2-byte variable.
+   static const uint32_t MAX_CLIENT_USABLE_COMP_THREADS = 15; // For JITClient and non-JITServer mode
+   static const uint32_t DEFAULT_CLIENT_USABLE_COMP_THREADS = 7; // For JITClient and non-JITServer mode
+#if defined(J9VM_OPT_JITSERVER)
+   static const uint32_t MAX_SERVER_USABLE_COMP_THREADS = 999; // JITServer
+   static const uint32_t DEFAULT_SERVER_USABLE_COMP_THREADS = 63; // JITServer
+#endif /* defined(J9VM_OPT_JITSERVER) */
    static const uint32_t MAX_DIAGNOSTIC_COMP_THREADS = 1;
 
 private:
@@ -1070,13 +1309,6 @@ private:
     */
    TR_MethodToBeCompiled * getCompilationQueueEntry();
 
-   int bufferSizeCompilationAttributes();
-   uint8_t * bufferPopulateCompilationAttributes(U_8 *buffer, TR::Compilation *&compiler, TR_MethodMetaData *metaData);
-   int bufferSizeInlinedCallSites(TR::Compilation *&compiler, TR_MethodMetaData *metaData);
-   uint8_t * bufferPopulateInlinedCallSites(uint8_t * buffer, TR::Compilation *&compiler, TR_MethodMetaData *metaData);
-   int bufferSizeLineNumberTable(TR::Compilation *&compiler, TR_MethodMetaData *metaData, J9Method *&_method);
-   uint8_t * bufferPopulateLineNumberTable(uint8_t *buffer, TR::Compilation *&compiler, TR_MethodMetaData *metaData, J9Method *&_method);
-
    J9Method *getRamMethod(TR_FrontEnd *vm, char *className, char *methodName, char *signature);
    //char *buildMethodString(TR_ResolvedMethod *method);
 
@@ -1090,7 +1322,6 @@ private:
 
    TR::CompilationInfoPerThread **_arrayOfCompilationInfoPerThread; // First NULL entry means end of the array
    TR::CompilationInfoPerThread *_compInfoForDiagnosticCompilationThread; // compinfo for dump compilation thread
-   TR::CompilationInfoPerThreadBase *_compInfoForCompOnAppThread; // This is NULL for separate compilation thread
    TR_MethodToBeCompiled *_methodQueue;
    TR_MethodToBeCompiled *_methodPool;
    int32_t                _methodPoolSize; // shouldn't this and _methodPool be static?
@@ -1108,10 +1339,14 @@ private:
 #endif
    DLTTracking           *_dltHT;
 
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+   TR::Monitor *_crMonitor;
+   TR_CheckpointStatus _checkpointStatus;
+#endif
+
    TR::Monitor *_vlogMonitor;
    TR::Monitor *_rtlogMonitor;
    TR::Monitor *_iprofilerBufferArrivalMonitor;
-   TR::Monitor *_applicationThreadMonitor;
    TR::MonitorTable *_j9MonitorTable; // used only for RAS (debuggerExtensions); no accessor; use TR_J9MonitorTable::get() everywhere else
    TR_LinkHead0<TR_ClassHolder> _classesToCompileList; // used by compileClasses; adjusted by unload hooks
    intptr_t               _numSyncCompilations;
@@ -1193,6 +1428,7 @@ private:
 #ifdef DEBUG
    bool                   _traceCompiling;
 #endif
+   bool                   _isInShutdownMode;
    int32_t                _numCompThreads; // Number of usable compilation threads that does not include the diagnostic thread
    int32_t                _numDiagnosticThreads;
    int32_t                _iprofilerMaxCount;
@@ -1210,7 +1446,6 @@ private:
    TR_LowPriorityCompQueue _lowPriorityCompilationScheduler;
    TR_JProfilingQueue      _JProfilingQueue;
 
-   TR::CompilationTracingFacility _compilationTracingFacility; // Must be initialized before using
    TR_CpuEntitlement _cpuEntitlement;
    TR_JitSampleInfo  _jitSampleInfo;
    TR_SharedCacheRelocationRuntime _sharedCacheReloRuntime;
@@ -1236,13 +1471,60 @@ private:
    PersistentVector<TR_OpaqueClassBlock*> *_illegalFinalFieldModificationList; // JITServer list of classes that have J9ClassHasIllegalFinalFieldModifications is set
    TR::Monitor                   *_sequencingMonitor; // Used for ordering outgoing messages at the client
    uint32_t                      _compReqSeqNo; // seqNo for outgoing messages at the client
+   uint32_t                      _lastCriticalCompReqSeqNo; // seqNo for last request that carried information that needs to be processed in order
    PersistentUnorderedMap<TR_OpaqueClassBlock*, uint8_t> *_newlyExtendedClasses; // JITServer table of newly extended classes
    uint8_t                       _chTableUpdateFlags;
    uint32_t                      _localGCCounter; // Number of local gc cycles done
    std::string                   _sslRootCerts;
    PersistentVector<std::string> _sslKeys;
    PersistentVector<std::string> _sslCerts;
+   PersistentVector<std::string> _metricsSslKeys;
+   PersistentVector<std::string> _metricsSslCerts;
+   JITServer::CompThreadActivationPolicy _activationPolicy;
+   JITServerSharedROMClassCache *_sharedROMClassCache;
+   JITServerAOTCacheMap *_JITServerAOTCacheMap;
+   JITServerAOTDeserializer *_JITServerAOTDeserializer;
 #endif /* defined(J9VM_OPT_JITSERVER) */
+
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+   /**
+    * @brief Release the comp monitor in order to wait on the CR Monitor;
+    *        release the CR Monitor and reacquire the comp monitor once notified.
+    *
+    * IMPORTANT: There should be no return, or C++ exception thrown, after
+    *            releasing the Comp Monitor until it is re-acquired.
+    *            The Comp Monitor may be acquired in an OMR::CriticalSection
+    *            object; a return, or thrown exception, will destruct this
+    *            object as part leaving the scope, or stack unwinding, which
+    *            will attempt to release the monitor in its destructor.
+    *
+    * @param vmThread The J9VMThread
+    */
+   void releaseCompMonitorUntilNotifiedOnCRMonitor(J9VMThread *vmThread) throw();
+
+   /**
+    * @brief Compile methods for checkpoint.
+    *
+    * IMPORTANT: Must be called with the comp monitor in hand.
+    *
+    * @param vmThread The J9VMThread
+    *
+    * @return false if the checkpoint is interrupted, true otherwise.
+    *
+    */
+   bool compileMethodsForCheckpoint(J9VMThread *vmThread);
+
+   /**
+    * @brief Suspend compilation threads for checkpoint.
+    *
+    * IMPORTANT: Must be called with the comp monitor in hand.
+    *
+    * @param vmThread The J9VMThread
+    *
+    * @return false false if the checkpoint is interrupted, true otherwise.
+    */
+   bool suspendCompThreadsForCheckpoint(J9VMThread *vmThread);
+#endif
    }; // CompilationInfo
 }
 

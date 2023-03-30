@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -49,10 +49,21 @@
 
 extern void TEMPORARY_initJ9X86TreeEvaluatorTable(TR::CodeGenerator *cg);
 
-J9::X86::CodeGenerator::CodeGenerator() :
-      J9::CodeGenerator(),
-      _stackFramePaddingSizeInBytes(0)
+J9::X86::CodeGenerator::CodeGenerator(TR::Compilation *comp) :
+      J9::CodeGenerator(comp),
+   _stackFramePaddingSizeInBytes(0)
    {
+   /**
+    * Do not add CodeGenerator initialization logic here.
+    * Use the \c initialize() method instead.
+    */
+   }
+
+void
+J9::X86::CodeGenerator::initialize()
+   {
+   self()->J9::CodeGenerator::initialize();
+
    TR::CodeGenerator *cg = self();
    TR::Compilation *comp = cg->comp();
    TR_J9VMBase *fej9 = (TR_J9VMBase *)(cg->fe());
@@ -64,6 +75,7 @@ J9::X86::CodeGenerator::CodeGenerator() :
    if (!TR::Compiler->om.canGenerateArraylets())
       {
       cg->setSupportsReferenceArrayCopy();
+      cg->setSupportsInlineStringLatin1Inflate();
       }
 
    if (comp->requiresSpineChecks())
@@ -85,10 +97,10 @@ J9::X86::CodeGenerator::CodeGenerator() :
    cg->setSupportsPartialInlineOfMethodHooks();
    cg->setSupportsInliningOfTypeCoersionMethods();
    cg->setSupportsNewInstanceImplOpt();
-   
-   TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->target().cpu.supportsFeature(OMR_FEATURE_X86_SSE4_1) == cg->getX86ProcessorInfo().supportsSSE4_1(), "supportsSSE4_1() failed\n");
-   TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->target().cpu.supportsFeature(OMR_FEATURE_X86_SSSE3) == cg->getX86ProcessorInfo().supportsSSSE3(), "supportsSSSE3() failed\n");
-   
+
+   TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->compilePortableCode() || comp->target().cpu.supportsFeature(OMR_FEATURE_X86_SSE4_1) == cg->getX86ProcessorInfo().supportsSSE4_1(), "supportsSSE4_1() failed\n");
+   TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || comp->compilePortableCode() || comp->target().cpu.supportsFeature(OMR_FEATURE_X86_SSSE3) == cg->getX86ProcessorInfo().supportsSSSE3(), "supportsSSSE3() failed\n");
+
    if (comp->target().cpu.supportsFeature(OMR_FEATURE_X86_SSE4_1) &&
        !comp->getOption(TR_DisableSIMDStringCaseConv) &&
        !TR::Compiler->om.canGenerateArraylets())
@@ -170,10 +182,9 @@ J9::X86::CodeGenerator::CodeGenerator() :
          returnInfo = TR_DoubleXMMReturn;
          break;
       }
-    comp->setReturnInfo(returnInfo);
 
+   comp->setReturnInfo(returnInfo);
    }
-
 
 TR::Recompilation *
 J9::X86::CodeGenerator::allocateRecompilationInfo()
@@ -217,7 +228,7 @@ J9::X86::CodeGenerator::beginInstructionSelection()
          {
          // A copy of the first two bytes of the method, in case we need to un-patch them
          //
-         new (self()->trHeapMemory()) TR::X86ImmInstruction(cursor, DWImm2, 0xcccc, self());
+         new (self()->trHeapMemory()) TR::X86ImmInstruction(cursor, TR::InstOpCode::DWImm2, 0xcccc, self());
          }
       }
    else if (methodSymbol->isJNI())
@@ -226,27 +237,27 @@ J9::X86::CodeGenerator::beginInstructionSelection()
       intptr_t methodAddress = (intptr_t)methodSymbol->getResolvedMethod()->startAddressForJNIMethod(comp);
 
       if (comp->target().is64Bit())
-         new (self()->trHeapMemory()) TR::AMD64Imm64Instruction ((TR::Instruction *)NULL, DQImm64, methodAddress, self());
+         new (self()->trHeapMemory()) TR::AMD64Imm64Instruction ((TR::Instruction *)NULL, TR::InstOpCode::DQImm64, methodAddress, self());
       else
-         new (self()->trHeapMemory()) TR::X86ImmInstruction    ((TR::Instruction *)NULL, DDImm4, methodAddress, self());
+         new (self()->trHeapMemory()) TR::X86ImmInstruction    ((TR::Instruction *)NULL, TR::InstOpCode::DDImm4, methodAddress, self());
       }
 
    if (methodSymbol->getLinkageConvention() == TR_Private && !_returnTypeInfoInstruction)
       {
       // linkageInfo word
       if (self()->getAppendInstruction())
-         _returnTypeInfoInstruction = generateImmInstruction(DDImm4, startNode, 0, self());
+         _returnTypeInfoInstruction = generateImmInstruction(TR::InstOpCode::DDImm4, startNode, 0, self());
       else
-         _returnTypeInfoInstruction = new (self()->trHeapMemory()) TR::X86ImmInstruction((TR::Instruction *)NULL, DDImm4, 0, self());
+         _returnTypeInfoInstruction = new (self()->trHeapMemory()) TR::X86ImmInstruction((TR::Instruction *)NULL, TR::InstOpCode::DDImm4, 0, self());
       }
 
    if (methodSymbol->getLinkageConvention() == TR_System && !_returnTypeInfoInstruction)
       {
       // linkageInfo word
       if (self()->getAppendInstruction())
-         _returnTypeInfoInstruction = generateImmInstruction(DDImm4, startNode, 0, self());
+         _returnTypeInfoInstruction = generateImmInstruction(TR::InstOpCode::DDImm4, startNode, 0, self());
       else
-         _returnTypeInfoInstruction = new (self()->trHeapMemory()) TR::X86ImmInstruction((TR::Instruction *)NULL, DDImm4, 0, self());
+         _returnTypeInfoInstruction = new (self()->trHeapMemory()) TR::X86ImmInstruction((TR::Instruction *)NULL, TR::InstOpCode::DDImm4, 0, self());
       }
 
    TR::RegisterDependencyConditions  *deps = generateRegisterDependencyConditions((uint8_t)0, (uint8_t)1, self());
@@ -258,16 +269,16 @@ J9::X86::CodeGenerator::beginInstructionSelection()
    deps->stopAddingPostConditions();
 
    if (self()->getAppendInstruction())
-      generateInstruction(PROCENTRY, startNode, deps, self());
+      generateInstruction(TR::InstOpCode::proc, startNode, deps, self());
    else
-      new (self()->trHeapMemory()) TR::Instruction(deps, PROCENTRY, (TR::Instruction *)NULL, self());
+      new (self()->trHeapMemory()) TR::Instruction(deps, TR::InstOpCode::proc, (TR::Instruction *)NULL, self());
 
    // Set the default FPCW to single precision mode if we are allowed to.
    //
    if (self()->enableSinglePrecisionMethods() && comp->getJittedMethodSymbol()->usesSinglePrecisionMode())
       {
       auto cds = self()->findOrCreate2ByteConstant(startNode, SINGLE_PRECISION_ROUND_TO_NEAREST);
-      generateMemInstruction(LDCWMem, startNode, generateX86MemoryReference(cds, self()), self());
+      generateMemInstruction(TR::InstOpCode::LDCWMem, startNode, generateX86MemoryReference(cds, self()), self());
       }
    }
 
@@ -292,7 +303,7 @@ J9::X86::CodeGenerator::endInstructionSelection()
              "endInstructionSelection() ==> Could not find the dummy finally block!\n");
 
       auto cds = self()->findOrCreate2ByteConstant(self()->getLastCatchAppendInstruction()->getNode(), DOUBLE_PRECISION_ROUND_TO_NEAREST);
-      generateMemInstruction(self()->getLastCatchAppendInstruction(), LDCWMem, generateX86MemoryReference(cds, self()), self());
+      generateMemInstruction(self()->getLastCatchAppendInstruction(), TR::InstOpCode::LDCWMem, generateX86MemoryReference(cds, self()), self());
       }
    }
 
@@ -312,12 +323,12 @@ J9::X86::CodeGenerator::generateSwitchToInterpreterPrePrologue(
       {
       // Put the alignment before the interpreter jump so the jump's offset is fixed
       //
-      alignmentMargin += 6; // MOV4RegImm4 below
+      alignmentMargin += 6; // TR::InstOpCode::MOV4RegImm4 below
       prev = generateAlignmentInstruction(prev, alignment, alignmentMargin, self());
       }
 
    startLabel = generateLabelSymbol(self());
-   prev = generateLabelInstruction(prev, LABEL, startLabel, self());
+   prev = generateLabelInstruction(prev, TR::InstOpCode::label, startLabel, self());
    self()->setSwitchToInterpreterLabel(startLabel);
 
    TR::RegisterDependencyConditions  *deps =
@@ -325,23 +336,23 @@ J9::X86::CodeGenerator::generateSwitchToInterpreterPrePrologue(
    deps->addPreCondition(ediRegister, TR::RealRegister::edi, self());
 
    TR::SymbolReference *helperSymRef =
-      self()->symRefTab()->findOrCreateRuntimeHelper(TR_j2iTransition, false, false, false);
+      self()->symRefTab()->findOrCreateRuntimeHelper(TR_j2iTransition);
 
    if (comp->target().is64Bit())
       {
-      prev = generateRegImm64Instruction(prev, MOV8RegImm64, ediRegister, feMethod, self(), TR_RamMethod);
+      prev = generateRegImm64Instruction(prev, TR::InstOpCode::MOV8RegImm64, ediRegister, feMethod, self(), TR_RamMethod);
       if (comp->getOption(TR_EnableHCR))
          comp->getStaticHCRPICSites()->push_front(prev);
       prev = self()->getLinkage(methodSymbol->getLinkageConvention())->storeArguments(prev, methodSymbol);
       }
    else
       {
-      prev = generateRegImmInstruction(prev, MOV4RegImm4, ediRegister, feMethod, self(), TR_RamMethod);
+      prev = generateRegImmInstruction(prev, TR::InstOpCode::MOV4RegImm4, ediRegister, feMethod, self(), TR_RamMethod);
       if (comp->getOption(TR_EnableHCR))
          comp->getStaticHCRPICSites()->push_front(prev);
       }
 
-   prev = new (self()->trHeapMemory()) TR::X86ImmSymInstruction(prev, JMP4, (uintptr_t)helperSymRef->getMethodAddress(), helperSymRef, deps, self());
+   prev = new (self()->trHeapMemory()) TR::X86ImmSymInstruction(prev, TR::InstOpCode::JMP4, (uintptr_t)helperSymRef->getMethodAddress(), helperSymRef, deps, self());
    self()->stopUsingRegister(ediRegister);
 
    if (comp->target().is64Bit())
@@ -349,13 +360,13 @@ J9::X86::CodeGenerator::generateSwitchToInterpreterPrePrologue(
       // Generate a mini-trampoline jump to the start of the
       // SwitchToInterpreterPrePrologue.  This comes after the alignment
       // instruction so we know where it will be relative to startPC.  Note
-      // that it ought to be a JMP1 despite the fact that we're using a JMP4
+      // that it ought to be a TR::InstOpCode::JMP1 despite the fact that we're using a TR::InstOpCode::JMP4
       // opCode; otherwise, this instruction is not 2 bytes long, so it will
       // mess up alignment.
       //
       alignmentMargin += 2; // Size of the mini-trampoline
       prev = generateAlignmentInstruction(prev, alignment, alignmentMargin, self());
-      prev = new (self()->trHeapMemory()) TR::X86LabelInstruction(prev, JMP4, startLabel, self());
+      prev = new (self()->trHeapMemory()) TR::X86LabelInstruction(prev, TR::InstOpCode::JMP4, startLabel, self());
       }
 
    return prev;
@@ -371,7 +382,6 @@ J9::X86::CodeGenerator::nopsAlsoProcessedByRelocations()
 bool
 J9::X86::CodeGenerator::enableAESInHardwareTransformations()
    {
-   TR_ASSERT_FATAL(self()->comp()->compileRelocatableCode() || self()->comp()->isOutOfProcessCompilation() || self()->comp()->target().cpu.supportsFeature(OMR_FEATURE_X86_AESNI) == TR::CodeGenerator::getX86ProcessorInfo().supportsAESNI(), "supportsAESNI() failed\n");
    if (self()->comp()->target().cpu.supportsFeature(OMR_FEATURE_X86_AESNI) && !self()->comp()->getOption(TR_DisableAESInHardware) && !self()->comp()->getCurrentMethod()->isJNINative())
       return true;
    else
@@ -395,6 +405,13 @@ J9::X86::CodeGenerator::supportsInliningOfIsAssignableFrom()
    {
    static const bool disableInliningOfIsAssignableFrom = feGetEnv("TR_disableInlineIsAssignableFrom") != NULL;
    return !disableInliningOfIsAssignableFrom;
+   }
+
+bool
+J9::X86::CodeGenerator::canEmitBreakOnDFSet()
+   {
+   static const bool enableBreakOnDFSet = feGetEnv("TR_enableBreakOnDFSet") != NULL;
+   return enableBreakOnDFSet;
    }
 
 void

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2006, 2013 IBM Corp. and others
+ * Copyright (c) 2006, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -104,13 +104,13 @@ public final class IntegerMap extends AbstractHashMap {
             }
             put(key, value);
             if (doCheck) {
-                check.put(new Long(key), new Long(value));
+                check.put(Long.valueOf(key), Long.valueOf(value));
                 if (get(key) != value) {
                     throw new Error("found " + get(key) + " expected " + value);
                 }
                 if (remove) {
                     remove(key);
-                    check.remove(new Long(key));
+                    check.remove(Long.valueOf(key));
                 }
             }
         }

@@ -1,6 +1,6 @@
 
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -162,6 +162,14 @@ j9gc_initialize_parse_gc_colon(J9JavaVM *javaVM, char **scan_start)
 		goto _exit;
 	}
 
+	if (try_scan(scan_start, "overrideHiresTimerCheck")) {
+		extensions->overrideHiresTimerCheck = true;
+		goto _exit;
+	}
+
+#endif /* J9VM_GC_REALTIME */
+
+#if defined(J9VM_GC_REALTIME)|| defined(J9VM_GC_VLHGC)
 	if (try_scan(scan_start, "targetPausetime=")) {
 		/* the unit of target pause time option is in milliseconds */
 		UDATA beatMilli = 0;
@@ -172,18 +180,20 @@ j9gc_initialize_parse_gc_colon(J9JavaVM *javaVM, char **scan_start)
 			j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_GC_OPTIONS_VALUE_MUST_BE_ABOVE, "targetPausetime=", (UDATA)0);
 			goto _error;
 		}
-		/* convert the unit to microseconds and store in extensions */
-		extensions->beatMicro = beatMilli * 1000;
 
-		goto _exit;
-	}
-
-	if (try_scan(scan_start, "overrideHiresTimerCheck")) {
-		extensions->overrideHiresTimerCheck = true;
-		goto _exit;
-	}
-
+#if defined(J9VM_GC_REALTIME)
+			/* convert the unit to microseconds and store in extensions */
+			extensions->beatMicro = beatMilli * 1000;
 #endif /* J9VM_GC_REALTIME */
+
+#if defined(J9VM_GC_VLHGC)
+		    /* Save soft pause target for balanced */
+			extensions->tarokTargetMaxPauseTime = beatMilli;
+#endif /* J9VM_GC_VLHGC */
+
+		goto _exit;
+	}
+#endif /* J9VM_GC_REALTIME || J9VM_GC_VLHGC */
 
 //todo temporary option to allow LOA to be enabled for testing with non-default gc policies
 //Remove once LOA code stable 
@@ -666,7 +676,8 @@ j9gc_initialize_parse_gc_colon(J9JavaVM *javaVM, char **scan_start)
 			j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_GC_OPTIONS_INTEGER_OUT_OF_RANGE, "dnssExpectedTimeRatioMinimum=", (UDATA)0, (UDATA)100);
 			goto _error;
 		}
-		extensions->dnssExpectedTimeRatioMinimum = ((double)value) / ((double)100);
+		extensions->dnssExpectedRatioMinimum._wasSpecified = true;
+		extensions->dnssExpectedRatioMinimum._valueSpecified = ((double)value) / ((double)100);
 		goto _exit;
 	}
 
@@ -679,7 +690,8 @@ j9gc_initialize_parse_gc_colon(J9JavaVM *javaVM, char **scan_start)
 			j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_GC_OPTIONS_INTEGER_OUT_OF_RANGE, "dnssExpectedTimeRatioMaximum=", (UDATA)0, (UDATA)100);
 			goto _error;
 		}
-		extensions->dnssExpectedTimeRatioMaximum = ((double)value) / ((double)100);
+		extensions->dnssExpectedRatioMaximum._wasSpecified = true;
+		extensions->dnssExpectedRatioMaximum._valueSpecified = ((double)value) / ((double)100);
 		goto _exit;
 	}
 
@@ -1100,6 +1112,16 @@ j9gc_initialize_parse_gc_colon(J9JavaVM *javaVM, char **scan_start)
 #endif /* defined(OMR_GC_VLHGC_CONCURRENT_COPY_FORWARD) */
 #endif /* defined(J9VM_GC_VLHGC) */
 
+#if defined(J9VM_GC_MODRON_SCAVENGER) || defined(J9VM_GC_VLHGC)
+	/* If dynamicBreadthFirstScanOrdering is enabled, set scavengerScanOrdering and other required options */
+	if(try_scan(scan_start, "dynamicBreadthFirstScanOrdering")) {
+		extensions->scavengerScanOrdering = MM_GCExtensions::OMR_GC_SCAVENGER_SCANORDERING_DYNAMIC_BREADTH_FIRST;
+		/* Below options are required options for dynamicBreadthFirstScanOrdering */
+		extensions->scavengerAlignHotFields = false;
+		goto _exit;
+	}
+#endif /* defined(J9VM_GC_MODRON_SCAVENGER) || defined (J9VM_GC_VLHGC) */
+
 #if defined(J9VM_GC_MODRON_SCAVENGER)
 	if (try_scan(scan_start, "scanCacheSize=")) {
 		/* Read in restricted scan cache size */
@@ -1122,7 +1144,6 @@ j9gc_initialize_parse_gc_colon(J9JavaVM *javaVM, char **scan_start)
 		extensions->scavengerScanOrdering = MM_GCExtensions::OMR_GC_SCAVENGER_SCANORDERING_BREADTH_FIRST;
 		goto _exit;
 	}
-		
 #endif /* J9VM_GC_MODRON_SCAVENGER */
 
 	if(try_scan(scan_start, "alwaysCallWriteBarrier")) {
@@ -1265,25 +1286,25 @@ gcParseXgcArguments(J9JavaVM *vm, char *optArg)
 			}
 			continue;
 		}
-		if (try_scan(&scan_start, "finalizeMasterPriority=")) {
-			if(!scan_udata_helper(vm, &scan_start, &extensions->finalizeMasterPriority, "finalizeMasterPriority=")) {
+		if (try_scan(&scan_start, "finalizeMainPriority=")) {
+			if(!scan_udata_helper(vm, &scan_start, &extensions->finalizeMainPriority, "finalizeMainPriority=")) {
 				returnValue = JNI_EINVAL;
 				break;
 			}
-			if((extensions->finalizeMasterPriority < J9THREAD_PRIORITY_USER_MIN) || (extensions->finalizeMasterPriority > J9THREAD_PRIORITY_USER_MAX)) {
-				j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_GC_OPTIONS_INTEGER_OUT_OF_RANGE, "-Xgc:finalizeMasterPriority", (UDATA)J9THREAD_PRIORITY_USER_MIN, (UDATA)J9THREAD_PRIORITY_USER_MAX);
+			if((extensions->finalizeMainPriority < J9THREAD_PRIORITY_USER_MIN) || (extensions->finalizeMainPriority > J9THREAD_PRIORITY_USER_MAX)) {
+				j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_GC_OPTIONS_INTEGER_OUT_OF_RANGE, "-Xgc:finalizeMainPriority", (UDATA)J9THREAD_PRIORITY_USER_MIN, (UDATA)J9THREAD_PRIORITY_USER_MAX);
 				returnValue = JNI_EINVAL;
 				break;
 			}
 			continue;
 		}
-		if (try_scan(&scan_start, "finalizeSlavePriority=")) {
-			if(!scan_udata_helper(vm, &scan_start, &extensions->finalizeSlavePriority, "finalizeSlavePriority=")) {
+		if (try_scan(&scan_start, "finalizeWorkerPriority=")) {
+			if(!scan_udata_helper(vm, &scan_start, &extensions->finalizeWorkerPriority, "finalizeWorkerPriority=")) {
 				returnValue = JNI_EINVAL;
 				break;
 			}
-			if((extensions->finalizeSlavePriority < J9THREAD_PRIORITY_USER_MIN) || (extensions->finalizeSlavePriority > J9THREAD_PRIORITY_USER_MAX)) {
-				j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_GC_OPTIONS_INTEGER_OUT_OF_RANGE, "-Xgc:finalizeSlavePriority", (UDATA)J9THREAD_PRIORITY_USER_MIN, (UDATA)J9THREAD_PRIORITY_USER_MAX);
+			if((extensions->finalizeWorkerPriority < J9THREAD_PRIORITY_USER_MIN) || (extensions->finalizeWorkerPriority > J9THREAD_PRIORITY_USER_MAX)) {
+				j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_GC_OPTIONS_INTEGER_OUT_OF_RANGE, "-Xgc:finalizeWorkerPriority", (UDATA)J9THREAD_PRIORITY_USER_MIN, (UDATA)J9THREAD_PRIORITY_USER_MAX);
 				returnValue = JNI_EINVAL;
 				break;
 			}

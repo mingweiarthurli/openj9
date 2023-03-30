@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no" ?>
 
 <!--
-  Copyright (c) 2011, 2020 IBM Corp. and others
+  Copyright (c) 2011, 2021 IBM Corp. and others
 
   This program and the accompanying materials are made available under
   the terms of the Eclipse Public License 2.0 which accompanies this
@@ -17,7 +17,7 @@
   OpenJDK Assembly Exception [2].
 
   [1] https://www.gnu.org/software/classpath/license.html
-  [2] http://openjdk.java.net/legal/assembly-exception.html
+  [2] https://openjdk.org/legal/assembly-exception.html
 
   SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 -->
@@ -27,7 +27,7 @@
 
 	<test id="Ensure -XXnosuballoc32bitmem is recognized on all platforms">
 		<command>$EXE$ -Xcompressedrefs -XXnosuballoc32bitmem -version</command>
-		<output type="success" caseSensitive="yes" regex="yes" javaUtilPattern="yes">(java|openjdk) version</output>
+		<output type="success" caseSensitive="no" regex="yes" javaUtilPattern="yes">(java|openjdk|semeru) version</output>
 		<output regex="no" type="failure">Command-line option unrecognised</output>
 		<output type="failure" caseSensitive="no" regex="no">Unhandled Exception</output>
 		<output type="failure" caseSensitive="yes" regex="no">Exception:</output>
@@ -38,7 +38,7 @@
 
 	<test id="Generate a javacore without -XXnosuballoc32bitmem">
 		<command>$EXE$ -Xcompressedrefs -Xdump:java:events=vmstop,file=testjavacore.txt -version</command>
-		<output type="success" caseSensitive="yes" regex="yes" javaUtilPattern="yes">(java|openjdk) version</output>
+		<output type="success" caseSensitive="no" regex="yes" javaUtilPattern="yes">(java|openjdk|semeru) version</output>
 		<output regex="no" type="failure">Command-line option unrecognised</output>
 		<output type="failure" caseSensitive="no" regex="no">Unhandled Exception</output>
 		<output type="failure" caseSensitive="yes" regex="no">Exception:</output>
@@ -53,7 +53,7 @@
 	
 	<test id="Generate a javacore with -XXnosuballoc32bitmem">
 		<command>$EXE$ -Xcompressedrefs -XXnosuballoc32bitmem -Xdump:java:events=vmstop,file=testjavacore.txt -version</command>
-		<output type="success" caseSensitive="yes" regex="yes" javaUtilPattern="yes">(java|openjdk) version</output>
+		<output type="success" caseSensitive="no" regex="yes" javaUtilPattern="yes">(java|openjdk|semeru) version</output>
 		<output regex="no" type="failure">Command-line option unrecognised</output>
 		<output type="failure" caseSensitive="no" regex="no">Unhandled Exception</output>
 		<output type="failure" caseSensitive="yes" regex="no">Exception:</output>
@@ -88,7 +88,7 @@
 
 	<test id="Verify rightmost -XX:-PrintFlagsFinal overrides earlier -XX:+PrintFlagsFinal">
 		<command>$EXE$ -XX:+PrintFlagsFinal -XX:-PrintFlagsFinal -version</command>
-		<output type="success" caseSensitive="no" regex="no">Runtime Environment</output>
+		<output type="success" caseSensitive="yes" javaUtilPattern="yes" regex="yes">(Semeru|OpenJDK|Java\(TM\) SE) Runtime</output>
 		<output type="failure" caseSensitive="no" regex="no">[Global flags]</output>
 	</test>
 </suite>

@@ -1,6 +1,6 @@
 
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -51,8 +51,8 @@
 #include "InterRegionRememberedSet.hpp"
 #include "PhysicalArenaRegionBased.hpp"
 #include "PhysicalSubArenaRegionBased.hpp"
+#include "SweepPoolManagerAddressOrderedList.hpp"
 #include "SweepPoolManagerVLHGC.hpp"
-
 
 #define TAROK_MINIMUM_REGION_SIZE_BYTES (512 * 1024)
 
@@ -203,9 +203,9 @@ MM_ConfigurationIncrementalGenerational::createDefaultMemorySpace(MM_Environment
 	MM_HeapRegionManager *regionManager = extensions->heapRegionManager;
 	Assert_MM_true(NULL != regionManager);
 
-	/* Create Sweep Pool Manager for MemoryPoolBumpPointer */
-	extensions->sweepPoolManagerBumpPointer = MM_SweepPoolManagerVLHGC::newInstance(MM_EnvironmentVLHGC::getEnvironment(env));
-	if (NULL == extensions->sweepPoolManagerBumpPointer) {
+	/* Create Sweep Pool Manager for VLHGC */
+	extensions->sweepPoolManagerAddressOrderedList = (MM_SweepPoolManagerAddressOrderedList *) MM_SweepPoolManagerVLHGC::newInstance(env);
+	if (NULL == extensions->sweepPoolManagerAddressOrderedList) {
 		return NULL;
 	}
 
@@ -272,8 +272,13 @@ MM_ConfigurationIncrementalGenerational::initialize(MM_EnvironmentBase *env)
 
 	bool result = MM_Configuration::initialize(env);
 
+	/* By default disable hot field depth copying */
+	env->disableHotFieldDepthCopy();
+
 	if (result) {
-		extensions->scavengerScanOrdering = MM_GCExtensions::OMR_GC_SCAVENGER_SCANORDERING_BREADTH_FIRST;
+		if (MM_GCExtensions::OMR_GC_SCAVENGER_SCANORDERING_NONE == extensions->scavengerScanOrdering) {
+			extensions->scavengerScanOrdering = MM_GCExtensions::OMR_GC_SCAVENGER_SCANORDERING_DYNAMIC_BREADTH_FIRST;
+		}
 		extensions->setVLHGC(true);
 	}
 
@@ -305,6 +310,22 @@ MM_ConfigurationIncrementalGenerational::initialize(MM_EnvironmentBase *env)
 		extensions->tarokMinimumGMPWorkTargetBytes._valueSpecified = extensions->regionSize;
 	}
 
+	if (!extensions->dnssExpectedRatioMaximum._wasSpecified) {
+		extensions->dnssExpectedRatioMaximum._valueSpecified = 0.05;
+	}
+
+	if (!extensions->dnssExpectedRatioMinimum._wasSpecified) {
+		extensions->dnssExpectedRatioMinimum._valueSpecified = 0.02;
+	}
+
+	if (!extensions->heapExpansionGCRatioThreshold._wasSpecified) {
+		extensions->heapExpansionGCRatioThreshold._valueSpecified = 5;
+	}
+
+	if (!extensions->heapContractionGCRatioThreshold._wasSpecified) {
+		extensions->heapContractionGCRatioThreshold._valueSpecified = 2;
+	}
+
 	return result;
 }
 
@@ -313,11 +334,11 @@ MM_ConfigurationIncrementalGenerational::tearDown(MM_EnvironmentBase *env)
 {
 	MM_GCExtensions *extensions = MM_GCExtensions::getExtensions(env);
 
-	if (NULL != extensions->sweepPoolManagerBumpPointer) {
-		extensions->sweepPoolManagerBumpPointer->kill(env);
-		extensions->sweepPoolManagerBumpPointer = NULL;
+	if (NULL != extensions->sweepPoolManagerAddressOrderedList) {
+		extensions->sweepPoolManagerAddressOrderedList->kill(env);
+		extensions->sweepPoolManagerAddressOrderedList = NULL;
 	}
-	
+
 	if (NULL != extensions->cardTable) {
 		extensions->cardTable->kill(MM_EnvironmentVLHGC::getEnvironment(env));
 		extensions->cardTable = NULL;

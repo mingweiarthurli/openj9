@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -87,7 +87,6 @@ public:
    static const char    * getName(TR::DataType dt);
    static const int32_t   getSize(TR::DataType dt);
    static void            setSize(TR::DataType dt, int32_t newValue);
-   static const char    * getPrefix(TR::DataType dt);
 
    // for the overloaded instances of getName:
    // OMR::DataType::getName(TR_RawBCDSignCode)
@@ -95,8 +94,6 @@ public:
    using OMR::DataTypeConnector::getName;
 
    inline bool isFloatingPoint();
-   bool isLongDouble()              { return _type == TR::DecimalLongDouble; }
-   bool isDFP()                     { return _type == TR::DecimalFloat|| _type == TR::DecimalDouble|| _type == TR::DecimalLongDouble; }
    bool isBCD()                     { return (_type >= TR::FirstBCDType) && (_type <= TR::LastBCDType); }
    bool isAnyPacked()               { return _type == TR::PackedDecimal; }
    bool isAnyZoned()                { return (_type >= TR::FirstZonedType) && (_type <= TR::LastZonedType); }
@@ -121,10 +118,6 @@ public:
    inline bool isTrailingSign();
    inline bool isSignless();
    inline bool hasExposedConstantAddress();
-
-   static inline int32_t getMaxShortDFPPrecision()    { return 7; }
-   static inline int32_t getMaxLongDFPPrecision()     { return 16; }
-   static inline int32_t getMaxExtendedDFPPrecision() { return 34; }
 
    // NOTE: getMaxPackedDecimalSize is derived from TR_MAX_DECIMAL_PRECISION but left as a constant
    //       to aid in static char declarations see packedDecimalPrecisionToByteLength for the formula
@@ -187,7 +180,7 @@ public:
    static inline int32_t getUnicodeSignSize()    { return 2; }
    static inline int32_t getUnicodeElementSize() { return 2; }
 
-   static inline int32_t getBCDSignCharSize() { return 1; } // one byte for leading leading +/-/u char
+   static inline int32_t getBCDSignCharSize() { return 1; } // one byte for leading +/-/u char
    static inline int32_t getBCDStrlen()       { return TR_MAX_DECIMAL_PRECISION + J9::DataType::getBCDSignCharSize() + 1; }
                                                 // +1 for sign, +1 for terminating null -- for pretty printed string e.g. "+1234"
 
@@ -198,8 +191,6 @@ public:
    static bool isValidZonedData(char  *lit, int32_t start, int32_t end);
    static bool isValidUnicodeData(char  *lit, int32_t start, int32_t end);
    static bool isValidBCDLiteral(char *lit, size_t litSize, TR::DataType dt, bool isEvenPrecision);
-
-   static TR::DataType getDFPTypeFromPrecision(int32_t precision);
 
    bool canGetMaxPrecisionFromType();
    int32_t getMaxPrecisionFromType();
@@ -352,8 +343,6 @@ public:
    static bool normalizedSignIsPositive(TR::DataType dt, TR_BCDSignCode normalizedSign);
    static bool rawSignIsNegative(TR::DataType dt, int32_t rawSignCode);
    static bool normalizedSignIsNegative(TR::DataType dt, TR_BCDSignCode normalizedSign);
-
-   static TR::ILOpCodes getDataTypeConversion(TR::DataType t1, TR::DataType t2);
 
 private:
    static char*         _TR_RawBCDSignCodeNames[num_raw_bcd_sign_codes];

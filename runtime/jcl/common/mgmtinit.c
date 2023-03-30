@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -745,7 +745,7 @@ gcEndEvent(J9JavaVM *vm, UDATA heapSize, UDATA heapUsed, UDATA *totals, UDATA *f
 	gcData->totalMemoryFreed += (I_64)(mgmt->preCollectionHeapUsed - mgmt->postCollectionHeapUsed);
 	
 	/* update the GC CPU usage */
-	mmFuncs->j9gc_get_CPU_times(vm, &mgmt->gcMasterCpuTime, &mgmt->gcSlaveCpuTime, &mgmt->gcMaxThreads, &mgmt->gcCurrentThreads);
+	mmFuncs->j9gc_get_CPU_times(vm, &mgmt->gcMainCpuTime, &mgmt->gcWorkerCpuTime, &mgmt->gcMaxThreads, &mgmt->gcCurrentThreads);
 	
 	/* update nonHeap memory pools for postCollection */
 	updateNonHeapMemoryPoolSizes(vm, mgmt, TRUE);

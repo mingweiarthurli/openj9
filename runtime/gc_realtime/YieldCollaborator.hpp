@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2019 IBM Corp. and others
+ * Copyright (c) 2001, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -32,9 +32,9 @@ class MM_YieldCollaborator : public MM_BaseNonVirtual {
 public:
 	
 	enum ResumeEvent {
-		fromYield = 1, /* master notifies slaves to start working */
+		fromYield = 1, /* main notifies workers to start working */
 		synchedThreads = 2,  /* one GC thread notifies other threads, it's the last one to reach blocking or yield point */
-		notifyMaster = 3, /* notify only master that all other GC threads synched or yielded */
+		notifyMain = 3, /* notify only main that all other GC threads synched or yielded */
 		newPacket = 4 /* notify a GC thread that a new packeted is created */
 	};
 	
@@ -73,9 +73,9 @@ public:
 		return _prev;
 	}
 	
-	/* master notifies slaves it's time to start a new GC quantum */
-	void resumeSlavesFromYield(MM_EnvironmentBase *env);
-	/* used by either slaves to yield or master to wait for slaves to yield (or reach sync barrier) */	
+	/* main notifies workers it's time to start a new GC quantum */
+	void resumeWorkersFromYield(MM_EnvironmentBase *env);
+	/* used by either workers to yield or main to wait for workers to yield (or reach sync barrier) */	
 	void yield(MM_EnvironmentBase *env);
 	
 	MM_YieldCollaborator(omrthread_monitor_t *mutex, volatile UDATA *count, CollaboratorID collaboratorID) :

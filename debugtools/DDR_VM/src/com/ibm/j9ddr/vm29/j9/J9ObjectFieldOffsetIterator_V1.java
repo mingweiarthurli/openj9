@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -36,6 +36,8 @@ import static com.ibm.j9ddr.vm29.structure.J9ROMFieldOffsetWalkState.J9VM_FIELD_
 import static com.ibm.j9ddr.vm29.structure.J9ROMFieldOffsetWalkState.J9VM_FIELD_OFFSET_WALK_INCLUDE_INSTANCE;
 import static com.ibm.j9ddr.vm29.structure.J9ROMFieldOffsetWalkState.J9VM_FIELD_OFFSET_WALK_INCLUDE_STATIC;
 import static com.ibm.j9ddr.vm29.structure.J9ROMFieldOffsetWalkState.J9VM_FIELD_OFFSET_WALK_ONLY_OBJECT_SLOTS;
+import static com.ibm.j9ddr.vm29.structure.J9ROMFieldOffsetWalkState.J9VM_FIELD_OFFSET_WALK_BACKFILL_FLAT_OBJECT_FIELD;
+import static com.ibm.j9ddr.vm29.structure.J9ROMFieldOffsetWalkState.J9VM_FIELD_OFFSET_WALK_BACKFILL_FLAT_SINGLE_FIELD;
 
 import java.io.PrintStream;
 import java.util.ArrayList;
@@ -56,7 +58,7 @@ import com.ibm.j9ddr.vm29.pointer.helper.J9ObjectHelper;
 import com.ibm.j9ddr.vm29.pointer.helper.J9ROMClassHelper;
 import com.ibm.j9ddr.vm29.pointer.helper.J9ROMFieldShapeHelper;
 import com.ibm.j9ddr.vm29.pointer.helper.ValueTypeHelper;
-import com.ibm.j9ddr.vm29.structure.J9Object;
+import com.ibm.j9ddr.vm29.structure.J9JavaAccessFlags;
 import com.ibm.j9ddr.vm29.types.IDATA;
 import com.ibm.j9ddr.vm29.types.Scalar;
 import com.ibm.j9ddr.vm29.types.U32;
@@ -90,6 +92,7 @@ public class J9ObjectFieldOffsetIterator_V1 extends J9ObjectFieldOffsetIterator 
 	private UDATA currentFlatDoubleOffset = new UDATA(0);
 	private UDATA currentFlatObjectOffset = new UDATA(0);
 	private UDATA currentFlatSingleOffset = new UDATA(0);
+	private UDATA flatBackFillSize = new UDATA(0);
 
 	private U32 objectsSeen = new U32(0);
 	private U32 objectStaticsSeen = new U32(0);
@@ -152,17 +155,25 @@ public class J9ObjectFieldOffsetIterator_V1 extends J9ObjectFieldOffsetIterator 
 
 		if (walkHiddenFields && hiddenInstanceFieldWalkIndex != 0) {
 			/* Note: hiddenInstanceFieldWalkIndex is the index of the last hidden instance field that was returned. */
-			HiddenInstanceField hiddenField = hiddenInstanceFieldList.get(--hiddenInstanceFieldWalkIndex);
 
-			field = hiddenField.shape();
-			isHidden = true;
-			/*
-			 * This function returns offsets relative to the end of the object header,
-			 * whereas fieldOffset is relative to the start of the header.
-			 */
-			offset = new UDATA(hiddenField.fieldOffset().intValue() - J9ObjectHelper.headerSize());
-			/* Hidden fields do not have a valid JVMTI index. */
-			index = new UDATA(-1);
+			while (hiddenInstanceFieldWalkIndex != 0) {
+				HiddenInstanceField hiddenField = hiddenInstanceFieldList.get(--hiddenInstanceFieldWalkIndex);
+				if (!walkFlags.allBitsIn(J9VM_FIELD_OFFSET_WALK_ONLY_OBJECT_SLOTS)
+				|| hiddenField.shape().modifiers().allBitsIn(J9FieldFlagObject)
+				) {
+					/* If we are only looking for o-slots we've found one, or we can return anything */
+					field = hiddenField.shape();
+					isHidden = true;
+					/*
+					 * This function returns offsets relative to the end of the object header,
+					 * whereas fieldOffset is relative to the start of the header.
+					 */
+					offset = new UDATA(hiddenField.fieldOffset().intValue() - J9ObjectHelper.headerSize());
+					/* Hidden fields do not have a valid JVMTI index. */
+					index = new UDATA(-1);
+					break;
+				}
+			}
 		}
 	}
 
@@ -208,29 +219,65 @@ public class J9ObjectFieldOffsetIterator_V1 extends J9ObjectFieldOffsetIterator 
 			} else {
 				if (walkFlags.anyBitsIn(J9VM_FIELD_OFFSET_WALK_INCLUDE_INSTANCE)) {
 					if (modifiers.anyBitsIn(J9FieldFlagObject)) {
-						if (walkFlags.anyBitsIn(J9VM_FIELD_OFFSET_WALK_BACKFILL_OBJECT_FIELD)) {
-							// Assert_VM_true(state->backfillOffsetToUse >= 0);
-							offset = new UDATA(backfillOffsetToUse);
-							walkFlags = walkFlags.bitAnd(new U32(new UDATA(J9VM_FIELD_OFFSET_WALK_BACKFILL_OBJECT_FIELD).bitNot()));
-						} else {
-							if (valueTypeHelper.isFlattenableFieldSignature(J9ROMFieldShapeHelper.getSignature(localField))) {
-								J9ClassPointer fieldClass = valueTypeHelper.findJ9ClassInFlattenedClassCacheWithFieldName(instanceClass, J9ROMFieldShapeHelper.getName(localField));
-								if (valueTypeHelper.isJ9ClassIsFlattened(fieldClass)) {
-									IDATA firstFieldOffset = fieldClass.backfillOffset();
-									if (valueTypeHelper.isJ9ClassLargestAlignmentConstraintDouble(fieldClass)) {
-										offset = firstFlatDoubleOffset.add(currentFlatDoubleOffset).sub(firstFieldOffset);
-										currentFlatDoubleOffset = currentFlatDoubleOffset.add(Scalar.roundToSizeofU64(fieldClass.totalInstanceSize().sub(firstFieldOffset)));
-									} else if (valueTypeHelper.isJ9ClassLargestAlignmentConstraintReference(fieldClass)) {
-										offset = firstFlatObjectOffset.add(currentFlatObjectOffset).sub(firstFieldOffset);
-										currentFlatObjectOffset = currentFlatObjectOffset.add(Scalar.roundToSizeToFJ9object(fieldClass.totalInstanceSize().sub(firstFieldOffset)));
-									} else {
-										offset = firstFlatSingleOffset.add(currentFlatSingleOffset).sub(firstFieldOffset);
-										currentFlatSingleOffset = currentFlatSingleOffset.add(fieldClass.totalInstanceSize().sub(firstFieldOffset));
+						if (valueTypeHelper.isFlattenableFieldSignature(J9ROMFieldShapeHelper.getSignature(localField))) {
+							J9ClassPointer fieldClass = valueTypeHelper.findJ9ClassInFlattenedClassCacheWithFieldName(instanceClass, J9ROMFieldShapeHelper.getName(localField));
+							if (valueTypeHelper.isJ9FieldIsFlattened(fieldClass, localField)) {
+								UDATA size = null;
+								boolean forceDoubleAlignment;
+								if (fj9object_t_SizeOf == U32.SIZEOF) {
+									UDATA instanceSize = fieldClass.totalInstanceSize();
+									UDATA doubleSize = new UDATA(U64.SIZEOF);
+									if (valueTypeHelper.classRequires4BytePrePadding(fieldClass)) {
+										instanceSize = instanceSize.sub(U32.SIZEOF);
 									}
+									forceDoubleAlignment = (modifiers.allBitsIn(J9JavaAccessFlags.J9AccVolatile) && instanceSize.eq(doubleSize));
+								} else {
+									forceDoubleAlignment = true;
+								}
+								if (forceDoubleAlignment
+									|| valueTypeHelper.isJ9ClassLargestAlignmentConstraintDouble(fieldClass)
+								) {
+									size = fieldClass.totalInstanceSize();
+									if (valueTypeHelper.classRequires4BytePrePadding(fieldClass)) {
+										size = size.sub(U32.SIZEOF);
+									}
+									offset = firstFlatDoubleOffset.add(currentFlatDoubleOffset);
+									currentFlatDoubleOffset = currentFlatDoubleOffset.add(Scalar.roundToSizeofU64(size));
+								} else if (valueTypeHelper.isJ9ClassLargestAlignmentConstraintReference(fieldClass)) {
+									size = Scalar.roundToSizeToFJ9object(fieldClass.totalInstanceSize());
+									if (walkFlags.anyBitsIn(J9VM_FIELD_OFFSET_WALK_BACKFILL_FLAT_OBJECT_FIELD) && size.eq(flatBackFillSize)) {
+										offset = new UDATA(backfillOffsetToUse);
+										walkFlags = walkFlags.bitAnd(new U32(new UDATA(J9VM_FIELD_OFFSET_WALK_BACKFILL_FLAT_OBJECT_FIELD).bitNot()));
+									} else {
+										offset = firstFlatObjectOffset.add(currentFlatObjectOffset);
+										currentFlatObjectOffset = currentFlatObjectOffset.add(size);
+									}
+								} else {
+									size = fieldClass.totalInstanceSize();
+									if (walkFlags.anyBitsIn(J9VM_FIELD_OFFSET_WALK_BACKFILL_FLAT_SINGLE_FIELD) && size.eq(flatBackFillSize)) {
+										// Assert_VM_true(state->backfillOffsetToUse >= 0);
+										offset = new UDATA(backfillOffsetToUse);
+										walkFlags = walkFlags.bitAnd(new U32(new UDATA(J9VM_FIELD_OFFSET_WALK_BACKFILL_FLAT_SINGLE_FIELD).bitNot()));
+									} else {
+										offset = firstFlatSingleOffset.add(currentFlatSingleOffset);
+										currentFlatSingleOffset = currentFlatSingleOffset.add(size);
+									}
+								}
+							} else {
+								if (walkFlags.anyBitsIn(J9VM_FIELD_OFFSET_WALK_BACKFILL_OBJECT_FIELD)) {
+									// Assert_VM_true(state->backfillOffsetToUse >= 0);
+									offset = new UDATA(backfillOffsetToUse);
+									walkFlags = walkFlags.bitAnd(~J9VM_FIELD_OFFSET_WALK_BACKFILL_OBJECT_FIELD);
 								} else {
 									offset = firstObjectOffset.add(objectsSeen.mult(fj9object_t_SizeOf));
 									objectsSeen = objectsSeen.add(1);
 								}
+							}
+						} else {
+							if (walkFlags.anyBitsIn(J9VM_FIELD_OFFSET_WALK_BACKFILL_OBJECT_FIELD)) {
+								// Assert_VM_true(state->backfillOffsetToUse >= 0);
+								offset = new UDATA(backfillOffsetToUse);
+								walkFlags = walkFlags.bitAnd(~J9VM_FIELD_OFFSET_WALK_BACKFILL_OBJECT_FIELD);
 							} else {
 								offset = firstObjectOffset.add(objectsSeen.mult(fj9object_t_SizeOf));
 								objectsSeen = objectsSeen.add(1);
@@ -367,6 +414,7 @@ public class J9ObjectFieldOffsetIterator_V1 extends J9ObjectFieldOffsetIterator 
 
 		new UDATA(fieldInfo.calculateTotalFieldsSizeAndBackfill());
 		if (valueTypeHelper.areValueTypesSupported()) {
+			flatBackFillSize = new UDATA(fieldInfo.getBackfillSize());
 			firstFlatDoubleOffset = new UDATA(fieldInfo.calculateFieldDataStart());
 			firstDoubleOffset = new UDATA(fieldInfo.addFlatDoublesArea(firstFlatDoubleOffset.intValue()));
 			firstFlatObjectOffset = new UDATA(fieldInfo.addDoublesArea(firstDoubleOffset.intValue()));
@@ -380,10 +428,27 @@ public class J9ObjectFieldOffsetIterator_V1 extends J9ObjectFieldOffsetIterator 
 		}
 
 		if (fieldInfo.isMyBackfillSlotAvailable() && fieldInfo.isBackfillSuitableFieldAvailable() ) {
-			if (fieldInfo.isBackfillSuitableInstanceSingleAvailable()) {
-				walkFlags = walkFlags.bitOr(J9VM_FIELD_OFFSET_WALK_BACKFILL_SINGLE_FIELD);
-			} else if (fieldInfo.isBackfillSuitableInstanceObjectAvailable()) {
-				walkFlags = walkFlags.bitOr(J9VM_FIELD_OFFSET_WALK_BACKFILL_OBJECT_FIELD);
+			if (valueTypeHelper.areValueTypesSupported()) {
+				boolean objectBackfillAvailable = fieldInfo.isBackfillSuitableObjectAvailable();
+				if (0 != fieldInfo.getInstanceSingleCount()) {
+					walkFlags = walkFlags.bitOr(J9VM_FIELD_OFFSET_WALK_BACKFILL_SINGLE_FIELD);
+				} else if (objectBackfillAvailable && (0 != fieldInfo.getInstanceObjectCount())) {
+					walkFlags = walkFlags.bitOr(J9VM_FIELD_OFFSET_WALK_BACKFILL_OBJECT_FIELD);
+				} else if (0 != fieldInfo.getFlatAlignedSingleInstanceBackfillSize()) {
+					walkFlags = walkFlags.bitOr(J9VM_FIELD_OFFSET_WALK_BACKFILL_FLAT_SINGLE_FIELD);
+				} else if (objectBackfillAvailable && (0 != fieldInfo.getFlatAlignedObjectInstanceBackfillSize())) {
+					walkFlags = walkFlags.bitOr(J9VM_FIELD_OFFSET_WALK_BACKFILL_FLAT_OBJECT_FIELD);
+				} else if (0 != fieldInfo.getFlatUnAlignedSingleInstanceBackfillSize()) {
+					walkFlags = walkFlags.bitOr(J9VM_FIELD_OFFSET_WALK_BACKFILL_FLAT_SINGLE_FIELD);
+				} else if (objectBackfillAvailable && (0 != fieldInfo.getFlatUnAlignedObjectInstanceBackfillSize())) {
+					walkFlags = walkFlags.bitOr(J9VM_FIELD_OFFSET_WALK_BACKFILL_FLAT_OBJECT_FIELD);
+				}
+			} else {
+				if (fieldInfo.isBackfillSuitableInstanceSingleAvailable()) {
+					walkFlags = walkFlags.bitOr(J9VM_FIELD_OFFSET_WALK_BACKFILL_SINGLE_FIELD);
+				} else if (fieldInfo.isBackfillSuitableInstanceObjectAvailable()) {
+					walkFlags = walkFlags.bitOr(J9VM_FIELD_OFFSET_WALK_BACKFILL_OBJECT_FIELD);
+				}
 			}
 		}
 

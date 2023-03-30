@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -54,7 +54,8 @@ public:
       _arrayLetLeafSize(0),
       _arrayLetLeafLogSize(0),
       _readBarrierType(gc_modron_readbar_none),
-      _writeBarrierType(gc_modron_wrtbar_none)
+      _writeBarrierType(gc_modron_wrtbar_none),
+      _objectAlignmentInBytes(0)
    {}
 
    void initialize();
@@ -62,8 +63,13 @@ public:
    bool mayRequireSpineChecks();
 
    bool areValueTypesEnabled();
+   /**
+   * @brief Whether the check is enabled on monitor object being value based class type
+   */
+   bool areValueBasedMonitorChecksEnabled();
 
    int32_t sizeofReferenceField();
+   bool isHotReferenceFieldRequired();
    uintptr_t elementSizeOfBooleanArray();
    uint32_t getSizeOfArrayElement(TR::Node *node);
    int64_t maxArraySizeInElementsForAllocation(TR::Node *newArray, TR::Compilation *comp);
@@ -113,6 +119,10 @@ public:
    uintptr_t offsetOfDiscontiguousArraySizeField();
    uintptr_t objectHeaderSizeInBytes();
    uintptr_t offsetOfIndexableSizeField();
+#if defined(TR_TARGET_64BIT)
+   uintptr_t offsetOfContiguousDataAddrField();
+   uintptr_t offsetOfDiscontiguousDataAddrField();
+#endif /* TR_TARGET_64BIT */
 
    /**
    * @brief Returns the read barrier type of VM's GC
@@ -129,6 +139,8 @@ public:
    */
    bool compressObjectReferences();
 
+   int32_t getObjectAlignmentInBytes();
+
 private:
 
    bool                  _compressObjectReferences;
@@ -137,6 +149,7 @@ private:
    int32_t               _arrayLetLeafLogSize;
    MM_GCReadBarrierType  _readBarrierType;
    MM_GCWriteBarrierType _writeBarrierType;
+   int32_t               _objectAlignmentInBytes;
    };
 
 }

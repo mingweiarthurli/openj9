@@ -1,5 +1,5 @@
 <!--
-Copyright (c) 2018, 2019 IBM Corp. and others
+Copyright (c) 2018, 2022 IBM Corp. and others
 
 This program and the accompanying materials are made available under
 the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@ Exception [1] and GNU General Public License, version 2 with the
 OpenJDK Assembly Exception [2].
 
 [1] https://www.gnu.org/software/classpath/license.html
-[2] http://openjdk.java.net/legal/assembly-exception.html
+[2] https://openjdk.org/legal/assembly-exception.html
 
 SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 -->
@@ -48,7 +48,7 @@ Indicate if this issue is specific for a given JDK level, such as JDK8.
 
 Component
 ---
-Indicate the likely component for this issue.  Segregating by component
+Indicate the likely component for this issue.  Separating by component
 helps to keep the list of issues to review managable and to guide
 contributors for a particular area to the relevant items.
 
@@ -95,12 +95,12 @@ Label to indicate that a PR or issue requires external documentation (new featur
 
 * `doc:externals`
 
-**Note:** When you use this label, you must open an [issue](https://github.com/eclipse/openj9-docs/issues/new?template=new-documentation-change.md) in the OpenJ9 documentation repo.
+**Note:** When you use this label, you must open an [issue](https://github.com/eclipse-openj9/openj9-docs/issues/new?template=new-documentation-change.md) in the OpenJ9 documentation repo.
 
 End User issues
 ---
 To indicate an issue has been raised by an end user or affects the User-experience rather than being a developer-centric issue.
 
 * `userRaised`
-* `svtRaised`: Indicate an issue was raised for an AdoptOpenJDK 3rd party issue or the OpenJ9 system verification test (svt).
+* `svtRaised`: Indicate an issue was raised for an Adoptium third party issue or the OpenJ9 system verification test (svt).
 

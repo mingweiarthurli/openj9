@@ -14,7 +14,7 @@
 # OpenJDK Assembly Exception [2].
 #
 # [1] https://www.gnu.org/software/classpath/license.html
-# [2] http://openjdk.java.net/legal/assembly-exception.html
+# [2] https://openjdk.org/legal/assembly-exception.html
 #
 # SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 
@@ -309,14 +309,22 @@ LIBCDEFS := $(word 1,$(wildcard $(foreach d,$(TPF_ROOT),$d/base/lib/libCDEFSFORA
 %$(UMA_DOT_II): %.cpp
 	$(CXX) $(CXXFLAGS) -E -dDI -o $@ $<
 
+<#elseif uma.spec.type.zos>
+
+<#if uma.spec.flags.opt_useOmrDdr.enabled>
+# Optimization is limited when using '-Wc,debug', but *.dbg files are required for DDR.
+# Compile C and C++ code twice: once with '-Wc,debug', and a second time without that option.
 </#if>
-<#if uma.spec.type.zos>
+
 # compilation rule for C files.
-%$(UMA_DOT_O): %.c
+%$(UMA_DOT_O) : %.c
+<#if uma.spec.flags.opt_useOmrDdr.enabled>
+	$(CC) $(CFLAGS) -Wc,debug -c -o $@ $< > /dev/null
+</#if>
 	$(CC) $(CFLAGS) -c -o $@ $< > $*.asmlist
 
 # compilation rule for metal-C files.
-%$(UMA_DOT_O): %.mc
+%$(UMA_DOT_O) : %.mc
 	cp $< $*.c
 	xlc $(MCFLAGS) -qnosearch -I /usr/include/metal/ -qmetal -qlongname -S -o $*.s $*.c > $*.asmlist
 	rm -f $*.c
@@ -324,9 +332,12 @@ LIBCDEFS := $(word 1,$(wildcard $(foreach d,$(TPF_ROOT),$d/base/lib/libCDEFSFORA
 	rm -f $*.s
 
 # compilation rule for C++ files.
-%$(UMA_DOT_O): %.cpp
-	$(CXX) $(CXXFLAGS) -c $< > $*.asmlist
-<#elseif !uma.spec.type.ztpf>
+%$(UMA_DOT_O) : %.cpp
+<#if uma.spec.flags.opt_useOmrDdr.enabled>
+	$(CXX) $(CXXFLAGS) -Wc,debug -c -o $@ $< > /dev/null
+</#if>
+	$(CXX) $(CXXFLAGS) -c -o $@ $< > $*.asmlist
+<#else>
 
 # compilation rule for C files.
 %$(UMA_DOT_O): %.c
@@ -355,8 +366,14 @@ DDR_SED_COMMAND := \
 
 DDR_NOLIST := <#if uma.spec.type.zos>-Wc,noconvlit -Wc,nolist,nooffset</#if>
 
+# On z/OS, also suppress these C preprocessor errors:
+# - CCN3211 Parameter list must be empty, or consist of one or more identifiers separated by commas.
+# - CCN3766 The universal character name "0x**" is not in the allowable range for an identifier.
+
+DDR_C_SUPPRESS := <#if uma.spec.type.zos>-qsuppress=CCN3211:CCN3766</#if>
+
 %.i : %.c
-	$(CC) $(CFLAGS) $(DDR_NOLIST) -E $< | $(DDR_SED_COMMAND) > $@
+	$(CC) $(CFLAGS) $(DDR_NOLIST) $(DDR_C_SUPPRESS) -E $< | $(DDR_SED_COMMAND) > $@
 
 %.i : %.cpp
 	$(CXX) $(CXXFLAGS) $(DDR_NOLIST) -E $< | $(DDR_SED_COMMAND) > $@
@@ -520,7 +537,7 @@ CLANG_CXXFLAGS+=-std=c++0x -D_CRT_SUPPRESS_RESTRICT -DVS12AndHigher
 	CLANG_CXXFLAGS+=-D_M_X64
 </#if>
 endif
-# special handling BytecodeInterpreterFull.cpp, BytecodeInterpreterCompressed.cpp, DebugBytecodeInterpreterFull.cpp and DebugBytecodeInterpreterCompressed.cpp
+# special handling MHInterpreterFull.cpp, MHInterpreterCompressed.cpp, BytecodeInterpreterFull.cpp, BytecodeInterpreterCompressed.cpp, DebugBytecodeInterpreterFull.cpp and DebugBytecodeInterpreterCompressed.cpp
 BytecodeInterpreterFull$(UMA_DOT_O):BytecodeInterpreterFull.cpp
 	$(CLANG_CXX) $(CLANG_CXXFLAGS) -c $< -o $@
 
@@ -533,7 +550,10 @@ DebugBytecodeInterpreterFull$(UMA_DOT_O):DebugBytecodeInterpreterFull.cpp
 DebugBytecodeInterpreterCompressed$(UMA_DOT_O):DebugBytecodeInterpreterCompressed.cpp
 	$(CLANG_CXX) $(CLANG_CXXFLAGS) -c $< -o $@
 
-MHInterpreter$(UMA_DOT_O):MHInterpreter.cpp
+MHInterpreterFull$(UMA_DOT_O):MHInterpreterFull.cpp
+	$(CLANG_CXX) $(CLANG_CXXFLAGS) -c $< -o $@
+
+MHInterpreterCompressed$(UMA_DOT_O):MHInterpreterCompressed.cpp
 	$(CLANG_CXX) $(CLANG_CXXFLAGS) -c $< -o $@
 
 endif
@@ -575,7 +595,10 @@ DebugBytecodeInterpreterFull$(UMA_DOT_O):DebugBytecodeInterpreterFull.cpp
 DebugBytecodeInterpreterCompressed$(UMA_DOT_O):DebugBytecodeInterpreterCompressed.cpp
 	$(CXX) $(SPECIALCXXFLAGS) $(NEW_OPTIMIZATION_FLAG) -c $<
 
-MHInterpreter$(UMA_DOT_O):MHInterpreter.cpp
+MHInterpreterFull$(UMA_DOT_O):MHInterpreterFull.cpp
+	$(CXX) $(SPECIALCXXFLAGS) $(NEW_OPTIMIZATION_FLAG) -c $<
+
+MHInterpreterCompressed$(UMA_DOT_O):MHInterpreterCompressed.cpp
 	$(CXX) $(SPECIALCXXFLAGS) $(NEW_OPTIMIZATION_FLAG) -c $<
 
 endif

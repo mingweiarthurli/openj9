@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2000, 2020 IBM Corp. and others
+# Copyright (c) 2000, 2021 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
 # OpenJDK Assembly Exception [2].
 #
 # [1] https://www.gnu.org/software/classpath/license.html
-# [2] http://openjdk.java.net/legal/assembly-exception.html
+# [2] https://openjdk.org/legal/assembly-exception.html
 #
 # SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 #
@@ -768,7 +768,7 @@ J9NLS_SHRC_CM_WARN_CORRUPT_CACHE=Sd\u00edlen\u00e1 mezipam\u011b\u0165 \"%s\" je
 # START NON-TRANSLATABLE
 J9NLS_SHRC_CM_WARN_CORRUPT_CACHE.sample_input_1=myCache
 J9NLS_SHRC_CM_WARN_CORRUPT_CACHE.explanation=The shared class cache named in the message is corrupt.
-J9NLS_SHRC_CM_WARN_CORRUPT_CACHE.system_action=The JVM will attempt to automatically re-create the cache before starting. If re-creation fails, the JVM will terminate unless unless you have specified the nonfatal option with "-Xshareclasses:nonfatal".
+J9NLS_SHRC_CM_WARN_CORRUPT_CACHE.system_action=The JVM will attempt to automatically re-create the cache before starting. If re-creation fails, the JVM will terminate unless you have specified the nonfatal option with "-Xshareclasses:nonfatal".
 J9NLS_SHRC_CM_WARN_CORRUPT_CACHE.user_response=Destroy the shared class cache named in the message and rerun.  If the situation persists, contact your service representative.
 # END NON-TRANSLATABLE
 
@@ -2650,7 +2650,7 @@ J9NLS_SHRC_CC_CRC_CHECK_FAILED=Kontrola k\u00f3du CRC sd\u00edlen\u00e9 mezipam\
 J9NLS_SHRC_CC_CRC_CHECK_FAILED.sample_input_1=-1
 J9NLS_SHRC_CC_CRC_CHECK_FAILED.sample_input_2=-1
 J9NLS_SHRC_CC_CRC_CHECK_FAILED.explanation=This message shows the CRC values when the cache startup CRC check fails
-J9NLS_SHRC_CC_CRC_CHECK_FAILED.system_action=The JVM will attempt to automatically re-create the cache before starting. If re-creation fails, the JVM will terminate unless unless you have specified the nonfatal option with "-Xshareclasses:nonfatal".
+J9NLS_SHRC_CC_CRC_CHECK_FAILED.system_action=The JVM will attempt to automatically re-create the cache before starting. If re-creation fails, the JVM will terminate unless you have specified the nonfatal option with "-Xshareclasses:nonfatal".
 J9NLS_SHRC_CC_CRC_CHECK_FAILED.user_response=Contact your service representative.
 # END NON-TRANSLATABLE
 
@@ -3540,7 +3540,7 @@ J9NLS_SHRC_CM_PRINTSTATS_JITPROFILE_FROM_ROMCLASS.system_action=
 J9NLS_SHRC_CM_PRINTSTATS_JITPROFILE_FROM_ROMCLASS.user_response=
 # END NON-TRANSLATABLE
 
-J9NLS_SHRC_SHRINIT_VALUE_IS_NOT_SUPPORTED_BY_PRIMENUMBERHELPER=Hodnota %d p\u0159edan\u00e1 volbou -Xitsn je mimo rozsah prvo\u010d\u00edseln\u00fdch hodnot podporovan\u00fdch virtu\u00e1ln\u00edm strojem. Podporovan\u00fd rozsah: 0 - %u
+J9NLS_SHRC_SHRINIT_VALUE_IS_NOT_SUPPORTED_BY_PRIMENUMBERHELPER=Hodnota %d p\u0159edan\u00e1 volbou -Xitsn je mimo rozsah prvo\u010d\u00edseln\u00fdch hodnot podporovan\u00fdch virtu\u00e1ln\u00edm po\u010d\u00edta\u010dem. Podporovan\u00fd rozsah: 0 - %u
 # START NON-TRANSLATABLE
 J9NLS_SHRC_SHRINIT_VALUE_IS_NOT_SUPPORTED_BY_PRIMENUMBERHELPER.sample_input_1=150
 J9NLS_SHRC_SHRINIT_VALUE_IS_NOT_SUPPORTED_BY_PRIMENUMBERHELPER.sample_input_2=27000
@@ -3608,7 +3608,7 @@ J9NLS_SHRC_CM_WARN_CORRUPT_CACHE_V2.sample_input_1=myCache
 J9NLS_SHRC_CM_WARN_CORRUPT_CACHE_V2.sample_input_2=-1
 J9NLS_SHRC_CM_WARN_CORRUPT_CACHE_V2.sample_input_3=67676767
 J9NLS_SHRC_CM_WARN_CORRUPT_CACHE_V2.explanation=The shared class cache named in the message is corrupt.
-J9NLS_SHRC_CM_WARN_CORRUPT_CACHE_V2.system_action=The JVM will attempt to automatically re-create the cache before starting. If re-creation fails, the JVM will terminate unless unless you have specified the nonfatal option with "-Xshareclasses:nonfatal".
+J9NLS_SHRC_CM_WARN_CORRUPT_CACHE_V2.system_action=The JVM will attempt to automatically re-create the cache before starting. If re-creation fails, the JVM will terminate unless you have specified the nonfatal option with "-Xshareclasses:nonfatal".
 J9NLS_SHRC_CM_WARN_CORRUPT_CACHE_V2.user_response=Destroy the shared class cache named in the message and rerun.  If the situation persists, contact your service representative.
 # END NON-TRANSLATABLE
 
@@ -6270,17 +6270,17 @@ J9NLS_SHRC_CC_WARN_AVAILABLE_SPACE_FULL.user_response=Increase the softmx limit 
 J9NLS_SHRC_CC_WARN_AOT_SPACE_FULL=Prostor pro data AOT ve sd\u00edlen\u00e9 mezipam\u011bti \"%s\" je pln\u00fd.
 # START NON-TRANSLATABLE
 J9NLS_SHRC_CC_WARN_AOT_SPACE_FULL.sample_input_1=myCache
-J9NLS_SHRC_CC_WARN_AOT_SPACE_FULL.explanation=The space for AOT data in named shared class cache is full and no further AOT data can be added to it. If the the shared cache is not full, then either the maximum space allowed for AOT data or softmx limit set for shared cache usage is reached.
+J9NLS_SHRC_CC_WARN_AOT_SPACE_FULL.explanation=The space for AOT data in named shared class cache is full and no further AOT data can be added to it. If the shared cache is not full, then either the maximum space allowed for AOT data or softmx limit set for shared cache usage is reached.
 J9NLS_SHRC_CC_WARN_AOT_SPACE_FULL.system_action=The JVM continues. The named shared cache is still operational and continues to provide increased performance for loading the classes it contains. However, no more AOT compiled methods can be added to the cache.
-J9NLS_SHRC_CC_WARN_AOT_SPACE_FULL.user_response=If the shared cache is not full, the the maximum space allowed for AOT data can be increased using -Xshareclasses:adjustmaxaot= option. In the case softmx limit for shared cache usage is reached, it can be increased using -Xshareclasses:adjustsoftmx= option. User can also increase the minimum space reserved for AOT data using -Xshareclasses:adjustminaot= option.
+J9NLS_SHRC_CC_WARN_AOT_SPACE_FULL.user_response=If the shared cache is not full, the maximum space allowed for AOT data can be increased using -Xshareclasses:adjustmaxaot= option. In the case softmx limit for shared cache usage is reached, it can be increased using -Xshareclasses:adjustsoftmx= option. User can also increase the minimum space reserved for AOT data using -Xshareclasses:adjustminaot= option.
 # END NON-TRANSLATABLE
 
 J9NLS_SHRC_CC_WARN_JIT_SPACE_FULL=Prostor pro data JIT ve sd\u00edlen\u00e9 mezipam\u011bti \"%s\" je pln\u00fd.
 # START NON-TRANSLATABLE
 J9NLS_SHRC_CC_WARN_JIT_SPACE_FULL.sample_input_1=myCache
-J9NLS_SHRC_CC_WARN_JIT_SPACE_FULL.explanation=The space for JIT data in named shared class cache is full and no further JIT data can be added to it. If the the shared cache is not full, then either the maximum space allowed for JIT data or softmx limit set for shared cache usage is reached.
+J9NLS_SHRC_CC_WARN_JIT_SPACE_FULL.explanation=The space for JIT data in named shared class cache is full and no further JIT data can be added to it. If the shared cache is not full, then either the maximum space allowed for JIT data or softmx limit set for shared cache usage is reached.
 J9NLS_SHRC_CC_WARN_JIT_SPACE_FULL.system_action=The JVM continues. The named shared cache is still operational and continues to provide increased performance for loading the classes it contains. However, no more JIT related data can be added to the cache.
-J9NLS_SHRC_CC_WARN_JIT_SPACE_FULL.user_response=If the shared cache is not full, the the maximum space allowed for JIT data can be increased using -Xshareclasses:adjustmaxjitdata= option. In the case softmx limit for shared cache usage is reached, it can be increased using -Xshareclasses:adjustsoftmx= option. User can also increase the minimum space reserved for JIT data using -Xshareclasses:adjustminjitdata= option.
+J9NLS_SHRC_CC_WARN_JIT_SPACE_FULL.user_response=If the shared cache is not full, the maximum space allowed for JIT data can be increased using -Xshareclasses:adjustmaxjitdata= option. In the case softmx limit for shared cache usage is reached, it can be increased using -Xshareclasses:adjustsoftmx= option. User can also increase the minimum space reserved for JIT data using -Xshareclasses:adjustminjitdata= option.
 # END NON-TRANSLATABLE
 
 J9NLS_SHRC_SOFTMAX_TOO_BIG=Mezn\u00ed hodnota softmx nastaven\u00e1 pro vyu\u017eit\u00ed sd\u00edlen\u00e9 mezipam\u011bti je v\u011bt\u0161\u00ed ne\u017e celkov\u00fd velikost mezipam\u011bti %u bajt\u016f. Bude nastavena shodn\u011b s celkovou velikost\u00ed mezipam\u011bti.
@@ -6589,7 +6589,7 @@ J9NLS_SHRC_CM_PRINTSHUTDOWNSTATS_UNSTORED.system_action=The JVM continues.
 J9NLS_SHRC_CM_PRINTSHUTDOWNSTATS_UNSTORED.user_response=No action required, this is an information only message.
 # END NON-TRANSLATABLE
 
-J9NLS_SHRC_SHRINIT_HELPTEXT_PRINTSTATS_STALE=\t stale           Vytiskne v\u0161echny zastaral\u00e9 polo\u017eky ve sd\u00edlen\u00e9 mezipam\u011bti.
+J9NLS_SHRC_SHRINIT_HELPTEXT_PRINTSTATS_STALE=\t stale		Vytiskne v\u0161echny zastaral\u00e9 polo\u017eky ve sd\u00edlen\u00e9 mezipam\u011bti.
 # START NON-TRANSLATABLE
 J9NLS_SHRC_SHRINIT_HELPTEXT_PRINTSTATS_STALE.explanation=NOTAG
 J9NLS_SHRC_SHRINIT_HELPTEXT_PRINTSTATS_STALE.system_action=
@@ -6683,7 +6683,7 @@ J9NLS_SHRC_CM_PRINTSTATS_STARTUP_HINTS_DISPLAY_DETAIL.system_action=
 J9NLS_SHRC_CM_PRINTSTATS_STARTUP_HINTS_DISPLAY_DETAIL.user_response=
 # END NON-TRANSLATABLE
 
-J9NLS_SHRC_SHRINIT_HELPTEXT_PRINTSTATS_STARTUPHINT=\t startuphint       Vytiskne pouze typy pokyn\u016f p\u0159i spu\u0161t\u011bn\u00ed ve sd\u00edlen\u00e9 mezipam\u011bti.
+J9NLS_SHRC_SHRINIT_HELPTEXT_PRINTSTATS_STARTUPHINT=\t startuphint	Vytiskne pouze typy pokyn\u016f p\u0159i spu\u0161t\u011bn\u00ed ve sd\u00edlen\u00e9 mezipam\u011bti.
 # START NON-TRANSLATABLE
 J9NLS_SHRC_SHRINIT_HELPTEXT_PRINTSTATS_STARTUPHINT.explanation=NOTAG
 J9NLS_SHRC_SHRINIT_HELPTEXT_PRINTSTATS_STARTUPHINT.system_action=
@@ -6904,4 +6904,12 @@ J9NLS_SHRC_CM_NEW_LAYER_CACHE_DESTROYED.sample_input_4=Cache_2
 J9NLS_SHRC_CM_NEW_LAYER_CACHE_DESTROYED.explanation=An error has occurred in shared class processing. A lower layer shared cache should not be modified. Any modification to a lower layer shared cache invalidates all the higher layers shared caches built on top of it.
 J9NLS_SHRC_CM_NEW_LAYER_CACHE_DESTROYED.system_action=The JVM terminates, unless you have specified the nonfatal option with "-Xshareclasses:nonfatal", in which case the JVM continues without using Shared Classes.
 J9NLS_SHRC_CM_NEW_LAYER_CACHE_DESTROYED.user_response=Use -Xshareclasses:name=<cacheName>,destroy to destroy all invalid layers (all the higher layers which are built on top of the modified layer) and retry.
+# END NON-TRANSLATABLE
+
+J9NLS_SHRC_CM_PRINTSTATS_PROCESSOR_FEATURES=Funkce procesoru                     = %s
+# START NON-TRANSLATABLE
+J9NLS_SHRC_CM_PRINTSTATS_PROCESSOR_FEATURES.sample_input_1=default
+J9NLS_SHRC_CM_PRINTSTATS_PROCESSOR_FEATURES.explanation=NOTAG
+J9NLS_SHRC_CM_PRINTSTATS_PROCESSOR_FEATURES.system_action=
+J9NLS_SHRC_CM_PRINTSTATS_PROCESSOR_FEATURES.user_response=
 # END NON-TRANSLATABLE

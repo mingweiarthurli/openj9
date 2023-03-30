@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2019 IBM Corp. and others
+ * Copyright (c) 2001, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -34,23 +34,6 @@ extern "C"
 #define TEST_ERROR -1
 /* A size greater than the shared cache size (or softmx size if it is set) */
 #define ROMCLASS_LARGE_SIZE (70 * 1024 *1024)
-
-#if defined(J9SHR_CACHELET_SUPPORT)
-IDATA
-testSCStoreTransaction(J9JavaVM* vm)
-{
-	const char * testName = "testSCStoreTransaction";
-	if (NULL == vm) {
-		/*vm is null*/
-		return TEST_ERROR;
-	}
-	PORT_ACCESS_FROM_JAVAVM(vm);
-
-	/*Note: we do this b/c test fails on realtime currently unless there is an existing cache*/
-	j9tty_printf(PORTLIB, "Skip these tests on realtime b/c cache is readonly\n", testName);
-	return TEST_PASS;
-}
-#else
 
 static IDATA AddClassToCacheHelper(J9VMThread* currentThread, J9ClassLoader* classloader, UDATA entryIndex, UDATA loadType, U_16 classnameLength, U_8 * classnameData, U_32 romclassSize);
 static IDATA test1(J9JavaVM* vm);
@@ -1665,7 +1648,8 @@ test20(J9JavaVM* vm)
 			(U_16) strlen(romclassName),
 			(U_8 *) romclassName,
 			FALSE,
-			takeStringTableLock);
+			takeStringTableLock,
+			TRUE);
 
 	if (sharedapi->classStoreTransaction_isOK((void *) &tobj) == FALSE) {
 		ERRPRINTF(("The transaction is not ok\n"));
@@ -2314,5 +2298,3 @@ test29(J9JavaVM* vm)
 	done:
 	return retval;
 }
-
-#endif /*defined(J9SHR_CACHELET_SUPPORT)*/

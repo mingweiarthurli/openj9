@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -98,6 +98,11 @@ dumpCapabilities(J9JavaVM * vm, const jvmtiCapabilities *capabilities, const cha
 #if JAVA_SPEC_VERSION >= 11
 	PRINT_CAPABILITY(can_generate_sampled_object_alloc_events);
 #endif /* JAVA_SPEC_VERSION >= 11 */
+
+	/* JVMTI 19 */
+#if JAVA_SPEC_VERSION >= 19
+	PRINT_CAPABILITY(can_support_virtual_threads);
+#endif /* JAVA_SPEC_VERSION >= 19 */
 #undef PRINT_CAPABILITY
 }
 
@@ -181,6 +186,14 @@ jvmtiGetPotentialCapabilities(jvmtiEnv* env, jvmtiCapabilities* capabilities_ptr
 		rv_capabilities.can_generate_sampled_object_alloc_events = 1;
 	}
 #endif /* JAVA_SPEC_VERSION >= 11 */
+
+#if JAVA_SPEC_VERSION >= 19
+	if (isEventHookable(j9env, JVMTI_EVENT_VIRTUAL_THREAD_START)
+	&& isEventHookable(j9env, JVMTI_EVENT_VIRTUAL_THREAD_END)
+	) {
+		rv_capabilities.can_support_virtual_threads = 1;
+	}
+#endif /* JAVA_SPEC_VERSION >= 19 */
 
 	if (isEventHookable(j9env, JVMTI_EVENT_NATIVE_METHOD_BIND)) {
 		rv_capabilities.can_generate_native_method_bind_events = 1;
@@ -585,6 +598,13 @@ mapCapabilitiesToEvents(J9JVMTIEnv * j9env, jvmtiCapabilities * capabilities, J9
 		rc |= eventHookFunction(j9env, JVMTI_EVENT_SAMPLED_OBJECT_ALLOC);
 	}
 #endif /* JAVA_SPEC_VERSION >= 11 */
+
+#if JAVA_SPEC_VERSION >= 19
+	if (capabilities->can_support_virtual_threads) {
+		rc |= eventHookFunction(j9env, JVMTI_EVENT_VIRTUAL_THREAD_START);
+		rc |= eventHookFunction(j9env, JVMTI_EVENT_VIRTUAL_THREAD_END);
+	}
+#endif /* JAVA_SPEC_VERSION >= 19 */
 
 	if (capabilities->can_generate_object_free_events) {
 		rc |= eventHookFunction(j9env, JVMTI_EVENT_OBJECT_FREE);

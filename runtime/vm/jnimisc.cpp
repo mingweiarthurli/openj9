@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2012, 2019 IBM Corp. and others
+ * Copyright (c) 2012, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -37,6 +37,10 @@
 #include "VMHelpers.hpp"
 #include "VMAccess.hpp"
 #include "ArrayCopyHelpers.hpp"
+
+#if defined(J9VM_ZOS_3164_INTEROPERABILITY)
+#include "ffi.h"
+#endif /* defined(J9VM_ZOS_3164_INTEROPERABILITY) */
 
 extern "C" {
 
@@ -70,6 +74,7 @@ javaOffloadSwitchOnWithReason(J9VMThread *currentThread, UDATA reason)
 		if (0 == currentThread->javaOffloadState) {
 			vm->javaOffloadSwitchOnWithReasonFunc(currentThread, reason);
 		}
+		Assert_VM_unequal(currentThread->javaOffloadState & J9_JNI_OFFLOAD_MAX_VALUE, J9_JNI_OFFLOAD_MAX_VALUE);
 		currentThread->javaOffloadState += 1;
 	}
 }
@@ -168,6 +173,37 @@ getCurrentClassLoader(J9VMThread *currentThread)
 		} else {
 			/* use the sender (native method) classloader */
 			classLoader = J9_CLASS_FROM_METHOD(nativeMethod)->classLoader;
+#if JAVA_SPEC_VERSION >= 15
+			/* special case - if jdk/internal/loader/NativeLibraries.load(NativeLibraryImpl impl, String name, boolean isBuiltin, boolean isJNI)
+			 * is the current native method, use the class loader of "impl.fromClass".
+			 * This nativeMethod can't be cached cause HCR might make it invalid.
+			 *
+			 * Note that in jdk17, the signature of that method changed to
+			 *   NativeLibraries.load(NativeLibraryImpl impl, String name, boolean isBuiltin, boolean isJNI, boolean throwOnFailure)
+			 */
+			if (J9VMJDKINTERNALLOADERNATIVELIBRARIES_LOAD_METHOD(currentThread->javaVM) == nativeMethod) {
+				/* The current native method has a NativeLibraryImpl instance as its first argument */
+				j9object_t nativeLibraryImplObject = (j9object_t)(currentThread->arg0EA[0]);
+				Trc_VM_findNativeLibrariesLoad_nativeMethod(currentThread, nativeMethod, nativeLibraryImplObject, classLoader);
+				/* Handle the object reference being redirected by the stack grower */
+				if (J9_ARE_ANY_BITS_SET((UDATA)nativeLibraryImplObject, 1)) {
+					nativeLibraryImplObject = *(j9object_t*)((UDATA)nativeLibraryImplObject - 1);
+				}
+				if (NULL != nativeLibraryImplObject) {
+					Trc_VM_findNativeLibrariesLoad_nativeLibraryImplObject(currentThread, nativeLibraryImplObject);
+					j9object_t fromClassObj = J9VMJDKINTERNALLOADERNATIVELIBRARIESNATIVELIBRARYIMPL_FROMCLASS(currentThread, nativeLibraryImplObject);
+					if (NULL != fromClassObj) {
+						Trc_VM_findNativeLibrariesLoad_fromClassObj(currentThread, fromClassObj);
+						J9Class *fromClass = J9VM_J9CLASS_FROM_HEAPCLASS(currentThread, fromClassObj);
+						Trc_VM_findNativeLibrariesLoad_fromClass(currentThread, fromClass);
+						if ((NULL != fromClass) && (NULL != fromClass->classLoader)) {
+							classLoader = fromClass->classLoader;
+						}
+					}
+				}
+				Trc_VM_findNativeLibrariesLoad_classLoader(currentThread, classLoader);
+			}
+#endif /* JAVA_SPEC_VERSION >= 15 */
 		}
 	}
 	return classLoader;
@@ -394,11 +430,15 @@ getObjectClass(JNIEnv *env, jobject obj)
 jint JNICALL
 getVersion(JNIEnv *env)
 {
-#if JAVA_SPEC_VERSION >= 10
+#if JAVA_SPEC_VERSION >= 20
+	return JNI_VERSION_20;
+#elif JAVA_SPEC_VERSION >= 19
+	return JNI_VERSION_19;
+#elif JAVA_SPEC_VERSION >= 10
 	return JNI_VERSION_10;
 #else /* JAVA_SPEC_VERSION >= 10 */
 	return JNI_VERSION_1_8;
-#endif /* JAVA_SPEC_VERSION >= 10 */
+#endif /* JAVA_SPEC_VERSION >= 19 */
 }
 
 jsize JNICALL
@@ -541,7 +581,7 @@ newObjectArray(JNIEnv *env, jsize length, jclass clazz, jobject initialElement)
 	J9VMThread *currentThread = (J9VMThread*)env;
 	VM_VMAccess::inlineEnterVMFromJNI(currentThread);
 	if (length < 0) {
-		gpCheckSetCurrentException(currentThread, J9VMCONSTANTPOOL_JAVALANGNEGATIVEARRAYSIZEEXCEPTION, NULL);
+		gpCheckSetNegativeArraySizeException(currentThread, (I_32)length);
 	} else {
 		J9Class *j9clazz = J9VM_J9CLASS_FROM_HEAPCLASS(currentThread, J9_JNI_UNWRAP_REFERENCE(clazz));
 		J9Class *arrayClass = fetchArrayClass(currentThread, j9clazz);
@@ -572,7 +612,7 @@ getOrSetArrayRegion(JNIEnv *env, jarray array, jsize start, jsize len, void *buf
 	UDATA ustart = (UDATA)(IDATA)start;
 	UDATA ulen = (UDATA)(IDATA)len;
 	UDATA end = ustart + ulen;
-	if ((ustart >= size) 
+	if ((ustart >= size)
 		|| (end > size)
 		|| (end < ustart) /* overflow */
 	) {
@@ -608,20 +648,25 @@ setArrayRegion(JNIEnv *env, jarray array, jsize start, jsize len, void *buf)
 	getOrSetArrayRegion(env, array, start, len, buf, false);
 }
 
-void* JNICALL
-getArrayElements(JNIEnv *env, jarray array, jboolean *isCopy)
+static void*
+getArrayElementsImpl(JNIEnv *env, jarray array, jboolean *isCopy, jboolean ensureMem32)
 {
 	J9VMThread *currentThread = (J9VMThread*)env;
 	J9JavaVM *vm = currentThread->javaVM;
 	void *elems = NULL;
-	if (J9_ARE_ANY_BITS_SET(vm->extendedRuntimeFlags, J9_EXTENDED_RUNTIME_ALWAYS_USE_JNI_CRITICAL)) {
+	if (!ensureMem32 && J9_ARE_ANY_BITS_SET(vm->extendedRuntimeFlags, J9_EXTENDED_RUNTIME_ALWAYS_USE_JNI_CRITICAL)) {
 		elems = vm->memoryManagerFunctions->j9gc_objaccess_jniGetPrimitiveArrayCritical(currentThread, array, isCopy);
 	} else {
 		VM_VMAccess::inlineEnterVMFromJNI(currentThread);
 		j9object_t arrayObject = J9_JNI_UNWRAP_REFERENCE(array);
 		UDATA logElementSize = ((J9ROMArrayClass*)J9OBJECT_CLAZZ(currentThread, arrayObject)->romClass)->arrayShape & 0x0000FFFF;
 		UDATA byteCount = (UDATA)J9INDEXABLEOBJECT_SIZE(currentThread, arrayObject) << logElementSize;
-		elems = jniArrayAllocateMemoryFromThread(currentThread, ROUND_UP_TO_POWEROF2(byteCount, sizeof(UDATA)));
+
+		if (ensureMem32) {
+			elems = jniArrayAllocateMemory32FromThread(currentThread, ROUND_UP_TO_POWEROF2(byteCount, sizeof(UDATA)));
+		} else {
+			elems = jniArrayAllocateMemoryFromThread(currentThread, ROUND_UP_TO_POWEROF2(byteCount, sizeof(UDATA)));
+		}
 		if (NULL == elems) {
 			gpCheckSetNativeOutOfMemoryError(currentThread, 0, 0);
 		} else {
@@ -638,12 +683,26 @@ getArrayElements(JNIEnv *env, jarray array, jboolean *isCopy)
 	return elems;
 }
 
-void JNICALL
-releaseArrayElements(JNIEnv *env, jarray array, void *elems, jint mode)
+void* JNICALL
+getArrayElements(JNIEnv *env, jarray array, jboolean *isCopy)
+{
+	return getArrayElementsImpl(env, array, isCopy, JNI_FALSE);
+}
+
+#if defined(J9VM_ZOS_3164_INTEROPERABILITY)
+void* JNICALL
+getArrayElements31(JNIEnv *env, jarray array, jboolean *isCopy)
+{
+	return getArrayElementsImpl(env, array, isCopy, JNI_TRUE);
+}
+#endif /* defined(J9VM_ZOS_3164_INTEROPERABILITY) */
+
+static void
+releaseArrayElementsImpl(JNIEnv *env, jarray array, void *elems, jint mode, jboolean ensureMem32)
 {
 	J9VMThread *currentThread = (J9VMThread*)env;
 	J9JavaVM *vm = currentThread->javaVM;
-	if (J9_ARE_ANY_BITS_SET(vm->extendedRuntimeFlags, J9_EXTENDED_RUNTIME_ALWAYS_USE_JNI_CRITICAL)) {
+	if (!ensureMem32 && J9_ARE_ANY_BITS_SET(vm->extendedRuntimeFlags, J9_EXTENDED_RUNTIME_ALWAYS_USE_JNI_CRITICAL)) {
 		vm->memoryManagerFunctions->j9gc_objaccess_jniReleasePrimitiveArrayCritical(currentThread, array, elems, mode);
 	} else {
 		VM_VMAccess::inlineEnterVMFromJNI(currentThread);
@@ -659,11 +718,29 @@ releaseArrayElements(JNIEnv *env, jarray array, void *elems, jint mode)
 		}
 		/* Commit means copy the data but do not free the buffer - all other modes free the buffer */
 		if (JNI_COMMIT != mode) {
-			jniArrayFreeMemoryFromThread(currentThread, elems);
+			if (ensureMem32) {
+				jniArrayFreeMemory32FromThread(currentThread, elems);
+			} else {
+				jniArrayFreeMemoryFromThread(currentThread, elems);
+			}
 		}
 		VM_VMAccess::inlineExitVMToJNI(currentThread);
 	}
 }
+
+void JNICALL
+releaseArrayElements(JNIEnv *env, jarray array, void *elems, jint mode)
+{
+	releaseArrayElementsImpl(env, array, elems, mode, JNI_FALSE);
+}
+
+#if defined(J9VM_ZOS_3164_INTEROPERABILITY)
+void JNICALL
+releaseArrayElements31(JNIEnv *env, jarray array, void *elems, jint mode)
+{
+	releaseArrayElementsImpl(env, array, elems, mode, JNI_TRUE);
+}
+#endif /* defined(J9VM_ZOS_3164_INTEROPERABILITY) */
 
 jobject
 newBaseTypeArray(JNIEnv *env, IDATA length, UDATA arrayClassOffset)
@@ -672,7 +749,7 @@ newBaseTypeArray(JNIEnv *env, IDATA length, UDATA arrayClassOffset)
 	j9object_t resultObject = NULL;
 	VM_VMAccess::inlineEnterVMFromJNI(currentThread);
 	if (length < 0) {
-		gpCheckSetCurrentException(currentThread, J9VMCONSTANTPOOL_JAVALANGNEGATIVEARRAYSIZEEXCEPTION, NULL);
+		gpCheckSetNegativeArraySizeException(currentThread, (I_32)length);
 	} else {
 		J9JavaVM *vm = currentThread->javaVM;
 		J9Class *arrayClass = *(J9Class**)((UDATA)vm + arrayClassOffset);
@@ -686,20 +763,26 @@ newBaseTypeArray(JNIEnv *env, IDATA length, UDATA arrayClassOffset)
 	return result;
 }
 
-const jchar* JNICALL
-getStringChars(JNIEnv *env, jstring string, jboolean *isCopy)
+static const jchar*
+getStringCharsImpl(JNIEnv *env, jstring string, jboolean *isCopy, jboolean ensureMem32)
 {
 	J9VMThread *currentThread = (J9VMThread*)env;
 	J9JavaVM *vm = currentThread->javaVM;
 	const jchar *chars = NULL;
-	if (J9_ARE_ANY_BITS_SET(vm->extendedRuntimeFlags, J9_EXTENDED_RUNTIME_ALWAYS_USE_JNI_CRITICAL)) {
+	if (!ensureMem32 && J9_ARE_ANY_BITS_SET(vm->extendedRuntimeFlags, J9_EXTENDED_RUNTIME_ALWAYS_USE_JNI_CRITICAL)) {
 		chars = vm->memoryManagerFunctions->j9gc_objaccess_jniGetStringCritical(currentThread, string, isCopy);
 	} else {
 		VM_VMAccess::inlineEnterVMFromJNI(currentThread);
 		j9object_t stringObject = J9_JNI_UNWRAP_REFERENCE(string);
 		UDATA length = (UDATA)J9VMJAVALANGSTRING_LENGTH(currentThread, stringObject);
 		UDATA allocateLength = (length + 1) * 2;
-		chars = (jchar*)jniArrayAllocateMemoryFromThread(currentThread, allocateLength);
+
+		if (ensureMem32) {
+			chars = (jchar*)jniArrayAllocateMemory32FromThread(currentThread, allocateLength);
+		} else {
+			chars = (jchar*)jniArrayAllocateMemoryFromThread(currentThread, allocateLength);
+		}
+
 		if (NULL == chars) {
 			gpCheckSetNativeOutOfMemoryError(currentThread, 0, 0);
 		} else {
@@ -709,7 +792,7 @@ getStringChars(JNIEnv *env, jstring string, jboolean *isCopy)
 
 			if (IS_STRING_COMPRESSED(currentThread, stringObject)) {
 				for (UDATA i = 0; i < length; ++i) {
-					((jchar*)chars)[i] = (jchar)J9JAVAARRAYOFBYTE_LOAD(currentThread, charArray, i);
+					((jchar*)chars)[i] = (jchar)(U_8)J9JAVAARRAYOFBYTE_LOAD(currentThread, charArray, i);
 				}
 			} else {
 				VM_ArrayCopyHelpers::memcpyFromArray(currentThread, charArray, (UDATA)1, 0, length, (void*)chars);
@@ -726,16 +809,63 @@ getStringChars(JNIEnv *env, jstring string, jboolean *isCopy)
 	return chars;
 }
 
-void JNICALL
-releaseStringChars(JNIEnv *env, jstring string, const jchar *chars)
+const jchar* JNICALL
+getStringChars(JNIEnv *env, jstring string, jboolean *isCopy)
+{
+	return getStringCharsImpl(env, string, isCopy, JNI_FALSE);
+}
+
+#if defined(J9VM_ZOS_3164_INTEROPERABILITY)
+const jchar* JNICALL
+getStringChars31(JNIEnv *env, jstring string, jboolean *isCopy)
+{
+	return getStringCharsImpl(env, string, isCopy, JNI_TRUE);
+}
+#endif /* defined(J9VM_ZOS_3164_INTEROPERABILITY) */
+
+static void
+releaseStringCharsImpl(JNIEnv *env, jstring string, const jchar *chars, jboolean ensureMem32)
 {
 	J9VMThread *currentThread = (J9VMThread*)env;
 	J9JavaVM *vm = currentThread->javaVM;
-	if (J9_ARE_ANY_BITS_SET(vm->extendedRuntimeFlags, J9_EXTENDED_RUNTIME_ALWAYS_USE_JNI_CRITICAL)) {
+	if (!ensureMem32 && J9_ARE_ANY_BITS_SET(vm->extendedRuntimeFlags, J9_EXTENDED_RUNTIME_ALWAYS_USE_JNI_CRITICAL)) {
 		vm->memoryManagerFunctions->j9gc_objaccess_jniReleaseStringCritical(currentThread, string, chars);
 	} else {
 		/* Allow the VM to crash on NULL input if -Xfuture is enabled */
 		if (J9_ARE_ANY_BITS_SET(vm->runtimeFlags, J9_RUNTIME_XFUTURE) || (NULL != chars)) {
+			if (ensureMem32) {
+				jniArrayFreeMemory32FromThread(currentThread, (void*)chars);
+			} else {
+				jniArrayFreeMemoryFromThread(currentThread, (void*)chars);
+			}
+		}
+	}
+}
+
+void JNICALL
+releaseStringChars(JNIEnv *env, jstring string, const jchar *chars)
+{
+	releaseStringCharsImpl(env, string, chars, JNI_FALSE);
+}
+
+#if defined(J9VM_ZOS_3164_INTEROPERABILITY)
+void JNICALL
+releaseStringChars31(JNIEnv *env, jstring string, const jchar *chars)
+{
+	releaseStringCharsImpl(env, string, chars, JNI_TRUE);
+}
+#endif /* defined(J9VM_ZOS_3164_INTEROPERABILITY) */
+
+static void
+releaseStringCharsUTFImpl(JNIEnv *env, jstring string, const char *chars, jboolean ensureMem32)
+{
+	J9VMThread *currentThread = (J9VMThread*)env;
+	J9JavaVM *vm = currentThread->javaVM;
+	/* Allow the VM to crash on NULL input if -Xfuture is enabled */
+	if (J9_ARE_ANY_BITS_SET(vm->runtimeFlags, J9_RUNTIME_XFUTURE) || (NULL != chars)) {
+		if (ensureMem32) {
+			jniArrayFreeMemory32FromThread(currentThread, (void*)chars);
+		} else {
 			jniArrayFreeMemoryFromThread(currentThread, (void*)chars);
 		}
 	}
@@ -744,13 +874,16 @@ releaseStringChars(JNIEnv *env, jstring string, const jchar *chars)
 void JNICALL
 releaseStringCharsUTF(JNIEnv *env, jstring string, const char *chars)
 {
-	J9VMThread *currentThread = (J9VMThread*)env;
-	J9JavaVM *vm = currentThread->javaVM;
-	/* Allow the VM to crash on NULL input if -Xfuture is enabled */
-	if (J9_ARE_ANY_BITS_SET(vm->runtimeFlags, J9_RUNTIME_XFUTURE) || (NULL != chars)) {
-		jniArrayFreeMemoryFromThread(currentThread, (void*)chars);
-	}
+	releaseStringCharsUTFImpl(env, string, chars, JNI_FALSE);
 }
+
+#if defined(J9VM_ZOS_3164_INTEROPERABILITY)
+void JNICALL
+releaseStringCharsUTF31(JNIEnv *env, jstring string, const char *chars)
+{
+	releaseStringCharsUTFImpl(env, string, chars, JNI_TRUE);
+}
+#endif /* defined(J9VM_ZOS_3164_INTEROPERABILITY) */
 
 jsize JNICALL
 getStringUTFLength(JNIEnv *env, jstring string)
@@ -764,15 +897,21 @@ getStringUTFLength(JNIEnv *env, jstring string)
 	return (jsize)utfLength;
 }
 
-const char* JNICALL
-getStringUTFChars(JNIEnv *env, jstring string, jboolean *isCopy)
+static const char*
+getStringUTFCharsImpl(JNIEnv *env, jstring string, jboolean *isCopy, jboolean ensureMem32)
 {
 	J9VMThread *currentThread = (J9VMThread*)env;
 	VM_VMAccess::inlineEnterVMFromJNI(currentThread);
 	j9object_t stringObject = J9_JNI_UNWRAP_REFERENCE(string);
 	/* Add 1 for null terminator */
 	UDATA utfLength = getStringUTF8Length(currentThread, stringObject) + 1;
-	U_8 *utfChars = (U_8*)jniArrayAllocateMemoryFromThread(currentThread, utfLength);
+
+	U_8 *utfChars = NULL;
+	if (ensureMem32) {
+		utfChars = (U_8*)jniArrayAllocateMemory32FromThread(currentThread, utfLength);
+	} else {
+		utfChars = (U_8*)jniArrayAllocateMemoryFromThread(currentThread, utfLength);
+	}
 
 	if (NULL == utfChars) {
 		gpCheckSetNativeOutOfMemoryError(currentThread, 0, 0);
@@ -789,12 +928,26 @@ getStringUTFChars(JNIEnv *env, jstring string, jboolean *isCopy)
 	return (const char*)utfChars;
 }
 
+const char* JNICALL
+getStringUTFChars(JNIEnv *env, jstring string, jboolean *isCopy)
+{
+	return getStringUTFCharsImpl(env, string, isCopy, JNI_FALSE);
+}
+
+#if defined(J9VM_ZOS_3164_INTEROPERABILITY)
+const char* JNICALL
+getStringUTFChars31(JNIEnv *env, jstring string, jboolean *isCopy)
+{
+	return getStringUTFCharsImpl(env, string, isCopy, JNI_TRUE);
+}
+#endif /* defined(J9VM_ZOS_3164_INTEROPERABILITY) */
+
 void JNICALL
 getStringUTFRegion(JNIEnv *env, jstring str, jsize start, jsize len, char *buf)
 {
 	J9VMThread *currentThread = (J9VMThread*)env;
 	VM_VMAccess::inlineEnterVMFromJNI(currentThread);
-	if ((start < 0) 
+	if ((start < 0)
 		|| (len < 0)
 		|| (((U_32) (start + len)) > I_32_MAX)
 	) {
@@ -899,7 +1052,7 @@ unregisterNatives(JNIEnv *env, jclass clazz)
 	acquireExclusiveVMAccess(currentThread);
 	J9Method *currentMethod = j9clazz->ramMethods;
 	J9Method *endOfMethods = currentMethod + j9clazz->romClass->romMethodCount;
-	
+
 	if (
 			(NULL != vm->jitConfig)  &&
 			(NULL != vm->jitConfig->jitDiscardPendingCompilationsOfNatives)
@@ -925,7 +1078,7 @@ getStringRegion(JNIEnv *env, jstring str, jsize start, jsize len, jchar *buf)
 {
 	J9VMThread *currentThread = (J9VMThread*)env;
 	VM_VMAccess::inlineEnterVMFromJNI(currentThread);
-	if ((start < 0) 
+	if ((start < 0)
 		|| (len < 0)
 		|| (((U_32) (start + len)) > I_32_MAX)
 	) {
@@ -945,7 +1098,7 @@ outOfBounds:
 		JAVA_OFFLOAD_SWITCH_ON_WITH_REASON_IF_LIMIT_EXCEEDED(currentThread, J9_JNI_OFFLOAD_SWITCH_GET_STRING_REGION, byteCount);
 		if (IS_STRING_COMPRESSED(currentThread, stringObject)) {
 			for (jsize i = 0; i < len; ++i) {
-				buf[i] = (jchar)J9JAVAARRAYOFBYTE_LOAD(currentThread, charArray, i + start);
+				buf[i] = (jchar)(U_8)J9JAVAARRAYOFBYTE_LOAD(currentThread, charArray, i + start);
 			}
 		} else {
 			/* No guarantee of native memory alignment, so copy byte-wise */
@@ -997,4 +1150,76 @@ returnFromJNI(J9VMThread *currentThread, void *vbp)
 	}
 }
 
+#if defined(J9VM_ZOS_3164_INTEROPERABILITY)
+void
+queryJNIEnv31(J9VMThread* vmThread)
+{
+	/* Query libjvm31 to get a handle on the corresponding 31-bit JNIEnv struct
+	 * for the given vmThread.
+	 */
+	UDATA slOpenResult = J9PORT_SL_FOUND;
+	UDATA dllHandle = 0;
+	UDATA getJNIEnv31Handle = 0;
+
+	if (0 == vmThread->jniEnv31) {
+		PORT_ACCESS_FROM_VMC(vmThread);
+		slOpenResult = j9sl_open_shared_library("libjvm31.so", &dllHandle, (J9PORT_SLOPEN_OPEN_EXECUTABLE | OMRPORT_SLOPEN_ATTEMPT_31BIT_OPEN));
+
+		if (J9PORT_SL_FOUND == slOpenResult) {
+			if (0 == j9sl_lookup_name(dllHandle, "getJNIEnv31", &getJNIEnv31Handle, "L")) {
+				ffi_type* args[1];
+				void* values[1];
+				UDATA returnValue = 0;
+				ffi_cif cif_t;
+				ffi_cif * const cif = &cif_t;
+
+				args[0]= &ffi_type_sint64;
+				values[0] = &vmThread;
+
+				if (FFI_OK == ffi_prep_cif(cif, FFI_CEL4RO31, 1, &ffi_type_uint32, args)) {
+					ffi_call(cif, FFI_FN(getJNIEnv31Handle), &returnValue, values);
+				}
+				vmThread->jniEnv31 = (U_32)returnValue;
+			}
+		}
+		Assert_VM_true(0 != vmThread->jniEnv31);
+	}
 }
+
+void
+queryJavaVM31(J9JavaVM* vm)
+{
+	/* Query libjvm31 to get a handle on the corresponding 31-bit JavaVM struct
+	 * for the given J9JavaVM.
+	 */
+	UDATA slOpenResult = J9PORT_SL_FOUND;
+	UDATA dllHandle = 0;
+	UDATA getJavaVM31Handle = 0;
+
+	if (0 == vm->javaVM31) {
+		PORT_ACCESS_FROM_JAVAVM(vm);
+		slOpenResult = j9sl_open_shared_library("libjvm31.so", &dllHandle, (J9PORT_SLOPEN_OPEN_EXECUTABLE | OMRPORT_SLOPEN_ATTEMPT_31BIT_OPEN));
+
+		if (J9PORT_SL_FOUND == slOpenResult) {
+			if (0 == j9sl_lookup_name(dllHandle, "getJavaVM31", &getJavaVM31Handle, "L")) {
+				ffi_type* args[1];
+				void* values[1];
+				UDATA returnValue = 0;
+				ffi_cif cif_t;
+				ffi_cif * const cif = &cif_t;
+
+				args[0]= &ffi_type_sint64;
+				values[0] = &vm;
+
+				if (FFI_OK == ffi_prep_cif(cif, FFI_CEL4RO31, 1, &ffi_type_uint32, args)) {
+					ffi_call(cif, FFI_FN(getJavaVM31Handle), &returnValue, values);
+				}
+				vm->javaVM31 = (U_32)returnValue;
+			}
+		}
+		Assert_VM_true(0 != vm->javaVM31);
+	}
+}
+#endif /* defined(J9VM_ZOS_3164_INTEROPERABILITY) */
+
+} /* extern "C" */

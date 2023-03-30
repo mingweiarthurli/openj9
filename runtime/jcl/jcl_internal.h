@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2020 IBM Corp. and others
+ * Copyright (c) 2001, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -130,6 +130,7 @@ getFieldsHelper(JNIEnv *env, jobject cls);
 J9Class *
 fetchArrayClass(struct J9VMThread *vmThread, J9Class *elementTypeClass);
 
+#if JAVA_SPEC_VERSION >= 14
 /**
  * Build an array of java.lang.reflect.RecordComponent for the record components of a record class
  * 
@@ -142,6 +143,7 @@ fetchArrayClass(struct J9VMThread *vmThread, J9Class *elementTypeClass);
  */
 jarray
 getRecordComponentsHelper(JNIEnv *env, jobject cls);
+#endif /* JAVA_SPEC_VERSION >= 14 */
 
 /**
  * Build an array of java.lang.String to return names of all permitted subclasses
@@ -157,16 +159,25 @@ permittedSubclassesHelper(JNIEnv *env, jobject cls);
 
 /* ---------------- sigquit.c ---------------- */
 void
-J9SigQuitShutdown(J9JavaVM * vm);
+J9SigQuitShutdown(J9JavaVM *vm);
 
+#if defined(J9VM_INTERP_SIG_USR2)
+/* ---------------- sigusr2.c ---------------- */
+void
+J9SigUsr2Shutdown(J9JavaVM *vm);
+#endif /* defined(J9VM_INTERP_SIG_USR2) */
 
 /* ---------------- unsafe_mem.c ---------------- */
 UDATA
-initializeUnsafeMemoryTracking(J9JavaVM* vm);
+initializeUnsafeMemoryTracking(J9JavaVM *vm);
 
 void
-freeUnsafeMemory(J9JavaVM* vm);
+freeUnsafeMemory(J9JavaVM *vm);
 
+/* ---------------- java_dyn_methodhandle.c ---------------- */
+#if defined(J9VM_OPT_JAVA_OFFLOAD_SUPPORT)
+void clearNonZAAPEligibleBit(JNIEnv *env, jclass nativeClass, const JNINativeMethod *nativeMethods, jint nativeMethodCount);
+#endif /* J9VM_OPT_JAVA_OFFLOAD_SUPPORT */
 
 #ifdef __cplusplus
 }

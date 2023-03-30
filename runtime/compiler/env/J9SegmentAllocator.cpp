@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -26,6 +26,7 @@
 #include "control/Options.hpp"
 #include "control/Options_inlines.hpp"
 #include "control/CompilationRuntime.hpp"
+#include "env/VerboseLog.hpp"
 #include "OMR/Bytes.hpp"
 #include "j9.h"
 #undef min
@@ -68,7 +69,7 @@ SegmentAllocator::allocate(const size_t segmentSize, const std::nothrow_t &tag) 
             //
             // We allow a small race condition: it is possible that between the test
             // for available physical memory and setting of the flag below, another
-            // compilation thread has suspended itself and reset the flag. The code 
+            // compilation thread has suspended itself and reset the flag. The code
             // below is going to set the flag again, possibly resulting into two
             // compilation threads being suspended. This is still fine, because, if
             // needed, a new compilation thread will be activated when a compilation
@@ -175,18 +176,14 @@ SegmentAllocator::preventAllocationOfBTLMemory(J9MemorySegment * &segment, J9Jav
             }
 
          // For scratch memory refuse to return memory below the line. Free the segment and let the compilation fail
-         // Compilation will be retried at lower opt level.
-         if (segmentType & MEMORY_TYPE_VIRTUAL)
+         // Compilation will be retried at lower opt level. However, We should not reject requests coming from hooks.
+         if (segmentType & MEMORY_TYPE_JIT_SCRATCH_SPACE)
             {
-            // We should not reject requests coming from hooks. Test if this is a comp thread
-            if (compInfo->useSeparateCompilationThread())
+            J9VMThread *crtVMThread = javaVM->internalVMFunctions->currentVMThread(javaVM);
+            if (compInfo->getCompInfoForThread(crtVMThread))
                {
-               J9VMThread *crtVMThread = javaVM->internalVMFunctions->currentVMThread(javaVM);
-               if (compInfo->getCompInfoForThread(crtVMThread))
-                  {
-                  javaVM->internalVMFunctions->freeMemorySegment(javaVM, segment, TRUE);
-                  segment = NULL;
-                  }
+               javaVM->internalVMFunctions->freeMemorySegment(javaVM, segment, TRUE);
+               segment = NULL;
                }
             }
          }

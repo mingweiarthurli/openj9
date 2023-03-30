@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -122,8 +122,22 @@ private:
    void         genInvokeVirtual(int32_t);
    void         genInvokeInterface(int32_t);
    void         genInvokeDynamic(int32_t callSiteIndex);
-   TR::Node *    genInvokeHandle(int32_t cpIndex);
-   TR::Node *    genInvokeHandleGeneric(int32_t cpIndex);
+   TR::Node *   genInvokeHandle(int32_t cpIndex);
+   TR::Node *   genInvokeHandleGeneric(int32_t cpIndex);
+#if defined(J9VM_OPT_OPENJDK_METHODHANDLE)
+   /**
+    * \brief
+    *    Generates IL to load elements from invokeCacheArray, resulting in load of
+    *    appendix and memberName objects into the stack to be used as
+    *    parameters for adapter method call node. memberName object is only required
+    *    to be loaded when the invokedynamic/invokehandle is unresolved
+    *
+    * \param tableEntrySymRef the symref representing the invokeCacheArray
+    * \param invokeCacheArray the static address of the invokeCacheArray
+    * \param isUnresolved
+    */
+   void         loadInvokeCacheArrayElements(TR::SymbolReference *tableEntrySymRef, uintptr_t * invokeCacheArray, bool isUnresolved);
+#endif
 
    TR::Node *    genHandleTypeCheck(TR::Node *handle, TR::Node *expectedType);
 
@@ -164,6 +178,8 @@ private:
    //
    void         loadInstance(int32_t);
    void         loadInstance(TR::SymbolReference *);
+   void         loadFlattenableInstance(int32_t);
+   void         loadFlattenableInstanceWithHelper(int32_t cpIndex);
    void         loadStatic(int32_t);
    void         loadAuto(TR::DataType type, int32_t slot, bool isAdjunct = false);
    TR::Node     *loadSymbol(TR::ILOpCodes, TR::SymbolReference *);
@@ -181,11 +197,13 @@ private:
    TR::SymbolReference *loadClassObjectForTypeTest(int32_t cpIndex, TR_CompilationOptions aotInhibit);
    void         loadClassObject(TR_OpaqueClassBlock *opaqueClass);
    void         loadArrayElement(TR::DataType dt){ loadArrayElement(dt, comp()->il.opCodeForIndirectArrayLoad(dt)); }
-   void         loadArrayElement(TR::DataType dt, TR::ILOpCodes opCode, bool checks = true);
+   void         loadArrayElement(TR::DataType dt, TR::ILOpCodes opCode, bool checks = true, bool mayBeValueType = true);
    void         loadMonitorArg();
 
    void         storeInstance(int32_t);
-   void         storeInstance(TR::SymbolReference *symRef);
+   void         storeInstance(TR::SymbolReference *);
+   void         storeFlattenableInstance(int32_t);
+   void         storeFlattenableInstanceWithHelper(int32_t);
    void         storeStatic(int32_t);
    void         storeAuto(TR::DataType type, int32_t slot, bool isAdjunct = false);
    void         storeArrayElement(TR::DataType dt){ storeArrayElement(dt, comp()->il.opCodeForIndirectArrayStore(dt)); }
@@ -229,9 +247,12 @@ private:
    void         genMonitorEnter();
    void         genMonitorExit(bool);
    TR_OpaqueClassBlock *loadValueClass(int32_t classCpIndex);
-   void         genDefaultValue(uint16_t classCpIndex);
-   void         genDefaultValue(TR_OpaqueClassBlock *valueTypeClass);
-   void         genWithField(uint16_t fieldCpIndex);
+   void         genAconst_init(int32_t classCpIndex);
+   void         genAconst_init(TR_OpaqueClassBlock *valueTypeClass, int32_t cpIndex);
+   void         genWithField(int32_t fieldCpIndex);
+   void         genWithField(TR::SymbolReference *, TR_OpaqueClassBlock *);
+   void         genFlattenableWithField(int32_t, TR_OpaqueClassBlock *);
+   void         genFlattenableWithFieldWithHelper(int32_t fieldCpIndex);
    void         genFlush(int32_t nargs);
    void         genFullFence(TR::Node *node);
    void         handlePendingPushSaveSideEffects(TR::Node *, int32_t stackSize = -1);
@@ -255,7 +276,6 @@ private:
    bool         genJNIIL();
    bool         genNewInstanceImplThunk();
    void         genJavaLangSystemIdentityHashCode();
-   void         genDFPGetHWAvailable();
    void         genHWOptimizedStrProcessingAvailable();
    void         genJITIntrinsicsEnabled();
    void         genIsORBDeepCopyAvailable();
@@ -415,4 +435,3 @@ private:
    };
 
 #endif
-

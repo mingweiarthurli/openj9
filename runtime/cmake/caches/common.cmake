@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 1991, 2020 IBM Corp. and others
+# Copyright (c) 1991, 2022 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
 # OpenJDK Assembly Exception [2].
 #
 # [1] https://www.gnu.org/software/classpath/license.html
-# [2] http://openjdk.java.net/legal/assembly-exception.html
+# [2] https://openjdk.org/legal/assembly-exception.html
 #
 # SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 ################################################################################
@@ -168,6 +168,7 @@ set(J9VM_INTERP_NEW_HEADER_SHAPE ON CACHE BOOL "")
 set(J9VM_INTERP_PROFILING_BYTECODES ON CACHE BOOL "")
 set(J9VM_INTERP_SIG_QUIT_THREAD ON CACHE BOOL "")
 set(J9VM_INTERP_SIG_QUIT_THREAD_USES_SEMAPHORES ON CACHE BOOL "")
+set(J9VM_INTERP_SIG_USR2 ON CACHE BOOL "")
 set(J9VM_INTERP_USE_SPLIT_SIDE_TABLES ON CACHE BOOL "")
 set(J9VM_INTERP_USE_UNSAFE_HELPER ON CACHE BOOL "")
 set(J9VM_INTERP_VERBOSE ON CACHE BOOL "")
@@ -199,10 +200,12 @@ set(J9VM_OPT_JVMTI ON CACHE BOOL "")
 set(J9VM_OPT_JXE_LOAD_SUPPORT ON CACHE BOOL "")
 set(J9VM_OPT_MEMORY_CHECK_SUPPORT ON CACHE BOOL "")
 set(J9VM_OPT_METHOD_HANDLE ON CACHE BOOL "")
+set(J9VM_OPT_METHOD_HANDLE_COMMON ON CACHE BOOL "")
 set(J9VM_OPT_MODULE ON CACHE BOOL "")
 set(J9VM_OPT_MULTI_VM ON CACHE BOOL "")
 set(J9VM_OPT_NEW_OBJECT_HASH ON CACHE BOOL "")
 set(J9VM_OPT_NEW_ROM_CLASS_BUILDER ON CACHE BOOL "")
+set(J9VM_OPT_OPENJDK_METHODHANDLE OFF CACHE BOOL "")
 set(J9VM_OPT_REFLECT ON CACHE BOOL "")
 set(J9VM_OPT_ROM_IMAGE_SUPPORT ON CACHE BOOL "")
 set(J9VM_OPT_SHARED_CLASSES ON CACHE BOOL "")
@@ -218,11 +221,10 @@ set(J9VM_OPT_ZLIB_SUPPORT ON CACHE BOOL "")
 set(J9VM_PORT_OMRSIG_SUPPORT ON CACHE BOOL "")
 set(J9VM_PORT_SIGNAL_SUPPORT ON CACHE BOOL "")
 set(J9VM_PROF_EVENT_REPORTING ON CACHE BOOL "")
-set(J9VM_RAS_DUMP_AGENTS ON CACHE BOOL "")
-set(J9VM_RAS_EYECATCHERS ON CACHE BOOL "")
 set(J9VM_SIZE_OPTIMIZE_SEND_TARGETS ON CACHE BOOL "")
 set(J9VM_THR_ASYNC_NAME_UPDATE ON CACHE BOOL "")
 set(J9VM_THR_LOCK_NURSERY ON CACHE BOOL "")
 set(J9VM_THR_LOCK_RESERVATION ON CACHE BOOL "")
 set(J9VM_THR_PREEMPTIVE ON CACHE BOOL "")
 set(J9VM_THR_SMART_DEFLATION ON CACHE BOOL "")
+set(J9VM_OPT_OPENJDK_FFI ON CACHE BOOL "")

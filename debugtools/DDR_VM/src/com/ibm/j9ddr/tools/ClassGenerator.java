@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2018 IBM Corp. and others
+ * Copyright (c) 2018, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -24,13 +24,14 @@ package com.ibm.j9ddr.tools;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.RandomAccessFile;
+import java.util.Iterator;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import javax.imageio.stream.FileImageInputStream;
 
 import com.ibm.j9ddr.StructureReader;
+import com.ibm.j9ddr.StructureReader.FieldDescriptor;
 import com.ibm.j9ddr.StructureReader.PackageNameType;
 import com.ibm.j9ddr.StructureReader.StructureDescriptor;
 
@@ -41,6 +42,31 @@ import com.ibm.j9ddr.StructureReader.StructureDescriptor;
  * hand-written Java code in DDR_VM.
  */
 public final class ClassGenerator {
+
+	private static void checkAndFilterFields(StructureReader reader) {
+		boolean problem = false;
+
+		for (StructureDescriptor structure : reader.getStructures()) {
+			Iterator<FieldDescriptor> fields = structure.getFields().iterator();
+
+			while (fields.hasNext()) {
+				FieldDescriptor field = fields.next();
+
+				if (field.isRequired()) {
+					if (!field.isPresent()) {
+						System.out.printf("Missing required field: %s.%s%n", structure.getName(), field.getName());
+						problem = true;
+					}
+				} else if (!field.isOptional()) {
+					fields.remove();
+				}
+			}
+		}
+
+		if (problem) {
+			System.exit(1);
+		}
+	}
 
 	private static void duplicateOption(String option) {
 		System.out.printf("Duplicate option: %s.%n", option);
@@ -54,12 +80,17 @@ public final class ClassGenerator {
 	}
 
 	private static StructureReader readBlob(String fileName) throws IOException {
-		FileImageInputStream image = new FileImageInputStream(new RandomAccessFile(fileName, "r"));
+		// Extend FileImageInputStream to avoid loading the awt shared library.
+		final class BlobStream extends FileImageInputStream {
+			BlobStream(File file) throws IOException {
+				super(file);
+			}
+		}
 
-		try {
-			return new StructureReader(image);
-		} finally {
-			image.close();
+		File file = new File(fileName);
+
+		try (BlobStream blob = new BlobStream(file)) {
+			return new StructureReader(blob);
 		}
 	}
 
@@ -76,8 +107,8 @@ public final class ClassGenerator {
 	private ClassGenerator() {
 		super();
 		this.badOptions = false;
-		this.helpRequested = false;
 		this.blobFile = null;
+		this.helpRequested = false;
 		this.outDir = null;
 		this.verbose = false;
 	}
@@ -142,6 +173,7 @@ public final class ClassGenerator {
 			try {
 				StructureReader reader = readBlob(blobFile);
 
+				checkAndFilterFields(reader);
 				writeTo(reader, outDir);
 			} catch (IOException e) {
 				System.out.printf("Can't read blob: %s%n", e.getLocalizedMessage());
@@ -152,16 +184,13 @@ public final class ClassGenerator {
 
 	private void save(byte[] bytes, File directory, String name) throws IOException {
 		File file = new File(directory, name + ".class");
-		FileOutputStream out = new FileOutputStream(file);
 
-		try {
+		try (FileOutputStream out = new FileOutputStream(file)) {
 			out.write(bytes);
 
 			if (verbose) {
 				System.out.printf("Wrote: %s%n", file.getPath());
 			}
-		} finally {
-			out.close();
 		}
 	}
 

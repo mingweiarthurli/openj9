@@ -1,6 +1,6 @@
-/*[INCLUDE-IF Sidecar19-SE]*/
+/*[INCLUDE-IF JAVA_SPEC_VERSION > 8]*/
 /*******************************************************************************
- * Copyright (c) 2016, 2019 IBM Corp. and others
+ * Copyright (c) 2016, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,16 +16,16 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
 package java.lang;
 
 import java.lang.StackWalker.StackFrameImpl;
-/*[IF Java10]*/
+/*[IF JAVA_SPEC_VERSION >= 10]*/
 import java.lang.invoke.MethodType;
-/*[ENDIF]*/
+/*[ENDIF] JAVA_SPEC_VERSION >= 10 */
 import java.lang.module.ModuleDescriptor;
 import java.lang.module.ModuleDescriptor.Version;
 import java.security.Permission;
@@ -39,6 +39,10 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+/*[IF JAVA_SPEC_VERSION >= 19]*/
+import jdk.internal.vm.Continuation;
+import jdk.internal.vm.ContinuationScope;
+/*[ENDIF] JAVA_SPEC_VERSION >= 19 */
 
 /**
  * This provides a facility for iterating over the call stack of the current
@@ -70,6 +74,7 @@ public final class StackWalker {
 			throw new IllegalArgumentException(com.ibm.oti.util.Msg.getString("K0641")); //$NON-NLS-1$
 		}
 		if (options.contains(Option.RETAIN_CLASS_REFERENCE)) {
+			@SuppressWarnings("removal")
 			SecurityManager securityMgr = System.getSecurityManager();
 			if (null != securityMgr) {
 				securityMgr.checkPermission(PermissionSingleton.perm);
@@ -78,6 +83,11 @@ public final class StackWalker {
 		flags = 0;
 		if (walkerOptions.contains(Option.RETAIN_CLASS_REFERENCE)) {
 			flags |= J9_RETAIN_CLASS_REFERENCE;
+		/*[IF JAVA_SPEC_VERSION >= 19]*/
+			retainClassRef = true;
+		} else {
+			retainClassRef = false;
+		/*[ENDIF] JAVA_SPEC_VERSION >= 19 */
 		}
 		if (walkerOptions.contains(Option.SHOW_REFLECT_FRAMES)) {
 			flags |= J9_SHOW_REFLECT_FRAMES;
@@ -222,8 +232,51 @@ public final class StackWalker {
 	 * @return the value returned by {@code function}.
 	 */
 	public <T> T walk(Function<? super Stream<StackFrame>, ? extends T> function) {
+		/*[IF JAVA_SPEC_VERSION >= 19]*/
+		if (null != cont) {
+			if (cont.trylockAccess()) {
+				try {
+					return walkContinuationImpl(flags, function, cont);
+				} finally {
+					cont.unlockAccess();
+				}
+			} else {
+				throw new IllegalStateException("Continuation is mounted.");
+			}
+		}
+		/*[ENDIF] JAVA_SPEC_VERSION >= 19 */
 		return walkWrapperImpl(flags, "walk", function); //$NON-NLS-1$
 	}
+
+	/*[IF JAVA_SPEC_VERSION >= 19]*/
+	final boolean retainClassRef;
+
+	private ExtendedOption extendedOption;
+	private ContinuationScope scope;
+	private Continuation cont;
+
+	private native static <T> T walkContinuationImpl(int flags, Function<? super Stream<StackFrame>, ? extends T> function, Continuation cont);
+
+	static StackWalker newInstance(Set<Option> options, ExtendedOption extendedOption) {
+		return newInstance(options, extendedOption, null, null);
+	}
+
+	static StackWalker newInstance(Set<Option> options, ExtendedOption extendedOption, ContinuationScope contScope) {
+		return newInstance(options, extendedOption, contScope, null);
+	}
+	static StackWalker newInstance(Set<Option> options, ExtendedOption extendedOption, ContinuationScope contScope, Continuation continuation) {
+		StackWalker result = getInstance(options);
+		result.extendedOption = extendedOption;
+		result.scope = contScope;
+		result.cont = continuation;
+
+		return result;
+	}
+
+	enum ExtendedOption {
+		LOCALS_AND_OPERANDS;
+	}
+	/*[ENDIF] JAVA_SPEC_VERSION >= 19 */
 
 	/**
 	 * Selects what type of stack and method information is provided by the
@@ -303,7 +356,7 @@ public final class StackWalker {
 		 */
 		StackTraceElement toStackTraceElement();
 
-		/*[IF Java10]*/
+		/*[IF JAVA_SPEC_VERSION >= 10]*/
 		/**
 		 * @throws UnsupportedOperationException if this method is not overridden
 		 * @return MethodType containing the parameter and return types for the associated method.
@@ -323,7 +376,7 @@ public final class StackWalker {
 			throw new UnsupportedOperationException();
 		}
 
-		/*[ENDIF]*/
+		/*[ENDIF] JAVA_SPEC_VERSION >= 10 */
 	}
 
 	final static class StackFrameImpl implements StackFrame {
@@ -383,7 +436,7 @@ public final class StackWalker {
 		public StackTraceElement toStackTraceElement() {
 			String moduleName = null;
 			String moduleVersion = null;
-			if (null != frameModule) {
+			if (null != frameModule && frameModule.isNamed()) {
 				ModuleDescriptor desc = frameModule.getDescriptor();
 				moduleName = desc.name();
 				Optional<Version> versionInfo = desc.version();
@@ -391,11 +444,28 @@ public final class StackWalker {
 					moduleVersion = versionInfo.get().toString();
 				}
 			}
-			return new StackTraceElement(classLoaderName, moduleName, moduleVersion, className, methodName, fileName,
+
+			StackTraceElement element = new StackTraceElement(classLoaderName, moduleName, moduleVersion, className, methodName, fileName,
 					lineNumber);
+
+			/**
+			 * Disable including classloader name and module version in stack trace output
+			 * until StackWalker StackTraceElement include info flags can be set properly.
+			 *
+			 * See: https://github.com/eclipse-openj9/openj9/issues/11774
+			 */
+			element.disableIncludeInfoFlags();
+
+			return element;
+		}
+		
+		@Override
+		public String toString() {
+			StackTraceElement stackTraceElement = toStackTraceElement();
+			return stackTraceElement.toString();
 		}
 
-		/*[IF Java10]*/
+		/*[IF JAVA_SPEC_VERSION >= 10]*/
 		/**
 		 * Creates a MethodType object for the method associated with this frame.
 		 * @throws UnsupportedOperationException if the StackWalker object is not configured with RETAIN_CLASS_REFERENCE
@@ -420,8 +490,8 @@ public final class StackWalker {
 		public java.lang.String getDescriptor() {
 			return methodSignature;
 		}
-		/*[ENDIF]*/
-		
+		/*[ENDIF] JAVA_SPEC_VERSION >= 10 */
+
 	}
 
 	static class PermissionSingleton {
@@ -429,4 +499,3 @@ public final class StackWalker {
 				new RuntimePermission("getStackWalkerWithClassReference"); //$NON-NLS-1$
 	}
 }
-

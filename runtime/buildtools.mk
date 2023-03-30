@@ -1,7 +1,7 @@
 # buildtools Makefile
 
 ###############################################################################
-# Copyright (c) 1998, 2020 IBM Corp. and others
+# Copyright (c) 1998, 2021 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -17,7 +17,7 @@
 # OpenJDK Assembly Exception [2].
 #
 # [1] https://www.gnu.org/software/classpath/license.html
-# [2] http://openjdk.java.net/legal/assembly-exception.html
+# [2] https://openjdk.org/legal/assembly-exception.html
 #
 # SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 ###############################################################################
@@ -40,67 +40,33 @@ BUILD_ID      ?= 000000
 OS            := $(shell uname)
 TRC_THRESHOLD ?= 1
 FREEMARKER_JAR ?= $(CURDIR)/buildtools/freemarker.jar
-CMAKE_ARGS :=
-
-# We grab the C/C++ compilers detected by autoconf or provided by user, not
-# the CC/CXX variables defined by the makefiles, which potentially include
-# the ccache command which will throw off cmake
-ifneq (,$(OPENJ9_CC))
-  CMAKE_ARGS += "-DCMAKE_C_COMPILER=$(OPENJ9_CC)"
-else
-  CMAKE_ARGS += "-DCMAKE_C_COMPILER=$(ac_cv_prog_CC)"
-endif
-
-ifneq (,$(OPENJ9_CXX))
-  CMAKE_ARGS += "-DCMAKE_CXX_COMPILER=$(OPENJ9_CXX)"
-else
-  CMAKE_ARGS += "-DCMAKE_CXX_COMPILER=$(ac_cv_prog_CXX)"
-endif
-
-ifneq (,$(CCACHE))
-  # Open jdk makefiles add a  bunch of environment variables to the ccache command
-  # cmake will not parse this properly, so we wrap the whole thing in the env command
-  # We also need to add semicolons between arguments or else cmake will treat the whole
-  # thing as one long command name
-
-  # Note: we remove the CCACHE_COMPRESS option that openjdk adds, because it significantly
-  # slows down the build (to the point of erasing any gains from using ccache)
-  CCACHE_NOCOMPRESS := $(filter-out CCACHE_COMPRESS=1,$(CCACHE))
-  ESCAPED_CCACHE :=env$(shell printf ";%s" $(CCACHE_NOCOMPRESS))
-
-  CMAKE_ARGS += "-DCMAKE_CXX_COMPILER_LAUNCHER=$(ESCAPED_CCACHE)"
-  CMAKE_ARGS += "-DCMAKE_C_COMPILER_LAUNCHER=$(ESCAPED_CCACHE)"
-endif
 
 ifneq (,$(or $(findstring Windows,$(OS)),$(findstring CYGWIN,$(OS))))
-	EXEEXT := .exe
-	PATHSEP := ;
+  EXEEXT  := .exe
+  PATHSEP := ;
 else
-	EXEEXT :=
-	PATHSEP := :
-	J9_ROOT := $(shell pwd)
+  EXEEXT  :=
+  PATHSEP := :
+  J9_ROOT := $(shell pwd)
 endif
 
 ifdef BOOT_JDK
-	JAVA := $(subst //,/,$(subst \,/,$(BOOT_JDK)/bin/java))
+  JAVA := $(subst //,/,$(subst \,/,$(BOOT_JDK)/bin/java))
 else
-	JAVA := $(if $(J9_ROOT),java8,$(DEV_TOOLS)\ibm-jdk-1.8.0\bin\java)
+  JAVA := $(if $(J9_ROOT),java8,$(DEV_TOOLS)\ibm-jdk-1.8.0\bin\java)
 endif
 
-ifneq (,$(VERSION_MAJOR))
-	CMAKE_ARGS += -DJAVA_SPEC_VERSION=$(VERSION_MAJOR)
-endif
+# Because we haven't expressed dependencies of these targets clearly, we can't
+# allow make to build them in parallel (at least at this level). Otherwise,
+# some things get built twice. Often we get lucky and both branches leave
+# things in a reasonable state for dependents, but not always.
+.NOTPARALLEL :
 
 default : all
 
 all : ddr tools
 
-tools : configure constantpool copya2e nls
-
-# CMake builds don't need hooktool or tracing.
-ifneq (true,$(OPENJ9_ENABLE_CMAKE))
-tools : hooktool tracing
-endif
+tools : configure constantpool copya2e hooktool nls tracing
 
 # OMRTODO
 # A JIT makefile has a hardcoded path to a2e/headers.
@@ -203,20 +169,14 @@ OMRGLUE_INCLUDES = \
   ../gc_trace \
   ../gc_vlhgc
 
-ifeq (true,$(OPENJ9_ENABLE_CMAKE))
-# If we are doing a cmake build, configure won't depend on UMA.
-# However we need to run constantpool and nls tools before invoking cmake.
-configure : constantpool nls
-	mkdir -p build && cd build && $(CMAKE) -C ../cmake/caches/$(SPEC).cmake  $(CMAKE_ARGS) $(EXTRA_CMAKE_ARGS) ..
-else
 .PHONY : j9includegen
 
 j9includegen : uma
 	$(MAKE) -C include j9include_generate
+	$(MAKE) -C include31 j9include31_generate
 
 configure : j9includegen
 	$(MAKE) -C omr -f run_configure.mk 'SPEC=$(SPEC)' 'OMRGLUE=$(OMRGLUE)' 'CONFIG_INCL_DIR=$(CONFIG_INCL_DIR)' 'OMRGLUE_INCLUDES=$(OMRGLUE_INCLUDES)' 'EXTRA_CONFIGURE_ARGS=$(EXTRA_CONFIGURE_ARGS)'
-endif
 
 # run UMA to generate makefiles
 J9VM_GIT_DIR := $(firstword $(wildcard $(J9_ROOT)/.git) $(wildcard $(J9_ROOT)/workspace/.git))
@@ -225,7 +185,6 @@ SPEC_DIR     := buildspecs
 UMA_TOOL     := $(JAVA) -cp "$(J9TOOLS_JAR_DIR)/om.jar$(PATHSEP)$(FREEMARKER_JAR)$(PATHSEP)$(J9TOOLS_JAR_DIR)/uma.jar" com.ibm.j9.uma.Main
 UMA_OPTIONS  := -rootDir . -configDir $(SPEC_DIR) -buildSpecId $(SPEC)
 UMA_OPTIONS  += -buildId $(BUILD_ID) -buildTag $(J9VM_SHA) -jvf compiler/jit.version
-UMA_OPTIONS  += $(UMA_OPTIONS_EXTRA)
 ifneq (,$(VERSION_MAJOR))
 UMA_OPTIONS  += -M JAVA_SPEC_VERSION=$(VERSION_MAJOR)
 endif
@@ -237,7 +196,7 @@ UMA_OPTIONS += -ea tracegen,tracemerge
 
 uma : buildtools copya2e
 	@echo J9VM version: $(J9VM_SHA)
-	$(UMA_TOOL) $(UMA_OPTIONS)
+	$(UMA_TOOL) $(UMA_OPTIONS) $(UMA_OPTIONS_EXTRA)
 
 # process constant pool definition file to generate jcl constant pool definitions and header file
 CONSTANTPOOL_TOOL    := $(JAVA) -cp "$(J9TOOLS_JAR_DIR)/om.jar$(PATHSEP)$(J9TOOLS_JAR_DIR)/j9vmcp.jar" com.ibm.oti.VMCPTool.Main
@@ -252,13 +211,14 @@ constantpool : buildtools
 
 # Backslashes need replacing on Windows/Cygwin
 ESCAPED_JAVA := $(subst \,/,$(JAVA))
-PLATFORM     := $(if $(wildcard buildtools/j9ddr-autoblob.jar),$(shell $(JAVA) -cp buildtools/j9ddr-autoblob.jar com.ibm.j9ddr.autoblob.GetNativeDirectory))
+AUTOBLOB_JAR := buildtools/j9ddr-autoblob.jar
+PLATFORM     := $(if $(wildcard $(AUTOBLOB_JAR)),$(shell $(JAVA) -cp $(AUTOBLOB_JAR) com.ibm.j9ddr.autoblob.GetNativeDirectory))
 SUPERSET     := superset.$(SPEC).dat
 
 # Trigger cross-compilation & use linux_x86 DDR configuration
 ifeq (linux_ztpf_390-64, $(SPEC))
-	PLATFORM := linux_x86
-	OS := ztpf
+  PLATFORM := linux_x86
+  OS := ztpf
 endif
 
 # Generate DDR structure blob C files - only functions on module.ddr build specs.
@@ -271,13 +231,11 @@ ddr : constantpool hooktool nls tracing
 	@echo "Platform = $(PLATFORM)"
 	@echo "OS       = $(OS)"
 	@echo "Building $(PLATFORM)"
-	( \
 	if [ -e ddr/j9ddrgen.mk ] ; then \
 		$(MAKE) -C ddr -f ddr_buildtools.mk JAVA=$(ESCAPED_JAVA) PLATFORM=$(PLATFORM) generate_ddr_blob_c ; \
 		echo "Generating updated superset ready for code generation" ; \
-		$(ESCAPED_JAVA) -cp buildtools/j9ddr-autoblob.jar com.ibm.j9ddr.autoblob.GenerateSpecSuperset -d ddr/superset -s ddr,gc_ddr -f $(SUPERSET) ; \
-	fi \
-	)
+		$(ESCAPED_JAVA) -cp $(AUTOBLOB_JAR) com.ibm.j9ddr.autoblob.GenerateSpecSuperset -d ddr/superset -s ddr,gc_ddr -f $(SUPERSET) ; \
+	fi
 endif
 
 # Create the lib directory

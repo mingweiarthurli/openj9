@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2020 IBM Corp. and others
+ * Copyright (c) 2018, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -24,13 +24,10 @@
 #define CLIENT_STREAM_H
 
 #include "compile/CompilationTypes.hpp"
+#include "control/CompilationRuntime.hpp"
 #include "ilgen/J9IlGeneratorMethodDetails.hpp"
 #include "net/RawTypeConvert.hpp"
 #include "net/CommunicationStream.hpp"
-
-#include <openssl/ssl.h>
-class SSLOutputStream;
-class SSLInputStream;
 
 namespace JITServer
 {
@@ -68,7 +65,7 @@ public:
 
        Returns 0 if successful;; Otherwise, returns -1.
    */
-   static int static_init(TR::PersistentInfo *info);
+   static int static_init(TR::CompilationInfo *compInfo);
 
    explicit ClientStream(TR::PersistentInfo *info);
    virtual ~ClientStream()
@@ -117,7 +114,7 @@ public:
       @brief Read a message from the server
 
       The read operation is blocking (subject to a timeout)
- 
+
       @return Returns the type of the message being received
    */
    MessageType read()
@@ -139,7 +136,7 @@ public:
       @brief Send an error message to the JITServer
 
       Examples of error messages include 'compilationInterrupted' (e.g. when class unloading happens),
-      'clientSessionTerminate' (e.g. when the client is about to exit), 
+      'clientSessionTerminate' (e.g. when the client is about to exit),
       and 'connectionTerminate' (e.g. when the client is closing the connection)
    */
    template <typename ...T>
@@ -182,7 +179,7 @@ public:
        that the client sends to the server. This function is actually called to
        determine if we need to try the compatibilty check again. The idea is that
        the incompatible server could be killed and another one (compatible) could be
-       instantiated. If enough time has passed since the server was found to be 
+       instantiated. If enough time has passed since the server was found to be
        incompatible, then the client should try again. "Enough time" is defined as a
        constant 10 second interval.
    */

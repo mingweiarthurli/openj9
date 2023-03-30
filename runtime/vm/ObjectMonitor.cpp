@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2020 IBM Corp. and others
+ * Copyright (c) 2001, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -190,6 +190,9 @@ restart:
 			if (J9_ARE_ANY_BITS_SET(((J9ThreadMonitor*)monitor)->flags, J9THREAD_MONITOR_INFLATED)) {
 				Trc_VM_objectMonitorEnterBlocking_alreadyInflated(currentThread);
 				internalAcquireVMAccess(currentThread);
+#if JAVA_SPEC_VERSION >= 19
+				currentThread->ownedMonitorCount += 1;
+#endif /* JAVA_SPEC_VERSION >= 19 */
 				goto done;
 			}
 			if (0 != internalTryAcquireVMAccess(currentThread)) {
@@ -308,15 +311,32 @@ UDATA
 objectMonitorEnterNonBlocking(J9VMThread *currentThread, j9object_t object)
 {
 	UDATA result = (UDATA)object;
+	J9JavaVM *vm = currentThread->javaVM;
 	j9objectmonitor_t volatile *lwEA = VM_ObjectMonitor::inlineGetLockAddress(currentThread, object);
+#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES) || (JAVA_SPEC_VERSION >= 16)
+	J9Class * objClass = J9OBJECT_CLAZZ(currentThread, object);
+#endif /* defined(J9VM_OPT_VALHALLA_VALUE_TYPES) || (JAVA_SPEC_VERSION >= 16) */
 
 #if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
-	J9Class * objClass = J9OBJECT_CLAZZ(currentThread, object);
 	if (J9_IS_J9CLASS_VALUETYPE(objClass)) {
 		result = J9_OBJECT_MONITOR_VALUE_TYPE_IMSE;
 		goto done;
 	}
 #endif /* J9VM_OPT_VALHALLA_VALUE_TYPES */	
+#if JAVA_SPEC_VERSION >= 16
+	if (J9_IS_J9CLASS_VALUEBASED(objClass)) {
+		U_32 runtimeFlags2 = vm->extendedRuntimeFlags2;
+		if (J9_ARE_ALL_BITS_SET(runtimeFlags2, J9_EXTENDED_RUNTIME2_VALUE_BASED_EXCEPTION)) {
+			result = J9_OBJECT_MONITOR_VALUE_TYPE_IMSE;
+			goto done;	
+		} else if (J9_ARE_ALL_BITS_SET(runtimeFlags2, J9_EXTENDED_RUNTIME2_VALUE_BASED_WARNING)) {
+			PORT_ACCESS_FROM_VMC(currentThread);
+			const J9UTF8* className = J9ROMCLASS_CLASSNAME(J9OBJECT_CLAZZ(currentThread, object)->romClass);
+			j9nls_printf(PORTLIB, J9NLS_WARNING, J9NLS_VM_ERROR_BYTECODE_OBJECTREF_CANNOT_BE_VALUE_BASED, J9UTF8_LENGTH(className), J9UTF8_DATA(className));
+		}
+	}
+#endif /* JAVA_SPEC_VERSION >= 16 */
+	
 restart:
 	if (NULL == lwEA) {
 		/* out of memory */
@@ -351,7 +371,7 @@ restart:
 				 * When the Learning Counter reaches reservedTransitionThreshold, the object transitions from Learning to Reserved.
 				 * reservedTransitionThreshold is being checked against a 2 bit value so values of 4 or higher will prevent transitions to Reserved.
 				 */
-				U_32 reservedTransitionThreshold = currentThread->javaVM->reservedTransitionThreshold;
+				U_32 reservedTransitionThreshold = vm->reservedTransitionThreshold;
 				bool reservedTransition = false;
 				if (((lock & OBJECT_HEADER_LOCK_LEARNING_LC_MASK) >> OBJECT_HEADER_LOCK_LEARNING_LC_OFFSET) >= reservedTransitionThreshold) {
 					/*
@@ -387,6 +407,9 @@ restart:
 					goto restart;
 				}
 			}
+#if JAVA_SPEC_VERSION >= 19
+			currentThread->ownedMonitorCount += 1;
+#endif /* JAVA_SPEC_VERSION >= 19 */
 			/* no barrier is required in the recursive case */
 		} else {
 			/* check to see if object is unlocked (JIT did not do initial inline sequence due to insufficient static type info) */
@@ -468,7 +491,14 @@ restart:
 wouldBlock:
 	/* unable to get thin lock by spinning - follow blocking path */
 	J9VMTHREAD_SET_BLOCKINGENTEROBJECT(currentThread, currentThread, object);
-	result = J9_OBJECT_MONITOR_BLOCKING;
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+	if (J9_IS_SINGLE_THREAD_MODE(vm)) {
+		result = J9_OBJECT_MONITOR_CRIU_SINGLE_THREAD_MODE_THROW;
+	} else
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
+	{
+		result = J9_OBJECT_MONITOR_BLOCKING;
+	}
 done:
 	return result;
 }
@@ -537,6 +567,9 @@ spinOnFlatLock(J9VMThread *currentThread, j9objectmonitor_t volatile *lwEA, j9ob
 						if (lock == VM_ObjectMonitor::compareAndSwapLockword(currentThread, lwEA, lock, (j9objectmonitor_t)(UDATA)currentThread, false)) {
 							/* compare and swap succeeded */
 							VM_AtomicSupport::readBarrier();
+#if JAVA_SPEC_VERSION >= 19
+							currentThread->ownedMonitorCount += 1;
+#endif /* JAVA_SPEC_VERSION >= 19 */
 							rc = true;
 
 							/* Transition from Learning to Flat occurred so the Cancel Counter in the object's J9Class is incremented by 1. */
@@ -680,6 +713,9 @@ spinOnTryEnter(J9VMThread *currentThread, J9ObjectMonitor *objectMonitor, j9obje
 				if (J9_LOCK_IS_INFLATED(J9_LOAD_LOCKWORD(currentThread, lwEA))) {
 					/* try_enter succeeded - monitor is inflated */
 					rc = true;
+#if JAVA_SPEC_VERSION >= 19
+					currentThread->ownedMonitorCount += 1;
+#endif /* JAVA_SPEC_VERSION >= 19 */
 				} else {
 					/* try_enter succeeded - monitor is not inflated - would block */
 					SET_IGNORE_ENTER(monitor);

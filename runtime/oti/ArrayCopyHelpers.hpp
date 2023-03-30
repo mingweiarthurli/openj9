@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -31,13 +31,13 @@
 
 #include "j9cfg.h"
 
-#if defined(J9_OVERRIDE_COMPRESS_OBJECT_REFERENCES)
-#if J9_OVERRIDE_COMPRESS_OBJECT_REFERENCES
+#if defined(OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES)
+#if OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES
 #define VM_ArrayCopyHelpers VM_ArrayCopyHelpersCompressed
-#else /* J9_OVERRIDE_COMPRESS_OBJECT_REFERENCES */
+#else /* OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES */
 #define VM_ArrayCopyHelpers VM_ArrayCopyHelpersFull
-#endif /* J9_OVERRIDE_COMPRESS_OBJECT_REFERENCES */
-#endif /* J9_OVERRIDE_COMPRESS_OBJECT_REFERENCES */
+#endif /* OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES */
+#endif /* OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES */
 
 #include "j9.h"
 #include "j9protos.h"

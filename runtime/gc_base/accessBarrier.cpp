@@ -1,6 +1,5 @@
-
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -361,10 +360,6 @@ j9gc_objaccess_getLockwordAddress(J9VMThread *vmThread, J9Object *object)
 	return barrier->getLockwordAddress(vmThread, object);
 }
 
-/**
- * TODO: This is not actually in the memory manager function table yet --
- * waiting until we have a consistent story for NHRT barriers.
- */
 void
 j9gc_objaccess_storeObjectToInternalVMSlot(J9VMThread *vmThread, J9Object** destSlot, J9Object *value) 
 {
@@ -372,14 +367,10 @@ j9gc_objaccess_storeObjectToInternalVMSlot(J9VMThread *vmThread, J9Object** dest
 	barrier->storeObjectToInternalVMSlot(vmThread, destSlot, value);
 }
 
-/**
- * TODO: This is not actually in the memory manager function table yet --
- * waiting until we have a consistent story for NHRT barriers.
- */
 J9Object*
-j9gc_objaccess_readObjectFromInternalVMSlot(J9VMThread *vmThread, J9Object **srcSlot)
+j9gc_objaccess_readObjectFromInternalVMSlot(J9VMThread *vmThread, J9JavaVM *vm, J9Object **srcSlot)
 {
-	MM_ObjectAccessBarrier *barrier = MM_GCExtensions::getExtensions(vmThread)->accessBarrier;
+	MM_ObjectAccessBarrier *barrier = MM_GCExtensions::getExtensions(vm)->accessBarrier;
 	return barrier->readObjectFromInternalVMSlot(vmThread, srcSlot);
 }
 
@@ -622,10 +613,10 @@ j9gc_objaccess_structuralCompareFlattenedObjects(J9VMThread *vmThread, J9Class *
  * Called by certain specs to copy objects
  */
 void
-j9gc_objaccess_copyObjectFields(J9VMThread *vmThread, J9Class *valueClass, J9Object *srcObject, UDATA srcOffset, J9Object *destObject, UDATA destOffset)
+j9gc_objaccess_copyObjectFields(J9VMThread *vmThread, J9Class *valueClass, J9Object *srcObject, UDATA srcOffset, J9Object *destObject, UDATA destOffset, MM_objectMapFunction objectMapFunction, void *objectMapData, UDATA initializeLockWord)
 {
 	MM_ObjectAccessBarrier *barrier = MM_GCExtensions::getExtensions(vmThread)->accessBarrier;
-	return barrier->copyObjectFields(vmThread, valueClass, srcObject, srcOffset, destObject, destOffset);
+	return barrier->copyObjectFields(vmThread, valueClass, srcObject, srcOffset, destObject, destOffset, objectMapFunction, objectMapData, FALSE != initializeLockWord);
 }
 
 /**
@@ -652,10 +643,10 @@ j9gc_objaccess_copyObjectFieldsFromFlattenedArrayElement(J9VMThread *vmThread, J
  * Called by certain specs to clone objects. See J9VMObjectAccessBarrier#cloneArray:into:sizeInElements:class:
  */
 void
-j9gc_objaccess_cloneIndexableObject(J9VMThread *vmThread, J9IndexableObject *srcObject, J9IndexableObject *destObject)
+j9gc_objaccess_cloneIndexableObject(J9VMThread *vmThread, J9IndexableObject *srcObject, J9IndexableObject *destObject, MM_objectMapFunction objectMapFunction, void *objectMapData)
 {
 	MM_ObjectAccessBarrier *barrier = MM_GCExtensions::getExtensions(vmThread)->accessBarrier;
-	return barrier->cloneIndexableObject(vmThread, srcObject, destObject);
+	return barrier->cloneIndexableObject(vmThread, srcObject, destObject, objectMapFunction, objectMapData);
 }
 
 /**
@@ -675,47 +666,47 @@ j9gc_objaccess_asConstantPoolObject(J9VMThread *vmThread, j9object_t toConvert, 
  * @note This function does not work in barrier check VMs
  */
 void
-J9MetronomeWriteBarrierStore(J9VMThread *vmThread, J9Object *dstObject, fj9object_t *dstAddress, J9Object *srcObject)
+J9WriteBarrierPre(J9VMThread *vmThread, J9Object *dstObject, fj9object_t *dstAddress, J9Object *srcObject)
 {
 	MM_ObjectAccessBarrier *barrier = MM_GCExtensions::getExtensions(vmThread->javaVM)->accessBarrier;
 	barrier->preObjectStore(vmThread, dstObject, dstAddress, srcObject);
 }
 
 void
-J9MetronomeWriteBarrierJ9ClassStore(J9VMThread *vmThread, J9Object *dstObject, J9Object **dstAddress, J9Object *srcObject)
+J9WriteBarrierPreClass(J9VMThread *vmThread, J9Object *dstClassObject, J9Object **dstAddress, J9Object *srcObject)
 {
 	MM_ObjectAccessBarrier *barrier = MM_GCExtensions::getExtensions(vmThread->javaVM)->accessBarrier;
-	barrier->preObjectStore(vmThread, dstObject, dstAddress, srcObject);
+	barrier->preObjectStore(vmThread, dstClassObject, dstAddress, srcObject);
 }
 
 void
-J9WriteBarrierStore(J9VMThread *vmThread, J9Object *dstObject, J9Object *srcObject)
+J9WriteBarrierPost(J9VMThread *vmThread, J9Object *dstObject, J9Object *srcObject)
 {
 	MM_ObjectAccessBarrier *barrier = MM_GCExtensions::getExtensions(vmThread->javaVM)->accessBarrier;
 	barrier->postObjectStore(vmThread, dstObject, (fj9object_t*)0, srcObject);
 }
 
 void
-J9WriteBarrierJ9ClassStore(J9VMThread *vmThread, J9Class *dstObject, J9Object *srcObject)
+J9WriteBarrierPostClass(J9VMThread *vmThread, J9Class *dstClazz, J9Object *srcObject)
 {
 	MM_ObjectAccessBarrier *barrier = MM_GCExtensions::getExtensions(vmThread->javaVM)->accessBarrier;
-	barrier->postObjectStore(vmThread, dstObject, (J9Object**)0, srcObject);
+	barrier->postObjectStore(vmThread, dstClazz, (J9Object**)0, srcObject);
 }
 
 void
-J9WriteBarrierBatchStore(J9VMThread *vmThread, J9Object *dstObject)
+J9WriteBarrierBatch(J9VMThread *vmThread, J9Object *dstObject)
 {
 	MM_ObjectAccessBarrier *barrier = MM_GCExtensions::getExtensions(vmThread->javaVM)->accessBarrier;
 	/* In Metronome, write barriers are always pre-store */
-	barrier->preBatchObjectStore(vmThread, dstObject);	
+	barrier->postBatchObjectStore(vmThread, dstObject);
 }
 
 void
-J9WriteBarrierJ9ClassBatchStore(J9VMThread *vmThread, J9Class *dstJ9Class)
+J9WriteBarrierClassBatch(J9VMThread *vmThread, J9Class *dstClazz)
 {
 	MM_ObjectAccessBarrier *barrier = MM_GCExtensions::getExtensions(vmThread->javaVM)->accessBarrier;
 	/* In Metronome, write barriers are always pre-store */
-	barrier->preBatchObjectStore(vmThread, dstJ9Class);	
+	barrier->postBatchObjectStore(vmThread, dstClazz);
 }
 
 void
@@ -726,7 +717,7 @@ J9ReadBarrier(J9VMThread *vmThread, fj9object_t *srcAddress)
 }
 
 void
-J9ReadBarrierJ9Class(J9VMThread *vmThread, j9object_t *srcAddress)
+J9ReadBarrierClass(J9VMThread *vmThread, j9object_t *srcAddress)
 {
 	MM_ObjectAccessBarrier *barrier = MM_GCExtensions::getExtensions(vmThread->javaVM)->accessBarrier;
 	barrier->preObjectRead(vmThread, NULL, srcAddress);
@@ -807,6 +798,55 @@ j9gc_objaccess_checkClassLive(J9JavaVM *javaVM, J9Class *classPtr)
 #else /* defined(J9VM_GC_DYNAMIC_CLASS_UNLOADING) */
 	return 1;
 #endif /* defined(J9VM_GC_DYNAMIC_CLASS_UNLOADING) */
+}
+
+J9Object*
+j9gc_objaccess_referenceGet(J9VMThread *vmThread, j9object_t refObject)
+{
+	MM_ObjectAccessBarrier *barrier = MM_GCExtensions::getExtensions(vmThread)->accessBarrier;
+	return barrier->referenceGet(vmThread, refObject);
+}
+
+void
+j9gc_objaccess_referenceReprocess(J9VMThread *vmThread, j9object_t refObject)
+{
+	MM_ObjectAccessBarrier *barrier = MM_GCExtensions::getExtensions(vmThread)->accessBarrier;
+	barrier->referenceReprocess(vmThread, refObject);
+}
+
+BOOLEAN
+checkStringConstantsLive(J9JavaVM *javaVM, j9object_t stringOne, j9object_t stringTwo)
+{
+	MM_ObjectAccessBarrier *barrier = MM_GCExtensions::getExtensions(javaVM)->accessBarrier;
+	return barrier->checkStringConstantsLive(javaVM, stringOne, stringTwo);
+}
+
+BOOLEAN
+checkStringConstantLive(J9JavaVM *javaVM, j9object_t string)
+{
+	MM_ObjectAccessBarrier *barrier = MM_GCExtensions::getExtensions(javaVM)->accessBarrier;
+	return barrier->checkStringConstantLive(javaVM, string);
+}
+
+void
+j9gc_objaccess_jniDeleteGlobalReference(J9VMThread *vmThread, J9Object *reference)
+{
+	MM_ObjectAccessBarrier *barrier = MM_GCExtensions::getExtensions(vmThread->javaVM)->accessBarrier;
+	barrier->jniDeleteGlobalReference(vmThread, reference);
+}
+
+void
+preMountContinuation(J9VMThread *vmThread, j9object_t object)
+{
+	MM_ObjectAccessBarrier *barrier = MM_GCExtensions::getExtensions(vmThread->javaVM)->accessBarrier;
+	barrier->preMountContinuation(vmThread, object);
+}
+
+void
+postUnmountContinuation(J9VMThread *vmThread, j9object_t object)
+{
+	MM_ObjectAccessBarrier *barrier = MM_GCExtensions::getExtensions(vmThread->javaVM)->accessBarrier;
+	barrier->postUnmountContinuation(vmThread, object);
 }
 
 } /* extern "C" */

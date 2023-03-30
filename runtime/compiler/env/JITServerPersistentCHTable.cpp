@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -31,14 +31,25 @@
 
 
 JITServerPersistentCHTable::JITServerPersistentCHTable(TR_PersistentMemory *trMemory)
-   : TR_PersistentCHTable(trMemory)
+   : TR_PersistentCHTable(trMemory),
+   _classMap(decltype(_classMap)::allocator_type(trMemory->_persistentAllocator.get()))
    {
+   _chTableMonitor = TR::Monitor::create("JIT-JITServerCHTableMonitor");
+   if (!_chTableMonitor)
+      throw std::bad_alloc();
    }
 
-PersistentUnorderedMap<TR_OpaqueClassBlock*, TR_PersistentClassInfo*> &JITServerPersistentCHTable::getData()
+JITServerPersistentCHTable::~JITServerPersistentCHTable()
    {
-   auto &data = TR::compInfoPT->getClientData()->getCHTableClassMap();
-   return data;
+   // Free CHTable 
+   for (auto& it : _classMap)
+      {
+      TR_PersistentClassInfo *classInfo = it.second;
+      classInfo->removeSubClasses(_trPersistentMemory);
+      _trPersistentMemory->freePersistentMemory(classInfo);
+      }
+   _classMap.clear();
+   TR::Monitor::destroy(_chTableMonitor);
    }
 
 bool
@@ -46,17 +57,16 @@ JITServerPersistentCHTable::initializeCHTable(TR_J9VMBase *fej9, const std::stri
    {
    if (rawData.length() == 0)
       return false;
-   auto infos = FlatPersistentClassInfo::deserializeHierarchy(rawData);
+   auto infos = FlatPersistentClassInfo::deserializeHierarchy(rawData, _trPersistentMemory);
       {
       TR::ClassTableCriticalSection initializeIfNeeded(fej9);
-      auto& data = getData();
-      if (data.empty()) // check again to prevent races
+      if (_classMap.empty()) // check again to prevent races
          {
          Trc_JITServerInitCHTable(TR::compInfoPT->getCompilationThread(), TR::compInfoPT->getCompThreadId(),
             TR::compInfoPT->getClientData(), (unsigned long long)TR::compInfoPT->getClientData()->getClientUID(),
             (unsigned long long)infos.size());
          for (auto clazz : infos)
-            data.insert({ clazz->getClassId(), clazz });
+            _classMap.insert({ clazz->getClassId(), clazz });
          CHTABLE_UPDATE_COUNTER(_numClassesUpdated, infos.size());
          return true;
          }
@@ -64,11 +74,11 @@ JITServerPersistentCHTable::initializeCHTable(TR_J9VMBase *fej9, const std::stri
          {
          Trc_JITServerAbortInitCHTable(TR::compInfoPT->getCompilationThread(), TR::compInfoPT->getCompThreadId(),
             TR::compInfoPT->getClientData(), (unsigned long long)TR::compInfoPT->getClientData()->getClientUID(),
-            (unsigned long long)data.size(), (unsigned long long)infos.size());
+            (unsigned long long)_classMap.size(), (unsigned long long)infos.size());
 
          TR_ASSERT_FATAL(false,"compThreadID=%d clientSessionData=%p clientUID=%llu CHTable is not empty size %llu. Update size %llu",
             TR::compInfoPT->getCompThreadId(), TR::compInfoPT->getClientData(), (unsigned long long)TR::compInfoPT->getClientData()->getClientUID(),
-            (unsigned long long)data.size(), (unsigned long long)infos.size());
+            (unsigned long long)_classMap.size(), (unsigned long long)infos.size());
          }
       }
    return false;
@@ -79,8 +89,7 @@ JITServerPersistentCHTable::doUpdate(TR_J9VMBase *fej9, const std::string &remov
    {
    TR::ClassTableCriticalSection doUpdate(fej9);
 
-   auto& data = getData();
-   if (!data.empty()) // make sure it's initialized already
+   if (!_classMap.empty()) // make sure it's initialized already
       {
       Trc_JITServerDoCHTableUpdate(TR::compInfoPT->getCompilationThread(), TR::compInfoPT->getCompThreadId(),
          TR::compInfoPT->getClientData(), (unsigned long long)TR::compInfoPT->getClientData()->getClientUID(),
@@ -110,13 +119,12 @@ JITServerPersistentCHTable::doUpdate(TR_J9VMBase *fej9, const std::string &remov
 void 
 JITServerPersistentCHTable::commitRemoves(const std::string &rawData)
    {
-   auto &data = getData();
    TR_OpaqueClassBlock **ptr = (TR_OpaqueClassBlock**)&rawData[0];
    size_t num = rawData.size() / sizeof(TR_OpaqueClassBlock*);
    for (size_t i = 0; i < num; i++)
       {
-      auto item = data[ptr[i]];
-      data.erase(ptr[i]);
+      auto item = _classMap[ptr[i]];
+      _classMap.erase(ptr[i]);
       if (item) // may have already been removed earlier in this update block
          jitPersistentFree(item);
       }
@@ -126,7 +134,6 @@ JITServerPersistentCHTable::commitRemoves(const std::string &rawData)
 void 
 JITServerPersistentCHTable::commitModifications(const std::string &rawData)
    {
-   auto &data = getData();
    std::unordered_map<TR_OpaqueClassBlock*, std::pair<FlatPersistentClassInfo*, TR_PersistentClassInfo*>> infoMap;
 
    // First, process all TR_PersistentClassInfo entries that have been
@@ -143,7 +150,7 @@ JITServerPersistentCHTable::commitModifications(const std::string &rawData)
       if (!clazz)
          {
          clazz = new (PERSISTENT_NEW) TR_PersistentClassInfo(NULL);
-         data.insert({classId, clazz});
+         _classMap.insert({classId, clazz});
          }
       infoMap.insert({classId, {info, clazz}});
       // Overwrite existing TR_PersistentClassInfo entry with info from client
@@ -157,7 +164,7 @@ JITServerPersistentCHTable::commitModifications(const std::string &rawData)
       {
       auto flat = it.second.first;
       auto persist = it.second.second;
-      persist->removeSubClasses();
+      persist->removeSubClasses(_trPersistentMemory);
       for (size_t i = 0; i < flat->_numSubClasses; i++)
          {
          auto classInfo = findClassInfo(flat->_subClasses[i]);
@@ -176,13 +183,12 @@ TR_PersistentClassInfo *
 JITServerPersistentCHTable::findClassInfo(TR_OpaqueClassBlock * classId)
    {
    CHTABLE_UPDATE_COUNTER(_numQueries, 1);
-   auto& data = getData();
    // It is possible that the persistentCHTable on the client side is not populated,
    // such as when recompilation is not allowed on the client side.
-   if (!data.empty())
+   if (!_classMap.empty())
       {
-      auto it = data.find(classId);
-      if (it != data.end())
+      auto it = _classMap.find(classId);
+      if (it != _classMap.end())
          return it->second;
       }
    return NULL;
@@ -303,11 +309,10 @@ FlatPersistentClassInfo::serializeClass(TR_PersistentClassInfo *clazz, FlatPersi
    info->_visitedStatus = clazz->_visitedStatus;
    info->_prexAssumptions = clazz->_prexAssumptions;
    info->_timeStamp = clazz->_timeStamp;
-   info->_nameLength = clazz->_nameLength;
+   info->_shouldNotBeNewlyExtended = clazz->_shouldNotBeNewlyExtended;
    info->_flags = clazz->_flags;
    TR_ASSERT(clazz->_flags.getValue() < 0x40, "corrupted flags");
    TR_ASSERT(!clazz->getFieldInfo(), "field info not supported");
-   info->_shouldNotBeNewlyExtended = clazz->_shouldNotBeNewlyExtended;
    int idx = 0;
    for (TR_SubClass *c = clazz->getFirstSubclass(); c; c = c->getNext())
       {
@@ -348,15 +353,14 @@ FlatPersistentClassInfo::deserializeClassSimple(TR_PersistentClassInfo *clazz, F
    clazz->_classId = info->_classId;
    clazz->_visitedStatus = info->_visitedStatus;
    clazz->_timeStamp = info->_timeStamp;
-   clazz->_nameLength = info->_nameLength;
-   clazz->_flags = info->_flags;
    clazz->_shouldNotBeNewlyExtended = info->_shouldNotBeNewlyExtended;
+   clazz->_flags = info->_flags;
    clazz->_fieldInfo = NULL;
    return sizeof(FlatPersistentClassInfo) + info->_numSubClasses * sizeof(TR_OpaqueClassBlock*);
    }
 
 std::vector<TR_PersistentClassInfo*> 
-FlatPersistentClassInfo::deserializeHierarchy(const std::string& data)
+FlatPersistentClassInfo::deserializeHierarchy(const std::string& data, TR_PersistentMemory *persistentMemory)
    {
    std::vector<TR_PersistentClassInfo*> out;
    std::unordered_map<TR_OpaqueClassBlock*, std::pair<FlatPersistentClassInfo*, TR_PersistentClassInfo*>> infoMap;
@@ -561,10 +565,10 @@ TR_SubClass *TR_JITClientPersistentClassInfo::addSubClass(TR_PersistentClassInfo
    return TR_PersistentClassInfo::addSubClass(subClass);
    }
 
-void TR_JITClientPersistentClassInfo::removeSubClasses()
+void TR_JITClientPersistentClassInfo::removeSubClasses(TR_PersistentMemory *persistentMemory)
    {
    TR_JITClientPersistentClassInfo::_chTable->markDirty(getClassId());
-   TR_PersistentClassInfo::removeSubClasses();
+   TR_PersistentClassInfo::removeSubClasses(persistentMemory);
    }
 
 void TR_JITClientPersistentClassInfo::removeASubClass(TR_PersistentClassInfo *subClass)
@@ -638,10 +642,4 @@ void TR_JITClientPersistentClassInfo::setClassHasBeenRedefined(bool v)
    {
    TR_JITClientPersistentClassInfo::_chTable->markDirty(getClassId());
    TR_PersistentClassInfo::setClassHasBeenRedefined(v);
-   }
-
-void TR_JITClientPersistentClassInfo::setNameLength(int32_t length)
-   {
-   TR_JITClientPersistentClassInfo::_chTable->markDirty(getClassId());
-   TR_PersistentClassInfo::setNameLength(length);
    }

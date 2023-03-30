@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2006, 2017 IBM Corp. and others
+ * Copyright (c) 2006, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -46,7 +46,7 @@ J9VMDllLoadInfo *findDllLoadInfo(J9Pool* aPool, const char* dllName);
 IDATA safeCat (char* buffer, const char* text, IDATA length);
 void freeDllLoadTable (J9Pool* table);
 void freeVMArgsArray (J9PortLibrary* portLibrary, J9VMInitArgs* j9vm_args);
-J9VMDllLoadInfo *createLoadInfo (J9PortLibrary* portLibrary, J9Pool* aPool, char* name, U_32 flags, void* methodPointer, UDATA verboseFlags);
+J9VMDllLoadInfo *createLoadInfo (J9PortLibrary* portLibrary, J9Pool* aPool, const char* name, U_32 flags, void* methodPointer, UDATA verboseFlags);
 UDATA jniVersionIsValid (UDATA jniVersion);
 
 

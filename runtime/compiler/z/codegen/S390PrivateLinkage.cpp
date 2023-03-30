@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -58,10 +58,10 @@
 ////////////////////////////////////////////////////////////////////////////////
 // J9::Z::PrivateLinkage for J9
 ////////////////////////////////////////////////////////////////////////////////
-J9::Z::PrivateLinkage::PrivateLinkage(TR::CodeGenerator * codeGen,TR_S390LinkageConventions elc, TR_LinkageConventions lc)
+J9::Z::PrivateLinkage::PrivateLinkage(TR::CodeGenerator * codeGen,TR_LinkageConventions lc)
    : J9::PrivateLinkage(codeGen)
    {
-   setExplicitLinkageType(elc);
+   setLinkageType(lc);
 
    // linkage properties
    setProperty(SplitLongParm);
@@ -100,17 +100,6 @@ J9::Z::PrivateLinkage::PrivateLinkage(TR::CodeGenerator * codeGen,TR_S390Linkage
    setLongDoubleReturnRegister2  (TR::RealRegister::FPR2 );
    setLongDoubleReturnRegister4  (TR::RealRegister::FPR4 );
    setLongDoubleReturnRegister6  (TR::RealRegister::FPR6 );
-
-   if(comp()->target().cpu.isAtLeast(OMR_PROCESSOR_S390_Z13) && comp()->target().cpu.supportsFeature(OMR_FEATURE_S390_VECTOR_FACILITY) &&
-     !comp()->getOption(TR_DisableSIMD))
-       {
-       codeGen->setSupportsVectorRegisters();
-       codeGen->setSupportsAutoSIMD();
-       }
-   else
-      {
-      comp()->setOption(TR_DisableSIMD);
-      }
 
    const bool enableVectorLinkage = codeGen->getSupportsVectorRegisters();
    if (enableVectorLinkage) setVectorReturnRegister(TR::RealRegister::VRF24);
@@ -658,11 +647,6 @@ J9::Z::PrivateLinkage::mapStack(TR::ResolvedMethodSymbol * method)
    lowGCOffset = stackIndex;
    int32_t firstLocalGCIndex = atlas->getNumberOfParmSlotsMapped();
 
-   if (firstLocalGCIndex != 0)
-      {
-      setStackSizeCheckNeeded(true);
-      }
-
    stackIndex -= (atlas->getNumberOfSlotsMapped() - firstLocalGCIndex) * TR::Compiler->om.sizeofReferenceAddress();
 
    uint32_t localObjectAlignment = 1 << TR::Compiler->om.compressedReferenceShift();
@@ -679,8 +663,6 @@ J9::Z::PrivateLinkage::mapStack(TR::ResolvedMethodSymbol * method)
    //
    for (localCursor = automaticIterator.getFirst(); localCursor; localCursor = automaticIterator.getNext())
       {
-      setStackSizeCheckNeeded(true);
-
       if (localCursor->getGCMapIndex() >= 0)
          {
          localCursor->setOffset(stackIndex + TR::Compiler->om.sizeofReferenceAddress() * (localCursor->getGCMapIndex() - firstLocalGCIndex));
@@ -725,7 +707,6 @@ J9::Z::PrivateLinkage::mapStack(TR::ResolvedMethodSymbol * method)
       {
       if (localCursor->getGCMapIndex() < 0 && !TR::Linkage::needsAlignment(localCursor->getDataType(), cg()))
          {
-         setStackSizeCheckNeeded(true);
          mapSingleAutomatic(localCursor, stackIndex);
          }
       localCursor = automaticIterator.getNext();
@@ -739,8 +720,6 @@ J9::Z::PrivateLinkage::mapStack(TR::ResolvedMethodSymbol * method)
       {
       if (localCursor->getGCMapIndex() < 0 && TR::Linkage::needsAlignment(localCursor->getDataType(), cg()))
          {
-         setStackSizeCheckNeeded(true);
-
          stackIndex -= (stackIndex & 0x4) ? 4 : 0;
          mapSingleAutomatic(localCursor, stackIndex);
          }
@@ -933,28 +912,11 @@ J9::Z::PrivateLinkage::setParameterLinkageRegisterIndex(TR::ResolvedMethodSymbol
             break;
          case TR::Float:
          case TR::Double:
-         case TR::DecimalFloat:
             if (numFloatArgs < self()->getNumFloatArgumentRegisters())
                {
                index = numFloatArgs;
                }
             numFloatArgs++;
-            break;
-         case TR::DecimalLongDouble:
-            // On zLinux Long Double is passed in memory using a pointer to buffer
-            if(comp()->target().isLinux())
-               {
-               if(numIntArgs < self()->getNumIntegerArgumentRegisters())
-                  index = numIntArgs++;
-               break;
-               }
-            if ((numFloatArgs & 0x1) !=0)  // if there are odd number of fp args in before a long double arg, need to skip one
-               numFloatArgs++;
-            if (numFloatArgs < self()->getNumFloatArgumentRegisters())
-               {
-               index = numFloatArgs;
-               }
-            numFloatArgs +=2;
             break;
          case TR::PackedDecimal:
          case TR::ZonedDecimal:
@@ -966,17 +928,17 @@ J9::Z::PrivateLinkage::setParameterLinkageRegisterIndex(TR::ResolvedMethodSymbol
          case TR::UnicodeDecimalSignTrailing:
          case TR::Aggregate:
             break;
-         case TR::VectorInt8:
-         case TR::VectorInt16:
-         case TR::VectorInt32:
-         case TR::VectorInt64:
-         case TR::VectorDouble:
-            if (numVectorArgs < self()->getNumVectorArgumentRegisters())
+         default:
+            if (dt.isVector())
                {
-               index = numVectorArgs;
+               // TODO: special handling for Float?
+               if (numVectorArgs < self()->getNumVectorArgumentRegisters())
+                  {
+                  index = numVectorArgs;
+                  }
+               numVectorArgs++;
+               break;
                }
-            numVectorArgs++;
-            break;
          }
       paramCursor->setLinkageRegisterIndex(index);
       paramCursor = paramIterator.getNext();
@@ -1093,7 +1055,7 @@ J9::Z::PrivateLinkage::setupLiteralPoolRegister(TR::Snippet *firstSnippet)
    if (!cg()->isLiteralPoolOnDemandOn() && firstSnippet != NULL)
       {
       // The immediate operand will be patched when the actual address of the literal pool is known
-      if (!comp()->target().cpu.isAtLeast(OMR_PROCESSOR_S390_Z10) || cg()->anyLitPoolSnippets())
+      if (cg()->anyLitPoolSnippets())
          {
          return getLitPoolRealRegister()->getRegisterNumber();
          }
@@ -1132,11 +1094,6 @@ J9::Z::PrivateLinkage::createPrologue(TR::Instruction * cursor)
    regSaveSize = calculateRegisterSaveSize(firstUsedReg, lastUsedReg,
                                            registerSaveDescription,
                                            numIntSaved, numFloatSaved);
-
-   if (regSaveSize != 0)
-      {
-      setStackSizeCheckNeeded(true);
-      }
 
    if (0 && comp()->target().is64Bit())
       {
@@ -1270,11 +1227,10 @@ J9::Z::PrivateLinkage::createPrologue(TR::Instruction * cursor)
       cg()->addSnippet(snippet);
 
       // The stack overflow helper returns back here
-      cursor = generateS390LabelInstruction(cg(), TR::InstOpCode::LABEL, firstNode, reStartLabel, cursor);
+      cursor = generateS390LabelInstruction(cg(), TR::InstOpCode::label, firstNode, reStartLabel, cursor);
       }
 
       // End of stack overflow checking code ////////////////////////
-#if !defined(PUBLIC_BUILD)
    static bool bppoutline = (feGetEnv("TR_BPRP_Outline")!=NULL);
 
    if (bppoutline && cg()->_outlineCall._frequency != -1)
@@ -1291,7 +1247,6 @@ J9::Z::PrivateLinkage::createPrologue(TR::Instruction * cursor)
       TR::MemoryReference * tempMR = generateS390MemoryReference(epReg, 0, cg());
       cursor = generateS390BranchPredictionPreloadInstruction(cg(), TR::InstOpCode::BPP, firstNode, cg()->_outlineArrayCall._callLabel, (int8_t) 0xD, tempMR, cursor);
       }
-#endif
 
       if (cg()->getSupportsRuntimeInstrumentation())
          cursor = TR::TreeEvaluator::generateRuntimeInstrumentationOnOffSequence(cg(), TR::InstOpCode::RION, firstNode, cursor, true);
@@ -1422,14 +1377,10 @@ J9::Z::PrivateLinkage::createPrologue(TR::Instruction * cursor)
    // Save or move arguments according to the result of register assignment.
    cursor = (TR::Instruction *) saveArguments(cursor, false);
 
-   if (comp()->target().cpu.isAtLeast(OMR_PROCESSOR_S390_Z10))
+   static const bool prefetchStack = feGetEnv("TR_PrefetchStack") != NULL;
+   if (cg()->isPrefetchNextStackCacheLine() && prefetchStack)
       {
-      static const bool prefetchStack = feGetEnv("TR_PrefetchStack") != NULL;
-
-      if (cg()->isPrefetchNextStackCacheLine() && prefetchStack)
-         {
-         cursor = generateRXInstruction(cg(), TR::InstOpCode::PFD, firstNode, 2, generateS390MemoryReference(spReg, -256, cg()), cursor);
-         }
+      cursor = generateRXInstruction(cg(), TR::InstOpCode::PFD, firstNode, 2, generateS390MemoryReference(spReg, -256, cg()), cursor);
       }
 
    // Cold Eyecatcher is used for padding of endPC so that Return Address for exception snippets will never equal the endPC.
@@ -1464,9 +1415,7 @@ J9::Z::PrivateLinkage::createEpilogue(TR::Instruction * cursor)
    TR::RealRegister * epReg = getRealRegister(getEntryPointRegister());
    int32_t blockNumber = -1;
 
-#if !defined(PUBLIC_BUILD)
    bool enableBranchPreload = cg()->supportsBranchPreload();
-#endif
 
    dep = cursor->getNext()->getDependencyConditions();
    offset = getOffsetToRegSaveArea();
@@ -1497,7 +1446,7 @@ J9::Z::PrivateLinkage::createEpilogue(TR::Instruction * cursor)
       if (comp()->getOption(TR_TraceCG))
          traceMsg(comp(), "No RAREG context restore needed in Epilog\n");
       }
-#if !defined(PUBLIC_BUILD)
+
    if (enableBranchPreload && (cursor->getNext() == cg()->_hottestReturn._returnInstr))
       {
       if (cg()->_hottestReturn._frequency > 6 && cg()->_hottestReturn._insertBPPInEpilogue)
@@ -1508,7 +1457,6 @@ J9::Z::PrivateLinkage::createEpilogue(TR::Instruction * cursor)
          cg()->_hottestReturn._insertBPPInEpilogue = false;
          }
       }
-#endif
 
    // Restore GPRs
    firstUsedReg = getFirstRestoredRegister(TR::RealRegister::GPR6, TR::RealRegister::GPR12);
@@ -1562,18 +1510,16 @@ J9::Z::PrivateLinkage::createEpilogue(TR::Instruction * cursor)
       cursor = TR::TreeEvaluator::generateRuntimeInstrumentationOnOffSequence(cg(), TR::InstOpCode::RIOFF, currentNode, cursor, true);
 
 
-#if !defined(PUBLIC_BUILD)
    if (enableBranchPreload)
       {
       if (cursor->getNext() == cg()->_hottestReturn._returnInstr)
          {
          if (cg()->_hottestReturn._frequency > 6)
             {
-            cursor = generateS390LabelInstruction(cg(), TR::InstOpCode::LABEL, currentNode, cg()->_hottestReturn._returnLabel, cursor);
+            cursor = generateS390LabelInstruction(cg(), TR::InstOpCode::label, currentNode, cg()->_hottestReturn._returnLabel, cursor);
             }
          }
       }
-#endif
 
    cursor = generateS390RegInstruction(cg(), TR::InstOpCode::BCR, currentNode, getRealRegister(getReturnAddressRegister()), cursor);
    ((TR::S390RegInstruction *)cursor)->setBranchCondition(TR::InstOpCode::COND_BCR);
@@ -1587,7 +1533,7 @@ void
 J9::Z::PrivateLinkage::buildVirtualDispatch(TR::Node * callNode, TR::RegisterDependencyConditions * dependencies,
    TR::Register * vftReg, uint32_t sizeOfArguments)
    {
-   TR_S390RegisterDependencyGroup * Dgroup = dependencies->getPreConditions();
+   TR::RegisterDependencyGroup * Dgroup = dependencies->getPreConditions();
    TR::SymbolReference * methodSymRef = callNode->getSymbolReference();
    TR::MethodSymbol * methodSymbol = methodSymRef->getSymbol()->castToMethodSymbol();
    TR::LabelSymbol * vcallLabel = generateLabelSymbol(cg());
@@ -1619,6 +1565,7 @@ J9::Z::PrivateLinkage::buildVirtualDispatch(TR::Node * callNode, TR::RegisterDep
       switch (methodSymbol->getMandatoryRecognizedMethod())
          {
          case TR::java_lang_invoke_ComputedCalls_dispatchVirtual:
+         case TR::com_ibm_jit_JITHelpers_dispatchVirtual:
             {
             char *j2iSignature = fej9->getJ2IThunkSignatureForDispatchVirtual(methodSymbol->getMethod()->signatureChars(), methodSymbol->getMethod()->signatureLength(), comp());
             int32_t signatureLen = strlen(j2iSignature);
@@ -1781,7 +1728,7 @@ J9::Z::PrivateLinkage::buildVirtualDispatch(TR::Node * callNode, TR::RegisterDep
                      TR_ResolvedMethod * method = chTable->findSingleAbstractImplementer(thisClass, methodSymRef->getOffset(),
                                                                 methodSymRef->getOwningMethod(comp()), comp());
                      if (method &&
-                        ((method->isSameMethod(comp()->getCurrentMethod()) && !comp()->isDLT()) || !method->isInterpreted() || method->isJITInternalNative()))
+                        (comp()->isRecursiveMethodTarget(method) || !method->isInterpreted() || method->isJITInternalNative()))
                         {
                         performGuardedDevirtualization = true;
                         resolvedMethod = method;
@@ -1802,7 +1749,7 @@ J9::Z::PrivateLinkage::buildVirtualDispatch(TR::Node * callNode, TR::RegisterDep
                         TR_ResolvedMethod * calleeMethod = methodSymRef->getOwningMethod(comp())->getResolvedVirtualMethod(comp(),
                                                                 refinedThisClass, methodSymRef->getOffset());
                         if (calleeMethod &&
-                           ((calleeMethod->isSameMethod(comp()->getCurrentMethod()) && !comp()->isDLT()) ||
+                           (comp()->isRecursiveMethodTarget(calleeMethod) ||
                            !calleeMethod->isInterpreted() ||
                            calleeMethod->isJITInternalNative()))
                            {
@@ -1842,7 +1789,7 @@ J9::Z::PrivateLinkage::buildVirtualDispatch(TR::Node * callNode, TR::RegisterDep
 
          if (!performGuardedDevirtualization &&
              !comp()->getOption(TR_DisableInterpreterProfiling) &&
-             comp()->getOption(TR_enableProfiledDevirtualization) &&
+             (callNode->getSymbolReference() != comp()->getSymRefTab()->findObjectNewInstanceImplSymbol()) &&
              TR_ValueProfileInfoManager::get(comp()) && resolvedMethod
              )
             {
@@ -1860,11 +1807,10 @@ J9::Z::PrivateLinkage::buildVirtualDispatch(TR::Node * callNode, TR::RegisterDep
                   {
                   topValue = 0;
                   }
-               // We can't do this guarded devirtualization if the profile data is not correct for this context. See defect 98813
                else
                   {
-                  TR_OpaqueClassBlock *callSiteMethod = methodSymRef->getSymbol()->getResolvedMethodSymbol()->getResolvedMethod()->classOfMethod();
-                  if( fej9->isInstanceOf( (TR_OpaqueClassBlock *)topValue, callSiteMethod, true, true ) != TR_yes )
+                  TR_OpaqueClassBlock *callSiteMethodClass = methodSymRef->getSymbol()->getResolvedMethodSymbol()->getResolvedMethod()->classOfMethod();
+                  if (!cg()->isProfiledClassAndCallSiteCompatible((TR_OpaqueClassBlock *)topValue, callSiteMethodClass))
                      {
                      topValue = 0;
                      }
@@ -1875,7 +1821,7 @@ J9::Z::PrivateLinkage::buildVirtualDispatch(TR::Node * callNode, TR::RegisterDep
                {
                TR_ResolvedMethod *profiledVirtualMethod = methodSymRef->getOwningMethod(comp())->getResolvedVirtualMethod(comp(),
                           (TR_OpaqueClassBlock *)topValue, methodSymRef->getOffset());
-               if (profiledVirtualMethod)
+               if (profiledVirtualMethod && !profiledVirtualMethod->isInterpreted())
                   {
                   if (comp()->getOption(TR_TraceCG))
                      {
@@ -1915,7 +1861,7 @@ J9::Z::PrivateLinkage::buildVirtualDispatch(TR::Node * callNode, TR::RegisterDep
 
             buildDirectCall(callNode, realMethodSymRef,  dependencies, sizeOfArguments);
 
-            if (comp()->getOption(TR_DisableOOL) || !virtualLabel)
+            if (!virtualLabel)
                generateS390BranchInstruction(cg(), TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, callNode, doneVirtualLabel);
             }
          }
@@ -1924,71 +1870,50 @@ J9::Z::PrivateLinkage::buildVirtualDispatch(TR::Node * callNode, TR::RegisterDep
 
       if ( virtualLabel )
          {
-         if (!comp()->getOption(TR_DisableOOL))
-            {
-            traceMsg (comp(), "OOL vcall: generating Vcall dispatch sequence\n");
-            //Using OOL but generating code manually
-            outlinedSlowPath = new (cg()->trHeapMemory()) TR_S390OutOfLineCodeSection(vcallLabel,doneVirtualLabel,cg());
-            cg()->getS390OutOfLineCodeSectionList().push_front(outlinedSlowPath);
-            outlinedSlowPath->swapInstructionListsWithCompilation();
-            }
+         traceMsg (comp(), "OOL vcall: generating Vcall dispatch sequence\n");
+         //Using OOL but generating code manually
+         outlinedSlowPath = new (cg()->trHeapMemory()) TR_S390OutOfLineCodeSection(vcallLabel,doneVirtualLabel,cg());
+         cg()->getS390OutOfLineCodeSectionList().push_front(outlinedSlowPath);
+         outlinedSlowPath->swapInstructionListsWithCompilation();
 
-         TR::Instruction * temp = generateS390LabelInstruction(cg(), TR::InstOpCode::LABEL, callNode, vcallLabel);
-         if (debugObj && !comp()->getOption(TR_DisableOOL))
+         TR::Instruction * temp = generateS390LabelInstruction(cg(), TR::InstOpCode::label, callNode, vcallLabel);
+         if (debugObj)
             {
             debugObj->addInstructionComment(temp, "Denotes start of OOL vcall sequence");
             }
          }
 
       // load class pointer
-      TR::Register *classReg;
-      if (!TR::Compiler->cls.classesOnHeap() && methodSymRef == comp()->getSymRefTab()->findObjectNewInstanceImplSymbol())
+      TR::Register *classReg = vftReg;
+
+      // It should be impossible to have a offset that can't fit in 20bit given Java method table limitations.
+      // We assert here to insure limitation/assumption remains true. If this fires we need to fix this code
+      // and the _virtualUnresolvedHelper() code to deal with a new worst case scenario for patching.
+      TR_ASSERT_FATAL(offset>MINLONGDISP, "JIT VFT offset does not fit in 20bits");
+      TR_ASSERT_FATAL(offset!=0 || unresolvedSnippet, "Offset is 0 yet unresolvedSnippet is NULL");
+      TR_ASSERT_FATAL(offset<=MAX_IMMEDIATE_VAL, "Offset is larger then MAX_IMMEDIATE_VAL");
+
+      // If unresolved/AOT, this instruction will be patched by _virtualUnresolvedHelper() with the correct offset
+      cursor = generateRXInstruction(cg(), TR::InstOpCode::getExtendedLoadOpCode(), callNode, RegRA,
+                                       generateS390MemoryReference(classReg, offset, cg()));
+
+      if (unresolvedSnippet)
          {
-         classReg = RegThis;
-         TR_ASSERT( offset >= 0,"J9::Z::PrivateLinkage::buildVirtualDispatch - Offset to instanceOf method is assumed positive\n");
-         }
-      else
-         {
-         classReg = vftReg;
+         ((TR::S390VirtualUnresolvedSnippet *)unresolvedSnippet)->setPatchVftInstruction(cursor);
          }
 
-      if (!TR::Compiler->cls.classesOnHeap() && offset >= 0 && methodSymRef == comp()->getSymRefTab()->findObjectNewInstanceImplSymbol())
+      // A load immediate into R0 instruction (LHI/LGFI) MUST be generated here because the "LA" instruction used by
+      // the VM to find VFT table entries can't handle negative displacements. For unresolved/AOT targets we must assume
+      // the worse case (offset can't fit in 16bits). VFT offset 0 means unresolved/AOT, otherwise offset is negative.
+      // Some special cases have positive offsets i.e. java/lang/Object.newInstancePrototype()
+      if (!unresolvedSnippet && offset >= MIN_IMMEDIATE_VAL && offset <= MAX_IMMEDIATE_VAL) // Offset fits in 16bits
          {
-         cursor =
-            generateRXInstruction(cg(), TR::InstOpCode::getLoadOpCode(), callNode, RegRA, generateS390MemoryReference(classReg, offset, cg()));
          cursor = generateRIInstruction(cg(), TR::InstOpCode::getLoadHalfWordImmOpCode(), callNode, RegZero, offset);
          }
-      else
+      else // if unresolved || offset can't fit in 16bits
          {
-         // It should be impossible to have a offset that can't fit in 20bit given Java method table limitations.
-         // We assert here to insure limitation/assumption remains true. If this fires we need to fix this code
-         // and the _virtualUnresolvedHelper() code to deal with a new worst case scenario for patching.
-         TR_ASSERT_FATAL(offset>MINLONGDISP, "JIT VFT offset does not fit in 20bits");
-         TR_ASSERT_FATAL(offset!=0 || unresolvedSnippet, "Offset is 0 yet unresolvedSnippet is NULL");
-         TR_ASSERT_FATAL(offset<=MAX_IMMEDIATE_VAL, "Offset is larger then MAX_IMMEDIATE_VAL");
-
          // If unresolved/AOT, this instruction will be patched by _virtualUnresolvedHelper() with the correct offset
-         cursor = generateRXInstruction(cg(), TR::InstOpCode::getExtendedLoadOpCode(), callNode, RegRA,
-                                        generateS390MemoryReference(classReg, offset, cg()));
-
-         if (unresolvedSnippet)
-            {
-            ((TR::S390VirtualUnresolvedSnippet *)unresolvedSnippet)->setPatchVftInstruction(cursor);
-            }
-
-         // A load immediate into R0 instruction (LHI/LGFI) MUST be generated here because the "LA" instruction used by
-         // the VM to find VFT table entries can't handle negative displacements. For unresolved/AOT targets we must assume
-         // the worse case (offset can't fit in 16bits). VFT offset 0 means unresolved/AOT, otherwise offset is negative.
-         // Some special cases have positive offsets i.e. java/lang/Object.newInstancePrototype()
-         if (!unresolvedSnippet && offset >= MIN_IMMEDIATE_VAL && offset <= MAX_IMMEDIATE_VAL) // Offset fits in 16bits
-            {
-            cursor = generateRIInstruction(cg(), TR::InstOpCode::getLoadHalfWordImmOpCode(), callNode, RegZero, offset);
-            }
-         else // if unresolved || offset can't fit in 16bits
-            {
-            // If unresolved/AOT, this instruction will be patched by _virtualUnresolvedHelper() with the correct offset
-            cursor = generateRILInstruction(cg(), TR::InstOpCode::LGFI, callNode, RegZero, static_cast<int32_t>(offset));
-            }
+         cursor = generateRILInstruction(cg(), TR::InstOpCode::LGFI, callNode, RegZero, static_cast<int32_t>(offset));
          }
 
       gcPoint = new (trHeapMemory()) TR::S390RRInstruction(TR::InstOpCode::BASR, callNode, RegRA, RegRA, cg());
@@ -2007,7 +1932,7 @@ J9::Z::PrivateLinkage::buildVirtualDispatch(TR::Node * callNode, TR::RegisterDep
          // Done using OOL with manual code generation
          outlinedSlowPath->swapInstructionListsWithCompilation();
 
-         generateS390LabelInstruction(cg(), TR::InstOpCode::LABEL, callNode, doneVirtualLabel, postDeps);
+         generateS390LabelInstruction(cg(), TR::InstOpCode::label, callNode, doneVirtualLabel, postDeps);
          }
       else
          {
@@ -2180,7 +2105,7 @@ J9::Z::PrivateLinkage::buildVirtualDispatch(TR::Node * callNode, TR::RegisterDep
                         generateS390MemoryReference(snippetReg, ifcSnippet->getDataConstantSnippet()->getSingleDynamicSlotOffset(), cg()), cursor);
 
             // We need a dummy label to hook dependencies onto
-            cursor = generateS390LabelInstruction(cg(), TR::InstOpCode::LABEL, callNode, paramSetupDummyLabel, preDeps, cursor);
+            cursor = generateS390LabelInstruction(cg(), TR::InstOpCode::label, callNode, paramSetupDummyLabel, preDeps, cursor);
 
             //check if cached classPtr matches the receiving object classPtr
             cursor = generateRXInstruction(cg(), TR::InstOpCode::getCmpLogicalOpCode(), callNode, classRegister,
@@ -2231,7 +2156,7 @@ J9::Z::PrivateLinkage::buildVirtualDispatch(TR::Node * callNode, TR::RegisterDep
             cursor = generateRILInstruction(cg(), TR::InstOpCode::LARL, callNode, RegRA, returnLocationLabel, cursor);
 
             // We need a dummy label to hook dependencies.
-            cursor = generateS390LabelInstruction(cg(), TR::InstOpCode::LABEL, callNode, paramSetupDummyLabel, preDeps, cursor);
+            cursor = generateS390LabelInstruction(cg(), TR::InstOpCode::label, callNode, paramSetupDummyLabel, preDeps, cursor);
 
             if (useCLFIandBRCL)
                {
@@ -2287,7 +2212,7 @@ J9::Z::PrivateLinkage::buildVirtualDispatch(TR::Node * callNode, TR::RegisterDep
             cursor = generateS390RegInstruction(cg(), TR::InstOpCode::BCR, callNode, snippetReg, cursor);
             ((TR::S390RegInstruction *)cursor)->setBranchCondition(TR::InstOpCode::COND_BCR);
 
-            cursor = generateS390LabelInstruction(cg(), TR::InstOpCode::DC, callNode,
+            cursor = generateS390LabelInstruction(cg(), TR::InstOpCode::dd, callNode,
                ifcSnippet->getDataConstantSnippet()->getSnippetLabel());
 
             // Added NOP so that the pattern matching code in jit2itrg icallVMprJavaSendPatchupVirtual
@@ -2300,7 +2225,7 @@ J9::Z::PrivateLinkage::buildVirtualDispatch(TR::Node * callNode, TR::RegisterDep
          gcPoint = cursor;
          ((TR::S390CallSnippet *) ifcSnippet)->setBranchInstruction(gcPoint);
 
-         cursor = generateS390LabelInstruction(cg(), TR::InstOpCode::LABEL, callNode, returnLocationLabel, postDeps);
+         cursor = generateS390LabelInstruction(cg(), TR::InstOpCode::label, callNode, returnLocationLabel, postDeps);
 
          if (comp()->getOption(TR_enableInterfaceCallCachingSingleDynamicSlot))
             {
@@ -2344,7 +2269,7 @@ J9::Z::PrivateLinkage::buildDirectCall(TR::Node * callNode, TR::SymbolReference 
    TR_ResolvedMethod * fem = (sym == NULL) ? NULL : sym->getResolvedMethod();
    bool myself;
    bool isJitInduceOSR = callSymRef->isOSRInductionHelper();
-   myself = (fem != NULL && fem->isSameMethod(comp()->getCurrentMethod()) && !comp()->isDLT()) ? true : false;
+   myself = comp()->isRecursiveMethodTarget(fem);
 
    TR_J9VMBase *fej9 = (TR_J9VMBase *)(comp()->fe());
 
@@ -2376,7 +2301,7 @@ J9::Z::PrivateLinkage::buildDirectCall(TR::Node * callNode, TR::SymbolReference 
                                                           callSymRef?callSymRef:callNode->getSymbolReference(), reStartLabel, argSize);
       cg()->addSnippet(snippet);
 
-      auto* reStartInstruction = generateS390LabelInstruction(cg(), TR::InstOpCode::LABEL, callNode, reStartLabel);
+      auto* reStartInstruction = generateS390LabelInstruction(cg(), TR::InstOpCode::label, callNode, reStartLabel);
 
       // NOP is necessary due to confusion when resolving shared slots at a transition. The OSR infrastructure needs
       // to locate the GC map metadata for this transition point by examining the return address. The algorithm used
@@ -2442,7 +2367,7 @@ J9::Z::PrivateLinkage::callPreJNICallOffloadCheck(TR::Node * callNode)
    TR::CodeGenerator * codeGen = cg();
    TR::LabelSymbol * offloadOffRestartLabel = generateLabelSymbol(codeGen);
    TR::LabelSymbol * offloadOffSnippetLabel = generateLabelSymbol(codeGen);
-   TR::SymbolReference * offloadOffSymRef = codeGen->symRefTab()->findOrCreateRuntimeHelper(TR_S390jitPreJNICallOffloadCheck, false, false, false);
+   TR::SymbolReference * offloadOffSymRef = codeGen->symRefTab()->findOrCreateRuntimeHelper(TR_S390jitPreJNICallOffloadCheck);
 
    TR::Instruction *gcPoint = generateS390BranchInstruction(
       codeGen, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, callNode, offloadOffSnippetLabel);
@@ -2450,7 +2375,7 @@ J9::Z::PrivateLinkage::callPreJNICallOffloadCheck(TR::Node * callNode)
 
    codeGen->addSnippet(new (trHeapMemory()) TR::S390HelperCallSnippet(codeGen, callNode,
       offloadOffSnippetLabel, offloadOffSymRef, offloadOffRestartLabel));
-   generateS390LabelInstruction(codeGen, TR::InstOpCode::LABEL, callNode, offloadOffRestartLabel);
+   generateS390LabelInstruction(codeGen, TR::InstOpCode::label, callNode, offloadOffRestartLabel);
    }
 
 void
@@ -2463,10 +2388,10 @@ J9::Z::PrivateLinkage::callPostJNICallOffloadCheck(TR::Node * callNode)
    TR::Instruction *gcPoint = generateS390BranchInstruction(
       codeGen, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, callNode, offloadOnSnippetLabel);
    gcPoint->setNeedsGCMap(0);
-   TR::SymbolReference * offloadOnSymRef = codeGen->symRefTab()->findOrCreateRuntimeHelper(TR_S390jitPostJNICallOffloadCheck, false, false, false);
+   TR::SymbolReference * offloadOnSymRef = codeGen->symRefTab()->findOrCreateRuntimeHelper(TR_S390jitPostJNICallOffloadCheck);
    codeGen->addSnippet(new (trHeapMemory()) TR::S390HelperCallSnippet(codeGen, callNode,
       offloadOnSnippetLabel, offloadOnSymRef, offloadOnRestartLabel));
-   generateS390LabelInstruction(codeGen, TR::InstOpCode::LABEL, callNode, offloadOnRestartLabel);
+   generateS390LabelInstruction(codeGen, TR::InstOpCode::label, callNode, offloadOnRestartLabel);
    }
 
 void J9::Z::PrivateLinkage::collapseJNIReferenceFrame(TR::Node * callNode,
@@ -2490,10 +2415,10 @@ void J9::Z::PrivateLinkage::collapseJNIReferenceFrame(TR::Node * callNode,
       generateS390BranchInstruction(codeGen, TR::InstOpCode::BRC, TR::InstOpCode::COND_BNE, callNode, refPoolSnippetLabel);
    gcPoint->setNeedsGCMap(0);
 
-   TR::SymbolReference * collapseSymRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_S390collapseJNIReferenceFrame, false, false, false);
+   TR::SymbolReference * collapseSymRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_S390collapseJNIReferenceFrame);
    codeGen->addSnippet(new (trHeapMemory()) TR::S390HelperCallSnippet(codeGen, callNode,
       refPoolSnippetLabel, collapseSymRef, refPoolRestartLabel));
-   generateS390LabelInstruction(cg(), TR::InstOpCode::LABEL, callNode, refPoolRestartLabel);
+   generateS390LabelInstruction(cg(), TR::InstOpCode::label, callNode, refPoolRestartLabel);
    }
 
 //JNI Callout frame
@@ -2614,7 +2539,7 @@ void J9::Z::JNILinkage::releaseVMAccessMask(TR::Node * callNode,
        fej9->thisThreadGetPublicFlagsOffset(), self()->cg()));
 
 
-   generateS390LabelInstruction(self()->cg(), TR::InstOpCode::LABEL, callNode, loopHead);
+   generateS390LabelInstruction(self()->cg(), TR::InstOpCode::label, callNode, loopHead);
    loopHead->setStartInternalControlFlow();
 
 
@@ -2670,7 +2595,7 @@ void J9::Z::JNILinkage::releaseVMAccessMask(TR::Node * callNode,
 
    generateS390BranchInstruction(self()->cg(), TR::InstOpCode::BRC, TR::InstOpCode::COND_BNE, callNode, loopHead);
 
-   generateS390LabelInstruction(self()->cg(), TR::InstOpCode::LABEL, callNode, cFlowRegionEnd, postDeps);
+   generateS390LabelInstruction(self()->cg(), TR::InstOpCode::label, callNode, cFlowRegionEnd, postDeps);
    cFlowRegionEnd->setEndInternalControlFlow();
 
 
@@ -2720,7 +2645,7 @@ void J9::Z::JNILinkage::acquireVMAccessMask(TR::Node * callNode, TR::Register * 
 
    self()->cg()->addSnippet(new (self()->trHeapMemory()) TR::S390HelperCallSnippet(self()->cg(), callNode, longAcquireSnippetLabel,
                               comp()->getSymRefTab()->findOrCreateAcquireVMAccessSymbolRef(comp()->getJittedMethodSymbol()), acquireDoneLabel));
-   generateS390LabelInstruction(self()->cg(), TR::InstOpCode::LABEL, callNode, acquireDoneLabel);
+   generateS390LabelInstruction(self()->cg(), TR::InstOpCode::label, callNode, acquireDoneLabel);
    // end of acquire vm accessa
    }
 
@@ -2757,21 +2682,10 @@ J9::Z::JNILinkage::releaseVMAccessMaskAtomicFree(TR::Node * callNode,
    TR_J9VMBase *fej9 = (TR_J9VMBase *)fe();
    TR::CodeGenerator* cg = self()->cg();
 
-   if (comp()->target().cpu.isAtLeast(OMR_PROCESSOR_S390_Z10))
-      {
-      // Store a 1 into vmthread->inNative
-      generateSILInstruction(cg, TR::InstOpCode::getMoveHalfWordImmOpCode(), callNode,
-                           generateS390MemoryReference(methodMetaDataVirtualRegister, offsetof(J9VMThread, inNative), cg),
-                           1);
-      }
-   else
-      {
-      TR::Register* buffer = cg->allocateRegister();
-      generateRIInstruction(cg, TR::InstOpCode::getLoadHalfWordImmOpCode(), callNode, buffer, 1);
-      generateRXInstruction(cg, TR::InstOpCode::getStoreOpCode(), callNode, buffer,
-                            generateS390MemoryReference(methodMetaDataVirtualRegister, offsetof(J9VMThread, inNative), cg));
-      cg->stopUsingRegister(buffer);
-      }
+   // Store a 1 into vmthread->inNative
+   generateSILInstruction(cg, TR::InstOpCode::getMoveHalfWordImmOpCode(), callNode,
+                        generateS390MemoryReference(methodMetaDataVirtualRegister, offsetof(J9VMThread, inNative), cg),
+                        1);
 
 
 #if !defined(J9VM_INTERP_ATOMIC_FREE_JNI_USES_FLUSH)
@@ -2794,7 +2708,7 @@ J9::Z::JNILinkage::releaseVMAccessMaskAtomicFree(TR::Node * callNode,
                                                                          comp()->getSymRefTab()->findOrCreateReleaseVMAccessSymbolRef(comp()->getJittedMethodSymbol()),
                                                                          longReleaseRestartLabel));
 
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, callNode, longReleaseRestartLabel);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, callNode, longReleaseRestartLabel);
    }
 
 /**
@@ -2835,7 +2749,7 @@ J9::Z::JNILinkage::acquireVMAccessMaskAtomicFree(TR::Node * callNode,
                                                                          comp()->getSymRefTab()->findOrCreateAcquireVMAccessSymbolRef(comp()->getJittedMethodSymbol()),
                                                                          longAcquireRestartLabel));
 
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, callNode, longAcquireRestartLabel);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, callNode, longAcquireRestartLabel);
    }
 #endif
 
@@ -2856,7 +2770,7 @@ void J9::Z::JNILinkage::checkException(TR::Node * callNode,
 
    self()->cg()->addSnippet(new (self()->trHeapMemory()) TR::S390HelperCallSnippet(self()->cg(), callNode, exceptionSnippetLabel,
       comp()->getSymRefTab()->findOrCreateThrowCurrentExceptionSymbolRef(comp()->getJittedMethodSymbol()), exceptionRestartLabel));
-   generateS390LabelInstruction(self()->cg(), TR::InstOpCode::LABEL, callNode, exceptionRestartLabel);
+   generateS390LabelInstruction(self()->cg(), TR::InstOpCode::label, callNode, exceptionRestartLabel);
    }
 
 void
@@ -2876,13 +2790,13 @@ J9::Z::JNILinkage::processJNIReturnValue(TR::Node * callNode,
       cFlowRegionStart = generateLabelSymbol(cg);
       cFlowRegionEnd = generateLabelSymbol(cg);
 
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, callNode, cFlowRegionStart);
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, callNode, cFlowRegionStart);
       cFlowRegionStart->setStartInternalControlFlow();
       generateS390CompareAndBranchInstruction(cg, TR::InstOpCode::getCmpOpCode(), callNode, javaReturnRegister, 0, TR::InstOpCode::COND_BE, cFlowRegionEnd);
       generateRXInstruction(cg, TR::InstOpCode::getLoadOpCode(), callNode, javaReturnRegister,
                             generateS390MemoryReference(javaReturnRegister, 0, cg));
 
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, callNode, cFlowRegionEnd);
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, callNode, cFlowRegionEnd);
       cFlowRegionEnd->setEndInternalControlFlow();
       }
    else if ((returnType == TR::Int8) && comp()->getSymRefTab()->isReturnTypeBool(callNode->getSymbolReference()))
@@ -2898,12 +2812,12 @@ J9::Z::JNILinkage::processJNIReturnValue(TR::Node * callNode,
          cFlowRegionStart = generateLabelSymbol(cg);
          cFlowRegionEnd = generateLabelSymbol(cg);
 
-         generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, callNode, cFlowRegionStart);
+         generateS390LabelInstruction(cg, TR::InstOpCode::label, callNode, cFlowRegionStart);
          cFlowRegionStart->setStartInternalControlFlow();
          generateS390CompareAndBranchInstruction(cg, TR::InstOpCode::getCmpOpCode(), callNode, javaReturnRegister,
                                                  0, TR::InstOpCode::COND_BE, cFlowRegionEnd);
          generateRIInstruction(cg, TR::InstOpCode::getLoadHalfWordImmOpCode(), callNode, javaReturnRegister, 1);
-         generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, callNode, cFlowRegionEnd);
+         generateS390LabelInstruction(cg, TR::InstOpCode::label, callNode, cFlowRegionEnd);
          cFlowRegionEnd->setEndInternalControlFlow();
          }
       }
@@ -3015,7 +2929,7 @@ TR::Register * J9::Z::JNILinkage::buildDirectDispatch(TR::Node * callNode)
       }
 
    // JNI dispatch does not allow for any object references to survive in preserved registers as they are saved onto
-   // the system stack, which the JVM stack walker has has no awareness of. Hence we need to ensure that all object
+   // the system stack, which the JVM stack walker has no awareness of. Hence we need to ensure that all object
    // references are evicted from preserved registers at the call site.
    TR::Register* tempReg = cg()->allocateRegister();
 
@@ -3040,9 +2954,22 @@ TR::Register * J9::Z::JNILinkage::buildDirectDispatch(TR::Node * callNode)
 
    if (isJNICallOutFrame)
      {
-     // Sets up PC, Stack pointer and literals offset slots.
-     setupJNICallOutFrame(callNode, javaStackPointerRealRegister, methodMetaDataVirtualRegister,
-                     returnFromJNICallLabel, jniCallDataSnippet);
+      // Sets up PC, Stack pointer and literals offset slots.
+      setupJNICallOutFrame(callNode, javaStackPointerRealRegister, methodMetaDataVirtualRegister,
+                              returnFromJNICallLabel, jniCallDataSnippet);
+
+#if (JAVA_SPEC_VERSION >= 19)
+#if defined(TR_TARGET_64BIT)
+      /**
+       * For virtual threads, bump the callOutCounter.  It is safe and most efficient to
+       * do this unconditionally.  No need to check for overflow.
+       */
+      generateSIInstruction(cg(), TR::InstOpCode::AGSI, callNode, generateS390MemoryReference(methodMetaDataVirtualRegister, fej9->thisThreadGetCallOutCountOffset(), cg()), 1);
+#else    /* TR_TARGET_64BIT */
+   TR_ASSERT_FATAL(false, "Virtual Thread is not supported on 31-Bit platform\n");
+#endif   /* TR_TARGET_64BIT */
+#endif   /* JAVA_SPEC_VERSION >= 19 */
+
      }
    else
      {
@@ -3054,16 +2981,7 @@ TR::Register * J9::Z::JNILinkage::buildDirectDispatch(TR::Node * callNode)
      auto* literalOffsetMemoryReference = new (trHeapMemory()) TR::MemoryReference(methodMetaDataVirtualRegister, (int32_t)fej9->thisThreadGetJavaLiteralsOffset(), codeGen);
 
      // Set up literal offset slot to zero
-     if (comp()->target().cpu.isAtLeast(OMR_PROCESSOR_S390_Z10))
-        {
-        generateSILInstruction(codeGen, TR::InstOpCode::getMoveHalfWordImmOpCode(), callNode, literalOffsetMemoryReference, 0);
-        }
-     else
-        {
-        generateRIInstruction(codeGen, TR::InstOpCode::getLoadHalfWordImmOpCode(), callNode, javaLitOffsetReg, 0);
-
-        generateRXInstruction(codeGen, TR::InstOpCode::getStoreOpCode(), callNode, javaLitOffsetReg, literalOffsetMemoryReference);
-        }
+     generateSILInstruction(codeGen, TR::InstOpCode::getMoveHalfWordImmOpCode(), callNode, literalOffsetMemoryReference, 0);
      }
 
     if (isReleaseVMAccess)
@@ -3105,6 +3023,20 @@ TR::Register * J9::Z::JNILinkage::buildDirectDispatch(TR::Node * callNode)
 #endif
      }
 
+#if (JAVA_SPEC_VERSION >= 19)
+#if defined(TR_TARGET_64BIT)
+   if (isJNICallOutFrame)
+      {
+      /**
+       * For virtual threads, decrement the callOutCounter.  It is safe and most efficient to
+       * do this unconditionally.  No need to check for underflow.
+       */
+      generateSIInstruction(cg(), TR::InstOpCode::AGSI, callNode, generateS390MemoryReference(methodMetaDataVirtualRegister, fej9->thisThreadGetCallOutCountOffset(), cg()), -1);
+      }
+#else    /* TR_TARGET_64BIT */
+   TR_ASSERT_FATAL(false, "Virtual Thread is not supported on 31-Bit platform\n");
+#endif   /* TR_TARGET_64BIT */
+#endif   /* JAVA_SPEC_VERSION >= 19 */
 
    generateRXInstruction(codeGen, TR::InstOpCode::getAddOpCode(), callNode, javaStackPointerRealRegister,
             new (trHeapMemory()) TR::MemoryReference(methodMetaDataVirtualRegister, (int32_t)fej9->thisThreadGetJavaLiteralsOffset(), codeGen));
@@ -3189,6 +3121,7 @@ J9::Z::PrivateLinkage::addSpecialRegDepsForBuildArgs(TR::Node * callNode, TR::Re
          specialArgReg = getJ9MethodArgumentRegister();
          break;
       case TR::java_lang_invoke_ComputedCalls_dispatchVirtual:
+      case TR::com_ibm_jit_JITHelpers_dispatchVirtual:
          specialArgReg = getVTableIndexArgumentRegister();
          break;
       }
@@ -3325,8 +3258,6 @@ J9::Z::PrivateLinkage::buildDirectDispatch(TR::Node * callNode)
          break;
       case TR::fcall:
       case TR::dcall:
-      case TR::dfcall:
-      case TR::ddcall:
          returnRegister = dependencies->searchPostConditionRegister(getFloatReturnRegister());
          break;
       case TR::call:
@@ -3410,14 +3341,7 @@ J9::Z::PrivateLinkage::buildIndirectDispatch(TR::Node * callNode)
          break;
       case TR::fcalli:
       case TR::dcalli:
-      case TR::dfcalli:
-      case TR::ddcalli:
          returnRegister = dependencies->searchPostConditionRegister(getFloatReturnRegister());
-         break;
-      case TR::decalli:
-         highReg = dependencies->searchPostConditionRegister(getLongDoubleReturnRegister0());
-         lowReg = dependencies->searchPostConditionRegister(getLongDoubleReturnRegister2());
-         returnRegister = cg()->allocateFPRegisterPair(lowReg, highReg);
          break;
       case TR::calli:
          returnRegister = NULL;
@@ -3539,7 +3463,7 @@ J9::Z::PrivateLinkage::getSystemStackPointerRegister()
    }
 
 
-J9::Z::JNILinkage::JNILinkage(TR::CodeGenerator * cg, TR_S390LinkageConventions elc, TR_LinkageConventions lc)
-   :J9::Z::PrivateLinkage(cg, elc, lc)
+J9::Z::JNILinkage::JNILinkage(TR::CodeGenerator * cg, TR_LinkageConventions elc)
+   :J9::Z::PrivateLinkage(cg, elc)
    {
    }

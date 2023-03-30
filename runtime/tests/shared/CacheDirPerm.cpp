@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2019 IBM Corp. and others
+ * Copyright (c) 2001, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -41,16 +41,21 @@ extern "C" {
 
 #define EXISTING_DIR_PERM         NEW_DIR_PERM
 #if defined(OPENJ9_BUILD)
-#define NON_EXISTING_DEFAULT_DIR_PERM	J9SH_DIRPERM
-#define EXISTING_DEFAULT_DIR_PERM	NEW_DIR_PERM
-#else
-#define NON_EXISTING_DEFAULT_DIR_PERM	J9SH_DIRPERM_DEFAULT_TMP
-#if defined(J9ZOS390)
-/* on z/OS permission of existing default directory under /tmp is not changed to J9SH_DIRPERM_DEFAULT_TMP. */
-#define EXISTING_DEFAULT_DIR_PERM	NEW_DIR_PERM
-#else /* defined(J9ZOS390) */
-#define EXISTING_DEFAULT_DIR_PERM	J9SH_DIRPERM_DEFAULT_TMP
-#endif /* defined(J9ZOS390) */
+	#define EXISTING_DEFAULT_DIR_PERM	NEW_DIR_PERM
+	#if defined(J9ZOS390)
+	/* on z/OS permission of new default directory under /tmp is J9SH_DIRPERM_DEFAULT_TMP */
+		#define NON_EXISTING_DEFAULT_DIR_PERM	J9SH_DIRPERM_DEFAULT_TMP
+	#else /* defined(J9ZOS390) */
+		#define NON_EXISTING_DEFAULT_DIR_PERM	J9SH_DIRPERM
+	#endif /* defined(J9ZOS390) */
+#else /* defined(OPENJ9_BUILD) */
+	#define NON_EXISTING_DEFAULT_DIR_PERM	J9SH_DIRPERM_DEFAULT_TMP
+	#if defined(J9ZOS390)
+		/* on z/OS permission of existing default directory under /tmp is not changed to J9SH_DIRPERM_DEFAULT_TMP. */
+		#define EXISTING_DEFAULT_DIR_PERM	NEW_DIR_PERM
+	#else /* defined(J9ZOS390) */
+		#define EXISTING_DEFAULT_DIR_PERM	J9SH_DIRPERM_DEFAULT_TMP
+	#endif /* defined(J9ZOS390) */
 #endif /* defined(OPENJ9_BUILD) */
 
 extern "C" IDATA removeTempDir(J9JavaVM *vm, char *dir);
@@ -83,11 +88,11 @@ CacheDirPerm::getTempCacheDir(J9JavaVM *vm, I_32 cacheType, bool useDefaultDir, 
 
 	if (useDefaultDir) {
 		flags |= J9SHMEM_GETDIR_APPEND_BASEDIR;
-#if defined(OPENJ9_BUILD)
+#if defined(OPENJ9_BUILD) && !defined(J9ZOS390)
 		if (!groupAccess) {
 			flags |= J9SHMEM_GETDIR_USE_USERHOME;
 		}
-#endif /* defined(OPENJ9_BUILD) */
+#endif /* defined(OPENJ9_BUILD) && !defined(J9ZOS390) */
 	}
 
 	memset(cacheDir, 0, J9SH_MAXPATH);
@@ -276,7 +281,6 @@ testCacheDirPerm(J9JavaVM *vm)
 #endif
 			break;
 		case 1:
-#if !defined(J9SHR_CACHELET_SUPPORT)
 			/* non-persistent cache; use existing non-default directory; don't use cacheDirPerm */
 			cacheType = J9PORT_SHR_CACHE_TYPE_NONPERSISTENT;
 			cacheTypeString = "non persistent";
@@ -284,7 +288,7 @@ testCacheDirPerm(J9JavaVM *vm)
 			cacheDirPermStr = NULL;
 			expectedDirPerm = EXISTING_DIR_PERM;
 			useDefaultDir = false;
-#endif
+
 			break;
 		case 2:
 #if !(defined(J9ZOS390))
@@ -298,7 +302,6 @@ testCacheDirPerm(J9JavaVM *vm)
 #endif
 			break;
 		case 3:
-#if !defined(J9SHR_CACHELET_SUPPORT)
 			/* non-persistent cache; use non-existing non-default directory; don't use cacheDirPerm */
 			cacheType = J9PORT_SHR_CACHE_TYPE_NONPERSISTENT;
 			cacheTypeString = "non persistent";
@@ -306,7 +309,7 @@ testCacheDirPerm(J9JavaVM *vm)
 			cacheDirPermStr = NULL;
 			expectedDirPerm = J9SH_DIRPERM;
 			useDefaultDir = false;
-#endif
+
 			break;
 		case 4:
 #if !(defined(J9ZOS390))
@@ -320,7 +323,6 @@ testCacheDirPerm(J9JavaVM *vm)
 #endif
 			break;
 		case 5:
-#if !defined(J9SHR_CACHELET_SUPPORT)
 			/* non-persistent cache; use existing non-default directory; use cacheDirPerm */
 			cacheType = J9PORT_SHR_CACHE_TYPE_NONPERSISTENT;
 			cacheTypeString = "non persistent";
@@ -328,7 +330,7 @@ testCacheDirPerm(J9JavaVM *vm)
 			cacheDirPermStr = USER_PERMISSION_STR;
 			expectedDirPerm = NEW_DIR_PERM;
 			useDefaultDir = false;
-#endif
+
 			break;
 		case 6:
 #if !(defined(J9ZOS390))
@@ -342,7 +344,6 @@ testCacheDirPerm(J9JavaVM *vm)
 #endif
 			break;
 		case 7:
-#if !defined(J9SHR_CACHELET_SUPPORT)
 			/* non-persistent cache; use non-existing non-default directory; use cacheDirPerm */
 			cacheType = J9PORT_SHR_CACHE_TYPE_NONPERSISTENT;
 			cacheTypeString = "non persistent";
@@ -350,7 +351,7 @@ testCacheDirPerm(J9JavaVM *vm)
 			cacheDirPermStr = USER_PERMISSION_STR;
 			expectedDirPerm = USER_PERMISSION;
 			useDefaultDir = false;
-#endif
+
 			break;
 		case 8:
 #if !(defined(J9ZOS390))
@@ -364,7 +365,6 @@ testCacheDirPerm(J9JavaVM *vm)
 #endif
 			break;
 		case 9:
-#if !defined(J9SHR_CACHELET_SUPPORT)
 			/* non-persistent cache; use existing default directory; don't use cacheDirPerm */
 			cacheType = J9PORT_SHR_CACHE_TYPE_NONPERSISTENT;
 			cacheTypeString = "non persistent";
@@ -372,7 +372,7 @@ testCacheDirPerm(J9JavaVM *vm)
 			cacheDirPermStr = NULL;
 			expectedDirPerm = EXISTING_DEFAULT_DIR_PERM;
 			useDefaultDir = true;
-#endif
+
 			break;
 		case 10:
 #if !(defined(J9ZOS390))
@@ -386,7 +386,6 @@ testCacheDirPerm(J9JavaVM *vm)
 #endif
 			break;
 		case 11:
-#if !defined(J9SHR_CACHELET_SUPPORT)
 			/* non-persistent cache; use existing default directory; use cacheDirPerm */
 			cacheType = J9PORT_SHR_CACHE_TYPE_NONPERSISTENT;
 			cacheTypeString = "non persistent";
@@ -394,7 +393,7 @@ testCacheDirPerm(J9JavaVM *vm)
 			cacheDirPermStr = USER_PERMISSION_STR;
 			expectedDirPerm = EXISTING_DEFAULT_DIR_PERM;
 			useDefaultDir = true;
-#endif
+
 			break;
 		case 12:
 #if !(defined(J9ZOS390))
@@ -408,7 +407,6 @@ testCacheDirPerm(J9JavaVM *vm)
 #endif
 			break;
 		case 13:
-#if !defined(J9SHR_CACHELET_SUPPORT)
 			/* non-persistent cache; use non-existing default directory; don't use cacheDirPerm */
 			cacheType = J9PORT_SHR_CACHE_TYPE_NONPERSISTENT;
 			cacheTypeString = "non persistent";
@@ -416,7 +414,7 @@ testCacheDirPerm(J9JavaVM *vm)
 			cacheDirPermStr = NULL;
 			expectedDirPerm = NON_EXISTING_DEFAULT_DIR_PERM;
 			useDefaultDir = true;
-#endif
+
 			break;
 		case 14:
 #if !(defined(J9ZOS390))
@@ -430,7 +428,6 @@ testCacheDirPerm(J9JavaVM *vm)
 #endif /* !(defined(J9ZOS390)) */
 			break;
 		case 15:
-#if !defined(J9SHR_CACHELET_SUPPORT)
 			/* non-persistent cache; use non-existing default directory; use cacheDirPerm */
 			cacheType = J9PORT_SHR_CACHE_TYPE_NONPERSISTENT;
 			cacheTypeString = "non persistent";
@@ -438,7 +435,7 @@ testCacheDirPerm(J9JavaVM *vm)
 			cacheDirPermStr = USER_PERMISSION_STR;
 			expectedDirPerm = NON_EXISTING_DEFAULT_DIR_PERM;
 			useDefaultDir = true;
-#endif
+
 			break;
 		case 16:
 #if !defined(J9ZOS390)

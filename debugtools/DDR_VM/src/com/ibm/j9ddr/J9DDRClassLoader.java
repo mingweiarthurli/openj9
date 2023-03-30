@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -59,16 +59,6 @@ public class J9DDRClassLoader extends SecureClassLoader {
 	private static boolean shouldGeneratePointerClasses(StructureReader reader) {
 		if (reader.getPackageVersion() < 29) {
 			// Prior to VM version 29, pointers classes are loaded from j9ddr.jar.
-			return false;
-		}
-
-		// Get pointer sizes in bytes (rounding up for 31-bit s390 VMs).
-		int hostPointerSize = (Integer.getInteger("sun.arch.data.model", 0) + 7) / 8;
-		int corePointerSize = reader.getSizeOfUDATA();
-
-		if (hostPointerSize == corePointerSize) {
-			// The VM that produced the core file has the same size pointers
-			// as this VM: we can use the pointers classes in j9ddr.jar.
 			return false;
 		}
 
@@ -122,6 +112,7 @@ public class J9DDRClassLoader extends SecureClassLoader {
 		return reader.getHeader();
 	}
 
+	@Override
 	protected Class<?> findClass(String binaryName) throws ClassNotFoundException {
 		Class<?> clazz = cache.get(binaryName);
 
@@ -205,6 +196,7 @@ public class J9DDRClassLoader extends SecureClassLoader {
 	}
 
 	// Cause per core file classes to be loaded once per core file, and shared classes to be loaded once per runtime.
+	@Override
 	public Class<?> loadClass(String name, boolean resolve) throws ClassNotFoundException {
 		if (name.startsWith(streamPackageDotName)) {
 			Class<?> clazz = findLoadedClass(name);

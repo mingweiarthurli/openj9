@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -62,15 +62,10 @@ SymbolReference::SymbolReference(
       symRefTab->comp()->registerResolvedMethodSymbolReference(self());
 
    //Check for init method
-   if (sym->isMethod())
+   if (sym->isMethod() &&
+       sym->castToMethodSymbol()->getMethod()->isConstructor())
       {
-      char *name         = sym->castToMethodSymbol()->getMethod()->nameChars();
-      int   nameLen      = sym->castToMethodSymbol()->getMethod()->nameLength();
-      if ((nameLen == 6) &&
-          !strncmp(name, "<init>", 6))
-         {
-         self()->setInitMethod();
-         }
+      self()->setInitMethod();
       }
 
    symRefTab->checkImmutable(self());
@@ -272,18 +267,18 @@ SymbolReference::getTypeSignature(int32_t & len, TR_AllocationKind allocKind, bo
                        const char * s = TR::Compiler->cls.classNameChars(comp, classOfObject, len);
                        if (s && (s[0] != '['))
                           {
-                          s = classNameToSignature(s, len, comp);
+                          s = TR::Compiler->cls.classNameToSignature(s, len, comp);
                           }
                        else
                           {
                           int32_t numParens = 0;
-                          while (s && (s[0] == '[') && (s[1] == 'L'))
+                          while (s && (s[0] == '[') && (s[1] == 'L' || s[1] == 'Q'))
                              {
                              numParens++;
                              classOfObject = comp->fe()->getComponentClassFromArrayClass(classOfObject);
                              s = TR::Compiler->cls.classNameChars(comp, classOfObject, len);
-                              }
-                          s = classNameToSignature(s, len, comp);
+                             }
+                          s = TR::Compiler->cls.classNameToSignature(s, len, comp);
                           s = prependNumParensToSig(s, len, numParens);
                           }
 
@@ -303,7 +298,7 @@ SymbolReference::getTypeSignature(int32_t & len, TR_AllocationKind allocKind, bo
                len = 18;
                return "Ljava/lang/Object;";
                }
-            return classNameToSignature(sig, len, comp, allocKind);
+            return TR::Compiler->cls.classNameToSignature(sig, len, comp, allocKind);
             }
 
          if (_symbol->isConstString())
@@ -329,10 +324,23 @@ SymbolReference::getTypeSignature(int32_t & len, TR_AllocationKind allocKind, bo
             len = condySigLength;
             return returnType;
             }
+         if (_symbol->isNonSpecificConstObject())
+            {
+            TR::StaticSymbol * symbol = _symbol->castToStaticSymbol();
+            uintptr_t objectLocation = (uintptr_t)symbol->getStaticAddress();
+            TR_OpaqueClassBlock *clazz = comp->fej9()->getObjectClassAt(objectLocation);
+            char *type = comp->fej9()->getClassSignature(clazz, comp->trMemory());
+            len = strlen(type);
+            return type;
+            }
          if (_symbol->isConst())
             {
             len = 1;
             return dataTypeToSig[_symbol->getDataType()];
+            }
+         if (_symbol->isStaticDefaultValueInstance())
+            {
+            return 0;
             }
 
          persistentClassInfo =

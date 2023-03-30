@@ -1,6 +1,6 @@
 /*[INCLUDE-IF DAA]*/
 /*******************************************************************************
- * Copyright (c) 2013, 2015 IBM Corp. and others
+ * Copyright (c) 2013, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,11 +16,10 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
-
 package com.ibm.dataaccess;
 
 import java.math.BigInteger;
@@ -40,6 +39,7 @@ public final class PackedDecimal {
      * Private constructor, class contains only static methods.
      */
     private PackedDecimal() {
+        super();
     }
 
     private static final ThreadLocal<PackedDecimalOperand> op1_threadLocal = new ThreadLocal<PackedDecimalOperand>() {
@@ -242,7 +242,7 @@ public final class PackedDecimal {
     }
 
     /**
-     * Add two Packed Decimals in byte arrays. The sign of an input Packed Decimal is assumed to to be positive unless
+     * Add two Packed Decimals in byte arrays. The sign of an input Packed Decimal is assumed to be positive unless
      * the sign nibble contains one of the negative sign codes, in which case the sign of the respective input Packed
      * Decimal is interpreted as negative.
      * 
@@ -312,7 +312,7 @@ public final class PackedDecimal {
     }
 
     /**
-     * Subtracts two Packed Decimals in byte arrays. The sign of an input Packed Decimal is assumed to to be positive
+     * Subtracts two Packed Decimals in byte arrays. The sign of an input Packed Decimal is assumed to be positive
      * unless the sign nibble contains one of the negative sign codes, in which case the sign of the respective input
      * Packed Decimal is interpreted as negative.
      * 
@@ -606,7 +606,7 @@ public final class PackedDecimal {
     private static final int MULTIPLY = 1, DIVIDE = 2, REMAINDER = 3;
 
     /**
-     * Multiplies two Packed Decimals in byte arrays. The sign of an input Packed Decimal is assumed to to be positive
+     * Multiplies two Packed Decimals in byte arrays. The sign of an input Packed Decimal is assumed to be positive
      * unless the sign nibble contains one of the negative sign codes, in which case the sign of the respective input
      * Packed Decimal is interpreted as negative.
      * 
@@ -677,7 +677,7 @@ public final class PackedDecimal {
     }
 
     /**
-     * Divides two Packed Decimals is byte arrays. The sign of an input Packed Decimal is assumed to to be positive
+     * Divides two Packed Decimals is byte arrays. The sign of an input Packed Decimal is assumed to be positive
      * unless the sign nibble contains one of the negative sign codes, in which case the sign of the respective input
      * Packed Decimal is interpreted as negative.
      * 
@@ -748,7 +748,7 @@ public final class PackedDecimal {
 
     /**
      * Calculates the remainder resulting from the division of two Packed Decimals in byte arrays. The sign of an input
-     * Packed Decimal is assumed to to be positive unless the sign nibble contains one of the negative sign codes, in
+     * Packed Decimal is assumed to be positive unless the sign nibble contains one of the negative sign codes, in
      * which case the sign of the respective input Packed Decimal is interpreted as negative.
      * 
      * @param result
@@ -842,14 +842,14 @@ public final class PackedDecimal {
         int charStart = neg ? 1 : 0;
         int charEnd = chars.length - 1;
 
-        pd[end--] = (byte) ((neg ? 0x0D : 0x0C) | (chars[charEnd--] - '0' << 4));
+        pd[end--] = (byte) ((neg ? 0x0D : 0x0C) | ((chars[charEnd--] - '0') << 4));
 
         while (end >= offset) {
             byte b = 0;
             if (charEnd >= charStart) {
                 b = (byte) (chars[charEnd--] - '0');
                 if (charEnd >= charStart) {
-                    b |= chars[charEnd--] - '0' << 4;
+                    b |= (byte) ((chars[charEnd--] - '0') << 4);
                 }
             }
             pd[end--] = b;
@@ -1451,7 +1451,7 @@ public final class PackedDecimal {
         
     	if ((byte) (packedDecimal[end] & CommonData.HIGHER_NIBBLE_MASK) == (byte) 0x00) 
         {        
-        	byte[] addTenArray = { (0x01), (byte) packedDecimal[end] };
+        	byte[] addTenArray = { 0x01, packedDecimal[end] };
             addPackedDecimal(packedDecimal, offset, precision,
                     packedDecimal, offset, precision, addTenArray, 0, 2,
                     checkOverflow);
@@ -1988,6 +1988,10 @@ public final class PackedDecimal {
     }
 
     private static class PackedDecimalOperand {
+
+    	PackedDecimalOperand() {
+            super();
+    	}
 
         private static final byte PACKED_ZERO = 0x00;
 

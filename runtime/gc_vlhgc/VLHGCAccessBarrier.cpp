@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -47,7 +47,7 @@
 #include "JNICriticalRegion.hpp"
 #include "ObjectModel.hpp"
 #include "SublistFragment.hpp"
-#include "ScavengerForwardedHeader.hpp"
+#include "ForwardedHeader.hpp"
 
 MM_VLHGCAccessBarrier *
 MM_VLHGCAccessBarrier::newInstance(MM_EnvironmentBase *env)
@@ -106,19 +106,19 @@ MM_VLHGCAccessBarrier::postObjectStore(J9VMThread *vmThread, J9Class *destClass,
 }
 
 bool 
-MM_VLHGCAccessBarrier::preBatchObjectStore(J9VMThread *vmThread, J9Object *destObject, bool isVolatile)
+MM_VLHGCAccessBarrier::postBatchObjectStore(J9VMThread *vmThread, J9Object *destObject, bool isVolatile)
 {
-	preBatchObjectStoreImpl(vmThread, destObject);
+	postBatchObjectStoreImpl(vmThread, destObject);
 	
 	return true;
 }
 
 bool 
-MM_VLHGCAccessBarrier::preBatchObjectStore(J9VMThread *vmThread, J9Class *destClass, bool isVolatile)
+MM_VLHGCAccessBarrier::postBatchObjectStore(J9VMThread *vmThread, J9Class *destClass, bool isVolatile)
 {
 	j9object_t destObject = J9VM_J9CLASS_TO_HEAPCLASS(destClass);
 	
-	preBatchObjectStoreImpl(vmThread, destObject);
+	postBatchObjectStoreImpl(vmThread, destObject);
 	
 	return true;
 }
@@ -167,7 +167,7 @@ MM_VLHGCAccessBarrier::postObjectStoreImpl(J9VMThread *vmThread, J9Object *dstOb
  * to optimistically add an object to the remembered set without checking too hard.
  */
 void 
-MM_VLHGCAccessBarrier::preBatchObjectStoreImpl(J9VMThread *vmThread, J9Object *dstObject)
+MM_VLHGCAccessBarrier::postBatchObjectStoreImpl(J9VMThread *vmThread, J9Object *dstObject)
 {
 	MM_EnvironmentVLHGC *env = MM_EnvironmentVLHGC::getEnvironment(vmThread);
 	_extensions->cardTable->dirtyCard(env, dstObject);
@@ -443,26 +443,27 @@ MM_VLHGCAccessBarrier::copyStringCritical(J9VMThread *vmThread, GC_ArrayObjectMo
 {
 	jint length = J9VMJAVALANGSTRING_LENGTH(vmThread, stringObject);
 	UDATA sizeInBytes = length * sizeof(jchar);
-	*data = (jchar*)functions->jniArrayAllocateMemoryFromThread(vmThread, sizeInBytes);
-	if (NULL == *data) {
+	jchar *copyArr = (jchar*)functions->jniArrayAllocateMemoryFromThread(vmThread, sizeInBytes);
+	if (NULL == copyArr) {
 		/* better error message here? */
 		functions->setNativeOutOfMemoryError(vmThread, 0, 0);
 	} else {
 		if (isCompressed) {
 			for (jint i = 0; i < length; i++) {
-				*data[i] = (jchar)J9JAVAARRAYOFBYTE_LOAD(vmThread, (j9object_t)valueObject, i) & (jchar)0xFF;
+				copyArr[i] = (jchar)(U_8)J9JAVAARRAYOFBYTE_LOAD(vmThread, (j9object_t)valueObject, i);
 			}
 		} else {
 			if (J9_ARE_ANY_BITS_SET(javaVM->runtimeFlags, J9_RUNTIME_STRING_BYTE_ARRAY)) {
 				/* This API determines the stride based on the type of valueObject so in the [B case we must passin the length in bytes */
-				indexableObjectModel->memcpyFromArray(*data, valueObject, 0, (I_32)sizeInBytes);
+				indexableObjectModel->memcpyFromArray(copyArr, valueObject, 0, (I_32)sizeInBytes);
 			} else {
-				indexableObjectModel->memcpyFromArray(*data, valueObject, 0, length);
+				indexableObjectModel->memcpyFromArray(copyArr, valueObject, 0, length);
 			}
 		}
 		if (NULL != isCopy) {
 			*isCopy = JNI_TRUE;
 		}
+		*data = copyArr;
 		vmThread->jniCriticalCopyCount += 1;
 	}
 }
@@ -613,7 +614,7 @@ MM_VLHGCAccessBarrier::jniReleaseStringCritical(J9VMThread* vmThread, jstring st
 bool
 MM_VLHGCAccessBarrier::preWeakRootSlotRead(J9VMThread *vmThread, j9object_t *srcAddress)
 {
-	MM_ScavengerForwardedHeader forwardedHeader(*srcAddress, compressObjectReferences());
+	MM_ForwardedHeader forwardedHeader(*srcAddress, compressObjectReferences());
 	J9Object* forwardedPtr = forwardedHeader.getForwardedObject();
 	if (NULL != forwardedPtr) {
 		*srcAddress = forwardedPtr;
@@ -625,11 +626,20 @@ MM_VLHGCAccessBarrier::preWeakRootSlotRead(J9VMThread *vmThread, j9object_t *src
 bool
 MM_VLHGCAccessBarrier::preWeakRootSlotRead(J9JavaVM *vm, j9object_t *srcAddress)
 {
-	MM_ScavengerForwardedHeader forwardedHeader(*srcAddress, compressObjectReferences());
+	MM_ForwardedHeader forwardedHeader(*srcAddress, compressObjectReferences());
 	J9Object* forwardedPtr = forwardedHeader.getForwardedObject();
 	if (NULL != forwardedPtr) {
 		*srcAddress = forwardedPtr;
 	}
 
 	return true;
+}
+
+void
+MM_VLHGCAccessBarrier::postUnmountContinuation(J9VMThread *vmThread, j9object_t contObject)
+{
+	/* Conservatively assume that via mutations of stack slots (which are not subject to access barriers),
+	 * all post-write barriers have been triggered on this Continuation object, since it's been mounted.
+	 */
+	postBatchObjectStore(vmThread, contObject);
 }

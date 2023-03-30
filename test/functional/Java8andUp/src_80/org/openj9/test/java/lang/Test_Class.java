@@ -1,7 +1,7 @@
 package org.openj9.test.java.lang;
 
 /*******************************************************************************
- * Copyright (c) 1998, 2018 IBM Corp. and others
+ * Copyright (c) 1998, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -17,7 +17,7 @@ package org.openj9.test.java.lang;
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -29,7 +29,6 @@ import org.testng.Assert;
 import org.testng.AssertJUnit;
 import org.testng.log4testng.Logger;
 import java.io.File;
-import java.io.IOException;
 import java.io.InputStream;
 import java.lang.annotation.Annotation;
 import java.lang.annotation.Inherited;
@@ -43,10 +42,8 @@ import java.lang.reflect.Member;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.lang.reflect.Parameter;
-import java.net.MalformedURLException;
 import java.net.URL;
 import java.net.URLClassLoader;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -67,7 +64,6 @@ import org.openj9.test.java.lang.specimens.I_SupDuper_SupA;
 import org.openj9.test.java.lang.specimens.InterfaceTestClasses;
 import org.openj9.test.java.lang.specimens.SuperA;
 import org.openj9.test.java.lang.specimens.SuperDuper;
-import org.openj9.test.support.resource.Support_Resources;
 
 import sun.misc.SharedSecrets;
 
@@ -145,7 +141,7 @@ public class Test_Class {
 	 */
 	@Test
 	public void test_forName() {
-		// Test for method java.lang.Class java.lang.Class.forName(java.lang.String)
+		// Test for method java.lang.Class.forName(java.lang.String)
 		try {
 			AssertJUnit.assertTrue("Class for name failed for java.lang.Object",
 					Class.forName("java.lang.Object") == java.lang.Object.class);
@@ -332,51 +328,6 @@ public class Test_Class {
 		}
 	}
 
-	@Test
-	public void test_getMethods_subtest2() {
-
-		java.security.PrivilegedAction action = new java.security.PrivilegedAction() {
-			public Object run() {
-				try {
-					File resources = Support_Resources.createTempFolder();
-					String[] expected_E = new String[] {
-							"org.openj9.resources.classinheritance.E.method_N(java.lang.String)",
-							"org.openj9.resources.classinheritance.E.method_M(java.lang.String)",
-							"org.openj9.resources.classinheritance.A.method_K(java.lang.String)",
-							"org.openj9.resources.classinheritance.E.method_L(java.lang.String)",
-							"org.openj9.resources.classinheritance.E.method_O(java.lang.String)",
-							"org.openj9.resources.classinheritance.B.method_K(java.lang.String)" };
-
-					Support_Resources.copyFile(resources, null, "openj9tr_general.jar");
-					File file = new File(resources.toString() + "/openj9tr_general.jar");
-					java.net.URL url = new java.net.URL("file:" + file.getPath());
-					ClassLoader loader = new java.net.URLClassLoader(new java.net.URL[] { url }, null);
-
-					Class cls_E = Class.forName("org.openj9.resources.classinheritance.E", false, loader);
-					Method[] methodNames_E = cls_E.getMethods();
-					AssertJUnit.assertEquals("Returned incorrect number of methods for cls_E",
-							expected_E.length + Object.class.getMethods().length, methodNames_E.length);
-					for (int i = 0; i < expected_E.length; i++) {
-						boolean match = false;
-						for (int j = 0; j < methodNames_E.length; j++) {
-							if (methodNames_E[j].toString().indexOf(expected_E[i]) != -1) {
-								match = true;
-							}
-						}
-						AssertJUnit.assertTrue("Expected method " + expected_E[i] + " not found.", match);
-					}
-				} catch (MalformedURLException e) {
-					logger.error("Unexpected exception: " + e);
-				} catch (ClassNotFoundException e) {
-					logger.error("Unexpected exception: " + e);
-				}
-
-				return null;
-			}
-		};
-		java.security.AccessController.doPrivileged(action);
-	}
-
 	static class ParentClass {
 		public static void methodPublicStatic() {}
 		public void methodPublicInstance() {}
@@ -457,6 +408,35 @@ public class Test_Class {
 		Method specificMethod = clz.getMethod("foo");
 		Assert.assertEquals(java.util.List.class, specificMethod.getReturnType(), 
 			"Expected method return type: " + java.util.List.class + " but got: " + specificMethod.getReturnType());
+	}
+	abstract class ClzParent {}
+	class ClzChild extends ClzParent {}
+	class ClzImpl implements InterFaceLayerOne {
+		@Override
+		public ClzChild getType() {
+			return null;
+		}
+	}
+	interface InterFaceLayerOne extends InterfaceLayerTwoA<ClzChild>, InterfaceLayerTwoB {}
+	interface InterfaceLayerTwoA<S> extends InterfaceLayerThreeA<ClzChild>, InterfaceLayerThreeB {}
+	interface InterfaceLayerTwoB {
+		ClzParent getType();
+	}
+	interface InterfaceLayerThreeA<S> {
+		S getType();
+	}
+	interface InterfaceLayerThreeB {
+		ClzParent getType();
+	}
+	@Test
+	public void test_getMethods_subtest8() throws Exception {
+		ClzImpl clzImpl = new ClzImpl();
+		for (Method method : clzImpl.getClass().getMethods()) {
+			for (Class<?> anInterface : method.getDeclaringClass().getInterfaces()) {
+				Method intfMethod = anInterface.getMethod(method.getName(), method.getParameterTypes());
+				Assert.assertEquals(intfMethod.toString(), "public abstract java.lang.Object org.openj9.test.java.lang.Test_Class$InterfaceLayerThreeA.getType()");
+			}
+		}
 	}
 	
 	class TestSpecificMethodsCL extends ClassLoader {
@@ -687,177 +667,11 @@ public class Test_Class {
 	}
 
 	/**
-	 * @tests java.lang.Class#getClasses()
-	 */
-	@Test
-	public void test_getClasses2() {
-		final java.security.Permission privCheckPermission = new java.security.BasicPermission("Privilege check") {
-		};
-		class MyCombiner implements java.security.DomainCombiner {
-			boolean combine;
-
-			public java.security.ProtectionDomain[] combine(java.security.ProtectionDomain[] executionDomains,
-					java.security.ProtectionDomain[] parentDomains) {
-				combine = true;
-				return new java.security.ProtectionDomain[0];
-			}
-
-			public boolean isPriviledged() {
-				combine = false;
-				try {
-					java.security.AccessController.checkPermission(privCheckPermission);
-				} catch (SecurityException e) {
-				}
-				return !combine;
-			}
-		}
-		;
-		final MyCombiner combiner = new MyCombiner();
-		class SecurityManagerCheck extends SecurityManager {
-			String reason;
-			Class checkClass;
-			int checkType;
-			int checkPermission = 0;
-			int checkMemberAccess = 0;
-			int checkPackageAccess = 0;
-
-			public void setExpected(String reason, Class cls, int type) {
-				this.reason = reason;
-				checkClass = cls;
-				checkType = type;
-				checkPermission = 0;
-				checkMemberAccess = 0;
-				checkPackageAccess = 0;
-			}
-
-			public void checkPermission(java.security.Permission perm) {
-				if (combiner.isPriviledged())
-					return;
-				checkPermission++;
-			}
-
-			public void checkPackageAccess(String packageName) {
-				if (packageName.startsWith("java.") || packageName.startsWith("org.openj9.test.java.lang")) {
-					return;
-				}
-				if (combiner.isPriviledged())
-					return;
-				checkPackageAccess++;
-				String name = checkClass.getName();
-				int index = name.lastIndexOf('.');
-				String checkPackage = name.substring(0, index);
-				AssertJUnit.assertTrue(reason + " unexpected package: " + packageName,
-						packageName.equals(checkPackage));
-			}
-
-			public void assertProperCalls() {
-				int declared = checkType == Member.DECLARED ? 1 : 0;
-				AssertJUnit.assertTrue(reason + " unexpected checkPermission count: " + checkPermission,
-						checkPermission == declared);
-				AssertJUnit.assertTrue(reason + " unexpected checkPackageAccess count: " + checkPackageAccess,
-						checkPackageAccess == 1);
-			}
-		}
-
-		final SecurityManagerCheck sm = new SecurityManagerCheck();
-		System.setSecurityManager(sm);
-
-		java.security.AccessControlContext acc = new java.security.AccessControlContext(
-				new java.security.ProtectionDomain[0]);
-		java.security.AccessControlContext acc2 = new java.security.AccessControlContext(acc, combiner);
-
-		java.security.PrivilegedAction action = new java.security.PrivilegedAction() {
-			public Object run() {
-				File resources = Support_Resources.createTempFolder();
-				try {
-					Support_Resources.copyFile(resources, null, "openj9tr_general.jar");
-					File file = new File(resources.toString() + "/openj9tr_general.jar");
-					java.net.URL url = new java.net.URL("file:" + file.getPath());
-					ClassLoader loader = new java.net.URLClassLoader(new java.net.URL[] { url }, null);
-					Class cls = Class.forName("org.openj9.resources.security.SecurityTestSub", false, loader);
-					// must preload junit.framework.Assert before installing SecurityManager
-					// otherwise loading it inside checkPackageAccess() is recursive
-					AssertJUnit.assertTrue("preload assertions", true);
-					try {
-						sm.setExpected("getClasses", cls, java.lang.reflect.Member.PUBLIC);
-						cls.getClasses();
-						sm.assertProperCalls();
-
-						sm.setExpected("getDeclaredClasses", cls, java.lang.reflect.Member.DECLARED);
-						cls.getDeclaredClasses();
-						sm.assertProperCalls();
-
-						sm.setExpected("getConstructor", cls, java.lang.reflect.Member.PUBLIC);
-						cls.getConstructor(new Class[0]);
-						sm.assertProperCalls();
-
-						sm.setExpected("getConstructors", cls, java.lang.reflect.Member.PUBLIC);
-						cls.getConstructors();
-						sm.assertProperCalls();
-
-						sm.setExpected("getDeclaredConstructor", cls, java.lang.reflect.Member.DECLARED);
-						cls.getDeclaredConstructor(new Class[0]);
-						sm.assertProperCalls();
-
-						sm.setExpected("getDeclaredConstructors", cls, java.lang.reflect.Member.DECLARED);
-						cls.getDeclaredConstructors();
-						sm.assertProperCalls();
-
-						sm.setExpected("getField", cls, java.lang.reflect.Member.PUBLIC);
-						cls.getField("publicField");
-						sm.assertProperCalls();
-
-						sm.setExpected("getFields", cls, java.lang.reflect.Member.PUBLIC);
-						cls.getFields();
-						sm.assertProperCalls();
-
-						sm.setExpected("getDeclaredField", cls, java.lang.reflect.Member.DECLARED);
-						cls.getDeclaredField("publicField");
-						sm.assertProperCalls();
-
-						sm.setExpected("getDeclaredFields", cls, java.lang.reflect.Member.DECLARED);
-						cls.getDeclaredFields();
-						sm.assertProperCalls();
-
-						sm.setExpected("getDeclaredMethod", cls, java.lang.reflect.Member.DECLARED);
-						cls.getDeclaredMethod("publicMethod", new Class[0]);
-						sm.assertProperCalls();
-
-						sm.setExpected("getDeclaredMethods", cls, java.lang.reflect.Member.DECLARED);
-						cls.getDeclaredMethods();
-						sm.assertProperCalls();
-
-						sm.setExpected("getMethod", cls, java.lang.reflect.Member.PUBLIC);
-						cls.getMethod("publicMethod", new Class[0]);
-						sm.assertProperCalls();
-
-						sm.setExpected("getMethods", cls, java.lang.reflect.Member.PUBLIC);
-						cls.getMethods();
-						sm.assertProperCalls();
-
-						sm.setExpected("newInstance", cls, java.lang.reflect.Member.PUBLIC);
-						cls.newInstance();
-						sm.assertProperCalls();
-					} finally {
-						System.setSecurityManager(null);
-					}
-				} catch (Exception e) {
-					if (e instanceof RuntimeException)
-						throw (RuntimeException)e;
-					Assert.fail("unexpected exception: " + e);
-				}
-				return null;
-			}
-		};
-		java.security.AccessController.doPrivileged(action, acc2);
-	}
-
-	/**
 	 * @tests java.lang.Class#getComponentType()
 	 */
 	@Test
 	public void test_getComponentType() {
-		// Test for method java.lang.Class java.lang.Class.getComponentType()
+		// Test for method java.lang.Class.getComponentType()
 		AssertJUnit.assertTrue("int array does not have int component type",
 				int[].class.getComponentType() == int.class);
 		AssertJUnit.assertTrue("Object array does not have Object component type",
@@ -904,7 +718,7 @@ public class Test_Class {
 	 */
 	@Test
 	public void test_getDeclaredClasses() {
-		int len = 66;
+		int len = 74;
 		// Test for method java.lang.Class [] java.lang.Class.getDeclaredClasses()
 		Class[] declaredClasses = Test_Class.class.getDeclaredClasses();
 		if (declaredClasses.length != len) {
@@ -1048,7 +862,7 @@ public class Test_Class {
 	 */
 	@Test
 	public void test_getDeclaringClass() {
-		// Test for method java.lang.Class java.lang.Class.getDeclaringClass()
+		// Test for method java.lang.Class.getDeclaringClass()
 		AssertJUnit.assertTrue(ClassTest.class.getDeclaringClass().equals(Test_Class.class));
 	}
 
@@ -1327,96 +1141,11 @@ public class Test_Class {
 	}
 
 	/**
-	 * @tests java.lang.Class#getResource(java.lang.String)
-	 */
-	@Test
-	public void test_getResource() {
-		// Test for method java.net.URL java.lang.Class.getResource(java.lang.String)
-		System.setSecurityManager(new SecurityManager());
-		try {
-			java.net.URL res = Object.class.getResource("Object.class");
-			AssertJUnit.assertTrue("Object.class should not be found", res == null);
-		} finally {
-			System.setSecurityManager(null);
-		}
-		
-		String name = "/org/openj9/resources/openj9tr_Foo.c";
-		
-		// find resource from object
-		AssertJUnit.assertTrue("directory of this class can be found",
-				Test_Class.class.getResource(name) != null);
-		
-		// find resource from array of objects
-		AssertJUnit.assertTrue("directory of array of this class can be found",
-				Test_Class[].class.getResource(name) != null);
-	}
-
-	/**
-	 * @tests java.lang.Class#getResourceAsStream(java.lang.String)
-	 */
-	@Test
-	public void test_getResourceAsStream() {
-		// Test for method java.io.InputStream java.lang.Class.getResourceAsStream(java.lang.String)
-		String name = Support_Resources.RESOURCE_PACKAGE + "openj9tr_compressD.txt";
-		Class clazz = null;
-		try {
-			clazz = Class.forName("org.openj9.test.java.lang.Test_Class");
-		} catch (ClassNotFoundException e) {
-			AssertJUnit.assertTrue("Should be able to find the class org.openj9.test.java.lang.Test_Class", false);
-		}
-		AssertJUnit.assertTrue("the file " + name + " can not be found in this directory",
-				clazz.getResourceAsStream(name) != null);
-
-		System.setSecurityManager(new SecurityManager());
-		try {
-			InputStream res = Object.class.getResourceAsStream("Object.class");
-			AssertJUnit.assertTrue("Object.class should not be found", res == null);
-		} finally {
-			System.setSecurityManager(null);
-		}
-
-		name = "org/openj9/resources/openj9tr_Foo.c";
-		AssertJUnit.assertTrue("the file " + name + " should not be found in this directory",
-				clazz.getResourceAsStream(name) == null);
-		AssertJUnit.assertTrue("the file " + name + " can be found in the root directory",
-				clazz.getResourceAsStream("/" + name) != null);
-		// find resource from array of objects
-		AssertJUnit.assertTrue("the file " + name + " can be found in the root directory where the class is an array",
-				Test_Class[].class.getResourceAsStream("/" + name) != null);
-
-		try {
-			clazz = Class.forName("java.lang.Object");
-		} catch (ClassNotFoundException e) {
-			AssertJUnit.assertTrue("Should be able to find the class java.lang.Object", false);
-		}
-		InputStream str = clazz.getResourceAsStream("Class.class");
-		AssertJUnit.assertTrue("java.lang.Object couldn't find its class with getResource...", str != null);
-		try {
-			AssertJUnit.assertTrue("Cannot read single byte", str.read() != -1);
-			AssertJUnit.assertTrue("Cannot read multiple bytes", str.read(new byte[5]) == 5);
-			str.close();
-		} catch (IOException e) {
-			AssertJUnit.assertTrue("Exception while closing resource stream 1.", false);
-		}
-
-		InputStream str2 = getClass().getResourceAsStream(Support_Resources.RESOURCE_PACKAGE + "openj9tr_compressD.txt");
-		AssertJUnit.assertTrue("Can't find resource", str2 != null);
-		try {
-			AssertJUnit.assertTrue("Cannot read single byte", str2.read() != -1);
-			AssertJUnit.assertTrue("Cannot read multiple bytes", str2.read(new byte[5]) == 5);
-			str2.close();
-		} catch (IOException e) {
-			AssertJUnit.assertTrue("Exception while closing resource stream 2.", false);
-		}
-
-	}
-
-	/**
 	 * @tests java.lang.Class#getSuperclass()
 	 */
 	@Test
 	public void test_getSuperclass() {
-		// Test for method java.lang.Class java.lang.Class.getSuperclass()
+		// Test for method java.lang.Class.getSuperclass()
 
 		AssertJUnit.assertTrue("Object has a superclass???", Object.class.getSuperclass() == null);
 		AssertJUnit.assertTrue("Normal class has bogus superclass",
@@ -1672,7 +1401,7 @@ public class Test_Class {
 				classes[2].toGenericString());
 		AssertJUnit.assertEquals("class org.openj9.test.java.lang.Test_Class$1Local$Class",
 				classes[3].toGenericString());
-		AssertJUnit.assertEquals("class org.openj9.test.java.lang.Test_Class$6", classes[4].toGenericString());
+		AssertJUnit.assertEquals("class org.openj9.test.java.lang.Test_Class$3", classes[4].toGenericString());
 		AssertJUnit.assertEquals("int", classes[5].toGenericString());
 		AssertJUnit.assertEquals("class org.openj9.test.java.lang.Test_Class$1Local$Class$Member6$E",
 				classes[6].toGenericString());
@@ -1722,7 +1451,7 @@ public class Test_Class {
 		AssertJUnit.assertEquals("org.openj9.test.java.lang.Test_Class$StaticMember$Class", classes[1].getTypeName());
 		AssertJUnit.assertEquals("org.openj9.test.java.lang.Test_Class$Member$Class", classes[2].getTypeName());
 		AssertJUnit.assertEquals("org.openj9.test.java.lang.Test_Class$1Local$Class", classes[3].getTypeName());
-		AssertJUnit.assertEquals("org.openj9.test.java.lang.Test_Class$6", classes[4].getTypeName());
+		AssertJUnit.assertEquals("org.openj9.test.java.lang.Test_Class$3", classes[4].getTypeName());
 		AssertJUnit.assertEquals("int", classes[5].getTypeName());
 		AssertJUnit.assertEquals("org.openj9.test.java.lang.Test_Class$1Local$Class$Member6$E",
 				classes[6].getTypeName());

@@ -1,6 +1,6 @@
-/*[INCLUDE-IF Sidecar18-SE]*/
+/*[INCLUDE-IF Sidecar18-SE & !OPENJDK_METHODHANDLES]*/
 /*******************************************************************************
- * Copyright (c) 2014, 2018 IBM Corp. and others
+ * Copyright (c) 2014, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -129,16 +129,16 @@ final class MethodHandleInfoImpl implements MethodHandleInfo {
 					// Method
 					} else if (isMethod()) { 
 						if (isPublic) {
-							result = defc.getMethod(getName(), getMethodType().arguments);
+							result = defc.getMethod(getName(), getMethodType().ptypes());
 						} else {
-							result = defc.getDeclaredMethod(getName(), getMethodType().arguments);
+							result = defc.getDeclaredMethod(getName(), getMethodType().ptypes());
 						}
 					// Constructor
 					} else if (isConstructor()) {
 						if (isPublic) {
-							result = defc.getConstructor(getMethodType().arguments);
+							result = defc.getConstructor(getMethodType().ptypes());
 						} else {
-							result = defc.getDeclaredConstructor(getMethodType().arguments);
+							result = defc.getDeclaredConstructor(getMethodType().ptypes());
 						}
 					}
 				} catch (NoSuchFieldException | NoSuchMethodException e) {

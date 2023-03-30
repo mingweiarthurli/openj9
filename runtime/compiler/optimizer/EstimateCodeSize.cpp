@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -56,7 +56,7 @@ TR_EstimateCodeSize::get(TR_InlinerBase * inliner, TR_InlinerTracer *tracer, int
 
    estimator->_sizeThreshold = sizeThreshold;
    estimator->_realSize = 0;
-   estimator->_error = 0;
+   estimator->_error = ECS_NORMAL;
 
    estimator->_numOfEstimatedCalls = 0;
    estimator->_hasNonColdCalls = true;
@@ -105,6 +105,22 @@ TR_EstimateCodeSize::calculateCodeSize(TR_CallTarget *calltarget, TR_CallStack *
    return retval;
    }
 
+const char *
+TR_EstimateCodeSize::getError()
+   {
+      switch(_error)
+         {
+            case ECS_NORMAL: return "ECS_NORMAL";
+            case ECS_RECURSION_DEPTH_THRESHOLD_EXCEEDED: return "ECS_RECURSION_DEPTH_THRESHOLD_EXCEEDED";
+            case ECS_OPTIMISTIC_SIZE_THRESHOLD_EXCEEDED: return "ECS_OPTIMISTIC_SIZE_THRESHOLD_EXCEEDED";
+            case ECS_VISITED_COUNT_THRESHOLD_EXCEEDED: return "ECS_VISITED_COUNT_THRESHOLD_EXCEEDED";
+            case ECS_REAL_SIZE_THRESHOLD_EXCEEDED: return "ECS_REAL_SIZE_THRESHOLD_EXCEEDED";
+            case ECS_ARGUMENTS_INCOMPATIBLE: return "ECS_ARGUMENTS_INCOMPATIBLE";
+            case ECS_CALLSITES_CREATION_FAILED: return "ECS_CALLSITES_CREATION_FAILED";
+            default: return "ECS_UNKNOWN";
+         }
+   }
+
 bool
 TR_EstimateCodeSize::isInlineable(TR_CallStack * prevCallStack, TR_CallSite *callsite)
    {
@@ -149,12 +165,12 @@ TR_EstimateCodeSize::isInlineable(TR_CallStack * prevCallStack, TR_CallSite *cal
    }
 
 bool
-TR_EstimateCodeSize::returnCleanup(int32_t anerrno)
+TR_EstimateCodeSize::returnCleanup(EcsCleanupErrorStates errorState)
    {
-   _error = anerrno;
+   _error = errorState;
    if (_mayHaveVirtualCallProfileInfo)
       _inliner->comp()->decInlineDepth(true);
-   if (anerrno > 0)
+   if (errorState > 0)
       return false;
    else
       return true;

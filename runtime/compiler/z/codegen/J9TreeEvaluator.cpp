@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -55,7 +55,6 @@
 #include "env/VMJ9.h"
 #include "il/DataTypes.hpp"
 #include "il/LabelSymbol.hpp"
-#include "il/MethodSymbol.hpp"
 #include "il/Node.hpp"
 #include "il/Node_inlines.hpp"
 #include "il/ResolvedMethodSymbol.hpp"
@@ -66,6 +65,7 @@
 #include "il/TreeTop.hpp"
 #include "il/TreeTop_inlines.hpp"
 #include "infra/Bit.hpp"
+#include "OMR/Bytes.hpp"
 #include "ras/Delimiter.hpp"
 #include "ras/DebugCounter.hpp"
 #include "env/VMJ9.h"
@@ -92,6 +92,771 @@ extern void killRegisterIfNotLocked(TR::CodeGenerator * cg, TR::RealRegister::Re
 extern TR::Register * iDivRemGenericEvaluator(TR::Node * node, TR::CodeGenerator * cg, bool isDivision, TR::MemoryReference * divchkDivisorMR);
 extern TR::Instruction * generateS390CompareOps(TR::Node * node, TR::CodeGenerator * cg, TR::InstOpCode::S390BranchCondition fBranchOpCond, TR::InstOpCode::S390BranchCondition rBranchOpCond, TR::LabelSymbol * targetLabel);
 
+void
+J9::Z::TreeEvaluator::inlineEncodeASCII(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   // tree looks as follows:
+   // encodeASCIISymbol
+   //    input ptr
+   //    output ptr
+   //    input length (in elements)
+   //
+   // The original Java loop that this IL is inlining is found in StringCoding.encodeASCII:
+   /* if (coder == LATIN1) {
+            byte[] dst = new byte[val.length];
+            for (int i = 0; i < val.length; i++) {
+                if (val[i] < 0) {
+                    dst[i] = '?';
+                } else {
+                    dst[i] = val[i];
+                }
+            }
+            return dst;
+        }
+   */
+   // Get the children
+   TR::Register *inputPtrReg = cg->gprClobberEvaluate(node->getChild(0));
+   TR::Register *outputPtrReg = cg->gprClobberEvaluate(node->getChild(1));
+   TR::Register *inputLengthRegister = cg->evaluate(node->getChild(2));
+
+   TR::LabelSymbol *processMultiple16CharsStart = generateLabelSymbol(cg);
+   TR::LabelSymbol *processMultiple16CharsEnd = generateLabelSymbol(cg);
+
+   TR::LabelSymbol *processSaturatedInput1 = generateLabelSymbol(cg);
+
+   TR::LabelSymbol *cFlowRegionEnd = generateLabelSymbol(cg);
+
+   TR::Register *vInput1 = cg->allocateRegister(TR_VRF);
+   TR::Register *vRange = cg->allocateRegister(TR_VRF);
+   TR::Register *vRangeControl = cg->allocateRegister(TR_VRF);
+   TR::Register *numCharsLeftToProcess = cg->allocateRegister();
+   TR::Register *firstSaturatedCharacter = cg->allocateRegister(TR_VRF);
+
+   uint32_t saturatedRange = 127;
+   uint8_t saturatedRangeControl = 0x20; // > comparison
+
+   // Replicate the limit character and comparison controller into vector registers
+   generateVRIaInstruction(cg, TR::InstOpCode::VREPI, node, vRange, saturatedRange, 0);
+   generateVRIaInstruction(cg, TR::InstOpCode::VREPI, node, vRangeControl, saturatedRangeControl, 0);
+
+   // Copy length into numCharsLeftToProcess
+   generateRRInstruction(cg, TR::InstOpCode::LR, node, numCharsLeftToProcess, inputLengthRegister);
+
+   // Branch to the end of this section if there are less than 16 chars left to process
+   generateS390CompareAndBranchInstruction(cg, TR::InstOpCode::C, node, numCharsLeftToProcess, 16, TR::InstOpCode::COND_BL, processMultiple16CharsEnd, false, false);
+
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, processMultiple16CharsStart);
+   processMultiple16CharsStart->setStartInternalControlFlow();
+
+   generateVRXInstruction(cg, TR::InstOpCode::VL, node, vInput1, generateS390MemoryReference(inputPtrReg, 0, cg));
+   // Check for vector saturation and branch to copy the unsaturated bytes
+   // VSTRC here will do an unsigned comparison and set the CC if any byte in the input vector is above 127.
+   // If all numbers are below 128, then we can do a straight copy of the 16 bytes. If not, then we branch to
+   // processSaturatedInput1 label that corrects the first 'bad' character and stores all characters up to and including the 'bad' character
+   // in the output destination. Then we branch back to this mainline loop and continue processing the rest of the array.
+   // The penalty for encountering 1 or more bad characters in a row can be big, but we bet that such cases are not
+   // common.
+   generateVRRdInstruction(cg, TR::InstOpCode::VSTRC, node, firstSaturatedCharacter, vInput1, vRange, vRangeControl, 0x1, 0);
+   // If atleast one bad character was found, CC=1. So branch to handle this case.
+   generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_CC1, node, processSaturatedInput1);
+
+   // If we didn't take the branch above, then all 16 bytes can be copied directly over.
+   generateVRXInstruction(cg, TR::InstOpCode::VST, node, vInput1, generateS390MemoryReference(outputPtrReg, 0, cg));
+
+   // Update the counters
+   generateRXInstruction(cg, TR::InstOpCode::getLoadAddressOpCode(), node, outputPtrReg, generateS390MemoryReference(outputPtrReg, 16, cg));
+   generateRXInstruction(cg, TR::InstOpCode::getLoadAddressOpCode(), node, inputPtrReg, generateS390MemoryReference(inputPtrReg, 16, cg));
+   generateRILInstruction(cg, TR::InstOpCode::SLFI, node, numCharsLeftToProcess, 16);
+
+   // Branch back up if we still have more than 16 characters to process.
+   generateS390CompareAndBranchInstruction(cg, TR::InstOpCode::C, node, numCharsLeftToProcess, 15, TR::InstOpCode::COND_BH, processMultiple16CharsStart, false, false);
+
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, processMultiple16CharsEnd);
+
+   // start of sequence to process under 16 characters
+
+   // numCharsLeftToProcess holds length of final load.
+   // Branch to the end if there is no residue
+   generateS390CompareAndBranchInstruction(cg, TR::InstOpCode::C, node, numCharsLeftToProcess, 0, TR::InstOpCode::COND_BE, cFlowRegionEnd, false, false);
+
+   // Zero out the input register to avoid invalid VSTRC result
+   generateVRIaInstruction(cg, TR::InstOpCode::VGBM, node, vInput1, 0, 0 /*unused*/);
+
+   // VLL and VSTL work on indices so we must subtract 1
+   TR::Register *numCharsLeftToProcessMinus1 = cg->allocateRegister();
+   // Due to the check above, the value in numCharsLeftToProcessMinus1 is guaranteed to be 0 or higher.
+   generateRIEInstruction(cg, TR::InstOpCode::AHIK, node, numCharsLeftToProcessMinus1, numCharsLeftToProcess, -1);
+   // Load residue bytes and check for saturation
+   generateVRSbInstruction(cg, TR::InstOpCode::VLL, node, vInput1, numCharsLeftToProcessMinus1, generateS390MemoryReference(inputPtrReg, 0, cg));
+
+   // Check for vector saturation and branch to copy the unsaturated bytes
+   generateVRRdInstruction(cg, TR::InstOpCode::VSTRC, node, firstSaturatedCharacter, vInput1, vRange, vRangeControl, 0x1, 0);
+   generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_CC1, node, processSaturatedInput1);
+
+   // If no bad characters found, the store with length.
+   generateVRSbInstruction(cg, TR::InstOpCode::VSTL, node, vInput1, numCharsLeftToProcessMinus1, generateS390MemoryReference(outputPtrReg, 0, cg), 0);
+   // Branch to end.
+   generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, cFlowRegionEnd);
+
+   // Encountered an out of range character via the VSTRC instruction. Find it, replace it with '?', then jump back to mainline
+   // to continue processing. This sequence is not the most efficient and hitting it one or more times can be expensive,
+   // but we bet that this won't happen often for the targeted workload.
+   // Algorithm works as follows:
+   // First store upto and not including the bad character.
+   // Then store '?' in place for the bad character.
+   // Then, update the counters with the number of characters we have processed.
+   // Then go back to mainline code. Where we jump to depends on how many characters are left to process.
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, processSaturatedInput1);
+
+   TR::Register *firstSaturatedCharacterGR = cg->allocateRegister();
+   // Extract the index of the first saturated char in the 2nd vector register
+   generateVRScInstruction(cg, TR::InstOpCode::VLGV, node, firstSaturatedCharacterGR, firstSaturatedCharacter, generateS390MemoryReference(7, cg), 0);
+
+   // Needed as VSTL operate on 0-based index.
+   TR::Register *firstSaturatedCharacterMinus1GR = cg->allocateRegister();
+
+   generateRIEInstruction(cg, TR::InstOpCode::AHIK, node, firstSaturatedCharacterMinus1GR, firstSaturatedCharacterGR, -1);
+
+   // If the result is less than 0, then it means the first character is saturated. So skip storing any good characters and jump to fixing the bad
+   // character.
+   TR::LabelSymbol *fixReplacementCharacter = generateLabelSymbol(cg);
+   generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_CC1, node, fixReplacementCharacter);
+
+   // Copy only the unsaturated results using the index we calculated earlier
+   generateVRSbInstruction(cg, TR::InstOpCode::VSTL, node, vInput1, firstSaturatedCharacterMinus1GR, generateS390MemoryReference(outputPtrReg, 0, cg), 0);
+   generateRRInstruction(cg, cg->comp()->target().is64Bit() ? TR::InstOpCode::AGFR : TR::InstOpCode::AR, node, outputPtrReg, firstSaturatedCharacterGR);
+
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, fixReplacementCharacter);
+   const uint32_t replacementCharacter = 63;
+   generateSIInstruction(cg, TR::InstOpCode::MVI, node, generateS390MemoryReference(outputPtrReg, 0, cg), replacementCharacter);
+
+   generateRILInstruction(cg, cg->comp()->target().is64Bit() ? TR::InstOpCode::AGFI : TR::InstOpCode::AFI, node, outputPtrReg, 1);
+
+   // Now update the counters
+   generateRXInstruction(cg, TR::InstOpCode::getLoadAddressOpCode(), node, inputPtrReg, generateS390MemoryReference(inputPtrReg, firstSaturatedCharacterGR, 1, cg));
+   generateRILInstruction(cg, TR::InstOpCode::AFI, node, numCharsLeftToProcess, -1);
+   generateRRInstruction(cg, TR::InstOpCode::SR, node, numCharsLeftToProcess, firstSaturatedCharacterGR);
+
+   // Counters have been updated. Now branch back to mainline. Where we branch depends on how many chars are left.
+   generateS390CompareAndBranchInstruction(cg, TR::InstOpCode::C, node, numCharsLeftToProcess, 15, TR::InstOpCode::COND_BH, processMultiple16CharsStart, false, false);
+   generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, processMultiple16CharsEnd);
+
+   TR::RegisterDependencyConditions* dependencies = new (cg->trHeapMemory()) TR::RegisterDependencyConditions(0, 11, cg);
+   dependencies->addPostConditionIfNotAlreadyInserted(vInput1, TR::RealRegister::AssignAny);
+   dependencies->addPostConditionIfNotAlreadyInserted(firstSaturatedCharacter, TR::RealRegister::AssignAny);
+   dependencies->addPostConditionIfNotAlreadyInserted(vRange, TR::RealRegister::AssignAny);
+   dependencies->addPostConditionIfNotAlreadyInserted(vRangeControl, TR::RealRegister::AssignAny);
+   dependencies->addPostConditionIfNotAlreadyInserted(outputPtrReg, TR::RealRegister::AssignAny);
+   dependencies->addPostConditionIfNotAlreadyInserted(inputPtrReg, TR::RealRegister::AssignAny);
+   dependencies->addPostConditionIfNotAlreadyInserted(numCharsLeftToProcess, TR::RealRegister::AssignAny);
+   dependencies->addPostConditionIfNotAlreadyInserted(numCharsLeftToProcessMinus1, TR::RealRegister::AssignAny);
+   dependencies->addPostConditionIfNotAlreadyInserted(inputLengthRegister, TR::RealRegister::AssignAny);
+   dependencies->addPostConditionIfNotAlreadyInserted(firstSaturatedCharacterGR, TR::RealRegister::AssignAny);
+   dependencies->addPostConditionIfNotAlreadyInserted(firstSaturatedCharacterMinus1GR, TR::RealRegister::AssignAny);
+
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, cFlowRegionEnd, dependencies);
+   cFlowRegionEnd->setEndInternalControlFlow();
+
+   cg->decReferenceCount(node->getChild(0));
+   cg->decReferenceCount(node->getChild(1));
+   cg->decReferenceCount(node->getChild(2));
+
+   cg->stopUsingRegister(vInput1);
+   cg->stopUsingRegister(firstSaturatedCharacter);
+   cg->stopUsingRegister(vRange);
+   cg->stopUsingRegister(vRangeControl);
+   cg->stopUsingRegister(numCharsLeftToProcess);
+   cg->stopUsingRegister(numCharsLeftToProcessMinus1);
+   cg->stopUsingRegister(firstSaturatedCharacterGR);
+   cg->stopUsingRegister(firstSaturatedCharacterMinus1GR);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::inlineStringLatin1Inflate(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   static bool disableStringInflate = feGetEnv("TR_DisableStringInflate") != NULL;
+   if (disableStringInflate)
+      {
+      return NULL;
+      }
+   TR_ASSERT_FATAL(cg->getSupportsInlineStringLatin1Inflate(), "This evaluator should only be triggered when inlining StringLatin1.inflate([BI[CII)V is enabled on Java 11 onwards!\n");
+   TR::Node *sourceArrayReferenceNode = node->getChild(0);
+   TR::Node *srcOffNode = node->getChild(1);
+   TR::Node *charArrayReferenceNode = node->getChild(2);
+   TR::Node *dstOffNode = node->getChild(3);
+   TR::Node *lenNode = node->getChild(4);
+
+   TR::Register *lenRegister = cg->evaluate(lenNode);
+   TR::Register *sourceArrayReferenceRegister = cg->gprClobberEvaluate(sourceArrayReferenceNode);
+   TR::Register *srcOffRegister = cg->gprClobberEvaluate(srcOffNode);
+   TR::Register *charArrayReferenceRegister = cg->gprClobberEvaluate(charArrayReferenceNode);
+   TR::Register *dstOffRegister = cg->gprClobberEvaluate(dstOffNode);
+
+   // Adjust the array reference (source and destination) with offset in advance
+   if (srcOffNode->getOpCodeValue() == TR::iconst)
+      {
+      if (srcOffNode->getInt() != 0)
+         {
+         generateRILInstruction(cg, TR::InstOpCode::AFI, node, sourceArrayReferenceRegister, srcOffNode->getInt());
+         }
+      }
+   else
+      {
+      generateRRInstruction(cg, TR::InstOpCode::AGFR, node, sourceArrayReferenceRegister, srcOffRegister);
+      }
+
+   if (dstOffNode->getOpCodeValue() == TR::iconst)
+      {
+      if (dstOffNode->getInt() != 0)
+         {
+         generateRILInstruction(cg, TR::InstOpCode::AFI, node, charArrayReferenceRegister, dstOffNode->getInt() * 2);
+         }
+      }
+   else
+      {
+      generateRSInstruction(cg, TR::InstOpCode::SLAK, node, dstOffRegister, dstOffRegister, 1);
+      generateRRInstruction(cg, TR::InstOpCode::AGFR, node, charArrayReferenceRegister, dstOffRegister);
+      }
+
+   // The vector tight loop (starting at vectorLoopStart label) overwrites sourceArrayReferenceRegister as it processes characters. So we keep a backup of the
+   // copy here so that we can refer to it when handling the residual digits after the tight loop is finished executing.
+   TR::Register *sourceArrayReferenceRegister2 = cg->allocateRegister();
+   generateRRInstruction(cg, TR::InstOpCode::LGR, node, sourceArrayReferenceRegister2, sourceArrayReferenceRegister);
+
+   // charArrayReference is the destination array. Since the vector loop below processes 16 bytes into 16 chars per iteration, we will store 32 bytes per iteration.
+   // We use the `VST` instruction twice to store 16 bytes at a time. Hence, we need a "low" and "high" memref for the char array in order to store all 32 bytes per iteration
+   // of the vector loop.
+   TR::MemoryReference *charArrayReferenceMemRefLow = generateS390MemoryReference(charArrayReferenceRegister, TR::Compiler->om.contiguousArrayHeaderSizeInBytes(), cg);
+   TR::MemoryReference *charArrayReferenceMemRefHigh = generateS390MemoryReference(charArrayReferenceRegister, TR::Compiler->om.contiguousArrayHeaderSizeInBytes() + 16, cg);
+
+   // numCharsMinusResidue is used as a scratch register to hold temporary values throughout the algorithm.
+   TR::Register *numCharsMinusResidue = cg->allocateRegister();
+   generateRRInstruction(cg, TR::InstOpCode::LR, node, numCharsMinusResidue, lenRegister);
+   generateRILInstruction(cg, TR::InstOpCode::SLFI, node, numCharsMinusResidue, 16);
+   generateRRInstruction(cg, TR::InstOpCode::AR, node, numCharsMinusResidue, srcOffRegister);
+
+   TR::LabelSymbol *cFlowRegionStart = generateLabelSymbol(cg);
+   cFlowRegionStart->setStartInternalControlFlow();
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, cFlowRegionStart);
+
+   TR::LabelSymbol *cFlowRegionEnd = generateLabelSymbol(cg);
+   TR::LabelSymbol *gprSequenceLabel = generateLabelSymbol(cg);
+   cFlowRegionEnd->setEndInternalControlFlow();
+   // Before starting the tight loop, check if length is 0. If so, then jump to end as there's no work to be done.
+   generateS390CompareAndBranchInstruction(cg, TR::InstOpCode::C, node, lenRegister, 0, TR::InstOpCode::COND_BE, cFlowRegionEnd, false, false);
+   // Also check if length < 8. If yes, then jump to gprSequenceLabel to handle this case with regular GPRs for speed.
+   generateS390CompareAndBranchInstruction(cg, TR::InstOpCode::C, node, lenRegister, 8, TR::InstOpCode::COND_BL, gprSequenceLabel, false, false);
+
+   TR::LabelSymbol *vectorLoopStart = generateLabelSymbol(cg);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, vectorLoopStart);
+   TR::LabelSymbol *handleResidueLabel = generateLabelSymbol(cg);
+
+   // We keep executing the vector tight loop below until only the residual characters remain to process.
+   generateS390CompareAndBranchInstruction(cg, TR::InstOpCode::CR, node, srcOffRegister, numCharsMinusResidue, TR::InstOpCode::COND_BH, handleResidueLabel, false, false);
+   TR::Register* registerV1 = cg->allocateRegister(TR_VRF);
+   TR::MemoryReference *sourceArrayMemRef = generateS390MemoryReference(sourceArrayReferenceRegister, TR::Compiler->om.contiguousArrayHeaderSizeInBytes(), cg);
+   // Do a vector load to batch process the characters.
+   generateVRXInstruction(cg, TR::InstOpCode::VL, node, registerV1, sourceArrayMemRef);
+   TR::Register* registerV2 = cg->allocateRegister(TR_VRF);
+   // Unpack the 1st and 2nd halves of the input vector. This will efectively inflate each character from 1 byte to 2 bytes.
+   generateVRRaInstruction(cg, TR::InstOpCode::VUPLH, node, registerV2, registerV1);
+   generateVRRaInstruction(cg, TR::InstOpCode::VUPLL, node, registerV1, registerV1);
+
+   // Store all characters.
+   generateVRXInstruction(cg, TR::InstOpCode::VST, node, registerV2, charArrayReferenceMemRefLow);
+   generateVRXInstruction(cg, TR::InstOpCode::VST, node, registerV1, charArrayReferenceMemRefHigh);
+
+   // Done storing 16 chars. Now do some bookkeeping and then branch back to start label.
+   generateRILInstruction(cg, TR::InstOpCode::AFI, node, srcOffRegister, 16);
+   generateRXInstruction(cg, TR::InstOpCode::getLoadAddressOpCode(), node, sourceArrayReferenceRegister, generateS390MemoryReference(sourceArrayReferenceRegister, 16, cg));
+   generateRXInstruction(cg, TR::InstOpCode::getLoadAddressOpCode(), node, charArrayReferenceRegister, generateS390MemoryReference(charArrayReferenceRegister, 32, cg));
+   generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, vectorLoopStart);
+
+   // Once we reach this label, only the residual characters need to be processed.
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, handleResidueLabel);
+
+   TR::MemoryReference *sourceArrayMemRef2 = generateS390MemoryReference(sourceArrayReferenceRegister2, TR::Compiler->om.contiguousArrayHeaderSizeInBytes(), cg);
+   TR::MemoryReference *charArrayReferenceMemRefLow2 = generateS390MemoryReference(charArrayReferenceRegister, TR::Compiler->om.contiguousArrayHeaderSizeInBytes(), cg);
+   TR::MemoryReference *charArrayReferenceMemRefHigh2 = generateS390MemoryReference(charArrayReferenceRegister, TR::Compiler->om.contiguousArrayHeaderSizeInBytes() + 16, cg);
+
+   TR::Register *quoRegister = cg->allocateRegister();
+   // Do lenRegister / 16 to calculate remaining number of chars using the Divide Logical (DLR) instruction.
+   // The dividend in a DLR instruction is a 64-bit integer. The top half is in remRegister, and the bottom half is in quoRegister.
+   // In our case the dividend is always a 32-bit integer (i.e. the length of the array). So we must always zero out the top half (i.e. remRegister) in order to make sure the dividend is never corrupted.
+   // The bottom half doesn't need to be zeroed out because we move a 32-bit integer in it, and then never use that register again.
+   TR::Register *remRegister = cg->allocateRegister();
+   generateRRInstruction(cg, TR::InstOpCode::XGR, node, remRegister, remRegister);
+   TR::RegisterPair *divRegisterPair = cg->allocateConsecutiveRegisterPair(quoRegister, remRegister); // rem is legal even of the pair
+   generateRRInstruction(cg, TR::InstOpCode::LR, node, quoRegister, lenRegister);
+   TR::Register *tempReg = cg->allocateRegister();
+   generateRILInstruction(cg, TR::InstOpCode::LGFI, node, /*divisor*/ tempReg, 16);
+   generateRRInstruction(cg, TR::InstOpCode::DLR, node, divRegisterPair, tempReg/*divisor*/);
+
+   // Branch to end if length was a multiple of 16. (We would have processed this in the vectorloop already).
+   generateS390CompareAndBranchInstruction(cg, TR::InstOpCode::C, node, remRegister, 0, TR::InstOpCode::COND_BE, cFlowRegionEnd, false, false);
+   // Now do srcOffRegister = lenRegister - remRegister to position index at the next character that we need to copy.
+   generateRRRInstruction(cg, TR::InstOpCode::SRK, node, srcOffRegister, lenRegister, remRegister);
+   // Now add that result to the base register
+   generateRRInstruction(cg, TR::InstOpCode::AGFR, node, sourceArrayReferenceRegister2, srcOffRegister);
+
+   // Now that you have the new index and the number of remaining characters, load those many chars into registerV1. We are guaranteed to have numChars < 16
+   //
+   // First load remainder (i.e. number of remaining chars) value into remRegister2 (Which is just a 0-index based version of remRegister).
+   // Then we subtract remRegister2 by 1 to get an indexed number. Then we use VLL to load the remaining bytes int registerV1.
+   TR::Register *remRegister2 = cg->allocateRegister();
+   generateRRInstruction(cg, TR::InstOpCode::LR, node, remRegister2, remRegister);
+   generateRILInstruction(cg, TR::InstOpCode::SLFI, node, remRegister2, 1);
+   generateVRSbInstruction(cg, TR::InstOpCode::VLL, node, registerV1, remRegister2, sourceArrayMemRef2);
+   // Now unpack the low order. If we have less than 8 chars to process, there will be zeros in the register
+   generateVRRaInstruction(cg, TR::InstOpCode::VUPLH, node, registerV2, registerV1);
+   // Multiply numChars remaining by 2 to get the number of bytes we need to write
+   generateRSInstruction(cg, TR::InstOpCode::SLAK, node, tempReg, remRegister, 1);
+   // Subtract one from tempReg since the byte position is 0 based.
+   generateRILInstruction(cg, TR::InstOpCode::SLFI, node, tempReg, 1);
+   generateVRSbInstruction(cg, TR::InstOpCode::VSTL, node, registerV2, tempReg, charArrayReferenceMemRefLow2, 0);
+   // Now subtract numChars by 8 and see if there's still more bytes left to write
+   generateRILInstruction(cg, TR::InstOpCode::SLFI, node, remRegister, 8);
+   generateS390CompareAndBranchInstruction(cg, TR::InstOpCode::C, node, remRegister, 0, TR::InstOpCode::COND_BNH, cFlowRegionEnd, false, false);
+   // If we didn't branch, then there are still more characters to process, and the remaining amount is in remRegister.
+   // So unpack the characters and store back in memory
+   generateVRRaInstruction(cg, TR::InstOpCode::VUPLL, node, registerV1, registerV1);
+   generateRSInstruction(cg, TR::InstOpCode::SLAK, node, tempReg, remRegister, 1);
+   generateRILInstruction(cg, TR::InstOpCode::SLFI, node, tempReg, 1);
+   generateVRSbInstruction(cg, TR::InstOpCode::VSTL, node, registerV1, tempReg, charArrayReferenceMemRefHigh2, 0);
+   generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, cFlowRegionEnd);
+
+   // We should only end up here if we initially detect that the input string's length < 8.
+   // For the GPR sequence we simply load one byte at a time using LLC, then store it as a char.
+   // If we are here, then lenRegister is less than remaining chars is in numCharsMinusResidue.
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, gprSequenceLabel);
+
+   // Repurpose numCharsMinusResidue here as a temp/scratch reg.
+   generateRSInstruction(cg, TR::InstOpCode::SLAK, node, numCharsMinusResidue, lenRegister, 1);
+   generateRSInstruction(cg, TR::InstOpCode::SLAK, node, tempReg, lenRegister, 3);
+   generateRRInstruction(cg, TR::InstOpCode::AR, node, numCharsMinusResidue, tempReg);
+
+   // First we figure out exactly how many chars are left.
+   generateRILInstruction(cg, TR::InstOpCode::LARL, node, tempReg, cFlowRegionEnd);
+
+   generateRRInstruction(cg, TR::InstOpCode::SR, node, tempReg, numCharsMinusResidue);
+   TR::Instruction *cursor = generateS390RegInstruction(cg, TR::InstOpCode::BCR, node, tempReg);
+   ((TR::S390RegInstruction *)cursor)->setBranchCondition(TR::InstOpCode::COND_BCR);
+
+   // 7 chars left
+   generateRXInstruction(cg, TR::InstOpCode::LLC, node, tempReg, generateS390MemoryReference(sourceArrayReferenceRegister, TR::Compiler->om.contiguousArrayHeaderSizeInBytes() + 6, cg));
+   generateRXInstruction(cg, TR::InstOpCode::STH, node, tempReg, generateS390MemoryReference(charArrayReferenceRegister, TR::Compiler->om.contiguousArrayHeaderSizeInBytes() + 12, cg));
+   // 6 chars left
+   generateRXInstruction(cg, TR::InstOpCode::LLC, node, tempReg, generateS390MemoryReference(sourceArrayReferenceRegister, TR::Compiler->om.contiguousArrayHeaderSizeInBytes() + 5, cg));
+   generateRXInstruction(cg, TR::InstOpCode::STH, node, tempReg, generateS390MemoryReference(charArrayReferenceRegister, TR::Compiler->om.contiguousArrayHeaderSizeInBytes() + 10, cg));
+   // 5 chars left
+   generateRXInstruction(cg, TR::InstOpCode::LLC, node, tempReg, generateS390MemoryReference(sourceArrayReferenceRegister, TR::Compiler->om.contiguousArrayHeaderSizeInBytes() + 4, cg));
+   generateRXInstruction(cg, TR::InstOpCode::STH, node, tempReg, generateS390MemoryReference(charArrayReferenceRegister, TR::Compiler->om.contiguousArrayHeaderSizeInBytes() + 8, cg));
+   // 4 chars left
+   generateRXInstruction(cg, TR::InstOpCode::LLC, node, tempReg, generateS390MemoryReference(sourceArrayReferenceRegister, TR::Compiler->om.contiguousArrayHeaderSizeInBytes() + 3, cg));
+   generateRXInstruction(cg, TR::InstOpCode::STH, node, tempReg, generateS390MemoryReference(charArrayReferenceRegister, TR::Compiler->om.contiguousArrayHeaderSizeInBytes() + 6, cg));
+   // 3 chars left
+   generateRXInstruction(cg, TR::InstOpCode::LLC, node, tempReg, generateS390MemoryReference(sourceArrayReferenceRegister, TR::Compiler->om.contiguousArrayHeaderSizeInBytes() + 2, cg));
+   generateRXInstruction(cg, TR::InstOpCode::STH, node, tempReg, generateS390MemoryReference(charArrayReferenceRegister, TR::Compiler->om.contiguousArrayHeaderSizeInBytes() + 4, cg));
+   // 2 chars left
+   generateRXInstruction(cg, TR::InstOpCode::LLC, node, tempReg, generateS390MemoryReference(sourceArrayReferenceRegister, TR::Compiler->om.contiguousArrayHeaderSizeInBytes() + 1, cg));
+   generateRXInstruction(cg, TR::InstOpCode::STH, node, tempReg, generateS390MemoryReference(charArrayReferenceRegister, TR::Compiler->om.contiguousArrayHeaderSizeInBytes() + 2, cg));
+   // 1 chars left
+   generateRXInstruction(cg, TR::InstOpCode::LLC, node, tempReg, generateS390MemoryReference(sourceArrayReferenceRegister, TR::Compiler->om.contiguousArrayHeaderSizeInBytes() + 0, cg));
+   generateRXInstruction(cg, TR::InstOpCode::STH, node, tempReg, generateS390MemoryReference(charArrayReferenceRegister, TR::Compiler->om.contiguousArrayHeaderSizeInBytes() + 0, cg));
+
+   TR::RegisterDependencyConditions* dependencies = new (cg->trHeapMemory()) TR::RegisterDependencyConditions(0, 14, cg);
+   dependencies->addPostConditionIfNotAlreadyInserted(sourceArrayReferenceRegister, TR::RealRegister::AssignAny);
+   dependencies->addPostConditionIfNotAlreadyInserted(lenRegister, TR::RealRegister::AssignAny);
+   dependencies->addPostConditionIfNotAlreadyInserted(srcOffRegister, TR::RealRegister::AssignAny);
+   dependencies->addPostConditionIfNotAlreadyInserted(dstOffRegister, TR::RealRegister::AssignAny);
+   dependencies->addPostConditionIfNotAlreadyInserted(charArrayReferenceRegister, TR::RealRegister::AssignAny);
+   dependencies->addPostConditionIfNotAlreadyInserted(numCharsMinusResidue, TR::RealRegister::AssignAny);
+   dependencies->addPostConditionIfNotAlreadyInserted(registerV1, TR::RealRegister::AssignAny);
+   dependencies->addPostConditionIfNotAlreadyInserted(registerV2, TR::RealRegister::AssignAny);
+   dependencies->addPostConditionIfNotAlreadyInserted(divRegisterPair, TR::RealRegister::EvenOddPair);
+   dependencies->addPostConditionIfNotAlreadyInserted(remRegister, TR::RealRegister::LegalEvenOfPair);
+   dependencies->addPostConditionIfNotAlreadyInserted(quoRegister, TR::RealRegister::LegalOddOfPair);
+   dependencies->addPostConditionIfNotAlreadyInserted(tempReg, TR::RealRegister::AssignAny);
+   dependencies->addPostConditionIfNotAlreadyInserted(sourceArrayReferenceRegister2, TR::RealRegister::AssignAny);
+   dependencies->addPostConditionIfNotAlreadyInserted(remRegister2, TR::RealRegister::AssignAny);
+
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, cFlowRegionEnd, dependencies);
+
+   cg->decReferenceCount(srcOffNode);
+   cg->decReferenceCount(dstOffNode);
+   cg->decReferenceCount(lenNode);
+   cg->decReferenceCount(sourceArrayReferenceNode);
+   cg->decReferenceCount(charArrayReferenceNode);
+
+   cg->stopUsingRegister(remRegister2);
+   cg->stopUsingRegister(numCharsMinusResidue);
+   cg->stopUsingRegister(registerV1);
+   cg->stopUsingRegister(registerV2);
+   cg->stopUsingRegister(divRegisterPair);
+   cg->stopUsingRegister(tempReg);
+   cg->stopUsingRegister(sourceArrayReferenceRegister2);
+   return charArrayReferenceRegister;
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::zdloadEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::pdloadEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::zdloadiEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::pdloadEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::zdstoreEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::pdstoreEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::zdstoreiEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::pdstoreEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::zdsleLoadEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::pdloadEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::zdslsLoadEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::pdloadEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::zdstsLoadEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::pdloadEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::zdsleLoadiEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::pdloadEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::zdslsLoadiEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::pdloadEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::zdstsLoadiEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::pdloadEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::zdsleStoreEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::pdstoreEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::zdslsStoreEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::pdstoreEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::zdstsStoreEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::pdstoreEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::zdsleStoreiEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::pdstoreEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::zdslsStoreiEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::pdstoreEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::zdstsStoreiEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::pdstoreEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::zd2zdsleEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::zdsle2zdEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::zd2zdstsEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::zd2zdslsEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::zdsle2pdEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::zdsts2pdEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::zdsls2pdEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::zdsts2zdEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::zdsls2zdEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::pd2zdslsSetSignEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::pd2zdslsEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::pd2zdstsEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::pd2zdslsEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::pd2zdstsSetSignEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::pd2zdslsEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::udLoadEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::pdloadEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::udslLoadEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::pdloadEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::udstLoadEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::pdloadEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::udLoadiEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::pdloadEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::udslLoadiEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::pdloadEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::udstLoadiEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::pdloadEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::udStoreEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::pdstoreEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::udslStoreEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::pdstoreEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::udstStoreEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::pdstoreEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::udStoreiEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::pdstoreEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::udslStoreiEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::pdstoreEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::udstStoreiEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::pdstoreEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::pd2udstEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::pd2udslEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::udsl2udEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::udst2udEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::udst2pdEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::udsl2pdEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::pdloadiEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::pdloadEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::pdstoreiEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::pdstoreEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::pddivEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::pddivremEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::pdremEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::pddivremEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::pdabsEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::pdshrSetSignEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::pdshlSetSignEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::pdshlOverflowEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::pdshlEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::pd2iOverflowEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::pd2iEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::pd2iuEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::pd2iEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::iu2pdEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::pd2lOverflowEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::pd2lEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::pd2luEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::pd2lEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::lu2pdEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::pd2fEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::pd2dEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::f2pdEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::d2pdEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::pdcleanEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::unImpOpEvaluator(node, cg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::pdclearSetSignEvaluator(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   return TR::TreeEvaluator::pdclearEvaluator(node, cg);
+   }
 
 /* Moved from Codegen to FE */
 ///////////////////////////////////////////////////////////////////////////////////
@@ -213,50 +978,8 @@ doubleMaxMinHelper(TR::Node *node, TR::CodeGenerator *cg, bool isMaxOp)
    return node->getRegister();
    }
 
-/**
- * \brief
- *
- * Use vector instructions to find the index of a sub-string inside
- * a string assuming both strings have the same element size. Each element
- * is 1-byte for compact strings and 2-bytes for non-compressed strings.
- *
- * \details
- *
- * The vector sequence searches for the first character of the sub-string
- * inside the source/master string. If the first character is located, it'll
- * perform iterative vector binary compares to match the rest of the sub-string
- * starting from the first character position.
- *
- * This evaluator inlines the following Java intrinsic methods:
- *
- * <verbatim>
- * For Java 9 and above:
- *
- * StringLatin1.indexOf(s1Value, s1Length, s2Value, s2Length, fromIndex);
- * StringUTF16.indexOf(s1Value, s1Length, s2Value, s2Length, fromIndex);
- *
- * For Java 8:
- * com.ibm.jit.JITHelpers.intrinsicIndexOfStringLatin1(Object s1Value, int s1len, Object s2Value, int s2len, int start);
- * com.ibm.jit.JITHelpers.intrinsicIndexOfStringUTF16(Object s1Value, int s1len, Object s2Value, int s2len, int start);
- *
- * Assumptions:
- *
- * -# 0 <= fromIndex < s1Length
- * -# s1Length could be anything: positive, negative or 0.
- * -# s2Length > 0
- * -# s1Value and s2Value are non-null arrays and are interpreted as byte arrays.
- * -# s1Length and s2Length are not related. i.e. s1Length could be smallers than s2Length.
- *
- * <\verbatim>
- *
- * \param node the intrinsic function call node
- * \param cg the code generator
- * \param isUTF16 true if the string is a decompressed string.
- *
- * \return a register for that contains the indexOf() result.
-*/
 TR::Register*
-inlineVectorizedStringIndexOf(TR::Node* node, TR::CodeGenerator* cg, bool isUTF16)
+J9::Z::TreeEvaluator::inlineVectorizedStringIndexOf(TR::Node* node, TR::CodeGenerator* cg, bool isUTF16)
    {
    #define iComment(str) if (compDebug) compDebug->addInstructionComment(cursor, (const_cast<char*>(str)));
    TR::Compilation *comp = cg->comp();
@@ -266,6 +989,10 @@ inlineVectorizedStringIndexOf(TR::Node* node, TR::CodeGenerator* cg, bool isUTF1
    const bool supportsVSTRS = comp->target().cpu.supportsFeature(OMR_FEATURE_S390_VECTOR_FACILITY_ENHANCEMENT_2);
    TR_Debug *compDebug = comp->getDebug();
    TR::Instruction* cursor;
+
+   static bool disableIndexOfStringIntrinsic = feGetEnv("TR_DisableIndexOfStringIntrinsic") != NULL;
+   if (disableIndexOfStringIntrinsic)
+      return NULL;
 
    if (comp->getOption(TR_TraceCG))
       traceMsg(comp, "inlineVectorizedStringIndexOf. Is isUTF16 %d\n", isUTF16);
@@ -317,7 +1044,7 @@ inlineVectorizedStringIndexOf(TR::Node* node, TR::CodeGenerator* cg, bool isUTF1
    TR::LabelSymbol* labelPatternNotFound = generateLabelSymbol(cg);
    TR::LabelSymbol* labelDone = generateLabelSymbol(cg);
 
-   cursor = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, labelStart);
+   cursor = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, labelStart);
    iComment("retrieve string len, pattern len and starting pos");
    labelStart->setStartInternalControlFlow();
 
@@ -365,25 +1092,25 @@ inlineVectorizedStringIndexOf(TR::Node* node, TR::CodeGenerator* cg, bool isUTF1
       cg->generateDebugCounter("indexOfString/PatternLen/below-10", 1, TR::DebugCounter::Cheap);
       generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, labelPatternLenCheckDone);
 
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, labelPatternLenGT10);
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, labelPatternLenGT10);
       generateRIEInstruction(cg, TR::InstOpCode::getCmpImmBranchRelOpCode(), node, patternLenReg, boundary30Char, labelPatternLenGT30, TR::InstOpCode::COND_BH);
       cg->generateDebugCounter("indexOfString/PatternLen/10-30", 1, TR::DebugCounter::Cheap);
       generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, labelPatternLenCheckDone);
 
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, labelPatternLenGT30);
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, labelPatternLenGT30);
       generateRIEInstruction(cg, TR::InstOpCode::getCmpImmBranchRelOpCode(), node, patternLenReg, boundary60Char, labelPatternLenGT60, TR::InstOpCode::COND_BH);
       cg->generateDebugCounter("indexOfString/PatternLen/30-60", 1, TR::DebugCounter::Cheap);
       generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, labelPatternLenCheckDone);
 
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, labelPatternLenGT60);
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, labelPatternLenGT60);
       generateRIEInstruction(cg, TR::InstOpCode::getCmpImmBranchRelOpCode(), node, patternLenReg, boundary100Char, labelPatternLenGT100, TR::InstOpCode::COND_BH);
       cg->generateDebugCounter("indexOfString/PatternLen/60-100", 1, TR::DebugCounter::Cheap);
       generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, labelPatternLenCheckDone);
 
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, labelPatternLenGT100);
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, labelPatternLenGT100);
       cg->generateDebugCounter("indexOfString/PatternLen/above-100", 1, TR::DebugCounter::Cheap);
 
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, labelPatternLenCheckDone);
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, labelPatternLenCheckDone);
       }
 
    if (supportsVSTRS)
@@ -402,16 +1129,16 @@ inlineVectorizedStringIndexOf(TR::Node* node, TR::CodeGenerator* cg, bool isUTF1
       generateVRSbInstruction(cg, TR::InstOpCode::VLVG, node, patternLenVReg, patternLenReg, generateS390MemoryReference(7, cg), 0);
       generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, labelPatternLoadDone);
 
-      cursor = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, labelPatternLoad16Bytes);
+      cursor = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, labelPatternLoad16Bytes);
       iComment("load first 16 bytes of the pattern");
       generateVRXInstruction(cg, TR::InstOpCode::VL, node, patternHeadVReg, generateS390MemoryReference(patternValueReg, headerSize, cg));
       generateRIInstruction(cg, TR::InstOpCode::LHI, node, loadLenReg, vectorSize);
       generateVRSbInstruction(cg, TR::InstOpCode::VLVG, node, patternLenVReg, loadLenReg, generateS390MemoryReference(7, cg), 0);
-      cursor = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, labelPatternLoadDone);
+      cursor = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, labelPatternLoadDone);
       iComment("min(16,pattern length) bytes have been loaded");
 
       // Loop to search for pattern header in string
-      cursor = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, labelFindPatternHead);
+      cursor = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, labelFindPatternHead);
       iComment("look for pattern head in the string");
 
       // Determine string load length and load a piece of string
@@ -424,13 +1151,14 @@ inlineVectorizedStringIndexOf(TR::Node* node, TR::CodeGenerator* cg, bool isUTF1
       cursor = generateRIInstruction(cg, TR::InstOpCode::getAddHalfWordImmOpCode(), node, loadLenReg, -1);
       iComment("needs -1 because VLL's third operand is the highest index to load");
       generateVRSbInstruction(cg, TR::InstOpCode::VLL, node, stringVReg, loadLenReg, generateS390MemoryReference(stringCharPtrReg, headerSize, cg));
+      generateRIInstruction(cg, TR::InstOpCode::getAddHalfWordImmOpCode(), node, loadLenReg, 1);
       generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, labelLoadStringLenDone);
       srm->reclaimScratchRegister(stringCharPtrReg);
-      cursor = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, labelLoadString16Bytes);
+      cursor = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, labelLoadString16Bytes);
       iComment("load 16 bytes of the string");
       generateVRXInstruction(cg, TR::InstOpCode::VL, node, stringVReg, generateS390MemoryReference(stringValueReg, stringIndexReg, headerSize, cg));
       generateRIInstruction(cg, TR::InstOpCode::getLoadHalfWordImmOpCode(), node, loadLenReg, vectorSize);
-      cursor = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, labelLoadStringLenDone);
+      cursor = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, labelLoadStringLenDone);
       iComment("16 bytes of the string have been loaded");
 
       // VSTRS sets CC with the following values:
@@ -447,14 +1175,14 @@ inlineVectorizedStringIndexOf(TR::Node* node, TR::CodeGenerator* cg, bool isUTF1
 
       // pattern header not found in first 16 bytes of the string
       // Load the next 16 bytes of the string and continue
-      generateRIEInstruction(cg, TR::InstOpCode::getCmpRegAndBranchRelOpCode(), node, stringIndexReg, maxIndexReg, labelPatternNotFound, TR::InstOpCode::COND_BNL);
       generateRRInstruction(cg, TR::InstOpCode::getAddRegOpCode(), node, stringIndexReg, loadLenReg);
-      generateRIEInstruction(cg, TR::InstOpCode::getCmpRegAndBranchRelOpCode(), node, stringIndexReg, stringLenReg, labelPatternNotFound, TR::InstOpCode::COND_BNL);
+      cursor = generateRIEInstruction(cg, TR::InstOpCode::getCmpRegAndBranchRelOpCode(), node, stringIndexReg, maxIndexReg, labelPatternNotFound, TR::InstOpCode::COND_BH);
+      iComment("Updated stringIndex for next iteration exceeds maxIndex of valid match. Full pattern cannot be matched.")
       cursor = generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, labelFindPatternHead);
       iComment("neither full nor partial match was found for pattern head, load next 16 bytes of the string and try again");
 
       // pattern header full match
-      cursor = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, labelPatternHeadFullMatch);
+      cursor = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, labelPatternHeadFullMatch);
       iComment("full match found of pattern head");
 
       // If patternLen <= 16 then we are done, otherwise we continue to check the rest of pattern. We first handle residue bytes
@@ -464,13 +1192,15 @@ inlineVectorizedStringIndexOf(TR::Node* node, TR::CodeGenerator* cg, bool isUTF1
       generateRRInstruction(cg, TR::InstOpCode::getAddRegOpCode(), node, matchIndexReg, stringIndexReg);
       cursor = generateRIEInstruction(cg, TR::InstOpCode::getCmpImmBranchRelOpCode(), node, patternLenReg, (int8_t)vectorSize, labelLoadResult, TR::InstOpCode::COND_BNH);
       iComment("if patternLen <= 16 then we are done, otherwise we continue to check the rest of pattern");
+      cursor = generateRIEInstruction(cg, TR::InstOpCode::getCmpRegAndBranchRelOpCode(), node, stringIndexReg, maxIndexReg, labelPatternNotFound, TR::InstOpCode::COND_BH);
+      iComment("Updated stringIndex for start of matched section exceeds maxIndex. Full pattern cannot be matched.");
       generateRRInstruction(cg, TR::InstOpCode::getAddRegOpCode(), node, stringIndexReg, loadLenReg);
       generateRIInstruction(cg, TR::InstOpCode::getLoadHalfWordImmOpCode(), node, patternIndexReg, vectorSize);
       cursor = generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, labelMatchPatternResidue);
       iComment("find residual pattern");
 
       // pattern header partial match
-      cursor = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, labelPatternHeadPartMatch);
+      cursor = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, labelPatternHeadPartMatch);
       iComment("partial match of first 16 bytes of pattern was found");
 
       // Starting from the beginning of the partial match, load the next 16 bytes from string and redo pattern header search.
@@ -491,7 +1221,7 @@ inlineVectorizedStringIndexOf(TR::Node* node, TR::CodeGenerator* cg, bool isUTF1
       TR::Register* patternFirstCharVReg  = srm->findOrCreateScratchRegister(TR_VRF);
 
       /************************************** 1st char of pattern ******************************************/
-      cursor = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, labelFindPatternHead);
+      cursor = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, labelFindPatternHead);
       iComment("find first character of pattern");
       generateVRXInstruction(cg, TR::InstOpCode::VLREP, node, patternFirstCharVReg, generateS390MemoryReference(patternValueReg, headerSize, cg), elementSizeMask);
 
@@ -502,11 +1232,11 @@ inlineVectorizedStringIndexOf(TR::Node* node, TR::CodeGenerator* cg, bool isUTF1
       generateRIInstruction(cg, TR::InstOpCode::getAddHalfWordImmOpCode(), node, loadLenReg, -1);
       generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, labelLoadStringLenDone);
 
-      cursor = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, labelLoadString16Bytes);
+      cursor = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, labelLoadString16Bytes);
       iComment("update loadLenReg to load 16 characters from the string later on");
       generateRIInstruction(cg, TR::InstOpCode::getLoadHalfWordImmOpCode(), node, loadLenReg, vectorSize-1);
 
-      cursor = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, labelLoadStringLenDone);
+      cursor = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, labelLoadStringLenDone);
       iComment("load 16 characters into string VRF register and search for first chracter of the pattern");
 
       TR::Register* stringCharPtrReg = srm->findOrCreateScratchRegister();
@@ -525,7 +1255,7 @@ inlineVectorizedStringIndexOf(TR::Node* node, TR::CodeGenerator* cg, bool isUTF1
       iComment("1st char not found. Loop back and retry from the next chunk");
 
       // Found 1st char. check it's byte index in searchResultVReg byte 7.
-      cursor = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, labelExtractFirstCharPos);
+      cursor = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, labelExtractFirstCharPos);
       iComment("check 7th index of search result vec for byte index");
 
       generateVRScInstruction(cg, TR::InstOpCode::VLGV, node, matchIndexReg, searchResultVReg, generateS390MemoryReference(7, cg), 0);
@@ -540,7 +1270,7 @@ inlineVectorizedStringIndexOf(TR::Node* node, TR::CodeGenerator* cg, bool isUTF1
       }
 
    srm->addScratchRegistersToDependencyList(regDeps);
-   cursor = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, labelMatchPatternResidue);
+   cursor = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, labelMatchPatternResidue);
    iComment("match remainder of the pattern");
 
    // pattern residue length  = patternLenReg mod 16
@@ -577,7 +1307,7 @@ inlineVectorizedStringIndexOf(TR::Node* node, TR::CodeGenerator* cg, bool isUTF1
 
    /************************************** pattern matching loop ENTRY ******************************************/
 
-   cursor = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, labelMatchPatternLoopSetup);
+   cursor = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, labelMatchPatternLoopSetup);
    iComment("loop setup to search for rest of the pattern");
    generateRRInstruction(cg, TR::InstOpCode::getAddRegOpCode(), node, stringIndexReg, loadLenReg);
 
@@ -602,7 +1332,7 @@ inlineVectorizedStringIndexOf(TR::Node* node, TR::CodeGenerator* cg, bool isUTF1
    generateRIEInstruction(cg, TR::InstOpCode::getCmpImmBranchRelOpCode(), node, loopCountReg, static_cast<int8_t>(0), labelLoadResult, TR::InstOpCode::COND_BE);
 
    /************************************** pattern matching loop ******************************************/
-   cursor = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, labelMatchPatternLoop);
+   cursor = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, labelMatchPatternLoop);
    iComment("start search for reset of the pattern");
    // Start to match the reset of pattern
    generateVRXInstruction(cg, TR::InstOpCode::VL, node, stringVReg, generateS390MemoryReference(stringValueReg, stringIndexReg, headerSize, cg));
@@ -617,7 +1347,7 @@ inlineVectorizedStringIndexOf(TR::Node* node, TR::CodeGenerator* cg, bool isUTF1
    cursor = generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, labelFindPatternHead);
    iComment("pattern chunk does not match. Go back and search again");
 
-   cursor = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, labelPartialPatternMatch);
+   cursor = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, labelPartialPatternMatch);
    iComment("there was a complete match for the characters currently loaded in pattern VRF register");
    generateRIInstruction(cg, TR::InstOpCode::getAddHalfWordImmOpCode(), node, stringIndexReg, vectorSize);
    generateRIInstruction(cg, TR::InstOpCode::getAddHalfWordImmOpCode(), node, patternIndexReg, vectorSize);
@@ -625,7 +1355,7 @@ inlineVectorizedStringIndexOf(TR::Node* node, TR::CodeGenerator* cg, bool isUTF1
    generateRIEInstruction(cg, TR::InstOpCode::getCmpImmBranchRelOpCode(), node, loopCountReg, (int8_t)0, labelMatchPatternLoop, TR::InstOpCode::COND_BNE);
    srm->reclaimScratchRegister(loopCountReg);
    // Load -1 if pattern is no found in string or load the character index of the 1st character of pattern in string
-   cursor = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, labelLoadResult);
+   cursor = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, labelLoadResult);
 
    if (isUTF16)
       {
@@ -635,11 +1365,11 @@ inlineVectorizedStringIndexOf(TR::Node* node, TR::CodeGenerator* cg, bool isUTF1
       }
    generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, labelResultDone);
 
-   cursor = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, labelPatternNotFound);
+   cursor = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, labelPatternNotFound);
    iComment("pattern was not found in the string");
    generateRIInstruction(cg, TR::InstOpCode::LHI, node, matchIndexReg, -1);
 
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, labelResultDone);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, labelResultDone);
 
    // Result debug counters
    if (enableIndexOfDebugCounter)
@@ -659,28 +1389,28 @@ inlineVectorizedStringIndexOf(TR::Node* node, TR::CodeGenerator* cg, bool isUTF1
       cg->generateDebugCounter("indexOfString/result/below-10", 1, TR::DebugCounter::Cheap);
       generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, labelResultCheckDone);
 
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node,  labelResultGT10);
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node,  labelResultGT10);
       generateRIEInstruction(cg, TR::InstOpCode::getCmpImmBranchRelOpCode(), node, patternLenReg, boundary30Char, labelResultGT30, TR::InstOpCode::COND_BH);
       cg->generateDebugCounter("indexOfString/result/10-30", 1, TR::DebugCounter::Cheap);
       generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, labelResultCheckDone);
 
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node,  labelResultGT30);
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node,  labelResultGT30);
       generateRIEInstruction(cg, TR::InstOpCode::getCmpImmBranchRelOpCode(), node, patternLenReg, boundary60Char, labelResultGT60, TR::InstOpCode::COND_BH);
       cg->generateDebugCounter("indexOfString/result/30-60", 1, TR::DebugCounter::Cheap);
       generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, labelResultCheckDone);
 
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node,   labelResultGT60);
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node,   labelResultGT60);
       generateRIEInstruction(cg, TR::InstOpCode::getCmpImmBranchRelOpCode(), node, patternLenReg, boundary100Char, labelResultGT100, TR::InstOpCode::COND_BH);
       cg->generateDebugCounter("indexOfString/result/60-100", 1, TR::DebugCounter::Cheap);
       generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, labelResultCheckDone);
 
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, labelResultGT100);
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, labelResultGT100);
       cg->generateDebugCounter("indexOfString/result/above-100", 1, TR::DebugCounter::Cheap);
 
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, labelResultCheckDone);
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, labelResultCheckDone);
       }
 
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, labelDone, regDeps);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, labelDone, regDeps);
    labelDone->setEndInternalControlFlow();
 
    node->setRegister(matchIndexReg);
@@ -847,7 +1577,7 @@ TR::Register * caseConversionHelper(TR::Node* node, TR::CodeGenerator* cg, bool 
 
    generateRRInstruction(cg, TR::InstOpCode::LR, node, loadLength, lengthRegister);
    generateRILInstruction(cg, TR::InstOpCode::NILF, node, loadLength, 0xF);
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, cFlowRegionStart);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, cFlowRegionStart);
    cFlowRegionStart->setStartInternalControlFlow();
    generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BZ, node, fullVectorConversion);
 
@@ -872,7 +1602,7 @@ TR::Register * caseConversionHelper(TR::Node* node, TR::CodeGenerator* cg, bool 
    // Increment index by the remainder then add 1, since the loadLength contains the highest index, we must go one past that
    generateRIEInstruction(cg, TR::InstOpCode::AHIK, node, addressOffset, loadLength, 1);
 
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, fullVectorConversion);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, fullVectorConversion);
 
    generateS390CompareAndBranchInstruction(cg, TR::InstOpCode::C, node,
                                            lengthRegister, sizeOfVector,
@@ -881,7 +1611,7 @@ TR::Register * caseConversionHelper(TR::Node* node, TR::CodeGenerator* cg, bool 
    // Set the loopCounter to the amount of groups of 16 bytes left, ignoring already accounted for remainder
    generateRSInstruction(cg, TR::InstOpCode::SRL, node, loopCounter, loopCounter, 4);
 
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, loop);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, loop);
 
    generateVRXInstruction(cg, TR::InstOpCode::VL, node, charBufferVector, generateS390MemoryReference(sourceRegister, addressOffset, headerSize, cg));
 
@@ -900,17 +1630,17 @@ TR::Register * caseConversionHelper(TR::Node* node, TR::CodeGenerator* cg, bool 
    generateRXInstruction(cg, TR::InstOpCode::getLoadAddressOpCode(), node, addressOffset, generateS390MemoryReference(addressOffset, sizeOfVector, cg));
    generateS390BranchInstruction(cg, TR::InstOpCode::BRCT, node, loopCounter, loop);
 
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, success);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, success);
 
    generateRIInstruction(cg, TR::InstOpCode::LHI, node, lengthRegister, 1);
 
    generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, cFlowRegionEnd);
 
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, handleInvalidChars);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, handleInvalidChars);
    cg->generateDebugCounter(isToUpper? "z13/simd/toUpper/null"  : "z13/simd/toLower/null", 1, TR::DebugCounter::Cheap);
    generateRRInstruction(cg, TR::InstOpCode::XR, node, lengthRegister, lengthRegister);
 
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, cFlowRegionEnd, regDeps);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, cFlowRegionEnd, regDeps);
    cFlowRegionEnd->setEndInternalControlFlow();
 
    cg->stopUsingRegister(addressOffset);
@@ -935,8 +1665,8 @@ TR::Register * caseConversionHelper(TR::Node* node, TR::CodeGenerator* cg, bool 
    return node->getRegister();
    }
 
-extern TR::Register *
-inlineIntrinsicIndexOf(TR::Node * node, TR::CodeGenerator * cg, bool isLatin1)
+TR::Register *
+J9::Z::TreeEvaluator::inlineIntrinsicIndexOf(TR::Node * node, TR::CodeGenerator * cg, bool isLatin1)
    {
    cg->generateDebugCounter("z13/simd/indexOf", 1, TR::DebugCounter::Free);
 
@@ -1004,7 +1734,7 @@ inlineIntrinsicIndexOf(TR::Node * node, TR::CodeGenerator * cg, bool isLatin1)
 
    generateRRInstruction(cg, TR::InstOpCode::LR, node, loadLength, length);
    generateRILInstruction(cg, TR::InstOpCode::NILF, node, loadLength, 0xF);
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, cFlowRegionStart);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, cFlowRegionStart);
    cFlowRegionStart->setStartInternalControlFlow();
    generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BZ, node, fullVectorLabel);
 
@@ -1022,13 +1752,13 @@ inlineIntrinsicIndexOf(TR::Node * node, TR::CodeGenerator * cg, bool isLatin1)
                                            scratch, loadLength,
                                            TR::InstOpCode::COND_BNH, foundLabelExtractedScratch);
 
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, notFoundInResidue);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, notFoundInResidue);
 
    // Increment index by loaded length + 1, since we subtracted 1 earlier
    generateRIEInstruction(cg, TR::InstOpCode::AHIK, node, loadLength, loadLength, 1);
    generateRRInstruction(cg, TR::InstOpCode::AR, node, indexRegister, loadLength);
 
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, fullVectorLabel);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, fullVectorLabel);
 
    generateS390CompareAndBranchInstruction(cg, TR::InstOpCode::C, node,
                                            length, sizeOfVector,
@@ -1037,7 +1767,7 @@ inlineIntrinsicIndexOf(TR::Node * node, TR::CodeGenerator * cg, bool isLatin1)
    // Set loopcounter to 1/16 of the length, remainder has already been accounted for
    generateRSInstruction(cg, TR::InstOpCode::SRL, node, loopCounter, loopCounter, 4);
 
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, loopLabel);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, loopLabel);
 
    generateVRXInstruction(cg, TR::InstOpCode::VL, node, charBufferVector, generateS390MemoryReference(array, indexRegister, TR::Compiler->om.contiguousArrayHeaderSizeInBytes(), cg));
 
@@ -1048,14 +1778,14 @@ inlineIntrinsicIndexOf(TR::Node * node, TR::CodeGenerator * cg, bool isLatin1)
 
    generateS390BranchInstruction(cg, TR::InstOpCode::BRCT, node, loopCounter, loopLabel);
 
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, failureLabel);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, failureLabel);
    generateRIInstruction(cg, TR::InstOpCode::LHI, node, indexRegister, 0xFFFF);
    generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_B, node, cFlowRegionEnd);
 
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, foundLabel);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, foundLabel);
    generateVRScInstruction(cg, TR::InstOpCode::VLGV, node, scratch, resultVector, generateS390MemoryReference(7, cg), 0);
 
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, foundLabelExtractedScratch);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, foundLabelExtractedScratch);
    generateRRInstruction(cg, TR::InstOpCode::AR, node, indexRegister, scratch);
 
    if (!isLatin1)
@@ -1063,7 +1793,7 @@ inlineIntrinsicIndexOf(TR::Node * node, TR::CodeGenerator * cg, bool isLatin1)
       generateRSInstruction(cg, TR::InstOpCode::SRL, node, indexRegister, indexRegister, 1);
       }
 
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, cFlowRegionEnd, regDeps);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, cFlowRegionEnd, regDeps);
    cFlowRegionEnd->setEndInternalControlFlow();
 
    cg->stopUsingRegister(loopCounter);
@@ -1085,56 +1815,644 @@ inlineIntrinsicIndexOf(TR::Node * node, TR::CodeGenerator * cg, bool isLatin1)
    return indexRegister;
    }
 
-extern TR::Register *
-toUpperIntrinsic(TR::Node *node, TR::CodeGenerator *cg, bool isCompressedString)
+TR::Register*
+J9::Z::TreeEvaluator::inlineUTF16BEEncode(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   TR::Compilation* comp = cg->comp();
+
+   // Create the necessary registers
+   TR::Register* output    = cg->gprClobberEvaluate(node->getChild(1));
+   TR::Register* input     = cg->gprClobberEvaluate(node->getChild(0));
+
+   TR::Register* inputLen  = cg->gprClobberEvaluate(node->getChild(2));
+   TR::Register* inputLen8 = cg->allocateRegister();
+
+   TR::Register* temp1 = cg->allocateRegister();
+   TR::Register* temp2 = cg->allocateRegister();
+
+   // Number of bytes currently translated (also used as a stride register)
+   TR::Register* translated = cg->allocateRegister();
+
+   // Convert input length in number of characters to number of bytes
+   generateRSInstruction(cg, TR::InstOpCode::getShiftLeftLogicalSingleOpCode(), node, inputLen, inputLen, 1);
+
+   // Calculate inputLen8 = inputLen / 8
+   generateRSInstruction(cg, TR::InstOpCode::SRLK, node, inputLen8, inputLen, 3);
+
+   // Initialize the number of translated bytes to 0
+   generateRREInstruction(cg, TR::InstOpCode::getXORRegOpCode(), node, translated, translated);
+
+   // Create the necessary labels
+   TR::LabelSymbol * processChar4     = generateLabelSymbol( cg);
+   TR::LabelSymbol * processChar4End  = generateLabelSymbol( cg);
+   TR::LabelSymbol * processChar1     = generateLabelSymbol( cg);
+   TR::LabelSymbol * processChar1End  = generateLabelSymbol( cg);
+   TR::LabelSymbol * processChar1Copy = generateLabelSymbol( cg);
+
+   const uint16_t surrogateRange1 = 0xD800;
+   const uint16_t surrogateRange2 = 0xDFFF;
+
+   const uint32_t surrogateMaskAND = 0xF800F800;
+   const uint32_t surrogateMaskXOR = 0xD800D800;
+
+   TR::RegisterDependencyConditions* dependencies = new (cg->trHeapMemory()) TR::RegisterDependencyConditions(0, 7, cg);
+
+   // ----------------- Incoming branch -----------------
+
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, processChar4);
+   processChar4->setStartInternalControlFlow();
+
+   // Branch to the end if there are no more multiples of 4 chars left to process
+   generateS390CompareAndBranchInstruction(cg, TR::InstOpCode::getCmpLogicalOpCode(), node, inputLen8, 0, TR::InstOpCode::COND_MASK8, processChar4End, false, false, NULL, dependencies);
+
+   // Load 4 input characters from memory and make a copy
+   generateRXInstruction(cg, TR::InstOpCode::LG,  node, temp1, generateS390MemoryReference(input, translated, 0, cg));
+   generateRREInstruction(cg, TR::InstOpCode::LGR, node, temp2, temp1);
+
+   // AND temp2 by the surrogate mask
+   generateRILInstruction(cg, TR::InstOpCode::NIHF, node, temp2, surrogateMaskAND);
+   generateRILInstruction(cg, TR::InstOpCode::NILF, node, temp2, surrogateMaskAND);
+
+   // XOR temp2 by the surrogate mask and branch if CC = 1 (meaning there is a surrogate)
+   generateRILInstruction(cg, TR::InstOpCode::XIHF, node, temp2, surrogateMaskXOR);
+   generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_CC1, node, processChar4End);
+   generateRILInstruction(cg, TR::InstOpCode::XILF, node, temp2, surrogateMaskXOR);
+   generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_CC1, node, processChar4End);
+
+   generateRXInstruction(cg, TR::InstOpCode::STG, node, temp1, generateS390MemoryReference(output, translated, 0, cg));
+
+   // Advance the number of bytes processed
+   generateRIInstruction(cg, TR::InstOpCode::getAddHalfWordImmOpCode(), node, translated, 8);
+
+   // Branch back to the start of the loop
+   generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_MASK15, node, processChar4);
+
+   // ----------------- Incoming branch -----------------
+
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, processChar4End);
+   processChar4End->setEndInternalControlFlow();
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, processChar1);
+   processChar1->setStartInternalControlFlow();
+
+   // Branch to the end if there are no more characters left to process
+   generateS390CompareAndBranchInstruction(cg, TR::InstOpCode::getCmpRegOpCode(), node, translated, inputLen, TR::InstOpCode::COND_BNL, processChar1End, false, false);
+
+   // Load an input character from memory
+   generateRXInstruction(cg, TR::InstOpCode::LLH, node, temp1, generateS390MemoryReference(input, translated, 0, cg));
+
+   // Compare the input character against the lower bound surrogate character range
+   generateRILInstruction(cg, TR::InstOpCode::getCmpImmOpCode(), node, temp1, surrogateRange1);
+
+   // Branch if < (non-surrogate char)
+   generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_MASK4, node, processChar1Copy);
+
+   // Compare the input character against the upper bound surrogate character range
+   generateRILInstruction(cg, TR::InstOpCode::getCmpImmOpCode(), node, temp1, surrogateRange2);
+
+   // Branch if > (non-surrogate char)
+   generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_MASK2, node, processChar1Copy);
+
+   // If we get here it must be a surrogate char
+   generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_MASK15, node, processChar1End);
+
+   // ----------------- Incoming branch -----------------
+
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, processChar1Copy);
+
+   // Store the lower byte of the character into the output buffer
+   generateRXInstruction (cg, TR::InstOpCode::STH, node, temp1, generateS390MemoryReference(output, translated, 0, cg));
+
+   // Advance the number of bytes processed
+   generateRIInstruction(cg, TR::InstOpCode::getAddHalfWordImmOpCode(), node, translated, 2);
+
+   // Branch back to the start of the loop
+   generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_MASK15, node, processChar1);
+
+   // Set up the proper register dependencies
+   dependencies->addPostCondition(input,      TR::RealRegister::AssignAny);
+   dependencies->addPostCondition(inputLen,   TR::RealRegister::AssignAny);
+   dependencies->addPostCondition(inputLen8,  TR::RealRegister::AssignAny);
+   dependencies->addPostCondition(temp1,      TR::RealRegister::AssignAny);
+   dependencies->addPostCondition(temp2,      TR::RealRegister::AssignAny);
+   dependencies->addPostCondition(output,     TR::RealRegister::AssignAny);
+   dependencies->addPostCondition(translated, TR::RealRegister::AssignAny);
+
+   // ----------------- Incoming branch -----------------
+
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, processChar1End, dependencies);
+   processChar1End->setEndInternalControlFlow();
+
+   // Convert translated length in number of bytes to number of characters
+   generateRSInstruction(cg, TR::InstOpCode::getShiftRightLogicalSingleOpCode(), node, translated, translated, 1);
+
+   // Cleanup nodes before returning
+   cg->decReferenceCount(node->getChild(0));
+   cg->decReferenceCount(node->getChild(1));
+   cg->decReferenceCount(node->getChild(2));
+
+   // Cleanup registers before returning
+   cg->stopUsingRegister(input);
+   cg->stopUsingRegister(inputLen);
+   cg->stopUsingRegister(inputLen8);
+   cg->stopUsingRegister(temp1);
+   cg->stopUsingRegister(temp2);
+   cg->stopUsingRegister(output);
+
+   return node->setRegister(translated);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::inlineUTF16BEEncodeSIMD(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   TR::Compilation* comp = cg->comp();
+
+   // Create the necessary registers
+   TR::Register* output = cg->gprClobberEvaluate(node->getChild(1));
+   TR::Register* input  = cg->gprClobberEvaluate(node->getChild(0));
+
+   TR::Register* inputLen;
+   TR::Register* inputLen16 = cg->allocateRegister();
+   TR::Register* inputLenMinus1 = inputLen16;
+
+   // Number of characters currently translated
+   TR::Register* translated = cg->allocateRegister();
+
+   // Initialize the number of translated characters to 0
+   generateRREInstruction(cg, TR::InstOpCode::getXORRegOpCode(), node, translated, translated);
+
+   TR::Node* inputLenNode = node->getChild(2);
+
+   // Optimize the constant length case
+   bool isLenConstant = inputLenNode->getOpCode().isLoadConst() && performTransformation(comp, "O^O [%p] Reduce input length to constant.\n", inputLenNode);
+
+   if (isLenConstant)
+      {
+      inputLen = cg->allocateRegister();
+
+      // Convert input length in number of characters to number of bytes
+      generateLoad32BitConstant(cg, inputLenNode, ((getIntegralValue(inputLenNode) * 2)), inputLen, true);
+      generateLoad32BitConstant(cg, inputLenNode, ((getIntegralValue(inputLenNode) * 2) >> 4) << 4, inputLen16, true);
+      }
+   else
+      {
+      inputLen = cg->gprClobberEvaluate(inputLenNode, true);
+
+      // Convert input length in number of characters to number of bytes
+      generateRSInstruction(cg, TR::InstOpCode::getShiftLeftLogicalSingleOpCode(), node, inputLen, inputLen, 1);
+
+      // Sign extend the value if needed
+      if (cg->comp()->target().is64Bit() && !(inputLenNode->getOpCode().isLong()))
+         {
+         generateRRInstruction(cg, TR::InstOpCode::getLoadRegWidenOpCode(), node, inputLen,   inputLen);
+         generateRRInstruction(cg, TR::InstOpCode::getLoadRegWidenOpCode(), node, inputLen16, inputLen);
+         }
+      else
+         {
+         generateRRInstruction(cg, TR::InstOpCode::getLoadRegOpCode(), node, inputLen16, inputLen);
+         }
+
+      // Truncate the 4 right most bits
+      generateRIInstruction(cg, TR::InstOpCode::NILL, node, inputLen16, static_cast <int16_t> (0xFFF0));
+      }
+
+   // Create the necessary vector registers
+   TR::Register* vInput     = cg->allocateRegister(TR_VRF);
+   TR::Register* vSurrogate = cg->allocateRegister(TR_VRF); // Track index of first surrogate char
+
+   TR::Register* vRange        = cg->allocateRegister(TR_VRF);
+   TR::Register* vRangeControl = cg->allocateRegister(TR_VRF);
+
+   // Initialize the vector registers
+   uint16_t surrogateRange1 = 0xD800;
+   uint16_t surrogateRange2 = 0xDFFF;
+
+   uint16_t surrogateControl1 = 0xA000; // >= comparison
+   uint16_t surrogateControl2 = 0xC000; // <= comparison
+
+   generateVRIaInstruction(cg, TR::InstOpCode::VGBM, node, vRange, 0, 0 /*unused*/);
+   generateVRIaInstruction(cg, TR::InstOpCode::VGBM, node, vRangeControl, 0, 0 /*unused*/);
+
+   generateVRIaInstruction(cg, TR::InstOpCode::VLEIH, node, vRange, surrogateRange1, 0);
+   generateVRIaInstruction(cg, TR::InstOpCode::VLEIH, node, vRange, surrogateRange2, 1);
+
+   generateVRIaInstruction(cg, TR::InstOpCode::VLEIH, node, vRangeControl, surrogateControl1, 0);
+   generateVRIaInstruction(cg, TR::InstOpCode::VLEIH, node, vRangeControl, surrogateControl2, 1);
+
+   // Create the necessary labels
+   TR::LabelSymbol * process8Chars         = generateLabelSymbol(cg);
+   TR::LabelSymbol * process8CharsEnd      = generateLabelSymbol(cg);
+
+   TR::LabelSymbol * processUnder8Chars    = generateLabelSymbol(cg);
+   TR::LabelSymbol * processUnder8CharsEnd = generateLabelSymbol(cg);
+
+   TR::LabelSymbol * processSurrogate      = generateLabelSymbol(cg);
+   TR::LabelSymbol * processSurrogateEnd   = generateLabelSymbol(cg);
+
+   // Branch to the end if there are no more multiples of 8 chars left to process
+   generateS390CompareAndBranchInstruction(cg, TR::InstOpCode::getCmpLogicalOpCode(), node, inputLen16, 0, TR::InstOpCode::COND_MASK8, process8CharsEnd, false, false);
+
+   // ----------------- Incoming branch -----------------
+
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, process8Chars);
+   process8Chars->setStartInternalControlFlow();
+
+   // Load 16 bytes (8 chars) into vector register
+   generateVRXInstruction(cg, TR::InstOpCode::VL, node, vInput, generateS390MemoryReference(input, translated, 0, cg));
+
+   // Check for vector surrogates and branch to copy the non-surrogate bytes
+   generateVRRdInstruction(cg, TR::InstOpCode::VSTRC, node, vSurrogate, vInput, vRange, vRangeControl, 0x1, 1);
+   generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_CC1, node, processSurrogate);
+
+   // Store the result
+   generateVRXInstruction(cg, TR::InstOpCode::VST, node, vInput, generateS390MemoryReference(output, translated, 0, cg));
+
+   // Advance the stride register
+   generateRIInstruction(cg, TR::InstOpCode::getAddHalfWordImmOpCode(), node, translated, 16);
+
+   // Loop back if there is at least 8 chars left to process
+   generateS390CompareAndBranchInstruction(cg, TR::InstOpCode::getCmpRegOpCode(), node, translated, inputLen16, TR::InstOpCode::COND_BL, process8Chars, false, false);
+
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, process8CharsEnd);
+   process8CharsEnd->setEndInternalControlFlow();
+
+   // ----------------- Incoming branch -----------------
+
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, processUnder8Chars);
+   processUnder8Chars->setStartInternalControlFlow();
+
+   // Calculate the number of residue bytes available
+   generateRRInstruction(cg, TR::InstOpCode::getSubstractRegOpCode(), node, inputLen, translated);
+
+   // Branch to the end if there is no residue
+   generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_CC0, node, processUnder8CharsEnd);
+
+   // VLL and VSTL work on indices so we must subtract 1
+   generateRIEInstruction(cg, TR::InstOpCode::getAddLogicalRegRegImmediateOpCode(), node, inputLenMinus1, inputLen, -1);
+
+   // Zero out the input register to avoid invalid VSTRC result
+   generateVRIaInstruction(cg, TR::InstOpCode::VGBM, node, vInput, 0, 0 /*unused*/);
+
+   // VLL instruction can only handle memory references of type D(B), so increment the base input address
+   generateRRInstruction (cg, TR::InstOpCode::getAddRegOpCode(), node, input, translated);
+
+   // Load residue bytes into vector register
+   generateVRSbInstruction(cg, TR::InstOpCode::VLL, node, vInput, inputLenMinus1, generateS390MemoryReference(input, 0, cg));
+
+   // Check for vector surrogates and branch to copy the non-surrogate bytes
+   generateVRRdInstruction(cg, TR::InstOpCode::VSTRC, node, vSurrogate, vInput, vRange, vRangeControl, 0x1, 1);
+
+   generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_CC3, node, processSurrogateEnd);
+
+   // ----------------- Incoming branch -----------------
+
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, processSurrogate);
+
+   // Extract the index of the first surrogate char
+   generateVRScInstruction(cg, TR::InstOpCode::VLGV, node, inputLen, vSurrogate, generateS390MemoryReference(7, cg), 0);
+
+   // Return in the case of saturation at index 0
+   generateS390CompareAndBranchInstruction(cg, TR::InstOpCode::getCmpLogicalOpCode(), node, inputLen, 0, TR::InstOpCode::COND_CC0, processUnder8CharsEnd, false, false);
+
+   // VLL and VSTL work on indices so we must subtract 1
+   generateRIEInstruction(cg, TR::InstOpCode::getAddLogicalRegRegImmediateOpCode(), node, inputLenMinus1, inputLen, -1);
+
+   // ----------------- Incoming branch -----------------
+
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, processSurrogateEnd);
+
+   // VSTL instruction can only handle memory references of type D(B), so increment the base output address
+   generateRRInstruction (cg, TR::InstOpCode::getAddRegOpCode(), node, output, translated);
+
+   // Store the result
+   generateVRSbInstruction(cg, TR::InstOpCode::VSTL, node, vInput, inputLenMinus1, generateS390MemoryReference(output, 0, cg), 0);
+
+   // Advance the stride register
+   generateRRInstruction(cg, TR::InstOpCode::getAddRegOpCode(), node, translated, inputLen);
+
+   // Set up the proper register dependencies
+   TR::RegisterDependencyConditions* dependencies = new (cg->trHeapMemory()) TR::RegisterDependencyConditions(0, 9, cg);
+
+   dependencies->addPostCondition(input,      TR::RealRegister::AssignAny);
+   dependencies->addPostCondition(inputLen,   TR::RealRegister::AssignAny);
+   dependencies->addPostCondition(inputLen16, TR::RealRegister::AssignAny);
+   dependencies->addPostCondition(output,     TR::RealRegister::AssignAny);
+   dependencies->addPostCondition(translated, TR::RealRegister::AssignAny);
+
+   dependencies->addPostCondition(vInput,        TR::RealRegister::AssignAny);
+   dependencies->addPostCondition(vSurrogate,    TR::RealRegister::AssignAny);
+   dependencies->addPostCondition(vRange,        TR::RealRegister::AssignAny);
+   dependencies->addPostCondition(vRangeControl, TR::RealRegister::AssignAny);
+
+   // ----------------- Incoming branch -----------------
+
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, processUnder8CharsEnd, dependencies);
+   processUnder8CharsEnd->setEndInternalControlFlow();
+
+   // Convert translated length in number of bytes to number of characters
+   generateRSInstruction(cg, TR::InstOpCode::getShiftRightLogicalSingleOpCode(), node, translated, translated, 1);
+
+   // Cleanup nodes before returning
+   cg->decReferenceCount(node->getChild(0));
+   cg->decReferenceCount(node->getChild(1));
+   cg->decReferenceCount(node->getChild(2));
+
+   // Cleanup registers before returning
+   cg->stopUsingRegister(input);
+   cg->stopUsingRegister(inputLen);
+   cg->stopUsingRegister(inputLen16);
+   cg->stopUsingRegister(output);
+
+   cg->stopUsingRegister(vInput);
+   cg->stopUsingRegister(vSurrogate);
+   cg->stopUsingRegister(vRange);
+   cg->stopUsingRegister(vRangeControl);
+
+   return node->setRegister(translated);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::inlineStringHashCode(TR::Node* node, TR::CodeGenerator* cg, bool isCompressed)
+   {
+   TR::Compilation* comp = cg->comp();
+   //stringSize = Number of bytes to load to process 4 characters in SIMD loop
+   //terminateVal = SIMD loop cotroller allowing characters in multiple of 4 to be processes by loop
+   //VLLEZ instruction will load word(compressed String) or double word (decompressed String), elementSize is used for that
+   const short stringSize = (isCompressed ? 4 : 8);
+   const short terminateVal = (isCompressed ? 3 : 6);
+   const short elementSize = (isCompressed ? 2 : 3);
+
+   TR::Node* nodeValue = node->getChild(0);
+   TR::Node* nodeIndex = node->getChild(1);
+   TR::Node* nodeCount = node->getChild(2);
+
+   // Create the necessary labels
+   TR::LabelSymbol * cFlowRegionStart  = generateLabelSymbol(cg);
+
+   TR::LabelSymbol * labelVector       = generateLabelSymbol(cg);
+   TR::LabelSymbol * labelVectorLoop   = generateLabelSymbol(cg);
+   TR::LabelSymbol * labelVectorReduce = generateLabelSymbol(cg);
+
+   TR::LabelSymbol * labelSerial       = generateLabelSymbol(cg);
+
+   TR::LabelSymbol * labelSerialLoop   = generateLabelSymbol(cg);
+
+   TR::LabelSymbol * cFlowRegionEnd    = generateLabelSymbol(cg);
+
+   // Create the necessary registers
+   TR::Register* registerHash = cg->allocateRegister();
+
+   TR::Register* registerValue = cg->evaluate(nodeValue);
+   TR::Register* registerIndex = cg->gprClobberEvaluate(nodeIndex);
+   TR::Register* registerCount = cg->gprClobberEvaluate(nodeCount);
+
+   if (cg->comp()->target().is64Bit())
+      {
+      generateRRInstruction(cg, TR::InstOpCode::getLoadRegWidenOpCode(), node, registerIndex, registerIndex);
+      generateRRInstruction(cg, TR::InstOpCode::getLoadRegWidenOpCode(), node, registerCount, registerCount);
+      }
+
+   TR::Register* registerVA = cg->allocateRegister(TR_VRF);
+   TR::Register* registerVB = cg->allocateRegister(TR_VRF);
+   TR::Register* registerVC = cg->allocateRegister(TR_VRF);
+
+   TR::Register* registerEnd = cg->allocateRegister(TR_GPR);
+
+   TR::RegisterDependencyConditions* dependencies = new (cg->trHeapMemory()) TR::RegisterDependencyConditions(0, 12, cg);
+
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, cFlowRegionStart);
+   cFlowRegionStart->setStartInternalControlFlow();
+
+   if(!isCompressed)
+      {
+      // registerIndex *= 2 and registerCount *= 2
+      generateRSInstruction(cg, TR::InstOpCode::getShiftLeftLogicalSingleOpCode(), node, registerIndex, registerIndex, 1);
+      generateRSInstruction(cg, TR::InstOpCode::getShiftLeftLogicalSingleOpCode(), node, registerCount, registerCount, 1);
+      }
+
+   // registerEnd = registerIndex + registerCount
+   generateRXInstruction(cg, TR::InstOpCode::getLoadAddressOpCode(), node, registerEnd, generateS390MemoryReference(registerIndex, registerCount, 0, cg));
+
+   // registerHash = 0
+   generateRREInstruction(cg, TR::InstOpCode::getXORRegOpCode(), node, registerHash, registerHash);
+
+   // Branch to labelSerial if registerCount < stringSize
+   generateS390CompareAndBranchInstruction(cg, TR::InstOpCode::getCmpLogicalOpCode(), node, registerCount, static_cast<int32_t>(stringSize), TR::InstOpCode::COND_MASK4, labelSerial, false, false);
+
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, labelVector);
+
+   // registerEnd -= terminateVal
+   generateRILInstruction(cg, TR::InstOpCode::getSubtractLogicalImmOpCode(), node, registerEnd, terminateVal);
+
+   // snippetData1 = [31^4, 31^4, 31^4, 31^4]
+   int32_t snippetData1[4] = {923521, 923521, 923521, 923521};
+
+   TR::MemoryReference* memrefSnippet1 = generateS390MemoryReference(cg->findOrCreateConstant(node, snippetData1, 16), cg, 0, node);
+
+   dependencies->addAssignAnyPostCondOnMemRef(memrefSnippet1);
+
+   // registerVA = snippetData1
+   generateVRXInstruction(cg, TR::InstOpCode::VL, node, registerVA, memrefSnippet1);
+
+   // registerVB = 0
+   generateVRIaInstruction(cg, TR::InstOpCode::VGBM, node, registerVB, 0, 0 /*unused*/);
+
+   // ----------------- Incoming branch -----------------
+
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, labelVectorLoop);
+
+   // registerVC = 4 consecutive chars (16 bit shorts or 8 bit bytes depending on String Compression) at the current index
+   generateVRXInstruction(cg, TR::InstOpCode::VLLEZ, node, registerVC, generateS390MemoryReference(registerValue, registerIndex, TR::Compiler->om.contiguousArrayHeaderSizeInBytes(), cg), elementSize);
+
+   if (!isCompressed)
+      {
+      // registerVC = unpack 4 (16 bit) short elements into 4 (32 bit) int elements
+      generateVRRaInstruction(cg, TR::InstOpCode::VUPLH, node, registerVC, registerVC, 0, 0, 1);
+      }
+   else
+      {
+      // registerVC = unpack 4 (8 bit) byte elements into 4 (32 bit) int elements
+      generateVRRaInstruction(cg, TR::InstOpCode::VUPLH, node, registerVC, registerVC, 0, 0, 0);
+      generateVRRaInstruction(cg, TR::InstOpCode::VUPLL, node, registerVC, registerVC, 0, 0, 1);
+      }
+
+   // registerVB = registerVB * registerVA + registerVC
+   generateVRRdInstruction(cg, TR::InstOpCode::VMAL, node, registerVB, registerVB, registerVA, registerVC, 0, 2);
+
+   // registerIndex += stringSize
+   generateRXInstruction(cg, TR::InstOpCode::getLoadAddressOpCode(), node, registerIndex, generateS390MemoryReference(registerIndex, stringSize, cg));
+
+   // Branch to labelVectorLoop if registerIndex < registerEnd
+   generateS390CompareAndBranchInstruction(cg, TR::InstOpCode::getCmpLogicalRegOpCode(), node, registerIndex, registerEnd, TR::InstOpCode::COND_MASK4, labelVectorLoop, false, false);
+
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, labelVectorReduce);
+
+   // snippetData2 = [31^3, 31^2, 31^1, 31^0]
+   int32_t snippetData2[4] = {29791, 961, 31, 1};
+
+   TR::MemoryReference* memrefSnippet2 = generateS390MemoryReference(cg->findOrCreateConstant(node, snippetData2, 16), cg, 0, node);
+
+   dependencies->addAssignAnyPostCondOnMemRef(memrefSnippet2);
+
+   // registerVA = snippetData2
+   generateVRXInstruction(cg, TR::InstOpCode::VL, node, registerVA, memrefSnippet2);
+
+   // registerVB = registerVB * registerVA
+   generateVRRcInstruction(cg, TR::InstOpCode::VML, node, registerVB, registerVB, registerVA, 2);
+
+   // registerVA = 0
+   generateVRIaInstruction(cg, TR::InstOpCode::VGBM, node, registerVA, 0, 0 /*unused*/);
+
+   // registerVA = sum of 4 (32 bit) int elements
+   generateVRRcInstruction(cg, TR::InstOpCode::VSUMQ, node, registerVA, registerVB, registerVA, 0, 0, 2);
+
+   // registerEnd += terminateVal
+   generateRXInstruction(cg, TR::InstOpCode::getLoadAddressOpCode(), node, registerEnd, generateS390MemoryReference(registerEnd, terminateVal, cg));
+
+   generateVRScInstruction(cg, TR::InstOpCode::VLGV, node, registerHash, registerVA, generateS390MemoryReference(3, cg), 2);
+
+   // ----------------- Incoming branch -----------------
+
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, labelSerial);
+   labelSerial->setEndInternalControlFlow();
+
+   // Branch to labelEnd if registerIndex >= registerEnd
+   generateS390CompareAndBranchInstruction(cg, TR::InstOpCode::getCmpLogicalRegOpCode(), node, registerIndex, registerEnd, TR::InstOpCode::COND_MASK10, cFlowRegionEnd, false, false);
+
+   // ----------------- Incoming branch -----------------
+
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, labelSerialLoop);
+   labelSerialLoop->setStartInternalControlFlow();
+
+   TR::Register* registerTemp = registerCount;
+
+   // registerTemp = registerHash << 5
+   generateRSInstruction(cg, TR::InstOpCode::SLLK, node, registerTemp, registerHash, 5);
+
+   // registerTemp -= registerHash
+   generateRRInstruction(cg, TR::InstOpCode::getSubstractRegOpCode(), node, registerTemp, registerHash);
+
+   // registerHash = char at registerIndex
+   if(isCompressed)
+      generateRXInstruction(cg, TR::InstOpCode::LLGC, node, registerHash, generateS390MemoryReference(registerValue, registerIndex, TR::Compiler->om.contiguousArrayHeaderSizeInBytes(), cg));
+   else
+      generateRXInstruction(cg, TR::InstOpCode::LLH, node, registerHash, generateS390MemoryReference(registerValue, registerIndex, TR::Compiler->om.contiguousArrayHeaderSizeInBytes(), cg));
+
+   if(isCompressed) //registerIndex += 1
+      generateRXInstruction(cg, TR::InstOpCode::getLoadAddressOpCode(), node, registerIndex, generateS390MemoryReference(registerIndex, 1, cg));
+   else //registerIndex += 2
+      generateRXInstruction(cg, TR::InstOpCode::getLoadAddressOpCode(), node, registerIndex, generateS390MemoryReference(registerIndex, 2, cg));
+
+
+   // registerHash += registerTemp
+   generateRRInstruction(cg, TR::InstOpCode::getAddRegOpCode(), node, registerHash, registerTemp);
+
+   // Branch to labelSerialLoop if registerIndex < registerEnd
+   generateS390CompareAndBranchInstruction(cg, TR::InstOpCode::getCmpLogicalRegOpCode(), node, registerIndex, registerEnd, TR::InstOpCode::COND_MASK4, labelSerialLoop, false, false);
+
+   // Set up the proper register dependencies
+   dependencies->addPostConditionIfNotAlreadyInserted(registerValue, TR::RealRegister::AssignAny);
+   dependencies->addPostConditionIfNotAlreadyInserted(registerIndex, TR::RealRegister::AssignAny);
+   dependencies->addPostConditionIfNotAlreadyInserted(registerCount, TR::RealRegister::AssignAny);
+
+   dependencies->addPostConditionIfNotAlreadyInserted(registerHash, TR::RealRegister::AssignAny);
+   dependencies->addPostConditionIfNotAlreadyInserted(registerEnd, TR::RealRegister::AssignAny);
+
+   dependencies->addPostConditionIfNotAlreadyInserted(registerVA, TR::RealRegister::AssignAny);
+   dependencies->addPostConditionIfNotAlreadyInserted(registerVB, TR::RealRegister::AssignAny);
+   dependencies->addPostConditionIfNotAlreadyInserted(registerVC, TR::RealRegister::AssignAny);
+
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, cFlowRegionEnd, dependencies);
+   cFlowRegionEnd->setEndInternalControlFlow();
+
+   // Cleanup nodes before returning
+   cg->decReferenceCount(nodeValue);
+   cg->decReferenceCount(nodeIndex);
+   cg->decReferenceCount(nodeCount);
+
+   // Cleanup registers before returning
+   cg->stopUsingRegister(registerValue);
+   cg->stopUsingRegister(registerIndex);
+   cg->stopUsingRegister(registerCount);
+
+   cg->stopUsingRegister(registerEnd);
+
+   cg->stopUsingRegister(registerVA);
+   cg->stopUsingRegister(registerVB);
+   cg->stopUsingRegister(registerVC);
+
+   return node->setRegister(registerHash);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::toUpperIntrinsic(TR::Node *node, TR::CodeGenerator *cg, bool isCompressedString)
    {
    cg->generateDebugCounter("z13/simd/toUpper", 1, TR::DebugCounter::Free);
    return caseConversionHelper(node, cg, true, isCompressedString);
    }
 
-extern TR::Register *
-toLowerIntrinsic(TR::Node *node, TR::CodeGenerator *cg, bool isCompressedString)
+TR::Register*
+J9::Z::TreeEvaluator::toLowerIntrinsic(TR::Node *node, TR::CodeGenerator *cg, bool isCompressedString)
    {
    cg->generateDebugCounter("z13/simd/toLower", 1, TR::DebugCounter::Free);
    return caseConversionHelper(node, cg, false, isCompressedString);
    }
 
-extern TR::Register *
-inlineDoubleMax(TR::Node *node, TR::CodeGenerator *cg)
+TR::Register*
+J9::Z::TreeEvaluator::inlineDoubleMax(TR::Node *node, TR::CodeGenerator *cg)
    {
    cg->generateDebugCounter("z13/simd/doubleMax", 1, TR::DebugCounter::Free);
    return doubleMaxMinHelper(node, cg, true);
    }
 
-extern TR::Register *
-inlineDoubleMin(TR::Node *node, TR::CodeGenerator *cg)
+TR::Register*
+J9::Z::TreeEvaluator::inlineDoubleMin(TR::Node *node, TR::CodeGenerator *cg)
    {
    cg->generateDebugCounter("z13/simd/doubleMin", 1, TR::DebugCounter::Free);
    return doubleMaxMinHelper(node, cg, false);
    }
 
-extern TR::Register *
-inlineMathFma(TR::Node *node, TR::CodeGenerator *cg)
+TR::Register *
+J9::Z::TreeEvaluator::inlineMathFma(TR::Node *node, TR::CodeGenerator *cg)
    {
    TR_ASSERT_FATAL(node->getNumChildren() == 3,
    "In function inlineMathFma, the node at address %p should have exactly 3 children, but got %u instead", node, node->getNumChildren());
 
-   TR::Register      * targetRegister      = cg->allocateRegister(TR_FPR);
+   TR::Register * a      = cg->evaluate(node->getFirstChild());
+   TR::Register * b      = cg->evaluate(node->getSecondChild());
+   TR::Register * target = NULL;
 
-   TR::Register      * v1      = cg->evaluate(node->getFirstChild());
-   TR::Register      * v2      = cg->evaluate(node->getSecondChild());
-   TR::Register      * v3      = cg->evaluate(node->getThirdChild());
+   if (cg->getSupportsVectorRegisters() &&
+         (!node->getOpCode().isFloat() ||
+           cg->comp()->target().cpu.supportsFeature(OMR_FEATURE_S390_VECTOR_FACILITY_ENHANCEMENT_1)))
+      {
+      // target = a*b + c
+      TR::Register * c = cg->evaluate(node->getThirdChild());
+      target = cg->allocateRegister(TR_FPR);
+      uint8_t mask6 = getVectorElementSizeMask(TR::DataType::getSize(node->getDataType()));
+      generateVRReInstruction(cg, TR::InstOpCode::VFMA, node, target, a, b, c, mask6, 0);
+      }
+   else
+      {
+      // target = c
+      // target += a*b
+      target = cg->fprClobberEvaluate(node->getThirdChild());
+      if (node->getDataType() == TR::Double)
+         {
+         generateRRDInstruction(cg, TR::InstOpCode::MADBR, node, target, a, b);
+         }
+      else
+         {
+         generateRRDInstruction(cg, TR::InstOpCode::MAEBR, node, target, a, b);
+         }
+      }
 
-   uint8_t mask6 = getVectorElementSizeMask(TR::DataType::getSize(node->getDataType()));
-   generateVRReInstruction(cg, TR::InstOpCode::VFMA, node, targetRegister, v1, v2, v3, mask6, 0);
-
-   node->setRegister(targetRegister);
+   node->setRegister(target);
 
    cg->decReferenceCount(node->getFirstChild());
    cg->decReferenceCount(node->getSecondChild());
    cg->decReferenceCount(node->getThirdChild());
 
-   return targetRegister;
+   return target;
    }
 
 /*
@@ -1142,7 +2460,7 @@ inlineMathFma(TR::Node *node, TR::CodeGenerator *cg)
  */
 extern void TEMPORARY_initJ9S390TreeEvaluatorTable(TR::CodeGenerator *cg)
    {
-   TR_TreeEvaluatorFunctionPointer *tet = cg->getTreeEvaluatorTable();
+   OMR::TreeEvaluatorFunctionPointerTable tet = cg->getTreeEvaluatorTable();
 
    tet[TR::monent] =                TR::TreeEvaluator::monentEvaluator;
    tet[TR::monexit] =               TR::TreeEvaluator::monexitEvaluator;
@@ -1305,7 +2623,7 @@ genTestIsSuper(TR::CodeGenerator * cg, TR::Node * node,
          {
         cursor = generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BE, node, notInterfaceLabel, cursor);
          // classObjectClazzSnippet and instanceOfClazzSnippet stores values of currentObject and cast Object when
-        // the the helper call returns success.
+         // the helper call returns success.
          // test if class is interface of not.
          // if interface, we do the following.
          //
@@ -1329,7 +2647,7 @@ genTestIsSuper(TR::CodeGenerator * cg, TR::Node * node,
          cursor = generateRXInstruction(cg, TR::InstOpCode::getCmpOpCode(), node, castClassReg, generateS390MemoryReference(instanceOfClazzSnippetReg,0,cg), cursor);
          cursor = generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BE, node, trueLabel, cursor);
          cursor = generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, callHelperLabel, cursor);
-         cursor = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, notInterfaceLabel, cursor);
+         cursor = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, notInterfaceLabel, cursor);
          }
       else
          {
@@ -1861,7 +3179,7 @@ VMnonNullSrcWrtBarCardCheckEvaluator(
                generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, noChkLabel);
             // If condition is NULL, the early assignment is handled by caller.
             // If not, early assignment handled here
-            generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, srcObjChkLabel, conditions);
+            generateS390LabelInstruction(cg, TR::InstOpCode::label, node, srcObjChkLabel, conditions);
             }
          }
       else
@@ -1894,7 +3212,7 @@ VMnonNullSrcWrtBarCardCheckEvaluator(
       //If cardmarking is on at compile time (mode=wrtbaroldcrdmrkcheck) then need a label for when cardmarking is done
       //in which case we need to skip the srcobj check
       if (doCrdMrk)
-         generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, noChkLabel, conditions);
+         generateS390LabelInstruction(cg, TR::InstOpCode::label, node, noChkLabel, conditions);
 
       // inline checking remembered bit for generational or (gencon+cardmarking is inlined).
       static_assert(J9_OBJECT_HEADER_REMEMBERED_MASK_FOR_TEST <= 0xFF, "The constant is too big");
@@ -2079,7 +3397,7 @@ VMwrtbarEvaluator(
       conditions->addPostCondition(owningObjectReg, TR::RealRegister::AssignAny);
       VMCardCheckEvaluator(node, owningObjectReg, NULL, conditions, cg, true, doneLabel);
       }
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, doneLabel, conditions);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, doneLabel, conditions);
    }
 
 ///////////////////////////////////////////////////////////////////////////////////////
@@ -2140,34 +3458,20 @@ J9::Z::TreeEvaluator::asynccheckEvaluator(TR::Node * node, TR::CodeGenerator * c
       // async-check.
       // (the VM ensures that all malloc'ed storage has the high-order-bit cleared)
       TR::Register * testRegister = cg->allocateRegister();
-      TR::MemoryReference * tempMR = generateS390MemoryReference(firstChild, cg);
+      TR::MemoryReference * tempMR = TR::MemoryReference::create(cg, firstChild);
 
       TR_ASSERT( getIntegralValue(secondChild) == -1, "asynccheck bad format");
       TR_ASSERT( comp->target().is32Bit(), "ICM can be used for 32bit code-gen only!");
 
       static char * dontUseTM = feGetEnv("TR_DONTUSETMFORASYNC");
-      if (comp->getOption(TR_DisableOOL))
-         {
-         reStartLabel->setEndInternalControlFlow();
-         }
       if (firstChild->getReferenceCount()>1 || dontUseTM)
          {
          generateRSInstruction(cg, TR::InstOpCode::ICM, firstChild, testRegister, (uint32_t) 0xF, tempMR);
-         if (comp->getOption(TR_DisableOOL))
-            {
-            generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, cFlowRegionStart);
-            cFlowRegionStart->setStartInternalControlFlow();
-            }
          gcPoint = generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BL, node, snippetLabel);
          }
       else
          {
          generateSIInstruction(cg, TR::InstOpCode::TM, firstChild, tempMR, 0xFF);
-         if (comp->getOption(TR_DisableOOL))
-            {
-            generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, cFlowRegionStart);
-            cFlowRegionStart->setStartInternalControlFlow();
-            }
          gcPoint = generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BO, node, snippetLabel);
          }
 
@@ -2176,63 +3480,44 @@ J9::Z::TreeEvaluator::asynccheckEvaluator(TR::Node * node, TR::CodeGenerator * c
       }
    else
       {
-
-      if (comp->getOption(TR_DisableOOL))
-         {
-         reStartLabel->setEndInternalControlFlow();
-         }
       if (value >= MIN_IMMEDIATE_VAL && value <= MAX_IMMEDIATE_VAL)
          {
-         if (comp->target().cpu.isAtLeast(OMR_PROCESSOR_S390_Z10))
+         TR::MemoryReference * tempMR = TR::MemoryReference::create(cg, firstChild);
+
+         if (tempMR->getIndexRegister() != NULL && tempMR->getBaseRegister() != NULL)
             {
-            TR::MemoryReference * tempMR = generateS390MemoryReference(firstChild, cg);
-
-            if (tempMR->getIndexRegister() != NULL && tempMR->getBaseRegister() != NULL)
+            TR::SymbolReference * symRef = firstChild->getSymbolReference();
+            TR::Symbol * symbol = symRef->getSymbol();
+            TR::Register * src1Reg = NULL;
+            if (firstChild->getDataType() == TR::Address &&
+                  !symbol->isInternalPointer() &&
+                  !symbol->isNotCollected()    &&
+                  !symbol->isAddressOfClassObject())
                {
-               TR::SymbolReference * symRef = firstChild->getSymbolReference();
-               TR::Symbol * symbol = symRef->getSymbol();
-               TR::Register * src1Reg = NULL;
-               if (firstChild->getDataType() == TR::Address &&
-                   !symbol->isInternalPointer() &&
-                   !symbol->isNotCollected()    &&
-                   !symbol->isAddressOfClassObject())
-                  {
-                  src1Reg = cg->allocateCollectedReferenceRegister();
-                  }
-               else
-                  {
-                  src1Reg = cg->allocateRegister();
-                  }
-               generateRXInstruction(cg, TR::InstOpCode::getLoadOpCode(), firstChild, src1Reg, tempMR);
-
-               updateReferenceNode(firstChild, src1Reg);
-               firstChild->setRegister(src1Reg);
-
-               generateRIInstruction(cg, TR::InstOpCode::getCmpHalfWordImmOpCode(), node, src1Reg, value);
+               src1Reg = cg->allocateCollectedReferenceRegister();
                }
             else
                {
-               generateSILInstruction(cg, TR::InstOpCode::getCmpHalfWordImmToMemOpCode(), node, tempMR, value);
+               src1Reg = cg->allocateRegister();
                }
-            tempMR->stopUsingMemRefRegister(cg);
-            }
-         else
-            {
-            TR::Register * src1Reg = cg->evaluate(firstChild);
+            generateRXInstruction(cg, TR::InstOpCode::getLoadOpCode(), firstChild, src1Reg, tempMR);
+
+            updateReferenceNode(firstChild, src1Reg);
+            firstChild->setRegister(src1Reg);
 
             generateRIInstruction(cg, TR::InstOpCode::getCmpHalfWordImmOpCode(), node, src1Reg, value);
             }
+         else
+            {
+            generateSILInstruction(cg, TR::InstOpCode::getCmpHalfWordImmToMemOpCode(), node, tempMR, value);
+            }
+         tempMR->stopUsingMemRefRegister(cg);
          }
       else
          {
          TR::Register * src1Reg = cg->evaluate(firstChild);
          TR::Register * tempReg = cg->evaluate(secondChild);
          generateRRInstruction(cg, TR::InstOpCode::getCmpRegOpCode(), node, src1Reg, tempReg);
-         }
-      if (comp->getOption(TR_DisableOOL))
-         {
-         generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, cFlowRegionStart);
-         cFlowRegionStart->setStartInternalControlFlow();
          }
       gcPoint = generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BE, node, snippetLabel);
       }
@@ -2253,43 +3538,34 @@ J9::Z::TreeEvaluator::asynccheckEvaluator(TR::Node * node, TR::CodeGenerator * c
 
    dependencies->addPostCondition(rRA, cg->getReturnAddressRegister());
 
-   if (!comp->getOption(TR_DisableOOL))
-      {
-      TR_Debug * debugObj = cg->getDebug();
-      if (debugObj)
-         debugObj->addInstructionComment(gcPoint, "Branch to OOL asyncCheck sequence");
+   TR_Debug * debugObj = cg->getDebug();
+   if (debugObj)
+      debugObj->addInstructionComment(gcPoint, "Branch to OOL asyncCheck sequence");
 
-      // starts OOL sequence, replacing the helper call snippet
-      TR_S390OutOfLineCodeSection *outlinedHelperCall = NULL;
-      outlinedHelperCall = new (cg->trHeapMemory()) TR_S390OutOfLineCodeSection(snippetLabel, reStartLabel, cg);
-      cg->getS390OutOfLineCodeSectionList().push_front(outlinedHelperCall);
-      outlinedHelperCall->swapInstructionListsWithCompilation();
+   // starts OOL sequence, replacing the helper call snippet
+   TR_S390OutOfLineCodeSection *outlinedHelperCall = NULL;
+   outlinedHelperCall = new (cg->trHeapMemory()) TR_S390OutOfLineCodeSection(snippetLabel, reStartLabel, cg);
+   cg->getS390OutOfLineCodeSectionList().push_front(outlinedHelperCall);
+   outlinedHelperCall->swapInstructionListsWithCompilation();
 
-      // snippetLabel : OOL Start label
-      TR::Instruction * cursor = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, snippetLabel);
-      if (debugObj)
-         debugObj->addInstructionComment(cursor, "Denotes start of OOL asyncCheck sequence");
+   // snippetLabel : OOL Start label
+   TR::Instruction * cursor = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, snippetLabel);
+   if (debugObj)
+      debugObj->addInstructionComment(cursor, "Denotes start of OOL asyncCheck sequence");
 
-      // BRASL R14, VMHelper, gc stack map on BRASL
-      gcPoint = generateDirectCall(cg, node, false, node->getSymbolReference(), dependencies, cursor);
-      gcPoint->setDependencyConditions(dependencies);
+   // BRASL R14, VMHelper, gc stack map on BRASL
+   gcPoint = generateDirectCall(cg, node, false, node->getSymbolReference(), dependencies, cursor);
+   gcPoint->setDependencyConditions(dependencies);
 
-      cursor = generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, reStartLabel);
-      if (debugObj)
-         debugObj->addInstructionComment(cursor, "Denotes end of OOL asyncCheck sequence: return to mainline");
+   cursor = generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, reStartLabel);
+   if (debugObj)
+      debugObj->addInstructionComment(cursor, "Denotes end of OOL asyncCheck sequence: return to mainline");
 
-      // Done using OOL with manual code generation
-      outlinedHelperCall->swapInstructionListsWithCompilation();
-      cursor = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, reStartLabel);
-      if (debugObj)
-         debugObj->addInstructionComment(cursor, "OOL asyncCheck return label");
-      }
-   else
-      {
-      TR::Snippet * snippet = new (cg->trHeapMemory()) TR::S390HelperCallSnippet(cg, node, snippetLabel, node->getSymbolReference(), reStartLabel);
-      cg->addSnippet(snippet);
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, reStartLabel, dependencies);
-      }
+   // Done using OOL with manual code generation
+   outlinedHelperCall->swapInstructionListsWithCompilation();
+   cursor = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, reStartLabel);
+   if (debugObj)
+      debugObj->addInstructionComment(cursor, "OOL asyncCheck return label");
 
    gcPoint->setNeedsGCMap(0x0000FFFF);
 
@@ -2379,8 +3655,8 @@ bool genInstanceOfOrCheckcastSuperClassTest(TR::Node *node, TR::CodeGenerator *c
       {
       TR::Register *scratchRegister1 = srm->findOrCreateScratchRegister();
       //TR::Register *scratchRegister1 = scratch1Reg;
-      TR_ASSERT((node->getOpCodeValue() == TR::instanceof &&
-            node->getSecondChild()->getOpCodeValue() != TR::loadaddr), "genTestIsSuper: castClassDepth == -1 is only supported for transformed isInstance calls.");
+      TR_ASSERT(node->getSecondChild()->getOpCodeValue() != TR::loadaddr,
+            "genTestIsSuper: castClassDepth == -1 is not supported for a loadaddr castClass.");
       cursor = generateRXInstruction(cg, TR::InstOpCode::getLoadOpCode(), node, scratchRegister1,
             generateS390MemoryReference(castClassReg, offsetof(J9Class, romClass), cg), cursor);
       cursor = generateRXInstruction(cg, TR::InstOpCode::L, node, scratchRegister1,
@@ -2519,7 +3795,7 @@ J9::Z::TreeEvaluator::checkcastEvaluator(TR::Node * node, TR::CodeGenerator * cg
    {
    TR::Compilation *comp = cg->comp();
 
-   // TODO: This is not the place to make such such checks. If we really want to optimize for space or disable inlining
+   // TODO: This is not the place to make such checks. If we really want to optimize for space or disable inlining
    // of instanceof/checkcast we should still go through the else path to the common infrastructure and it should just
    // generate a call to the helper (along with any null tests if needed for checkcastAndNULLCHK). This should be
    // handled at the common level.
@@ -2607,7 +3883,7 @@ J9::Z::TreeEvaluator::checkcastEvaluator(TR::Node * node, TR::CodeGenerator * cg
          case ClassEqualityTest:
             if (comp->getOption(TR_TraceCG))
                traceMsg(comp, "%s: Emitting Class Equality Test\n", node->getOpCode().getName());
-            if (outLinedTest && !comp->getOption(TR_DisableOOL))
+            if (outLinedTest)
                {
                // This is the case when we are going to have an Internal Control Flow in the OOL
                startOOLLabel = generateLabelSymbol(cg);
@@ -2619,7 +3895,7 @@ J9::Z::TreeEvaluator::checkcastEvaluator(TR::Node * node, TR::CodeGenerator * cg
                outlinedSlowPath = new (cg->trHeapMemory()) TR_S390OutOfLineCodeSection(startOOLLabel,doneOOLLabel,cg);
                cg->getS390OutOfLineCodeSectionList().push_front(outlinedSlowPath);
                outlinedSlowPath->swapInstructionListsWithCompilation();
-               generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, startOOLLabel);
+               generateS390LabelInstruction(cg, TR::InstOpCode::label, node, startOOLLabel);
                resultLabel = helperReturnOOLLabel;
                }
             else
@@ -2636,7 +3912,7 @@ J9::Z::TreeEvaluator::checkcastEvaluator(TR::Node * node, TR::CodeGenerator * cg
             TR_ASSERT(numSequencesRemaining == 2, "SuperClassTest should always be followed by a GoToFalse and must always be the second last test generated");
             if (comp->getOption(TR_TraceCG))
                traceMsg(comp, "%s: Emitting Super Class Test, Cast Class Depth=%d\n", node->getOpCode().getName(),castClassDepth);
-            dynamicCastClass = genInstanceOfOrCheckcastSuperClassTest(node, cg, objClassReg, castClassReg, castClassDepth, callLabel, NULL, srm);
+            dynamicCastClass = genInstanceOfOrCheckcastSuperClassTest(node, cg, objClassReg, castClassReg, castClassDepth, callLabel, callLabel, srm);
             /* outlinedSlowPath will be non-NULL if we have a higher probability of ClassEqualityTest succeeding.
                * In such cases we will do rest of the tests in OOL section, and as such we need to skip the helper call
                * if the result of SuperClassTest is true and branch to resultLabel which will branch back to the doneLabel from OOL code.
@@ -2758,7 +4034,7 @@ J9::Z::TreeEvaluator::checkcastEvaluator(TR::Node * node, TR::CodeGenerator * cg
       if (comp->getOption(TR_TraceCG))
          traceMsg(comp, "%s: Emitting helper call%s\n", node->getOpCode().getName(),helperCallForFailure?" for failure":"");
       //Following code is needed to put the Helper Call Outlined.
-      if (!comp->getOption(TR_DisableOOL) && !outlinedSlowPath)
+      if (!outlinedSlowPath)
          {
          // As SuperClassTest is the costliest test and is guaranteed to give results for checkCast node. Hence it will always be second last test
          // in iter array followed by GoToFalse as last test for checkCastNode
@@ -2772,7 +4048,7 @@ J9::Z::TreeEvaluator::checkcastEvaluator(TR::Node * node, TR::CodeGenerator * cg
          }
 
 
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, callLabel);
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, callLabel);
       outlinedConditions->addPostCondition(objectReg, TR::RealRegister::AssignAny);
       if (outLinedTest)
          {
@@ -2798,14 +4074,14 @@ J9::Z::TreeEvaluator::checkcastEvaluator(TR::Node * node, TR::CodeGenerator * cg
             mergeConditions = new (cg->trHeapMemory()) TR::RegisterDependencyConditions(outlinedConditions, deps, cg);
          else
             mergeConditions = outlinedConditions;
-         generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, helperReturnOOLLabel, mergeConditions);
+         generateS390LabelInstruction(cg, TR::InstOpCode::label, node, helperReturnOOLLabel, mergeConditions);
          generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, doneOOLLabel);
          outlinedSlowPath->swapInstructionListsWithCompilation();
          }
       }
    if (resultReg)
       cg->stopUsingRegister(resultReg);
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, doneLabel, conditions);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, doneLabel, conditions);
    cg->stopUsingRegister(castClassReg);
    if (objClassReg)
       cg->stopUsingRegister(objClassReg);
@@ -2910,13 +4186,9 @@ J9::Z::TreeEvaluator::generateHelperCallForVMNewEvaluators(TR::Node *node, TR::C
 TR::Register *
 J9::Z::TreeEvaluator::newObjectEvaluator(TR::Node * node, TR::CodeGenerator * cg)
    {
-   // If the helper symbol set on the node is TR_jitNewValue, we are (expecting to be)
-   // dealing with a value type. Since we do not fully support value types yet, always
-   // call the JIT helper to do the allocation.
-   //
    TR::Compilation* comp = cg->comp();
    if (cg->comp()->suppressAllocationInlining() ||
-       (TR::Compiler->om.areValueTypesEnabled() && node->getSymbolReference() == comp->getSymRefTab()->findOrCreateNewValueSymbolRef(comp->getMethodSymbol())))
+       TR::TreeEvaluator::requireHelperCallValueTypeAllocation(node, cg))
       return generateHelperCallForVMNewEvaluators(node, cg);
    else
       return TR::TreeEvaluator::VMnewEvaluator(node, cg);
@@ -2952,13 +4224,234 @@ J9::Z::TreeEvaluator::anewArrayEvaluator(TR::Node * node, TR::CodeGenerator * cg
 TR::Register *
 J9::Z::TreeEvaluator::multianewArrayEvaluator(TR::Node * node, TR::CodeGenerator * cg)
    {
+   #define iComment(str) if (compDebug) compDebug->addInstructionComment(cursor, (const_cast<char*>(str)));
+   TR::Compilation *comp = cg->comp();
+   TR_Debug *compDebug = comp->getDebug();
+   TR_ASSERT_FATAL(comp->target().is64Bit(), "multianewArrayEvaluator is only supported on 64-bit JVMs!");
+   TR_J9VMBase *fej9 = static_cast<TR_J9VMBase *>(comp->fe());
+   TR::Register *targetReg = cg->allocateRegister();
+   TR::Instruction *cursor = NULL;
+
+   TR::Node *firstChild = node->getFirstChild();
+   TR::Node *secondChild = node->getSecondChild();
+   TR::Node *thirdChild = node->getThirdChild();
+
+   TR::LabelSymbol *cFlowRegionStart = generateLabelSymbol(cg);
+   TR::LabelSymbol *nonZeroFirstDimLabel = generateLabelSymbol(cg);
+   TR::LabelSymbol *cFlowRegionEnd = generateLabelSymbol(cg);
+   TR::LabelSymbol *oolFailLabel = generateLabelSymbol(cg);
+
+   // oolJumpLabel is a common point that all branches will jump to. From this label, we branch to OOL code.
+   // We do this instead of jumping directly to OOL code from mainline because the RA can only handle the case where there's
+   // a single jump point to OOL code.
+   TR::LabelSymbol *oolJumpLabel = generateLabelSymbol(cg);
+
+   cFlowRegionStart->setStartInternalControlFlow();
+   cFlowRegionEnd->setEndInternalControlFlow();
+
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, cFlowRegionStart);
+
+   TR::Register *dimsPtrReg = cg->evaluate(firstChild);
+   TR::Register *dimReg = cg->evaluate(secondChild);
+   TR::Register *classReg = cg->evaluate(thirdChild);
+
+   // In the mainline, first load the first and second dimensions' lengths into registers.
+   TR::Register *firstDimLenReg = cg->allocateRegister();
+   cursor = generateRXInstruction(cg, TR::InstOpCode::LGF, node, firstDimLenReg, generateS390MemoryReference(dimsPtrReg, 4, cg));
+   iComment("Load 1st dim length.");
+
+   TR::Register *secondDimLenReg = cg->allocateRegister();
+   cursor = generateRXInstruction(cg, TR::InstOpCode::L, node, secondDimLenReg, generateS390MemoryReference(dimsPtrReg, 0, cg));
+   iComment("Load 2nd dim length.");
+
+   // Check to see if second dimension is indeed 0. If yes, then proceed to handle the case here. Otherwise jump to OOL code.
+   cursor = generateS390CompareAndBranchInstruction(cg, TR::InstOpCode::CL, node, secondDimLenReg, 0, TR::InstOpCode::COND_BNE, oolJumpLabel, false);
+   iComment("if 2nd dim is 0, we handle it here. Else, jump to oolJumpLabel.");
+
+   // Now check to see if first dimension is also 0. If yes, continue below to handle the case when length for both dimensions is 0. Otherwise jump to nonZeroFirstDimLabel.
+   cursor = generateS390CompareAndBranchInstruction(cg, TR::InstOpCode::CL, node, firstDimLenReg, 0, TR::InstOpCode::COND_BNE, nonZeroFirstDimLabel, false);
+   iComment("if 1st dim is also 0, we handle it here. Else, jump to nonZeroFirstDimLabel.");
+
+   // First dimension zero, so only allocate 1 zero-length object array
+   TR::Register *vmThreadReg = cg->getMethodMetaDataRealRegister();
+   generateRXInstruction(cg, TR::InstOpCode::LG, node, targetReg, generateS390MemoryReference(vmThreadReg, offsetof(J9VMThread, heapAlloc), cg));
+
+   // Take into account alignment requirements for the size of the zero-length array header
+   int32_t zeroArraySizeAligned = OMR::align(TR::Compiler->om.discontiguousArrayHeaderSizeInBytes(), TR::Compiler->om.getObjectAlignmentInBytes());
+
+   // Branch to OOL if there's not enough space for an array of size 0.
+   TR::Register *temp1Reg = cg->allocateRegister();
+   if (cg->comp()->target().cpu.isAtLeast(OMR_PROCESSOR_S390_Z196))
+      {
+      generateRIEInstruction(cg, TR::InstOpCode::AGHIK, node, temp1Reg, targetReg, zeroArraySizeAligned);
+      }
+   else
+      {
+      generateRRInstruction(cg, TR::InstOpCode::LGR, node, temp1Reg, targetReg);
+      generateRILInstruction(cg, TR::InstOpCode::AGFI, node, temp1Reg, zeroArraySizeAligned);
+      }
+
+   generateRXInstruction(cg, TR::InstOpCode::CLG, node, temp1Reg, generateS390MemoryReference(vmThreadReg, offsetof(J9VMThread, heapTop), cg));
+   cursor = generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BH, node, oolJumpLabel);
+   iComment("Branch to oolJumpLabel if there isn't enough space for a 0 size array.");
+
+   // If there's enough space, then we can continue to allocate.
+   generateRXInstruction(cg, TR::InstOpCode::STG, node, temp1Reg, generateS390MemoryReference(vmThreadReg, offsetof(J9VMThread, heapAlloc), cg));
+
+   bool use64BitClasses = comp->target().is64Bit() && !TR::Compiler->om.generateCompressedObjectHeaders();
+
+   // Init class field, then jump to end of ICF
+   generateRXInstruction(cg, use64BitClasses ? TR::InstOpCode::STG : TR::InstOpCode::ST, node, classReg, generateS390MemoryReference(targetReg, TR::Compiler->om.offsetOfObjectVftField(), cg));
+   cursor = generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, cFlowRegionEnd);
+   iComment("Init class field and jump to end of ICF.");
+
+   // We end up in this region of the ICF if the first dimension is non-zero and the second dimension is zero.
+   cursor = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, nonZeroFirstDimLabel);
+   iComment("nonZeroFirstDimLabel, 2nd dim length is 0.");
+
+   TR::Register *componentClassReg = cg->allocateRegister();
+   generateRXInstruction(cg, TR::InstOpCode::LG, node, componentClassReg, generateS390MemoryReference(classReg, offsetof(J9ArrayClass, componentType), cg));
+
+   // Calculate maximum allowable object size in elements and jump to OOL if firstDimLenReg is higher than it.
+   int32_t elementSize = TR::Compiler->om.sizeofReferenceField();
+   uintptr_t maxObjectSize = cg->getMaxObjectSizeGuaranteedNotToOverflow();
+   uintptr_t maxObjectSizeInElements = maxObjectSize / elementSize;
+   cursor = generateS390CompareAndBranchInstruction(cg, TR::InstOpCode::CL, node, firstDimLenReg, static_cast<int32_t>(maxObjectSizeInElements), TR::InstOpCode::COND_BHR, oolJumpLabel, false);
+   iComment("Jump to oolJumpLabel if 1st dim len > the num of elements a block can fit.");
+
+   // Now check to see if we have enough space to do the allocation. If not then jump to OOL code.
+   int32_t elementSizeAligned = OMR::align(elementSize, TR::Compiler->om.getObjectAlignmentInBytes());
+   int32_t alignmentCompensation = (elementSize == elementSizeAligned) ? 0 : elementSizeAligned - 1;
+   static const uint8_t multiplierToStrideMap[] = {0, 0, 1, 0, 2, 0, 0, 0, 3};
+   TR_ASSERT_FATAL(elementSize <= 8, "multianewArrayEvaluator - elementSize cannot be greater than 8!");
+   generateRSInstruction(cg, TR::InstOpCode::SLLG, node, temp1Reg, firstDimLenReg, multiplierToStrideMap[elementSize]);
+   generateRILInstruction(cg, TR::InstOpCode::AGFI, node, temp1Reg, static_cast<int32_t>(TR::Compiler->om.contiguousArrayHeaderSizeInBytes()) + alignmentCompensation);
+
+   if (alignmentCompensation != 0)
+      {
+      generateRILInstruction(cg, TR::InstOpCode::NILF, node, temp1Reg, -elementSizeAligned);
+      }
+
+   TR::Register *temp2Reg = cg->allocateRegister();
+   generateRRInstruction(cg, TR::InstOpCode::LGR, node, temp2Reg, firstDimLenReg);
+   generateRILInstruction(cg, TR::InstOpCode::MSGFI, node, temp2Reg, zeroArraySizeAligned);
+
+   cursor = generateRRInstruction(cg, TR::InstOpCode::AGR, node, temp2Reg, temp1Reg);
+   iComment("Calculates (firstDimLen * zeroArraySizeAligned) + (arrayStrideInBytes + arrayHeaderSize)");
+
+   generateRXInstruction(cg, TR::InstOpCode::LG, node, targetReg, generateS390MemoryReference(vmThreadReg, offsetof(J9VMThread, heapAlloc), cg));
+   generateRRInstruction(cg, TR::InstOpCode::AGR, node, temp2Reg, targetReg);
+   generateRXInstruction(cg, TR::InstOpCode::CLG, node, temp2Reg, generateS390MemoryReference(vmThreadReg, offsetof(J9VMThread, heapTop), cg));
+
+   cursor = generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BH, node, oolJumpLabel);
+   iComment("Branch to oolJumpLabel if we don't have enough space for both 1st and 2nd dim.");
+
+   // We have enough space, so proceed with the allocation.
+   generateRXInstruction(cg, TR::InstOpCode::STG, node, temp2Reg, generateS390MemoryReference(vmThreadReg, offsetof(J9VMThread, heapAlloc), cg));
+
+
+   // Init 1st dim array class and size fields.
+   cursor = generateRXInstruction(cg, use64BitClasses ? TR::InstOpCode::STG : TR::InstOpCode::ST, node, classReg, generateS390MemoryReference(targetReg, TR::Compiler->om.offsetOfObjectVftField(), cg));
+   iComment("Init 1st dim class field.");
+   cursor = generateRXInstruction(cg, TR::InstOpCode::ST, node, firstDimLenReg, generateS390MemoryReference(targetReg, fej9->getOffsetOfContiguousArraySizeField(), cg));
+   iComment("Init 1st dim size field.");
+   // temp2 point to end of 1st dim array i.e. start of 2nd dim
+   generateRRInstruction(cg, TR::InstOpCode::LGR, node, temp2Reg, targetReg);
+   generateRRInstruction(cg, TR::InstOpCode::AGR, node, temp2Reg, temp1Reg);
+   if (cg->comp()->target().cpu.isAtLeast(OMR_PROCESSOR_S390_Z196))
+      {
+      generateRIEInstruction(cg, TR::InstOpCode::AGHIK, node, temp1Reg, targetReg, TR::Compiler->om.contiguousArrayHeaderSizeInBytes());
+      }
+   else
+      {
+      generateRRInstruction(cg, TR::InstOpCode::LGR, node, temp1Reg, targetReg);
+      generateRILInstruction(cg, TR::InstOpCode::AGFI, node, temp1Reg, static_cast<int32_t>(TR::Compiler->om.contiguousArrayHeaderSizeInBytes()));
+      }
+
+   // Loop start
+   TR::LabelSymbol *loopLabel = generateLabelSymbol(cg);
+   cursor = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, loopLabel);
+   iComment("loopLabel: init 2nd dim's class field.");
+
+   // Init 2nd dim element's class
+   cursor = generateRXInstruction(cg, use64BitClasses ? TR::InstOpCode::STG : TR::InstOpCode::ST, node, componentClassReg, generateS390MemoryReference(temp2Reg, TR::Compiler->om.offsetOfObjectVftField(), cg));
+   iComment("Init 2nd dim class field.");
+
+   // Store 2nd dim element into 1st dim array slot, compress temp2 if needed
+   TR::Register *temp3Reg = cg->allocateRegister();
+   if (comp->target().is64Bit() && comp->useCompressedPointers())
+      {
+      int32_t shiftAmount = TR::Compiler->om.compressedReferenceShift();
+      generateRRInstruction(cg, TR::InstOpCode::LGR, node, temp3Reg, temp2Reg);
+      if (shiftAmount != 0)
+         {
+         generateRSInstruction(cg, TR::InstOpCode::SRAG, node, temp3Reg, temp3Reg, shiftAmount);
+         }
+      generateRXInstruction(cg, TR::InstOpCode::ST, node, temp3Reg, generateS390MemoryReference(temp1Reg, 0, cg));
+      }
+   else
+      {
+      generateRXInstruction(cg, TR::InstOpCode::STG, node, temp2Reg, generateS390MemoryReference(temp1Reg, 0, cg));
+      }
+
+   // Advance cursors temp1 and temp2. Then branch back or fall through if done.
+   generateRIInstruction(cg, TR::InstOpCode::AGHI, node, temp2Reg, zeroArraySizeAligned);
+   generateRIInstruction(cg, TR::InstOpCode::AGHI, node, temp1Reg, elementSize);
+
+   generateRILInstruction(cg, TR::InstOpCode::SLFI, node, firstDimLenReg, 1);
+   generateS390CompareAndBranchInstruction(cg, TR::InstOpCode::CL, node, firstDimLenReg, 0, TR::InstOpCode::COND_BNE, loopLabel, false);
+   generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, cFlowRegionEnd);
+
+   TR::RegisterDependencyConditions *dependencies = generateRegisterDependencyConditions(0,10,cg);
+   dependencies->addPostCondition(dimReg, TR::RealRegister::AssignAny);
+   dependencies->addPostCondition(secondDimLenReg, TR::RealRegister::AssignAny);
+   dependencies->addPostCondition(firstDimLenReg, TR::RealRegister::AssignAny);
+   dependencies->addPostCondition(targetReg, TR::RealRegister::AssignAny);
+   dependencies->addPostCondition(dimsPtrReg, TR::RealRegister::AssignAny);
+   dependencies->addPostCondition(temp1Reg, TR::RealRegister::AssignAny);
+   dependencies->addPostCondition(classReg, TR::RealRegister::AssignAny);
+   dependencies->addPostCondition(componentClassReg, TR::RealRegister::AssignAny);
+   dependencies->addPostCondition(temp2Reg, TR::RealRegister::AssignAny);
+   dependencies->addPostCondition(temp3Reg, TR::RealRegister::AssignAny);
+
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, oolJumpLabel);
+   generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, oolFailLabel);
+
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, cFlowRegionEnd, dependencies);
+
+   TR::Register *targetRegisterFinal = cg->allocateCollectedReferenceRegister();
+   generateRRInstruction(cg, TR::InstOpCode::LGR, node, targetRegisterFinal, targetReg);
+
+   // Generate the OOL code before final bookkeeping.
+   TR_S390OutOfLineCodeSection *outlinedSlowPath = new (cg->trHeapMemory()) TR_S390OutOfLineCodeSection(oolFailLabel, cFlowRegionEnd, cg);
+   cg->getS390OutOfLineCodeSectionList().push_front(outlinedSlowPath);
+   outlinedSlowPath->swapInstructionListsWithCompilation();
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, oolFailLabel);
+
    TR::ILOpCodes opCode = node->getOpCodeValue();
    TR::Node::recreate(node, TR::acall);
-   TR::Register * targetRegister = directCallEvaluator(node, cg);
+   TR::Register *targetReg2 = TR::TreeEvaluator::performCall(node, false, cg);
    TR::Node::recreate(node, opCode);
-   return targetRegister;
-   }
 
+   generateRRInstruction(cg, TR::InstOpCode::LGR, node, targetReg, targetReg2);
+   generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, cFlowRegionEnd);
+   outlinedSlowPath->swapInstructionListsWithCompilation();
+
+   // Note: We don't decrement the ref count node's children here (i.e. cg->decReferenceCount(node->getFirstChild())) because it is done by the performCall in the OOL code above.
+   // Doing so here would end up double decrementing the children nodes' ref count.
+
+   cg->stopUsingRegister(targetReg);
+   cg->stopUsingRegister(firstDimLenReg);
+   cg->stopUsingRegister(secondDimLenReg);
+   cg->stopUsingRegister(temp1Reg);
+   cg->stopUsingRegister(temp2Reg);
+   cg->stopUsingRegister(temp3Reg);
+   cg->stopUsingRegister(componentClassReg);
+
+   node->setRegister(targetRegisterFinal);
+   return targetRegisterFinal;
+   #undef iComment
+   }
 
 TR::Register *
 J9::Z::TreeEvaluator::arraylengthEvaluator(TR::Node *node, TR::CodeGenerator *cg)
@@ -2990,7 +4483,7 @@ J9::Z::TreeEvaluator::arraylengthEvaluator(TR::Node *node, TR::CodeGenerator *cg
       cg->getS390OutOfLineCodeSectionList().push_front(outlinedDiscontigPath);
       outlinedDiscontigPath->swapInstructionListsWithCompilation();
 
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, oolStartLabel);
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, oolStartLabel);
 
       if (cg->getDebug())
          {
@@ -3009,7 +4502,7 @@ J9::Z::TreeEvaluator::arraylengthEvaluator(TR::Node *node, TR::CodeGenerator *cg
 
       outlinedDiscontigPath->swapInstructionListsWithCompilation();
 
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, oolReturnLabel);
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, oolReturnLabel);
       }
 
    cg->decReferenceCount(node->getFirstChild());
@@ -3071,13 +4564,13 @@ J9::Z::TreeEvaluator::DIVCHKEvaluator(TR::Node * node, TR::CodeGenerator * cg)
 
    bool disableS390CompareAndTrap = comp->getOption(TR_DisableTraps);
 
-   // Try to compare directly to memory if if the child is a field access (load with no index reg)
-   if (cg->comp()->target().cpu.isAtLeast(OMR_PROCESSOR_S390_Z10) && divisorIsFieldAccess &&
+   // Try to compare directly to memory if the child is a field access (load with no index reg)
+   if (divisorIsFieldAccess &&
        !willUseIndexAndBaseReg &&
        (node->getFirstChild()->getOpCodeValue() == TR::idiv ||
         node->getFirstChild()->getOpCodeValue() == TR::irem))
       {
-      divisorMr = generateS390MemoryReference(secondChild, cg);
+      divisorMr = TR::MemoryReference::create(cg, secondChild);
 
       TR::InstOpCode::Mnemonic op = (dtype.isInt64())? TR::InstOpCode::CLGHSI : TR::InstOpCode::CLFHSI;
       generateSILInstruction(cg, op, node, divisorMr, 0);
@@ -3174,7 +4667,8 @@ J9::Z::TreeEvaluator::BNDCHKEvaluator(TR::Node * node, TR::CodeGenerator * cg)
    bool skipArrayLengthReg = false;
    bool skipArrayIndexReg = false;
    if (firstChild->getOpCodeValue() == TR::l2i &&
-           firstChild->isSingleRefUnevaluated() &&
+           firstChild->getReferenceCount() == 1 &&
+           firstChild->getRegister() == NULL &&
            firstChild->getFirstChild() &&
            firstChild->getFirstChild()->getRegister())
       {
@@ -3187,7 +4681,8 @@ J9::Z::TreeEvaluator::BNDCHKEvaluator(TR::Node * node, TR::CodeGenerator * cg)
       }
 
    if (secondChild->getOpCodeValue() == TR::l2i &&
-           secondChild->isSingleRefUnevaluated() &&
+           secondChild->getReferenceCount() == 1 &&
+           secondChild->getRegister() == NULL &&
            secondChild->getFirstChild() &&
            secondChild->getFirstChild()->getRegister())
       {
@@ -3361,8 +4856,12 @@ J9::Z::TreeEvaluator::BNDCHKEvaluator(TR::Node * node, TR::CodeGenerator * cg)
          return NULL;
          }
       else if (useS390CompareAndTrap &&
-              (  (firstChild->getOpCode().isLoadVar() && firstChild->isSingleRefUnevaluated()) ||
-                 (secondChild->getOpCode().isLoadVar() && secondChild->isSingleRefUnevaluated())) &&
+              ((firstChild->getOpCode().isLoadVar() &&
+               firstChild->getReferenceCount() == 1 &&
+               firstChild->getRegister() == NULL) ||
+               (secondChild->getOpCode().isLoadVar() &&
+               secondChild->getReferenceCount() == 1 &&
+               secondChild->getRegister() == NULL)) &&
               cg->comp()->target().cpu.isAtLeast(OMR_PROCESSOR_S390_ZEC12))
          {
          // Assume 1st child is the memory operand.
@@ -3371,7 +4870,9 @@ J9::Z::TreeEvaluator::BNDCHKEvaluator(TR::Node * node, TR::CodeGenerator * cg)
          TR::InstOpCode::S390BranchCondition compareCondition = TR::InstOpCode::COND_BNL;
 
          // Check if first child is really the memory operand
-         if (!(firstChild->getOpCode().isLoadVar() && firstChild->isSingleRefUnevaluated()))
+         if (!(firstChild->getOpCode().isLoadVar() &&
+               firstChild->getReferenceCount() == 1 &&
+               firstChild->getRegister() == NULL))
             {
             // Nope... the second child is!
             memChild = secondChild;
@@ -3388,7 +4889,7 @@ J9::Z::TreeEvaluator::BNDCHKEvaluator(TR::Node * node, TR::CodeGenerator * cg)
          cursor = generateRSInstruction(cg, opCode,
                                          node, regChild->getRegister(),
                                          getMaskForBranchCondition(compareCondition),
-                                         generateS390MemoryReference(memChild, cg));
+                                         TR::MemoryReference::create(cg, memChild));
          cursor->setExceptBranchOp();
          cg->setCanExceptByTrap(true);
          cursor->setNeedsGCMap(0x0000FFFF);
@@ -3605,8 +5106,7 @@ J9::Z::TreeEvaluator::ArrayCopyBNDCHKEvaluator(TR::Node * node, TR::CodeGenerato
                return NULL;
                }
             // check if we can use Compare-and-Branch at least
-            else if (cg->comp()->target().cpu.isAtLeast(OMR_PROCESSOR_S390_Z10) &&
-                     arrayTargetLengthConst <= MAX_IMMEDIATE_BYTE_VAL &&
+            else if (arrayTargetLengthConst <= MAX_IMMEDIATE_BYTE_VAL &&
                      arrayTargetLengthConst >= MIN_IMMEDIATE_BYTE_VAL &&
                      !disableS390CompareAndBranch)
                {
@@ -3681,8 +5181,7 @@ J9::Z::TreeEvaluator::ArrayCopyBNDCHKEvaluator(TR::Node * node, TR::CodeGenerato
             return NULL;
             }
          // check if we can use Compare-and-Branch at least
-         else if (cg->comp()->target().cpu.isAtLeast(OMR_PROCESSOR_S390_Z10) &&
-                  secondChild->getOpCode().isLoadConst() &&
+         else if (secondChild->getOpCode().isLoadConst() &&
                   secondChild->getInt() <= MAX_IMMEDIATE_BYTE_VAL &&
                   secondChild->getInt() >= MIN_IMMEDIATE_BYTE_VAL &&
                   !disableS390CompareAndBranch)
@@ -3759,7 +5258,7 @@ J9::Z::TreeEvaluator::generateFillInDataBlockSequenceForUnresolvedField(TR::Code
    outlinedSlowPath->swapInstructionListsWithCompilation();
 
    // OOL code start.
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, unresolvedLabel);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, unresolvedLabel);
 
    if (isStatic)
       {
@@ -3820,7 +5319,7 @@ J9::Z::TreeEvaluator::generateFillInDataBlockSequenceForUnresolvedField(TR::Code
    deps->addPostCondition(scratchReg2, cg->getReturnAddressRegister());
 
    // Now make the call. Return value of the call is in GPR2 (cpIndexReg).
-   TR::Instruction *call = generateDirectCall(cg, node, false /*myself*/, cg->symRefTab()->findOrCreateRuntimeHelper(helperIndex, false, false, false), deps);
+   TR::Instruction *call = generateDirectCall(cg, node, false /*myself*/, cg->symRefTab()->findOrCreateRuntimeHelper(helperIndex), deps);
    call->setNeedsGCMap(0x0000FFFF);
    call->setDependencyConditions(deps);
 
@@ -3837,7 +5336,7 @@ J9::Z::TreeEvaluator::generateFillInDataBlockSequenceForUnresolvedField(TR::Code
    // End of OOL code. Branch back to mainline.
    generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, mergePointLabel);
    outlinedSlowPath->swapInstructionListsWithCompilation();
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, mergePointLabel);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, mergePointLabel);
 
    cg->stopUsingRegister(cpIndexReg);
    cg->stopUsingRegister(scratchReg1);
@@ -3899,7 +5398,7 @@ void generateReportFieldAccessOutlinedInstructions(TR::Node *node, TR::LabelSymb
    TR_S390OutOfLineCodeSection *outlinedSlowPath = new (cg->trHeapMemory()) TR_S390OutOfLineCodeSection(fieldReportLabel, mergePointLabel, cg);
    cg->getS390OutOfLineCodeSectionList().push_front(outlinedSlowPath);
    outlinedSlowPath->swapInstructionListsWithCompilation();
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, fieldReportLabel);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, fieldReportLabel);
 
    // Populate the first argument needed by the VM Helper (address to the data snippet), and set the dependencies.
    TR::Register *dataBlockReg = cg->allocateRegister();
@@ -3976,7 +5475,7 @@ void generateReportFieldAccessOutlinedInstructions(TR::Node *node, TR::LabelSymb
    dependencies->addPostCondition(scratch2, cg->getReturnAddressRegister());
 
    // Now generate the call to VM Helper to report the fieldwatch.
-   TR::Instruction *call = generateDirectCall(cg, node, false /*myself*/, cg->symRefTab()->findOrCreateRuntimeHelper(helperIndex, false, false, false), dependencies);
+   TR::Instruction *call = generateDirectCall(cg, node, false /*myself*/, cg->symRefTab()->findOrCreateRuntimeHelper(helperIndex), dependencies);
    call->setNeedsGCMap(0x0000FFFF);
    call->setDependencyConditions(dependencies);
 
@@ -4013,10 +5512,10 @@ J9::Z::TreeEvaluator::generateTestAndReportFieldWatchInstructions(TR::CodeGenera
       if (isResolved)
          {
          fieldClassReg = cg->allocateRegister();
-         if (!(cg->needClassAndMethodPointerRelocations()))
+         J9Class *fieldClass = static_cast<TR::J9WatchedStaticFieldSnippet *>(dataSnippet)->getFieldClass();
+         if (!(cg->needClassAndMethodPointerRelocations()) && cg->canUseRelativeLongInstructions(reinterpret_cast<int64_t>(fieldClass)))
             {
             // For non-AOT (JIT and JITServer) compiles we don't need to use sideEffectRegister here as the class information is available to us at compile time.
-            J9Class *fieldClass = static_cast<TR::J9WatchedStaticFieldSnippet *>(dataSnippet)->getFieldClass();
             TR_ASSERT_FATAL(fieldClass != NULL, "A valid J9Class must be provided for direct rdbar/wrtbar opcodes %p\n", node);
             generateRILInstruction(cg, TR::InstOpCode::LARL, node, fieldClassReg, static_cast<void *>(fieldClass));
             }
@@ -4052,7 +5551,7 @@ J9::Z::TreeEvaluator::generateTestAndReportFieldWatchInstructions(TR::CodeGenera
    // branch back to mainline (mergePointLabel).
    generateReportFieldAccessOutlinedInstructions(node, fieldReportLabel, mergePointLabel, dataSnippet, isWrite, cg, sideEffectRegister, valueReg);
 
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, mergePointLabel);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, mergePointLabel);
 
    if (opCodeIsIndirect || isResolved || isWrite)
       {
@@ -4134,7 +5633,7 @@ J9::Z::TreeEvaluator::ardbariEvaluator(TR::Node *node, TR::CodeGenerator *cg)
       bool dynLitPoolLoad = false;
       resultReg = TR::TreeEvaluator::checkAndAllocateReferenceRegister(node, cg, dynLitPoolLoad);
       // MemRef can generate BRCL to unresolved data snippet if needed.
-      TR::MemoryReference* loadMemRef = generateS390MemoryReference(node, cg);
+      TR::MemoryReference* loadMemRef = TR::MemoryReference::create(cg, node);
 
       if (cg->comp()->target().cpu.supportsFeature(OMR_FEATURE_S390_GUARDED_STORAGE))
          {
@@ -4328,7 +5827,7 @@ J9::Z::TreeEvaluator::awrtbariEvaluator(TR::Node *node, TR::CodeGenerator *cg)
 
    // We need to evaluate all the children first before we generate memory reference
    // since it will screw up the code sequence for patching when we do symbol resolution.
-   TR::MemoryReference *tempMR = generateS390MemoryReference(node, cg);
+   TR::MemoryReference *tempMR = TR::MemoryReference::create(cg, node);
    TR::InstOpCode::Mnemonic storeOp = usingCompressedPointers ? TR::InstOpCode::ST : TR::InstOpCode::getStoreOpCode();
    TR::Instruction * instr = generateRXInstruction(cg, storeOp, node, opCodeIsIndirect ? compressedRegister : sourceRegister, tempMR);
 
@@ -4499,7 +5998,7 @@ J9::Z::TreeEvaluator::BNDCHKwithSpineCHKEvaluator(TR::Node *node, TR::CodeGenera
 
    if (comp->getOption(TR_TraceCG))
       traceMsg(comp,"Identified actualLoadOrStoreChild: %p and evaluated node: %p\n",actualLoadOrStoreChild, evaluatedNode);
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, oolReturnLabel);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, oolReturnLabel);
 
    if (loadOrStoreChild != evaluatedNode)
       cg->evaluate(loadOrStoreChild);
@@ -4510,7 +6009,7 @@ J9::Z::TreeEvaluator::BNDCHKwithSpineCHKEvaluator(TR::Node *node, TR::CodeGenera
    TR_S390OutOfLineCodeSection *outlinedDiscontigPath = new (cg->trHeapMemory()) TR_S390OutOfLineCodeSection(oolStartLabel,oolReturnLabel,cg);
    cg->getS390OutOfLineCodeSectionList().push_front(outlinedDiscontigPath);
    outlinedDiscontigPath->swapInstructionListsWithCompilation();
-   TR::Instruction * cursor = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, oolStartLabel);
+   TR::Instruction * cursor = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, oolStartLabel);
 
    // get the correct liveLocals from the OOL entry branch instruction, so the GC maps can be correct in OOL slow path
    cursor->setLiveLocals(branchToOOL->getLiveLocals());
@@ -4565,15 +6064,9 @@ J9::Z::TreeEvaluator::BNDCHKwithSpineCHKEvaluator(TR::Node *node, TR::CodeGenera
          {
          cursor = generateRIEInstruction(cg, TR::InstOpCode::RISBGN, node, tmpReg, indexReg,(32+spineShift-spinePtrShift), (128+63-spinePtrShift),(64-spineShift+spinePtrShift),cursor);
          }
-      else if (cg->comp()->target().cpu.isAtLeast(OMR_PROCESSOR_S390_Z10))
-         {
-         cursor = generateRIEInstruction(cg, TR::InstOpCode::RISBG, node, tmpReg, indexReg,(32+spineShift-spinePtrShift), (128+63-spinePtrShift),(64-spineShift+spinePtrShift),cursor);
-         }
       else
          {
-         cursor = generateRRInstruction(cg, TR::InstOpCode::LGFR, node, tmpReg, indexReg, cursor);
-         cursor = generateRSInstruction(cg, TR::InstOpCode::SRAG, node, tmpReg, tmpReg, spineShift, cursor);
-         cursor = generateRSInstruction(cg, TR::InstOpCode::SLLG, node, tmpReg, tmpReg, spinePtrShift, cursor);
+         cursor = generateRIEInstruction(cg, TR::InstOpCode::RISBG, node, tmpReg, indexReg,(32+spineShift-spinePtrShift), (128+63-spinePtrShift),(64-spineShift+spinePtrShift),cursor);
          }
       }
    else
@@ -4603,11 +6096,6 @@ J9::Z::TreeEvaluator::BNDCHKwithSpineCHKEvaluator(TR::Node *node, TR::CodeGenera
          {
          cursor = generateRSInstruction(cg, TR::InstOpCode::SLLG, node, tmpReg, tmpReg, cmpRefsShift, cursor);
          }
-
-      // Add heapbase value if necessary.
-      uintptr_t heapBaseValue = TR::Compiler->vm.heapBaseAddress();
-      if (heapBaseValue != 0)
-         cursor = generateRegLitRefInstruction(cg, TR::InstOpCode::AG, node, tmpReg, (int64_t)heapBaseValue, NULL, cursor, NULL, false);
       }
 
    // Calculate the offset with the arraylet for the index.
@@ -4619,15 +6107,9 @@ J9::Z::TreeEvaluator::BNDCHKwithSpineCHKEvaluator(TR::Node *node, TR::CodeGenera
          {
          cursor = generateRIEInstruction(cg, TR::InstOpCode::RISBGN, node, tmpReg2, indexReg,(64-spineShift- elementShift), (128+63-elementShift),(elementShift),cursor);
          }
-      else if (cg->comp()->target().cpu.isAtLeast(OMR_PROCESSOR_S390_Z10))
-         {
-         cursor = generateRIEInstruction(cg, TR::InstOpCode::RISBG, node, tmpReg2, indexReg,(64-spineShift- elementShift), (128+63-elementShift),(elementShift),cursor);
-         }
       else
          {
-         cursor = generateRRInstruction(cg, TR::InstOpCode::LGFR, node, tmpReg2, indexReg, cursor);
-         cursor = generateRSInstruction(cg, TR::InstOpCode::SLLG, node, tmpReg2, tmpReg2, 64-spineShift, cursor);
-         cursor = generateRSInstruction(cg, TR::InstOpCode::SRLG, node, tmpReg2, tmpReg2, 64-spineShift - elementShift, cursor);
+         cursor = generateRIEInstruction(cg, TR::InstOpCode::RISBG, node, tmpReg2, indexReg,(64-spineShift- elementShift), (128+63-elementShift),(elementShift),cursor);
          }
       }
    else
@@ -4641,7 +6123,7 @@ J9::Z::TreeEvaluator::BNDCHKwithSpineCHKEvaluator(TR::Node *node, TR::CodeGenera
 
    if (!actualLoadOrStoreChild->getOpCode().isStore())
       {
-      TR::InstOpCode::Mnemonic op = TR::InstOpCode::BAD;
+      TR::InstOpCode::Mnemonic op = TR::InstOpCode::bad;
 
       TR::MemoryReference *highArrayletMR = NULL;
       TR::Register *highRegister = NULL;
@@ -4724,11 +6206,6 @@ J9::Z::TreeEvaluator::BNDCHKwithSpineCHKEvaluator(TR::Node *node, TR::CodeGenera
             {
             cursor = generateRSInstruction(cg, TR::InstOpCode::SLLG, node, loadOrStoreReg, loadOrStoreReg, cmpRefsShift, cursor);
             }
-
-         // Add heapbase value if necessary.
-         uintptr_t heapBaseValue = TR::Compiler->vm.heapBaseAddress();
-         if (heapBaseValue != 0)
-            cursor = generateRegLitRefInstruction(cg, TR::InstOpCode::AG, node, loadOrStoreReg, (int64_t)heapBaseValue, NULL, cursor, NULL, false);
          }
 
       if (highArrayletMR)
@@ -4770,7 +6247,7 @@ J9::Z::TreeEvaluator::BNDCHKwithSpineCHKEvaluator(TR::Node *node, TR::CodeGenera
 
             default:
                TR_ASSERT(0, "unsupported array element store type");
-               op = TR::InstOpCode::BAD;
+               op = TR::InstOpCode::bad;
             }
 
          if (needStore)
@@ -4845,7 +6322,7 @@ VMarrayStoreCHKEvaluator(
    if (debugObj)
       debugObj->addInstructionComment(cursor, "Check if src.type == array.type");
 
-   intptr_t objectClass = (intptr_t) fej9->getSystemClassFromClassName("java/lang/Object", 16, !cg->comp()->isOutOfProcessCompilation());
+   intptr_t objectClass = (intptr_t) fej9->getSystemClassFromClassName("java/lang/Object", 16, true);
    /*
     * objectClass is used for Object arrays check optimization: when we are storing to Object arrays we can skip all other array store checks
     * However, TR_J9SharedCacheVM::getSystemClassFromClassName can return 0 when it's impossible to relocate j9class later for AOT loads
@@ -4855,7 +6332,7 @@ VMarrayStoreCHKEvaluator(
 
    if (doObjectArrayCheck && (cg->wantToPatchClassPointer((TR_OpaqueClassBlock*)objectClass, node) || cg->needClassAndMethodPointerRelocations()))
       {
-      if (cg->comp()->target().cpu.isAtLeast(OMR_PROCESSOR_S390_Z10) && cg->isLiteralPoolOnDemandOn())
+      if (cg->isLiteralPoolOnDemandOn())
          {
          TR::S390ConstantDataSnippet * targetsnippet;
          if (cg->comp()->target().is64Bit())
@@ -4874,8 +6351,6 @@ VMarrayStoreCHKEvaluator(
          if (cg->needClassAndMethodPointerRelocations())
             {
             targetsnippet->setReloType(TR_ClassPointer);
-            AOTcgDiag4(comp, "generateRegLitRefInstruction constantDataSnippet=%x symbolReference=%x symbol=%x reloType=%x\n",
-                  targetsnippet, targetsnippet->getSymbolReference(), targetsnippet->getSymbolReference()->getSymbol(), TR_ClassPointer);
             }
          }
       else
@@ -4972,7 +6447,7 @@ VMarrayStoreCHKEvaluator(
    arrayStoreCHKOOL = new (cg->trHeapMemory()) TR_S390OutOfLineCodeSection(helperCallLabel,wbLabel,cg);
    cg->getS390OutOfLineCodeSectionList().push_front(arrayStoreCHKOOL);
    arrayStoreCHKOOL->swapInstructionListsWithCompilation();
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, helperCallLabel);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, helperCallLabel);
    TR::Register *dummyResReg = helperLink->buildDirectDispatch(callNode);
    if (dummyResReg)
       cg->stopUsingRegister(dummyResReg);
@@ -5008,57 +6483,27 @@ J9::Z::TreeEvaluator::ArrayStoreCHKEvaluator(TR::Node * node, TR::CodeGenerator 
 
    bool nopASC = false;
    if (comp->performVirtualGuardNOPing() && node->getArrayStoreClassInNode() &&
-      !comp->getOption(TR_DisableOOL) && !fej9->classHasBeenExtended(node->getArrayStoreClassInNode()))
+      !fej9->classHasBeenExtended(node->getArrayStoreClassInNode()))
       nopASC = true;
 
    bool usingCompressedPointers = false;
    if (comp->useCompressedPointers() && firstChild->getOpCode().isIndirect())
       {
-       // pattern match the sequence
-       //     iistore f     iistore f         <- node
-       //       aload O       aload O
-       //     value           l2i
-       //                       lshr
-       //                         lsub
-       //                           a2l
-       //                             value   <- sourceChild
-       //                           lconst HB
-       //                         iconst shftKonst
-       //
-       // -or- if the field is known to be null
-       // iistore f
-       //    aload O
-       //    l2i
-       //      a2l
-       //        value  <- valueChild
-       //
-      TR::Node *translatedNode = sourceChild;
-      if (translatedNode->getOpCode().isConversion())
-         translatedNode = translatedNode->getFirstChild();
-      if (translatedNode->getOpCode().isRightShift()) // optional
-         translatedNode = translatedNode->getFirstChild();
-
-      bool usingLowMemHeap = false;
-      if (TR::Compiler->vm.heapBaseAddress() == 0 ||
-             sourceChild->isNull())
-         usingLowMemHeap = true;
-
-      if (translatedNode->getOpCode().isSub() || usingLowMemHeap)
-         usingCompressedPointers = true;
-
-      if (usingCompressedPointers)
+      usingCompressedPointers = true;
+      while (sourceChild->getNumChildren() > 0
+         && sourceChild->getOpCodeValue() != TR::a2l)
          {
-         while ((sourceChild->getNumChildren() > 0) &&
-                  (sourceChild->getOpCodeValue() != TR::a2l))
-            sourceChild = sourceChild->getFirstChild();
-         if (sourceChild->getOpCodeValue() == TR::a2l)
-            sourceChild = sourceChild->getFirstChild();
-         // artificially bump up the refCount on the value so
-         // that different registers are allocated for the actual
-         // and compressed values
-         //
-         sourceChild->incReferenceCount();
+         sourceChild = sourceChild->getFirstChild();
          }
+      if (sourceChild->getOpCodeValue() == TR::a2l)
+         {
+         sourceChild = sourceChild->getFirstChild();
+         }
+      // artificially bump up the refCount on the value so
+      // that different registers are allocated for the actual
+      // and compressed values
+      //
+      sourceChild->incReferenceCount();
       }
    TR::Node * memRefChild = firstChild->getFirstChild();
 
@@ -5094,7 +6539,7 @@ J9::Z::TreeEvaluator::ArrayStoreCHKEvaluator(TR::Node * node, TR::CodeGenerator 
          {
             srcReg = cg->allocateCollectedReferenceRegister();
 
-            generateRXInstruction(cg, TR::InstOpCode::getLoadTestOpCode(), sourceChild, srcReg, generateS390MemoryReference(sourceChild, cg));
+            generateRXInstruction(cg, TR::InstOpCode::getLoadTestOpCode(), sourceChild, srcReg, TR::MemoryReference::create(cg, sourceChild));
 
             sourceChild->setRegister(srcReg);
          }
@@ -5111,7 +6556,7 @@ J9::Z::TreeEvaluator::ArrayStoreCHKEvaluator(TR::Node * node, TR::CodeGenerator 
    TR::Node *callNode = TR::Node::createWithSymRef(node, TR::call, 2, node->getSymbolReference());
    callNode->setChild(0, sourceChild);
    callNode->setChild(1, classChild);
-   mr1 = generateS390MemoryReference(firstChild, cg);
+   mr1 = TR::MemoryReference::create(cg, firstChild);
 
    TR::Register *compressedReg = srcReg;
    if (usingCompressedPointers)
@@ -5149,12 +6594,11 @@ J9::Z::TreeEvaluator::ArrayStoreCHKEvaluator(TR::Node * node, TR::CodeGenerator 
 
    if (!sourceChild->isNonNull())
       {
-      // If we have an actionable wrtbar and a NULL ptr, branch around the wrt bar
-      // as it needs not be exec'd
-      TR::InstOpCode::Mnemonic compareAndBranchMnemonic = usingCompressedPointers ? TR::InstOpCode::C : TR::InstOpCode::getCmpOpCode();
-
-      generateS390CompareAndBranchInstruction(cg, compareAndBranchMnemonic, node, srcReg, 0, TR::InstOpCode::COND_BE, (doWrtBar || doCrdMrk)?simpleStoreLabel:wbLabel, false, true);
+      // Note the use of 64-bit compare for compressedRefs and use of the decompressed `srcReg` register
+      // Compare object with NULL. If NULL, branch around ASC, WrtBar and CrdMrk as they are not required
+      generateS390CompareAndBranchInstruction(cg, TR::InstOpCode::getCmpOpCode(), node, srcReg, 0, TR::InstOpCode::COND_BE, (doWrtBar || doCrdMrk)?simpleStoreLabel:wbLabel, false, true);
       }
+
    J9::Z::CHelperLinkage *helperLink = static_cast<J9::Z::CHelperLinkage*>(cg->getLinkage(TR_CHelper));
    if (nopASC)
       {
@@ -5170,7 +6614,7 @@ J9::Z::TreeEvaluator::ArrayStoreCHKEvaluator(TR::Node * node, TR::CodeGenerator 
       cg->getS390OutOfLineCodeSectionList().push_front(outlinedSlowPath);
       outlinedSlowPath->swapInstructionListsWithCompilation();
 
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, oolASCLabel);
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, oolASCLabel);
       TR::Register *dummyResReg = helperLink->buildDirectDispatch(callNode);
       if (dummyResReg)
          cg->stopUsingRegister(dummyResReg);
@@ -5181,7 +6625,7 @@ J9::Z::TreeEvaluator::ArrayStoreCHKEvaluator(TR::Node * node, TR::CodeGenerator 
    else
       VMarrayStoreCHKEvaluator(node, helperLink, callNode, srcReg, classReg, txReg, tyReg, litPoolBaseReg, owningObjectRegVal, srcRegVal, wbLabel, conditions, cg);
 
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, wbLabel);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, wbLabel);
 
    if (mr1->getBaseRegister())
       {
@@ -5229,7 +6673,7 @@ J9::Z::TreeEvaluator::ArrayStoreCHKEvaluator(TR::Node * node, TR::CodeGenerator 
          generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, cFlowRegionEnd);
          }
 
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, simpleStoreLabel);
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, simpleStoreLabel);
 
       mr2 = generateS390MemoryReference(*mr1, 0, cg);
       if (usingCompressedPointers)
@@ -5238,7 +6682,7 @@ J9::Z::TreeEvaluator::ArrayStoreCHKEvaluator(TR::Node * node, TR::CodeGenerator 
          generateRXInstruction(cg, TR::InstOpCode::getStoreOpCode(), node, srcReg, mr2);
       }
 
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, cFlowRegionEnd, conditions);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, cFlowRegionEnd, conditions);
    cFlowRegionEnd->setEndInternalControlFlow();
 
    if (comp->useCompressedPointers() && firstChild->getOpCode().isIndirect())
@@ -5272,7 +6716,7 @@ J9::Z::TreeEvaluator::ArrayStoreCHKEvaluator(TR::Node * node, TR::CodeGenerator 
    while(next != NULL && !next->isBranchOp())
       next = next->getNext();
    TR_ASSERT( next != NULL && next->getPrev() != NULL, "Could not find branch instruction where internal control flow begins");
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, cFlowRegionStart, next->getPrev());
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, cFlowRegionStart, next->getPrev());
    cFlowRegionStart->setStartInternalControlFlow();
 
    return NULL;
@@ -5344,14 +6788,14 @@ J9::Z::TreeEvaluator::conditionalHelperEvaluator(TR::Node * node, TR::CodeGenera
    dependencies->addPostCondition(tempReg2, cg->getReturnAddressRegister());
    snippetLabel->setEndInternalControlFlow();
 
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, cFlowRegionStart);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, cFlowRegionStart);
    cFlowRegionStart->setStartInternalControlFlow();
    gcPoint = generateS390BranchInstruction(cg, TR::InstOpCode::BRC, testNode->getOpCodeValue() == TR::icmpeq ?  TR::InstOpCode::COND_BE : TR::InstOpCode::COND_BNE, node, snippetLabel);
 
    TR::LabelSymbol * reStartLabel = generateLabelSymbol(cg);
    TR::Snippet * snippet = new (cg->trHeapMemory()) TR::S390HelperCallSnippet(cg, node, snippetLabel, node->getSymbolReference(), reStartLabel);
    cg->addSnippet(snippet);
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, reStartLabel, dependencies);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, reStartLabel, dependencies);
 
    gcPoint->setNeedsGCMap(0x0000FFFF);
 
@@ -5583,7 +7027,7 @@ J9::Z::TreeEvaluator::evaluateNULLCHKWithPossibleResolve(TR::Node * node, bool n
                && reference->getRegister() == NULL)
             {
             targetRegister = cg->allocateCollectedReferenceRegister();
-            appendTo = generateRXInstruction(cg, TR::InstOpCode::getLoadAndTrapOpCode(), node, targetRegister, generateS390MemoryReference(reference, cg), appendTo);
+            appendTo = generateRXInstruction(cg, TR::InstOpCode::getLoadAndTrapOpCode(), node, targetRegister, TR::MemoryReference::create(cg, reference), appendTo);
             reference->setRegister(targetRegister);
             }
          else if (cg->comp()->target().cpu.isAtLeast(OMR_PROCESSOR_S390_ZEC12)
@@ -5654,7 +7098,7 @@ J9::Z::TreeEvaluator::evaluateNULLCHKWithPossibleResolve(TR::Node * node, bool n
                }
 
             reference->setRegister(targetRegister);
-            TR::MemoryReference * tempMR = generateS390MemoryReference(reference, cg);
+            TR::MemoryReference * tempMR = TR::MemoryReference::create(cg, reference);
             appendTo = generateRXInstruction(cg, TR::InstOpCode::getLoadTestOpCode(), reference, targetRegister, tempMR, appendTo);
             tempMR->stopUsingMemRefRegister(cg);
 
@@ -5684,7 +7128,7 @@ J9::Z::TreeEvaluator::evaluateNULLCHKWithPossibleResolve(TR::Node * node, bool n
                n->setIsNonZero(true);
                }
 
-            TR::InstOpCode::Mnemonic cmpOpCode = TR::InstOpCode::BAD;
+            TR::InstOpCode::Mnemonic cmpOpCode = TR::InstOpCode::bad;
 
             // For compressed pointers case, if we find the compressed value,
             // and it has already been evaluated into a register,
@@ -5724,51 +7168,7 @@ J9::Z::TreeEvaluator::evaluateNULLCHKWithPossibleResolve(TR::Node * node, bool n
 
    if (needLateEvaluation)
       {
-      // If this is a load with ref count of 1, just decrease the ref count
-      // since it must have been evaluated. Otherwise, evaluate it.
-      // for compressedPointers, the firstChild will have a refCount
-      // of atleast 2 (the other under an anchor node)
-      //
-      if (opCode.isLoad() && firstChild->getReferenceCount() == 1
-            && !firstChild->getSymbolReference()->isUnresolved())
-         {
-         if (needExplicitCheck && firstChild->getRegister() == NULL)
-            {
-            // load with reference count 1 and no register, this means load is not evaluated
-            // this load is only meaningful for explicit NULL CHK
-            // it should not be evaluated yet. Its reference counter will be decrease later.
-            cg->decReferenceCount(reference);
-            }
-         else
-            {
-            cg->decReferenceCount(firstChild);
-            cg->decReferenceCount(reference);
-            }
-         }
-      else
-         {
-         // cg->comp()->useCompressedPointers
-         // this will end up evaluating either the l2a sequence (for loads)
-         // or the iistore (in case of iastores)
-         //
-         // for stores under NULLCHKs, artificially bump
-         // down the reference count before evaluation (since stores
-         // return null as registers)
-         //
-         bool fixRefCount = false;
-         if (comp->useCompressedPointers())
-            {
-            if (firstChild->getOpCode().isStoreIndirect()
-                  && firstChild->getReferenceCount() > 1)
-               {
-               firstChild->decReferenceCount();
-               fixRefCount = true;
-               }
-            }
-         cg->evaluate(firstChild);
-         if (fixRefCount)
-            firstChild->incReferenceCount();
-         }
+      cg->evaluate(firstChild);
       }
    else if (needExplicitCheck)
       {
@@ -5900,6 +7300,8 @@ reservationLockEnter(TR::Node *node, int32_t lwOffset, TR::Register *objectClass
    //    CRJ   valReg,     monitorReg, MASK6, callLabel
    //    AHI   monitorReg, INC_DEC_VALUE
    //    ST    monitorReg, #lwOffset(objectReg)
+   //    # IF 64-Bit and JAVA_VERSION >= 19
+   //       AGSI #ownedMonitorCountOffset(J9VMThread), 1
 
    // load monitor reg
    generateRXInstruction(cg, loadOp, node, monitorReg, generateS390MemoryReference(objReg, lwOffset, cg));
@@ -5908,25 +7310,17 @@ reservationLockEnter(TR::Node *node, int32_t lwOffset, TR::Register *objectClass
    generateRILInstruction(cg, orImmOp, node, valReg, LOCK_RESERVATION_BIT);
 
    // Jump to OOL path if lock is not reserved (monReg != r13|LOCK_RESERVATION_BIT)
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, cFlowRegionStart);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, cFlowRegionStart);
    cFlowRegionStart->setStartInternalControlFlow();
    instr = generateS390CompareAndBranchInstruction(cg, compareOp, node, valReg, monitorReg,
       TR::InstOpCode::COND_BNE, resLabel, false, false);
 
-   if (!comp->getOption(TR_DisableOOL))
-      {
-      helperReturnOOLLabel = generateLabelSymbol(cg);
-      doneOOLLabel = generateLabelSymbol(cg);
-      if (debugObj)
-         debugObj->addInstructionComment(instr, "Branch to OOL reservation enter sequence");
-      outlinedSlowPath = new (cg->trHeapMemory()) TR_S390OutOfLineCodeSection(resLabel, doneOOLLabel, cg);
-      cg->getS390OutOfLineCodeSectionList().push_front(outlinedSlowPath);
-      }
-   else
-      {
-      TR_ASSERT(0, "Not implemented- Lock reservation with Disable OOL yet.");
-      //Todo: Call VM helper maybe?
-      }
+   helperReturnOOLLabel = generateLabelSymbol(cg);
+   doneOOLLabel = generateLabelSymbol(cg);
+   if (debugObj)
+      debugObj->addInstructionComment(instr, "Branch to OOL reservation enter sequence");
+   outlinedSlowPath = new (cg->trHeapMemory()) TR_S390OutOfLineCodeSection(resLabel, doneOOLLabel, cg);
+   cg->getS390OutOfLineCodeSectionList().push_front(outlinedSlowPath);
 
    cg->generateDebugCounter("LockEnt/LR/LRSuccessfull", 1, TR::DebugCounter::Undetermined);
    if (!isPrimitive)
@@ -5935,11 +7329,19 @@ reservationLockEnter(TR::Node *node, int32_t lwOffset, TR::Register *objectClass
       generateRXInstruction(cg, storeOp, node, monitorReg, generateS390MemoryReference(objReg, lwOffset, cg));
       }
 
+#if (JAVA_SPEC_VERSION >= 19)
+#if defined(TR_TARGET_64BIT)
+   generateSIInstruction(cg, TR::InstOpCode::AGSI, node, generateS390MemoryReference(cg->getMethodMetaDataRealRegister(), fej9->thisThreadGetOwnedMonitorCountOffset(), cg), 1);
+#else    /* TR_TARGET_64BIT */
+   TR_ASSERT_FATAL(false, "Virtual Thread is not supported on 31-Bit platform\n");
+#endif   /* TR_TARGET_64BIT */
+#endif   /* JAVA_SPEC_VERSION >= 19 */
+
    if (outlinedSlowPath) // Means we have OOL
       {
       TR::LabelSymbol *reserved_checkLabel = generateLabelSymbol(cg);
       outlinedSlowPath->swapInstructionListsWithCompilation(); // Toggle instruction list
-      TR::Instruction *temp = generateS390LabelInstruction(cg,TR::InstOpCode::LABEL,node,resLabel);
+      TR::Instruction *temp = generateS390LabelInstruction(cg,TR::InstOpCode::label,node,resLabel);
       if (debugObj)
          {
          if (isPrimitive)
@@ -5959,6 +7361,10 @@ reservationLockEnter(TR::Node *node, int32_t lwOffset, TR::Register *objectClass
       // XR    monitorReg, monitorReg
       // CS    monitorReg, valReg, #lwOffset(objectReg)
       // BRC   MASK6, callHelper
+      // #IF 64-Bit and JAVA_VERSION >= 19
+      //    BRC   incrementOwnedMonitorCountLabel
+      // #ELSEIF
+      //    BRC   returnLabel
       // BRC   returnLabel
       // checkLabel:
       // LGFI  tempReg, LOCK_RES_NON_PRIMITIVE_ENTER_MASK
@@ -5966,6 +7372,9 @@ reservationLockEnter(TR::Node *node, int32_t lwOffset, TR::Register *objectClass
       // CRJ   tempReg, valReg, MASK6, callHelper
       // AHI   monitorReg, INC_DEC_VALUE
       // ST    monitorReg, #lwOffset(objectReg)
+      // #IF 64-Bit && JAVA_VERSION >=19
+      //    incrementOwnedMonitorCountLabel:
+      //    AGSI #ownedMonitorCountOffset(J9VMThread), 1
       // BRC   returnLabel
       // callHelper:
       // BRASL R14, jitMonitorEntry
@@ -5983,12 +7392,21 @@ reservationLockEnter(TR::Node *node, int32_t lwOffset, TR::Register *objectClass
       // Call VM helper if the CAS fails (contention)
       instr = generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BNE, node, callLabel);
 
-      cg->generateDebugCounter("LockEnt/LR/CASSuccessfull", 1, TR::DebugCounter::Undetermined);
+      cg->generateDebugCounter("LockEnt/LR/CASSuccessful", 1, TR::DebugCounter::Undetermined);
 
       // Lock is acquired successfully
+#if (JAVA_SPEC_VERSION >= 19)
+#if defined(TR_TARGET_64BIT)
+      TR::LabelSymbol *incrementOwnedMonitorCountLabel = generateLabelSymbol(cg);
+      generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, incrementOwnedMonitorCountLabel);
+#else    /* TR_TARGET_64BIT */
+      TR_ASSERT_FATAL(false, "Virtual thread is not supported on 31-Bit platform\n");
+#endif   /* TR_TARGET_64BIT */
+#else    /* JAVA_SPEC_VERSION >= 19 */
       generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, helperReturnOOLLabel);
+#endif   /* JAVA_SPEC_VERSION >= 19 */
 
-      generateS390LabelInstruction(cg,TR::InstOpCode::LABEL,node,reserved_checkLabel);
+      generateS390LabelInstruction(cg,TR::InstOpCode::label,node,reserved_checkLabel);
       // Mask the counter
       // Mask is 8 bit value which will be sign extended, We will be using cheaper instruction like LGHI or LHI
       generateRIInstruction(cg, loadImmOp, node, tempReg, ~(isPrimitive ? LOCK_RES_PRIMITIVE_ENTER_MASK : LOCK_RES_NON_PRIMITIVE_ENTER_MASK));
@@ -6006,18 +7424,27 @@ reservationLockEnter(TR::Node *node, int32_t lwOffset, TR::Register *objectClass
          generateRIInstruction  (cg, addImmOp, node, monitorReg, (uintptr_t) LOCK_INC_DEC_VALUE);
          generateRXInstruction(cg, storeOp, node, monitorReg, generateS390MemoryReference(objReg, lwOffset, cg));
          }
+
+#if (JAVA_SPEC_VERSION >= 19)
+#if defined(TR_TARGET_64BIT)
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, incrementOwnedMonitorCountLabel);
+      generateSIInstruction(cg, TR::InstOpCode::AGSI, node, generateS390MemoryReference(cg->getMethodMetaDataRealRegister(), fej9->thisThreadGetOwnedMonitorCountOffset(), cg), 1);
+#else    /* TR_TARGET_64BIT */
+      TR_ASSERT_FATAL(false, "Virtual thread is not supported on 31-Bit platform\n");
+#endif   /* TR_TARGET_64BIT */
+#endif   /* JAVA_SPEC_VERSION >= 19 */
+
       generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, helperReturnOOLLabel);
       // call to jithelper
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, callLabel);
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, callLabel);
       cg->generateDebugCounter("LockEnt/LR/VMHelper", 1, TR::DebugCounter::Undetermined);
-      uintptr_t returnAddress = (uintptr_t) (node->getSymbolReference()->getMethodAddress());
 
       // We are calling helper within ICF so we need to combine dependency from ICF and helper call at merge label
       TR::RegisterDependencyConditions *deps = NULL;
       helperLink->buildDirectDispatch(node, &deps);
       TR::RegisterDependencyConditions *mergeConditions = mergeConditions = new (cg->trHeapMemory()) TR::RegisterDependencyConditions(ICFConditions, deps, cg);
       // OOL return label
-      instr = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, helperReturnOOLLabel, mergeConditions);
+      instr = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, helperReturnOOLLabel, mergeConditions);
       helperReturnOOLLabel->setEndInternalControlFlow();
       if (debugObj)
          {
@@ -6035,10 +7462,10 @@ reservationLockEnter(TR::Node *node, int32_t lwOffset, TR::Register *objectClass
 
       outlinedSlowPath->swapInstructionListsWithCompilation(); // Toggle instruction list
 
-      instr = generateS390LabelInstruction(cg,TR::InstOpCode::LABEL,node,doneOOLLabel);
+      instr = generateS390LabelInstruction(cg,TR::InstOpCode::label,node,doneOOLLabel);
       if (debugObj)
          debugObj->addInstructionComment(instr, "OOL reservation enter return label");
-      generateS390LabelInstruction(cg,TR::InstOpCode::LABEL,node, doneLabel);
+      generateS390LabelInstruction(cg,TR::InstOpCode::label,node, doneLabel);
       }
    else
       {
@@ -6127,6 +7554,8 @@ reservationLockExit(TR::Node *node, int32_t lwOffset, TR::Register *objectClassR
    //   CRJ   valReg, monitorReg, BNE, callLabel
    //   AHI   valReg, -INC_DEC_VALUE
    //   ST    valReg, #lwOffset(objectReg)
+   // #IF 64-Bit && JAVA_VERSION >=19
+   //    AGSI #ownedMonitorCountOffset(J9VMThread), -1
 
    generateRXInstruction(cg, loadOp, node, monitorReg, generateS390MemoryReference(objReg, lwOffset, cg));
    if (!isPrimitive)
@@ -6145,17 +7574,12 @@ reservationLockExit(TR::Node *node, int32_t lwOffset, TR::Register *objectClassR
          TR::InstOpCode::COND_BNE, resLabel, false);
       }
 
-   if (!comp->getOption(TR_DisableOOL))
-      {
-      helperReturnOOLLabel = generateLabelSymbol(cg);
-      doneOOLLabel = generateLabelSymbol(cg);
-      if (debugObj)
-         debugObj->addInstructionComment(instr, "Branch to OOL reservation exit sequence");
-      outlinedSlowPath = new (cg->trHeapMemory()) TR_S390OutOfLineCodeSection(resLabel, doneOOLLabel, cg);
-      cg->getS390OutOfLineCodeSectionList().push_front(outlinedSlowPath);
-      }
-   else
-      TR_ASSERT(0, "Not implemented: Lock reservation with Disable OOL.");
+   helperReturnOOLLabel = generateLabelSymbol(cg);
+   doneOOLLabel = generateLabelSymbol(cg);
+   if (debugObj)
+      debugObj->addInstructionComment(instr, "Branch to OOL reservation exit sequence");
+   outlinedSlowPath = new (cg->trHeapMemory()) TR_S390OutOfLineCodeSection(resLabel, doneOOLLabel, cg);
+   cg->getS390OutOfLineCodeSectionList().push_front(outlinedSlowPath);
 
    if (!isPrimitive)
       {
@@ -6163,11 +7587,18 @@ reservationLockExit(TR::Node *node, int32_t lwOffset, TR::Register *objectClassR
       generateRXInstruction(cg, use64b? TR::InstOpCode::STG : TR::InstOpCode::ST,
          node, tempReg, generateS390MemoryReference(objReg, lwOffset, cg));
       }
+#if (JAVA_SPEC_VERSION >= 19)
+#if defined(TR_TARGET_64BIT)
+      generateSIInstruction(cg, TR::InstOpCode::AGSI, node, generateS390MemoryReference(cg->getMethodMetaDataRealRegister(), fej9->thisThreadGetOwnedMonitorCountOffset(), cg), -1);
+#else    /* TR_TARGET_64BIT */
+      TR_ASSERT_FATAL(false, "Virtual thread is not supported on 31-Bit platform\n");
+#endif   /* TR_TARGET_64BIT */
+#endif   /* JAVA_SPEC_VERSION >= 19 */
 
    if (outlinedSlowPath) // Means we have OOL
       {
       outlinedSlowPath->swapInstructionListsWithCompilation(); // Toggle instruction list
-      TR::Instruction *temp = generateS390LabelInstruction(cg,TR::InstOpCode::LABEL,node,resLabel);
+      TR::Instruction *temp = generateS390LabelInstruction(cg,TR::InstOpCode::label,node,resLabel);
       if (debugObj)
          {
          if (isPrimitive)
@@ -6191,6 +7622,8 @@ reservationLockExit(TR::Node *node, int32_t lwOffset, TR::Register *objectClassR
       // BRC   BERC, callHelper
       // AHI   monitorReg, -INC_DEC_VALUE
       // ST    monitorReg, #lwOffset(objectReg)
+      // #IF 64-Bit && JAVA_VERSION >=19
+      //    AGSI #ownedMonitorCountOffset(J9VMThread), -1
       // BRC   returnLabel
       // callHelper:
       // BRASL R14, jitMonitorExit
@@ -6201,7 +7634,7 @@ reservationLockExit(TR::Node *node, int32_t lwOffset, TR::Register *objectClassR
       generateRRInstruction(cg, loadRegOp, node, valReg, metaReg);
       generateRIInstruction  (cg, addImmOp, node, valReg, (uintptr_t) LOCK_RESERVATION_BIT);
 
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, cFlowRegionStart);
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, cFlowRegionStart);
       cFlowRegionStart->setStartInternalControlFlow();
       generateS390CompareAndBranchInstruction(cg, compareOp, node, tempReg, valReg,
          TR::InstOpCode::COND_BNE, callLabel, false, false);
@@ -6211,7 +7644,9 @@ reservationLockExit(TR::Node *node, int32_t lwOffset, TR::Register *objectClassR
          isPrimitive ? OBJECT_HEADER_LOCK_RECURSION_MASK : LOCK_RES_NON_PRIMITIVE_EXIT_MASK);
 
       if (isPrimitive)
+         {
          generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BNE, node, helperReturnOOLLabel);
+         }
       else
          {
          generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BE, node, callLabel/*,conditions*/);
@@ -6222,15 +7657,23 @@ reservationLockExit(TR::Node *node, int32_t lwOffset, TR::Register *objectClassR
       generateRXInstruction(cg, storeOp, node, monitorReg, generateS390MemoryReference(objReg, lwOffset, cg));
 
       if (!isPrimitive)
+         {
+#if (JAVA_SPEC_VERSION >= 19)
+#if defined(TR_TARGET_64BIT)
+         generateSIInstruction(cg, TR::InstOpCode::AGSI, node, generateS390MemoryReference(cg->getMethodMetaDataRealRegister(), fej9->thisThreadGetOwnedMonitorCountOffset(), cg), -1);
+#else    /* TR_TARGET_64BIT */
+         TR_ASSERT_FATAL(false, "Virtual thread is not supported on 31-Bit platform\n");
+#endif   /* TR_TARGET_64BIT */
+#endif   /* JAVA_SPEC_VERSION >= 19 */
          generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, helperReturnOOLLabel);
+         }
       // call to jithelper
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, callLabel);
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, callLabel);
       cg->generateDebugCounter("LockExit/LR/VMHelper", 1, TR::DebugCounter::Undetermined);
-      uintptr_t returnAddress = (uintptr_t) (node->getSymbolReference()->getMethodAddress());
       TR::RegisterDependencyConditions *deps = NULL;
       helperLink->buildDirectDispatch(node, &deps);
       TR::RegisterDependencyConditions *mergeConditions = mergeConditions = new (cg->trHeapMemory()) TR::RegisterDependencyConditions(ICFConditions, deps, cg);
-      instr = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, helperReturnOOLLabel, mergeConditions);
+      instr = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, helperReturnOOLLabel, mergeConditions);
       // OOL return label
       helperReturnOOLLabel->setEndInternalControlFlow();
       if (debugObj)
@@ -6246,11 +7689,11 @@ reservationLockExit(TR::Node *node, int32_t lwOffset, TR::Register *objectClassR
             debugObj->addInstructionComment(instr, "Denotes end of OOL non-primitive reversation exit sequence: return to mainline");
          }
       outlinedSlowPath->swapInstructionListsWithCompilation(); // Toggle instruction list
-      instr = generateS390LabelInstruction(cg,TR::InstOpCode::LABEL,node,doneOOLLabel);
+      instr = generateS390LabelInstruction(cg,TR::InstOpCode::label,node,doneOOLLabel);
       if (debugObj)
          debugObj->addInstructionComment(instr, "OOL reservation exit return label");
 
-      generateS390LabelInstruction(cg,TR::InstOpCode::LABEL,node, doneLabel);
+      generateS390LabelInstruction(cg,TR::InstOpCode::label,node, doneLabel);
       }
    else
       {
@@ -6407,7 +7850,7 @@ void genInstanceOfDynamicCacheAndHelperCall(TR::Node *node, TR::CodeGenerator *c
       dynamicCacheReg = srm->findOrCreateScratchRegister();
 
       // Start of the Dyanamic Cache Test
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, dynamicCacheTestLabel);
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, dynamicCacheTestLabel);
       generateRILInstruction(cg, TR::InstOpCode::LARL, node, dynamicCacheReg, dynamicCacheSnippet, 0);
 
       // For 64-Bit Non Compressedrefs JVM, we need to make sure that we are loading associated class data from the cache that appears quadwoerd concurrent as observed by other CPUs/
@@ -6491,7 +7934,7 @@ void genInstanceOfDynamicCacheAndHelperCall(TR::Node *node, TR::CodeGenerator *c
             }
 
          if (gotoNextTest && gotoNextTest != helperCallLabel)
-            generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, gotoNextTest);
+            generateS390LabelInstruction(cg, TR::InstOpCode::label, node, gotoNextTest);
 
          currentIndex += ( cacheCastClass ? 2 : 1 ) * sizeofJ9ClassFieldWithinReference;
          }
@@ -6509,7 +7952,7 @@ void genInstanceOfDynamicCacheAndHelperCall(TR::Node *node, TR::CodeGenerator *c
    cg->getS390OutOfLineCodeSectionList().push_front(outlinedSlowPath);
       outlinedSlowPath->swapInstructionListsWithCompilation();
 
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, helperCallLabel);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, helperCallLabel);
    cg->generateDebugCounter(TR::DebugCounter::debugCounterName(comp, "instanceOf/(%s)/Helper", comp->signature()),1,TR::DebugCounter::Undetermined);
    J9::Z::CHelperLinkage *helperLink =  static_cast<J9::Z::CHelperLinkage*>(cg->getLinkage(TR_CHelper));
    resultReg = helperLink->buildDirectDispatch(node, resultReg);
@@ -6529,13 +7972,13 @@ void genInstanceOfDynamicCacheAndHelperCall(TR::Node *node, TR::CodeGenerator *c
       OOLConditions->addPostCondition(dynamicCacheReg, TR::RealRegister::AssignAny);
 
       TR::LabelSymbol *cFlowRegionStart = generateLabelSymbol(cg);
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, cFlowRegionStart);
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, cFlowRegionStart);
       cFlowRegionStart->setStartInternalControlFlow();
       TR::LabelSymbol *skipSettingBitForFalseResult = generateLabelSymbol(cg);
       generateS390CompareAndBranchInstruction(cg, TR::InstOpCode::getCmpOpCode(), node, resultReg, 1, TR::InstOpCode::COND_BE, skipSettingBitForFalseResult, false);
       // We will set the last bit of objectClassRegister to 1 if helper returns false.
       generateRIInstruction(cg, TR::InstOpCode::OILL, node, objClassReg, 0x1);
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, skipSettingBitForFalseResult);
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, skipSettingBitForFalseResult);
       TR::MemoryReference *updateMemRef = NULL;
       // Update cache sequence
 
@@ -6586,12 +8029,12 @@ void genInstanceOfDynamicCacheAndHelperCall(TR::Node *node, TR::CodeGenerator *c
          TR::LabelSymbol *skipResetOffsetLabel = generateLabelSymbol(cg);
          generateS390CompareAndBranchInstruction(cg, TR::InstOpCode::C, node, offsetRegister, snippetSizeInBytes, TR::InstOpCode::COND_BNE, skipResetOffsetLabel, false);
          generateRIInstruction(cg, TR::InstOpCode::getLoadHalfWordImmOpCode() , node, offsetRegister, sizeofJ9ClassFieldWithinReference * (cacheCastClass ? 2 : 1));
-         generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, skipResetOffsetLabel);
+         generateS390LabelInstruction(cg, TR::InstOpCode::label, node, skipResetOffsetLabel);
          generateRXInstruction(cg, TR::InstOpCode::ST, node, offsetRegister, generateS390MemoryReference(dynamicCacheReg,0,cg));
          }
 
       TR::LabelSymbol *doneCacheUpdateLabel = generateLabelSymbol(cg);
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, doneCacheUpdateLabel, OOLConditions);
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, doneCacheUpdateLabel, OOLConditions);
       doneCacheUpdateLabel->setEndInternalControlFlow();
       srm->reclaimScratchRegister(dynamicCacheReg);
       if (offsetRegister != NULL)
@@ -6903,18 +8346,18 @@ J9::Z::TreeEvaluator::VMgenCoreInstanceofEvaluator(TR::Node * node, TR::CodeGene
             }
          case DynamicCacheObjectClassTest:
             {
-            generateDynamicCache = comp->target().cpu.getSupportsArch(TR::CPU::z10);
+            generateDynamicCache = true;
             dynamicCacheTestLabel = generateLabelSymbol(cg);
-            if (comp->getOption(TR_TraceCG) && generateDynamicCache)
+            if (comp->getOption(TR_TraceCG))
                traceMsg(comp,"Emitting Dynamic Cache for ObjectClass only\n",node->getOpCode().getName());
             break;
             }
          case DynamicCacheDynamicCastClassTest:
             {
-            generateDynamicCache = comp->target().cpu.getSupportsArch(TR::CPU::z10);
+            generateDynamicCache = true;
             cacheCastClass = true;
             TR_ASSERT(dynamicCacheTestLabel!=NULL, "DynamicCacheDynamicCastClassTest: dynamicCacheTestLabel should be generated by SuperClassTest before reaching this point");
-            if (comp->getOption(TR_TraceCG) && generateDynamicCache)
+            if (comp->getOption(TR_TraceCG))
                traceMsg(comp,"Emitting Dynamic Cache for CastClass and ObjectClass\n",node->getOpCode().getName());
             break;
             }
@@ -6934,7 +8377,7 @@ J9::Z::TreeEvaluator::VMgenCoreInstanceofEvaluator(TR::Node * node, TR::CodeGene
 
    if (needResult)
       {
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, oppositeResultLabel);
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, oppositeResultLabel);
       generateRIInstruction(cg,TR::InstOpCode::getLoadHalfWordImmOpCode(),node,resultReg,static_cast<int32_t>(!initialResult));
       }
 
@@ -6946,7 +8389,7 @@ J9::Z::TreeEvaluator::VMgenCoreInstanceofEvaluator(TR::Node * node, TR::CodeGene
    if (castClassReg)
       conditions->addPostConditionIfNotAlreadyInserted(castClassReg, TR::RealRegister::AssignAny);
    srm->addScratchRegistersToDependencyList(conditions);
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, doneLabel, conditions);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, doneLabel, conditions);
    if (objClassReg)
       cg->stopUsingRegister(objClassReg);
    if (castClassReg)
@@ -7013,7 +8456,7 @@ J9::Z::TreeEvaluator::VMifInstanceOfEvaluator(TR::Node * node, TR::CodeGenerator
    }
 
 /**
- * Generates a quick runtime test for valueType node and in case if node is of valueType, generates a branch to helper call
+ * Generates a quick runtime test for valueType/valueBased node and in case if node is of valueType or valueBased, generates a branch to helper call
  *
  * @param node monent/exit node
  * @param mergeLabel Label pointing to merge point
@@ -7022,20 +8465,18 @@ J9::Z::TreeEvaluator::VMifInstanceOfEvaluator(TR::Node * node, TR::CodeGenerator
  * @return Returns a register containing objectClassPointer
  */
 static TR::Register*
-generateCheckForValueTypeMonitorEnterOrExit(TR::Node *node, TR::LabelSymbol* mergeLabel, TR::LabelSymbol *helperCallLabel, TR::CodeGenerator *cg)
+generateCheckForValueMonitorEnterOrExit(TR::Node *node, TR::LabelSymbol* mergeLabel, TR::LabelSymbol *helperCallLabel, TR::CodeGenerator *cg)
    {
    TR::Register *objReg = cg->evaluate(node->getFirstChild());
    TR::Register *objectClassReg = cg->allocateRegister();
 
    TR::TreeEvaluator::genLoadForObjectHeadersMasked(cg, node, objectClassReg, generateS390MemoryReference(objReg, TR::Compiler->om.offsetOfObjectVftField(), cg), NULL);
 
-   // Currently the value of J9ClassIsValueType flag maps to the second (low order) byte of the class flags field. To
-   // be able to use the TM instruction we need to ensure we safe guard against changes of this value since we have to
-   // hardcode the offset from the class flags field to reach the byte corresponding to the bit we want to test.
-   static_assert(static_cast<uint32_t>(J9ClassIsValueType & 0xFF00) == static_cast<uint32_t>(J9ClassIsValueType), "Expecting J9ClassIsValueType to be within second byte of classFlags");
+   TR::Register *tempReg = cg->allocateRegister();
+   generateLoad32BitConstant(cg, node, J9_CLASS_DISALLOWS_LOCKING_FLAGS, tempReg, false);
 
-   TR::MemoryReference *classFlagsMemRef = generateS390MemoryReference(objectClassReg, static_cast<uint32_t>(static_cast<TR_J9VMBase *>(cg->comp()->fe())->getOffsetOfClassFlags()) + 2, cg);
-   generateSIInstruction(cg, TR::InstOpCode::TM, node, classFlagsMemRef, J9ClassIsValueType >> 8);
+   TR::MemoryReference *classFlagsMemRef = generateS390MemoryReference(objectClassReg, static_cast<uint32_t>(static_cast<TR_J9VMBase *>(cg->comp()->fe())->getOffsetOfClassFlags()), cg);
+   generateRXInstruction(cg, TR::InstOpCode::N, node, tempReg, classFlagsMemRef);
 
    bool generateOOLSection = helperCallLabel == NULL;
    if (generateOOLSection)
@@ -7048,7 +8489,7 @@ generateCheckForValueTypeMonitorEnterOrExit(TR::Node *node, TR::LabelSymbol* mer
    //
    // 1. Monitor cache lookup OOL
    // 2. Lock reservation OOL
-   // 3. Value types object OOL
+   // 3. Value types or value based object OOL
    // 4. Recursive CAS sequence for Locking
    //
    // These distinct OOL sections may perform non-trivial logic but what they all have in common is they all have a
@@ -7062,21 +8503,22 @@ generateCheckForValueTypeMonitorEnterOrExit(TR::Node *node, TR::LabelSymbol* mer
       cg->getS390OutOfLineCodeSectionList().push_front(helperCallOOLSection);
       helperCallOOLSection->swapInstructionListsWithCompilation();
 
-      TR::Instruction *cursor = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, helperCallLabel);
+      TR::Instruction *cursor = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, helperCallLabel);
 
       TR_Debug *debugObj = cg->getDebug();
       if (debugObj)
-         debugObj->addInstructionComment(cursor, "Denotes Start of OOL for ValueType Node");
+         debugObj->addInstructionComment(cursor, "Denotes Start of OOL for ValueType or ValueBased Node");
 
       cg->getLinkage(TR_CHelper)->buildDirectDispatch(node);
       cursor = generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, mergeLabel);
 
       if (debugObj)
-         debugObj->addInstructionComment(cursor, "Denotes End of OOL for ValueType Node");
+         debugObj->addInstructionComment(cursor, "Denotes End of OOL for ValueType or ValueBased Node");
 
       helperCallOOLSection->swapInstructionListsWithCompilation();
       }
 
+   cg->stopUsingRegister(tempReg);
    return objectClassReg;
    }
 
@@ -7087,10 +8529,9 @@ J9::Z::TreeEvaluator::VMmonentEvaluator(TR::Node * node, TR::CodeGenerator * cg)
    TR_J9VMBase *fej9 = (TR_J9VMBase *)(comp->fe());
    int32_t lwOffset = fej9->getByteOffsetToLockword((TR_OpaqueClassBlock *) cg->getMonClass(node));
    J9::Z::CHelperLinkage *helperLink =  static_cast<J9::Z::CHelperLinkage*>(cg->getLinkage(TR_CHelper));
-   TR_YesNoMaybe isMonitorValueType = cg->isMonitorValueType(node);
+   TR_YesNoMaybe isMonitorValueBasedOrValueType = cg->isMonitorValueBasedOrValueType(node);
 
-   if (comp->getOption(TR_OptimizeForSpace) ||
-       (TR::Compiler->om.areValueTypesEnabled() && isMonitorValueType == TR_yes) ||
+   if ((isMonitorValueBasedOrValueType == TR_yes) ||
        comp->getOption(TR_DisableInlineMonEnt) ||
        comp->getOption(TR_FullSpeedDebug))  // Required for Live Monitor Meta Data in FSD.
       {
@@ -7145,22 +8586,16 @@ J9::Z::TreeEvaluator::VMmonentEvaluator(TR::Node * node, TR::CodeGenerator * cg)
    bool simpleLocking = false;
    bool reserveLocking = false, normalLockWithReservationPreserving = false;
 
-
-   bool disableOOL = comp->getOption(TR_DisableOOL);
-   if (disableOOL)
-      inlineRecursive = false;
-
-   if (TR::Compiler->om.areValueTypesEnabled() && isMonitorValueType == TR_maybe)
+   if (isMonitorValueBasedOrValueType == TR_maybe)
       {
       numDeps += 1;
       // If we are generating code for MonitorCacheLookup then we will not have a separate OOL for inlineRecursive, and callLabel points
       // to the OOL Containing only helper call. Otherwise, OOL will have other code apart from helper call which we do not want to execute
-      // for ValueType and in that scenario we will need to generate another OOL that just contains helper call.
-      objectClassReg = generateCheckForValueTypeMonitorEnterOrExit(node, cFlowRegionEnd, lwOffset <= 0 ? callLabel : NULL, cg);
+      // for ValueType or ValueBased object and in that scenario we will need to generate another OOL that just contains helper call.
+      objectClassReg = generateCheckForValueMonitorEnterOrExit(node, cFlowRegionEnd, lwOffset <= 0 ? callLabel : NULL, cg);
       }
    TR::RegisterDependencyConditions * conditions = new (cg->trHeapMemory()) TR::RegisterDependencyConditions(0, numDeps, cg);
 
-   bool isAOT = comp->getOption(TR_AOT);
    TR_Debug * debugObj = cg->getDebug();
 
 
@@ -7199,12 +8634,6 @@ J9::Z::TreeEvaluator::VMmonentEvaluator(TR::Node * node, TR::CodeGenerator * cg)
 
       generateRXInstruction(cg, TR::InstOpCode::getLoadTestOpCode(), node, tempRegister, tempMR);
 
-      if (disableOOL)
-         {
-         TR::LabelSymbol * cFlowRegionStart = generateLabelSymbol(cg);
-         generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, cFlowRegionStart);
-         cFlowRegionStart->setStartInternalControlFlow();
-         }
       TR::Instruction *cmpInstr = generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BNH, node, targetLabel);
 
       if(cg->comp()->target().is64Bit())
@@ -7224,29 +8653,26 @@ J9::Z::TreeEvaluator::VMmonentEvaluator(TR::Node * node, TR::CodeGenerator * cg)
          cg->getS390OutOfLineCodeSectionList().push_front(monitorCacheLookupOOL);
          monitorCacheLookupOOL->swapInstructionListsWithCompilation();
 
-         TR::Instruction *cursor = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, monitorLookupCacheLabel);
+         TR::Instruction *cursor = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, monitorLookupCacheLabel);
 
-         if (!disableOOL)
+         if (debugObj)
             {
-            if (debugObj)
-               {
-               debugObj->addInstructionComment(cmpInstr, "Branch to OOL monent monitorLookupCache");
-               debugObj->addInstructionComment(cursor, "Denotes start of OOL monent monitorLookupCache");
-               }
+            debugObj->addInstructionComment(cmpInstr, "Branch to OOL monent monitorLookupCache");
+            debugObj->addInstructionComment(cursor, "Denotes start of OOL monent monitorLookupCache");
             }
 
          lookupOffsetReg = cg->allocateRegister();
          OOLConditions->addPostCondition(lookupOffsetReg, TR::RealRegister::AssignAny);
 
          int32_t offsetOfMonitorLookupCache = offsetof(J9VMThread, objectMonitorLookupCache);
-         int32_t t = trailingZeroes(TR::Compiler->om.objectAlignmentInBytes());
+         int32_t t = trailingZeroes(TR::Compiler->om.getObjectAlignmentInBytes());
          int32_t shiftAmount = trailingZeroes((int32_t) TR::Compiler->om.sizeofReferenceField()) - t;
          int32_t end = 63 - trailingZeroes((int32_t) TR::Compiler->om.sizeofReferenceField());
          int32_t start = end - trailingZeroes(J9VMTHREAD_OBJECT_MONITOR_CACHE_SIZE) + 1;
 
          if (cg->comp()->target().cpu.isAtLeast(OMR_PROCESSOR_S390_ZEC12) && cg->comp()->target().is64Bit())
             generateRIEInstruction(cg, TR::InstOpCode::RISBGN, node, lookupOffsetReg, objReg, start, end+0x80, shiftAmount);
-         else if(cg->comp()->target().cpu.isAtLeast(OMR_PROCESSOR_S390_Z10) && cg->comp()->target().is64Bit())
+         else if(cg->comp()->target().is64Bit())
             generateRIEInstruction(cg, TR::InstOpCode::RISBG, node, lookupOffsetReg, objReg, start, end+0x80, shiftAmount);
          else
             {
@@ -7311,21 +8737,30 @@ J9::Z::TreeEvaluator::VMmonentEvaluator(TR::Node * node, TR::CodeGenerator * cg)
             generateRSInstruction(cg, TR::InstOpCode::getCmpAndSwapOpCode(), node, monitorReg, metaReg,
                                   generateS390MemoryReference(baseReg, lwOffset, cg));
 
+#if (JAVA_SPEC_VERSION >= 19)
+#if defined(TR_TARGET_64BIT)
+         generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BNE, node, helperCallLabel);
+         generateSIInstruction(cg, TR::InstOpCode::AGSI, node, generateS390MemoryReference(cg->getMethodMetaDataRealRegister(), fej9->thisThreadGetOwnedMonitorCountOffset(), cg), 1);
+         generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, helperReturnOOLLabel);
+#else    /* TR_TARGET_64BIT */
+         TR_ASSERT_FATAL(false, "Virtual Thread is not supported on 31-Bit platform\n");
+#endif   /* TR_TARGET_64BIT */
+#else    /* JAVA_SPEC_VERSION >= 19 */
          generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BE, node, helperReturnOOLLabel);
-         generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, helperCallLabel );
+#endif   /* JAVA_SPEC_VERSION >= 19 */
+
+         generateS390LabelInstruction(cg, TR::InstOpCode::label, node, helperCallLabel );
          TR::RegisterDependencyConditions *deps = NULL;
          dummyResultReg = helperLink->buildDirectDispatch(node, &deps);
          TR::RegisterDependencyConditions *mergeConditions = new (cg->trHeapMemory()) TR::RegisterDependencyConditions(OOLConditions, deps, cg);
-         generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, helperReturnOOLLabel , mergeConditions);
-         if (!disableOOL)
-            {
-            cursor = generateS390BranchInstruction(cg,TR::InstOpCode::BRC,TR::InstOpCode::COND_BRC,node,cFlowRegionEnd);
-            if (debugObj)
-               debugObj->addInstructionComment(cursor, "Denotes end of OOL monent monitorCacheLookup: return to mainline");
+         generateS390LabelInstruction(cg, TR::InstOpCode::label, node, helperReturnOOLLabel , mergeConditions);
 
-            // Done using OOL with manual code generation
-            monitorCacheLookupOOL->swapInstructionListsWithCompilation();
-            }
+         cursor = generateS390BranchInstruction(cg,TR::InstOpCode::BRC,TR::InstOpCode::COND_BRC,node,cFlowRegionEnd);
+         if (debugObj)
+            debugObj->addInstructionComment(cursor, "Denotes end of OOL monent monitorCacheLookup: return to mainline");
+
+         // Done using OOL with manual code generation
+         monitorCacheLookupOOL->swapInstructionListsWithCompilation();
       }
 
       simpleLocking = true;
@@ -7402,19 +8837,26 @@ J9::Z::TreeEvaluator::VMmonentEvaluator(TR::Node * node, TR::CodeGenerator * cg)
    // Jump to OOL branch in case that the CAS is unsuccessful (Lockword had contained a non-zero value before CAS)
    // Both TR::InstOpCode::MASK6 and TR::InstOpCode::MASK4 are ok here. TR::InstOpCode::MASK4 is directly testing failure condition.
    generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BL, node, callLabel);
+
+#if (JAVA_SPEC_VERSION >= 19)
+#if defined(TR_TARGET_64BIT)
+   generateSIInstruction(cg, TR::InstOpCode::AGSI, node, generateS390MemoryReference(cg->getMethodMetaDataRealRegister(), fej9->thisThreadGetOwnedMonitorCountOffset(), cg), 1);
+#else    /* TR_TARGET_64BIT */
+   TR_ASSERT_FATAL(false, "Virtual Thread is not supported on 31-Bit platform\n");
+#endif   /* TR_TARGET_64BIT */
+#endif   /* JAVA_SPEC_VERSION >= 19 */
+
    cg->generateDebugCounter(TR::DebugCounter::debugCounterName(comp, "%s/CSSuccessfull", debugCounterNamePrefix), 1, TR::DebugCounter::Undetermined);
    TR_S390OutOfLineCodeSection *outlinedHelperCall = NULL;
    TR::Instruction *cursor;
    TR::LabelSymbol *returnLabel = generateLabelSymbol(cg);
-   if (!disableOOL)
-      {
-      outlinedHelperCall = new (cg->trHeapMemory()) TR_S390OutOfLineCodeSection(callLabel, cFlowRegionEnd, cg);
-      cg->getS390OutOfLineCodeSectionList().push_front(outlinedHelperCall);
-      outlinedHelperCall->swapInstructionListsWithCompilation();
-      cursor = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, callLabel);
-      if (debugObj)
-         debugObj->addInstructionComment(cursor, "Denotes start of OOL monent sequence");
-      }
+
+   outlinedHelperCall = new (cg->trHeapMemory()) TR_S390OutOfLineCodeSection(callLabel, cFlowRegionEnd, cg);
+   cg->getS390OutOfLineCodeSectionList().push_front(outlinedHelperCall);
+   outlinedHelperCall->swapInstructionListsWithCompilation();
+   cursor = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, callLabel);
+   if (debugObj)
+      debugObj->addInstructionComment(cursor, "Denotes start of OOL monent sequence");
 
    if (inlineRecursive)
       {
@@ -7474,13 +8916,21 @@ J9::Z::TreeEvaluator::VMmonentEvaluator(TR::Node * node, TR::CodeGenerator * cg)
          generateRIInstruction(cg, addImmOp, node, monitorReg, OBJECT_HEADER_LOCK_FIRST_RECURSION_BIT);
       generateRXInstruction(cg, storeOp, node, monitorReg, tempMR1);
 
+#if (JAVA_SPEC_VERSION >= 19)
+#if defined(TR_TARGET_64BIT)
+      generateSIInstruction(cg, TR::InstOpCode::AGSI, node, generateS390MemoryReference(cg->getMethodMetaDataRealRegister(), fej9->thisThreadGetOwnedMonitorCountOffset(), cg), 1);
+#else    /* TR_TARGET_64BIT */
+      TR_ASSERT_FATAL(false, "Virtual Thread is not supported on 31-Bit platform\n");
+#endif   /* TR_TARGET_64BIT */
+#endif   /* JAVA_SPEC_VERSION >= 19 */
+
       generateS390BranchInstruction(cg,TR::InstOpCode::BRC,TR::InstOpCode::COND_BRC,node,returnLabel);
 
       tempMR->stopUsingMemRefRegister(cg);
       tempMR1->stopUsingMemRefRegister(cg);
 
       // Helper Call
-      cursor = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, callHelper);
+      cursor = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, callHelper);
       }
 
    cg->generateDebugCounter(TR::DebugCounter::debugCounterName(comp, "%s/VMHelper", debugCounterNamePrefix), 1, TR::DebugCounter::Undetermined);
@@ -7491,29 +8941,20 @@ J9::Z::TreeEvaluator::VMmonentEvaluator(TR::Node * node, TR::CodeGenerator * cg)
       mergeConditions = new (cg->trHeapMemory()) TR::RegisterDependencyConditions(conditions, deps, cg);
    else
       mergeConditions = conditions;
-   generateS390LabelInstruction(cg,TR::InstOpCode::LABEL,node,returnLabel,mergeConditions);
+   generateS390LabelInstruction(cg,TR::InstOpCode::label,node,returnLabel,mergeConditions);
 
-   if (!disableOOL)
+   // End of OOl path.
+   cursor = generateS390BranchInstruction(cg,TR::InstOpCode::BRC,TR::InstOpCode::COND_BRC,node,cFlowRegionEnd);
+   if (debugObj)
       {
-      // End of OOl path.
-      cursor = generateS390BranchInstruction(cg,TR::InstOpCode::BRC,TR::InstOpCode::COND_BRC,node,cFlowRegionEnd);
-      if (debugObj)
-         {
-         debugObj->addInstructionComment(cursor, "Denotes end of OOL monent: return to mainline");
-         }
-
-      // Done using OOL with manual code generation
-      outlinedHelperCall->swapInstructionListsWithCompilation();
+      debugObj->addInstructionComment(cursor, "Denotes end of OOL monent: return to mainline");
       }
 
-   bool needDeps = false;
-   if (lwOffset <= 0 && disableOOL)
-      needDeps = true;
+   // Done using OOL with manual code generation
+   outlinedHelperCall->swapInstructionListsWithCompilation();
 
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, cFlowRegionEnd, conditions);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, cFlowRegionEnd, conditions);
 
-   if (lwOffset <= 0 && disableOOL)
-      cFlowRegionEnd->setEndInternalControlFlow();
    cg->stopUsingRegister(monitorReg);
    if (wasteReg)
       cg->stopUsingRegister(wasteReg);
@@ -7536,10 +8977,9 @@ J9::Z::TreeEvaluator::VMmonexitEvaluator(TR::Node * node, TR::CodeGenerator * cg
    TR_J9VMBase *fej9 = (TR_J9VMBase *)(comp->fe());
    int32_t lwOffset = fej9->getByteOffsetToLockword((TR_OpaqueClassBlock *) cg->getMonClass(node));
    J9::Z::CHelperLinkage *helperLink =  static_cast<J9::Z::CHelperLinkage*>(cg->getLinkage(TR_CHelper));
-   TR_YesNoMaybe isMonitorValueType = cg->isMonitorValueType(node);
+   TR_YesNoMaybe isMonitorValueBasedOrValueType = cg->isMonitorValueBasedOrValueType(node);
 
-   if (comp->getOption(TR_OptimizeForSpace) ||
-       (TR::Compiler->om.areValueTypesEnabled() && isMonitorValueType == TR_yes) ||
+   if ((isMonitorValueBasedOrValueType == TR_yes) ||
        comp->getOption(TR_DisableInlineMonExit) ||
        comp->getOption(TR_FullSpeedDebug))  // Required for Live Monitor Meta Data in FSD.
       {
@@ -7565,10 +9005,10 @@ J9::Z::TreeEvaluator::VMmonexitEvaluator(TR::Node * node, TR::CodeGenerator * cg
    TR::Register      *metaReg             = cg->getMethodMetaDataRealRegister();
    TR::Register      *scratchRegister     = NULL;
    TR::Instruction         *startICF                  = NULL;
-   bool disableOOL  = comp->getOption(TR_DisableOOL);
+
    static char * disableInlineRecursiveMonitor = feGetEnv("TR_DisableInlineRecursiveMonitor");
    bool inlineRecursive = true;
-   if (disableInlineRecursiveMonitor || disableOOL)
+   if (disableInlineRecursiveMonitor)
      inlineRecursive = false;
 
    TR::LabelSymbol *callLabel                      = generateLabelSymbol(cg);
@@ -7590,16 +9030,15 @@ J9::Z::TreeEvaluator::VMmonexitEvaluator(TR::Node * node, TR::CodeGenerator * cg
    if (comp->getOptions()->enableDebugCounters())
          numDeps += 4;
 
-   if (TR::Compiler->om.areValueTypesEnabled() && isMonitorValueType == TR_maybe)
+   if (isMonitorValueBasedOrValueType == TR_maybe)
       {
       numDeps += 1;
-      objectClassReg = generateCheckForValueTypeMonitorEnterOrExit(node, cFlowRegionEnd, lwOffset <= 0 ? callLabel : NULL, cg);
+      objectClassReg = generateCheckForValueMonitorEnterOrExit(node, cFlowRegionEnd, lwOffset <= 0 ? callLabel : NULL, cg);
       }
    TR::RegisterDependencyConditions * conditions = new (cg->trHeapMemory()) TR::RegisterDependencyConditions(0, numDeps, cg);
 
 
    TR::Instruction * gcPoint;
-   bool isAOT = comp->getOption(TR_AOT);
    TR_Debug * debugObj = cg->getDebug();
 
    bool reserveLocking                          = false;
@@ -7638,12 +9077,6 @@ J9::Z::TreeEvaluator::VMmonexitEvaluator(TR::Node * node, TR::CodeGenerator * cg
 
       generateRXInstruction(cg, TR::InstOpCode::getLoadTestOpCode(), node, tempRegister, tempMR);
 
-      if (disableOOL)
-         {
-         TR::LabelSymbol * cFlowRegionStart = generateLabelSymbol(cg);
-         generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, cFlowRegionStart);
-         cFlowRegionStart->setStartInternalControlFlow();
-         }
       TR::Instruction *cmpInstr = generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BNH, node, targetLabel);
 
       if(comp->target().is64Bit())
@@ -7667,27 +9100,24 @@ J9::Z::TreeEvaluator::VMmonexitEvaluator(TR::Node * node, TR::CodeGenerator * cg
          cg->getS390OutOfLineCodeSectionList().push_front(monitorCacheLookupOOL);
          monitorCacheLookupOOL->swapInstructionListsWithCompilation();
 
-         TR::Instruction *cursor = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, monitorLookupCacheLabel);
+         TR::Instruction *cursor = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, monitorLookupCacheLabel);
 
-         if (!disableOOL)
+         if (debugObj)
             {
-            if (debugObj)
-               {
-               debugObj->addInstructionComment(cmpInstr, "Branch to OOL monexit monitorLookupCache");
-               debugObj->addInstructionComment(cursor, "Denotes start of OOL monexit monitorLookupCache");
-               }
+            debugObj->addInstructionComment(cmpInstr, "Branch to OOL monexit monitorLookupCache");
+            debugObj->addInstructionComment(cursor, "Denotes start of OOL monexit monitorLookupCache");
             }
 
 
          int32_t offsetOfMonitorLookupCache = offsetof(J9VMThread, objectMonitorLookupCache);
-         int32_t t = trailingZeroes(TR::Compiler->om.objectAlignmentInBytes());
+         int32_t t = trailingZeroes(TR::Compiler->om.getObjectAlignmentInBytes());
          int32_t shiftAmount = trailingZeroes((int32_t) TR::Compiler->om.sizeofReferenceField()) - t;
          int32_t end = 63 - trailingZeroes((int32_t) TR::Compiler->om.sizeofReferenceField());
          int32_t start = end - trailingZeroes(J9VMTHREAD_OBJECT_MONITOR_CACHE_SIZE) + 1;
 
          if (comp->target().cpu.isAtLeast(OMR_PROCESSOR_S390_ZEC12) && comp->target().is64Bit())
             generateRIEInstruction(cg, TR::InstOpCode::RISBGN, node, lookupOffsetReg, objReg, start, end+0x80, shiftAmount);
-         else if(comp->target().cpu.isAtLeast(OMR_PROCESSOR_S390_Z10) && comp->target().is64Bit())
+         else if(comp->target().is64Bit())
             generateRIEInstruction(cg, TR::InstOpCode::RISBG, node, lookupOffsetReg, objReg, start, end+0x80, shiftAmount);
          else
             {
@@ -7747,44 +9177,33 @@ J9::Z::TreeEvaluator::VMmonexitEvaluator(TR::Node * node, TR::CodeGenerator * cg
 
          // If VMThread matches, we can safely perform the monitor exit by zero'ing
          // out the lockWord on the object
-         if (!comp->target().cpu.isAtLeast(OMR_PROCESSOR_S390_Z10))
-            {
-            if (comp->target().is64Bit() && fej9->generateCompressedLockWord())
-               {
-               generateRRInstruction(cg, TR::InstOpCode::XR, node, monitorReg, monitorReg);
-               gcPoint = generateRXInstruction(cg, TR::InstOpCode::ST, node, monitorReg, generateS390MemoryReference(baseReg, lwOffset, cg));
-               }
-            else
-               {
-               generateRRInstruction(cg, TR::InstOpCode::getXORRegOpCode(), node, monitorReg, monitorReg);
-               gcPoint = generateRXInstruction(cg, TR::InstOpCode::getStoreOpCode(), node, monitorReg, generateS390MemoryReference(baseReg, lwOffset, cg));
-               }
-            }
+         if (comp->target().is64Bit() && fej9->generateCompressedLockWord())
+            gcPoint = generateSILInstruction(cg, TR::InstOpCode::MVHI, node, generateS390MemoryReference(baseReg, lwOffset, cg), 0);
          else
-            {
-            if (comp->target().is64Bit() && fej9->generateCompressedLockWord())
-               gcPoint = generateSILInstruction(cg, TR::InstOpCode::MVHI, node, generateS390MemoryReference(baseReg, lwOffset, cg), 0);
-            else
-               gcPoint = generateSILInstruction(cg, TR::InstOpCode::getMoveHalfWordImmOpCode(), node, generateS390MemoryReference(baseReg, lwOffset, cg), 0);
-            }
+            gcPoint = generateSILInstruction(cg, TR::InstOpCode::getMoveHalfWordImmOpCode(), node, generateS390MemoryReference(baseReg, lwOffset, cg), 0);
+
+#if (JAVA_SPEC_VERSION >= 19)
+#if defined(TR_TARGET_64BIT)
+         generateSIInstruction(cg, TR::InstOpCode::AGSI, node, generateS390MemoryReference(cg->getMethodMetaDataRealRegister(), fej9->thisThreadGetOwnedMonitorCountOffset(), cg), -1);
+#else    /* TR_TARGET_64BIT */
+         TR_ASSERT_FATAL(false, "Virtual Thread is not supported on 31-Bit platform\n");
+#endif   /* TR_TARGET_64BIT */
+#endif   /* JAVA_SPEC_VERSION >= 19 */
 
          generateS390BranchInstruction(cg,TR::InstOpCode::BRC,TR::InstOpCode::COND_BRC,node,helperReturnOOLLabel);
 
-         generateS390LabelInstruction(cg, TR::InstOpCode::LABEL , node, helperCallLabel );
+         generateS390LabelInstruction(cg, TR::InstOpCode::label , node, helperCallLabel );
          TR::RegisterDependencyConditions *deps = NULL;
          helperLink->buildDirectDispatch(node, &deps);
          TR::RegisterDependencyConditions *mergeConditions = new (cg->trHeapMemory()) TR::RegisterDependencyConditions(OOLConditions, deps, cg);
-         generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, helperReturnOOLLabel , mergeConditions);
+         generateS390LabelInstruction(cg, TR::InstOpCode::label, node, helperReturnOOLLabel , mergeConditions);
 
-         if (!disableOOL)
-            {
-            cursor = generateS390BranchInstruction(cg,TR::InstOpCode::BRC,TR::InstOpCode::COND_BRC,node,cFlowRegionEnd);
-            if (debugObj)
-               debugObj->addInstructionComment(cursor, "Denotes end of OOL monexit monitorCacheLookup: return to mainline");
+         cursor = generateS390BranchInstruction(cg,TR::InstOpCode::BRC,TR::InstOpCode::COND_BRC,node,cFlowRegionEnd);
+         if (debugObj)
+            debugObj->addInstructionComment(cursor, "Denotes end of OOL monexit monitorCacheLookup: return to mainline");
 
-            // Done using OOL with manual code generation
-            monitorCacheLookupOOL->swapInstructionListsWithCompilation();
-            }
+         // Done using OOL with manual code generation
+         monitorCacheLookupOOL->swapInstructionListsWithCompilation();
          }
 
       lwOffset = 0;
@@ -7840,24 +9259,23 @@ J9::Z::TreeEvaluator::VMmonexitEvaluator(TR::Node * node, TR::CodeGenerator * cg
       cg->generateDebugCounter("LockExit/Normal/MVHISuccessfull", 1, TR::DebugCounter::Undetermined);
    // If VMThread matches, we can safely perform the monitor exit by zero'ing
    // out the lockWord on the object
-   if (!comp->target().cpu.isAtLeast(OMR_PROCESSOR_S390_Z10))
-      {
-      generateRRInstruction(cg, xorOp, node, monitorReg, monitorReg);
-      generateRXInstruction(cg, storeOp, node, monitorReg, generateS390MemoryReference(baseReg, lwOffset, cg));
-      }
-   else
-      {
-      generateSILInstruction(cg, moveImmOp, node, generateS390MemoryReference(baseReg, lwOffset, cg), 0);
-      }
+   generateSILInstruction(cg, moveImmOp, node, generateS390MemoryReference(baseReg, lwOffset, cg), 0);
+
+#if (JAVA_SPEC_VERSION >= 19)
+#if defined(TR_TARGET_64BIT)
+   generateSIInstruction(cg, TR::InstOpCode::AGSI, node, generateS390MemoryReference(cg->getMethodMetaDataRealRegister(), fej9->thisThreadGetOwnedMonitorCountOffset(), cg), -1);
+#else    /* TR_TARGET_64BIT */
+   TR_ASSERT_FATAL(false, "Virtual Thread is not supported on 31-Bit platform\n");
+#endif   /* TR_TARGET_64BIT */
+#endif   /* JAVA_SPEC_VERSION >= 19 */
 
    TR_S390OutOfLineCodeSection *outlinedHelperCall = NULL;
-   if (!disableOOL)
-     {
-     outlinedHelperCall = new (cg->trHeapMemory()) TR_S390OutOfLineCodeSection(callLabel,cFlowRegionEnd,cg);
-     cg->getS390OutOfLineCodeSectionList().push_front(outlinedHelperCall);
-     outlinedHelperCall->swapInstructionListsWithCompilation();
-     }
-   TR::Instruction *cursor = generateS390LabelInstruction(cg,TR::InstOpCode::LABEL,node,callLabel);
+
+   outlinedHelperCall = new (cg->trHeapMemory()) TR_S390OutOfLineCodeSection(callLabel,cFlowRegionEnd,cg);
+   cg->getS390OutOfLineCodeSectionList().push_front(outlinedHelperCall);
+   outlinedHelperCall->swapInstructionListsWithCompilation();
+
+   TR::Instruction *cursor = generateS390LabelInstruction(cg,TR::InstOpCode::label,node,callLabel);
 
    if (inlineRecursive)
       {
@@ -7918,11 +9336,20 @@ J9::Z::TreeEvaluator::VMmonexitEvaluator(TR::Node * node, TR::CodeGenerator * cg
          generateRIInstruction(cg, addImmOp, node, monitorReg, -OBJECT_HEADER_LOCK_FIRST_RECURSION_BIT);
          generateRXInstruction(cg, storeOp, node, monitorReg, tempMR1);
          }
+
+#if (JAVA_SPEC_VERSION >= 19)
+#if defined(TR_TARGET_64BIT)
+      generateSIInstruction(cg, TR::InstOpCode::AGSI, node, generateS390MemoryReference(cg->getMethodMetaDataRealRegister(), fej9->thisThreadGetOwnedMonitorCountOffset(), cg), -1);
+#else    /* TR_TARGET_64BIT */
+      TR_ASSERT_FATAL(false, "Virtual Thread is not supported on 31-Bit platform\n");
+#endif   /* TR_TARGET_64BIT */
+#endif   /* JAVA_SPEC_VERSION >= 19 */
+
       generateS390BranchInstruction(cg,TR::InstOpCode::BRC,TR::InstOpCode::COND_BRC,node,returnLabel);
       tempMR->stopUsingMemRefRegister(cg);
       tempMR1->stopUsingMemRefRegister(cg);
 
-      cursor = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, callHelper);
+      cursor = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, callHelper);
       if (normalLockWithReservationPreserving)
          cg->generateDebugCounter("LockExit/Preserving/VMHelper", 1, TR::DebugCounter::Undetermined);
       else
@@ -7936,27 +9363,17 @@ J9::Z::TreeEvaluator::VMmonexitEvaluator(TR::Node * node, TR::CodeGenerator * cg
    else
       mergeConditions = conditions;
 
-   generateS390LabelInstruction(cg,TR::InstOpCode::LABEL,node,returnLabel,mergeConditions);
+   generateS390LabelInstruction(cg,TR::InstOpCode::label,node,returnLabel,mergeConditions);
 
-   if (!disableOOL)
+   cursor = generateS390BranchInstruction(cg,TR::InstOpCode::BRC,TR::InstOpCode::COND_BRC,node,cFlowRegionEnd);
+   if (debugObj)
       {
-      cursor = generateS390BranchInstruction(cg,TR::InstOpCode::BRC,TR::InstOpCode::COND_BRC,node,cFlowRegionEnd);
-      if (debugObj)
-         {
-         debugObj->addInstructionComment(cursor, "Denotes end of OOL monexit: return to mainline");
-         }
-      // Done using OOL with manual code generation
-      outlinedHelperCall->swapInstructionListsWithCompilation();
+      debugObj->addInstructionComment(cursor, "Denotes end of OOL monexit: return to mainline");
       }
-   bool needDeps = false;
-   if (lwOffset <= 0 && disableOOL)
-      needDeps = true;
+   // Done using OOL with manual code generation
+   outlinedHelperCall->swapInstructionListsWithCompilation();
 
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, cFlowRegionEnd, conditions);
-
-   if (lwOffset <= 0 && disableOOL)
-      cFlowRegionEnd->setEndInternalControlFlow();
-
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, cFlowRegionEnd, conditions);
 
    cg->stopUsingRegister(monitorReg);
    if (objectClassReg)
@@ -7977,11 +9394,11 @@ roundArrayLengthToObjectAlignment(TR::CodeGenerator* cg, TR::Node* node, TR::Ins
       TR::RegisterDependencyConditions* conditions, TR::Register *litPoolBaseReg, int32_t allocSize, int32_t elementSize, TR::Register* sizeReg, TR::LabelSymbol * exitOOLLabel = NULL)
    {
    TR_J9VMBase *fej9 = (TR_J9VMBase *)(cg->fe());
-   int32_t alignmentConstant = TR::Compiler->om.objectAlignmentInBytes();
+   int32_t alignmentConstant = TR::Compiler->om.getObjectAlignmentInBytes();
    if (exitOOLLabel)
       {
       TR_Debug * debugObj = cg->getDebug();
-      iCursor = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, exitOOLLabel);
+      iCursor = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, exitOOLLabel);
       //TODO if not outline stuff?
       if (debugObj)
          debugObj->addInstructionComment(iCursor, "Exit OOL, going back to main line");
@@ -8027,14 +9444,14 @@ genHeapAlloc(TR::Node * node, TR::Instruction *& iCursor, bool isVariableLen, TR
 
       // bool sizeInReg = (isVariableLen || (allocSize > MAX_IMMEDIATE_VAL));
 
-      int alignmentConstant = TR::Compiler->om.objectAlignmentInBytes();
+      int alignmentConstant = TR::Compiler->om.getObjectAlignmentInBytes();
 
       if (isVariableLen)
          {
          if (exitOOLLabel)
             {
             TR_Debug * debugObj = cg->getDebug();
-            iCursor = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, exitOOLLabel);
+            iCursor = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, exitOOLLabel);
             if (debugObj)
                debugObj->addInstructionComment(iCursor, "Exit OOL, going back to main line");
             }
@@ -8227,13 +9644,13 @@ genHeapAlloc(TR::Node * node, TR::Instruction *& iCursor, bool isVariableLen, TR
          iCursor = generateRSInstruction(cg, TR::InstOpCode::SRA, node, shiftReg, 8);
 
          iCursor = generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BZ, node, fillerRemLabel, iCursor);
-         iCursor = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, fillerLoopLabel);
+         iCursor = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, fillerLoopLabel);
          iCursor = generateSS1Instruction(cg, TR::InstOpCode::XC, node, 255, generateS390MemoryReference(addressReg, 0, cg), generateS390MemoryReference(addressReg, 0, cg), iCursor);
 
          iCursor = generateRXInstruction(cg, TR::InstOpCode::LA, node, addressReg, generateS390MemoryReference(addressReg, 256, cg), iCursor);
 
          iCursor = generateS390BranchInstruction(cg, TR::InstOpCode::BRCT, node, shiftReg, fillerLoopLabel);
-         iCursor = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, fillerRemLabel);
+         iCursor = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, fillerRemLabel);
 
          // and to only get the right 8 bits (remainder)
          iCursor = generateRIInstruction(cg, TR::InstOpCode::NILL, node, lengthReg, 0x00FF);
@@ -8247,7 +9664,7 @@ genHeapAlloc(TR::Node * node, TR::Instruction *& iCursor, bool isVariableLen, TR
          // minus 1 from lengthreg since xc auto adds 1 to it
 
          iCursor = generateEXDispatch(node, cg, lengthReg, shiftReg, iCursor);
-         iCursor = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, doneLabel);
+         iCursor = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, doneLabel);
          }
       cg->stopUsingRegister(addressReg);
       cg->stopUsingRegister(shiftReg);
@@ -8396,7 +9813,7 @@ genInitObjectHeader(TR::Node * node, TR::Instruction *& iCursor, TR_OpaqueClassB
          staticFlag |= fej9->getStaticObjectFlags();
          if (staticFlag != 0)
             {
-            if (comp->target().cpu.isAtLeast(OMR_PROCESSOR_S390_Z10) && staticFlag >= MIN_IMMEDIATE_VAL && staticFlag <= MAX_IMMEDIATE_VAL)
+            if (staticFlag >= MIN_IMMEDIATE_VAL && staticFlag <= MAX_IMMEDIATE_VAL)
                {
                iCursor = generateSILInstruction(cg, TR::InstOpCode::MVHI, node, generateS390MemoryReference(resReg, TMP_OFFSETOF_J9OBJECT_FLAGS, cg), staticFlag, iCursor);
                }
@@ -8477,11 +9894,11 @@ genAlignDoubleArray(TR::Node * node, TR::Instruction *& iCursor, bool isVariable
    iCursor = generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, doneAlign, iCursor);
 
    // the slop bytes are at the start of the allocation
-   iCursor = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, slotAtStart, iCursor);
+   iCursor = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, slotAtStart, iCursor);
    iCursor = generateRXInstruction(cg, TR::InstOpCode::getStoreOpCode(), node, temp2Reg,
                 generateS390MemoryReference(resReg, (int32_t) 0, cg), iCursor);
    iCursor = generateRIInstruction(cg, TR::InstOpCode::getAddHalfWordImmOpCode(), node, resReg, 4, iCursor);
-   iCursor = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, doneAlign, iCursor);
+   iCursor = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, doneAlign, iCursor);
    }
 
 
@@ -8708,7 +10125,7 @@ J9::Z::TreeEvaluator::VMnewEvaluator(TR::Node * node, TR::CodeGenerator * cg)
       // if variable-length array   - dataSizeReg will contain the (calculated) size
       // if outlined                - tmpReg will contain the value of
       // otherwise                  - size is in (int) allocateSize
-      int alignmentConstant = TR::Compiler->om.objectAlignmentInBytes();
+      int alignmentConstant = TR::Compiler->om.getObjectAlignmentInBytes();
 
       if (isVariableLen)
          allocateSize += dataBegin;
@@ -8769,7 +10186,7 @@ J9::Z::TreeEvaluator::VMnewEvaluator(TR::Node * node, TR::CodeGenerator * cg)
             TR::LabelSymbol * startOOLLabel = generateLabelSymbol(cg);
             exitOOLLabel = generateLabelSymbol(cg);
             TR_S390OutOfLineCodeSection *zeroSizeArrayChckOOL;
-            if (comp->target().cpu.isAtLeast(OMR_PROCESSOR_S390_Z10) && comp->target().is64Bit())
+            if (comp->target().is64Bit())
                {
                //need 31 bit as well, combining lgfr + sllg into rsibg
                int32_t shift_amount = trailingZeroes(elementSize);
@@ -8791,68 +10208,58 @@ J9::Z::TreeEvaluator::VMnewEvaluator(TR::Node * node, TR::CodeGenerator * cg)
             static char * allocZeroArrayWithVM = feGetEnv("TR_VMALLOCZEROARRAY");
             // DualTLH: Remove when performance confirmed
             static char * useDualTLH = feGetEnv("TR_USEDUALTLH");
-            // OOL
-            if (!comp->getOption(TR_DisableOOL))
+
+            if (comp->getOption(TR_DisableDualTLH) && useDualTLH || allocZeroArrayWithVM == NULL)
                {
-               if (comp->getOption(TR_DisableDualTLH) && useDualTLH || allocZeroArrayWithVM == NULL)
-                  {
-                  iCursor = generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BE, node, startOOLLabel, iCursor);
-                  TR_Debug * debugObj = cg->getDebug();
-                  zeroSizeArrayChckOOL = new (cg->trHeapMemory()) TR_S390OutOfLineCodeSection(startOOLLabel,exitOOLLabel,cg);
-                  cg->getS390OutOfLineCodeSectionList().push_front(zeroSizeArrayChckOOL);
-                  zeroSizeArrayChckOOL->swapInstructionListsWithCompilation();
-                  // Check to see if array-type is a super-class of the src object
-                  //
-                  TR::Instruction * cursor;
-                  cursor = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, startOOLLabel);
-                  if (debugObj)
-                  debugObj->addInstructionComment(cursor, "Denotes start of OOL for allocating zero size arrays");
+               iCursor = generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BE, node, startOOLLabel, iCursor);
+               TR_Debug * debugObj = cg->getDebug();
+               zeroSizeArrayChckOOL = new (cg->trHeapMemory()) TR_S390OutOfLineCodeSection(startOOLLabel,exitOOLLabel,cg);
+               cg->getS390OutOfLineCodeSectionList().push_front(zeroSizeArrayChckOOL);
+               zeroSizeArrayChckOOL->swapInstructionListsWithCompilation();
+               // Check to see if array-type is a super-class of the src object
+               //
+               TR::Instruction * cursor;
+               cursor = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, startOOLLabel);
+               if (debugObj)
+               debugObj->addInstructionComment(cursor, "Denotes start of OOL for allocating zero size arrays");
 
-                  /* using TR::Compiler->om.discontiguousArrayHeaderSizeInBytes() - TR::Compiler->om.contiguousArrayHeaderSizeInBytes()
-                   * for byte size for discontiguous 0 size arrays because later instructions do ( + 15 & -8) to round it to object size header and adding a j9 class header
-                   *
-                   *
-                   ----------- OOL: Beginning of out-of-line code section ---------------
-                   Label [0x484BE2AC80]:    ; Denotes start of OOL for allocating zero size arrays
-                   AGHI    GPR_0x484BE2A900,16
-                   BRC     J(0xf), Label [0x484BE2ACE0]
-                   --------------- OOL: End of out-of-line code section ------------------
+               /* using TR::Compiler->om.discontiguousArrayHeaderSizeInBytes() - TR::Compiler->om.contiguousArrayHeaderSizeInBytes()
+                  * for byte size for discontiguous 0 size arrays because later instructions do ( + 15 & -8) to round it to object size header and adding a j9 class header
+                  *
+                  *
+                  ----------- OOL: Beginning of out-of-line code section ---------------
+                  Label [0x484BE2AC80]:    ; Denotes start of OOL for allocating zero size arrays
+                  AGHI    GPR_0x484BE2A900,16
+                  BRC     J(0xf), Label [0x484BE2ACE0]
+                  --------------- OOL: End of out-of-line code section ------------------
 
-                   Label [0x484BE2ACE0]:    ; Exit OOL, going back to main line
-                   LR      GPR_0x484BE2AAE0,GPR_0x484BE2A7A0
-                   SRA     GPR_0x484BE2AAE0,16
-                   BRC     MASK6(0x6), Snippet Label [0x484BE2A530]      # (Start of internal control flow)
-                   AGHI    GPR_0x484BE2A900,15 <----add 7 + 8
-                   NILF    GPR_0x484BE2A900,-8 <---round to object size
-                   AG      GPR_0x484BE2A900,#490 96(GPR13)
+                  Label [0x484BE2ACE0]:    ; Exit OOL, going back to main line
+                  LR      GPR_0x484BE2AAE0,GPR_0x484BE2A7A0
+                  SRA     GPR_0x484BE2AAE0,16
+                  BRC     MASK6(0x6), Snippet Label [0x484BE2A530]      # (Start of internal control flow)
+                  AGHI    GPR_0x484BE2A900,15 <----add 7 + 8
+                  NILF    GPR_0x484BE2A900,-8 <---round to object size
+                  AG      GPR_0x484BE2A900,#490 96(GPR13)
 
-                   */
-                  cursor = generateRIInstruction(cg, TR::InstOpCode::getAddHalfWordImmOpCode(), node, tmp,
-                        TR::Compiler->om.discontiguousArrayHeaderSizeInBytes() - TR::Compiler->om.contiguousArrayHeaderSizeInBytes(), cursor);
+                  */
+               cursor = generateRIInstruction(cg, TR::InstOpCode::getAddHalfWordImmOpCode(), node, tmp,
+                     TR::Compiler->om.discontiguousArrayHeaderSizeInBytes() - TR::Compiler->om.contiguousArrayHeaderSizeInBytes(), cursor);
 
-                  generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, exitOOLLabel,cursor);
-                  zeroSizeArrayChckOOL->swapInstructionListsWithCompilation();
-                  }
-               else
-                  {
-                  iCursor = generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BE, node, callLabel, iCursor);
-                  if(!firstBRCToOOL)
-                     {
-                     firstBRCToOOL = iCursor;
-                     }
-                  else
-                     {
-                     secondBRCToOOL = iCursor;
-                     }
-                  }
+               generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, exitOOLLabel,cursor);
+               zeroSizeArrayChckOOL->swapInstructionListsWithCompilation();
                }
             else
                {
-               iCursor = generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BNE, node, exitOOLLabel, iCursor);
-               iCursor = generateRIInstruction(cg, TR::InstOpCode::getAddHalfWordImmOpCode(), node, tmp,
-                     TR::Compiler->om.discontiguousArrayHeaderSizeInBytes() - TR::Compiler->om.contiguousArrayHeaderSizeInBytes(), iCursor);
+               iCursor = generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BE, node, callLabel, iCursor);
+               if(!firstBRCToOOL)
+                  {
+                  firstBRCToOOL = iCursor;
+                  }
+               else
+                  {
+                  secondBRCToOOL = iCursor;
+                  }
                }
-
             }
          else
             {
@@ -8887,12 +10294,14 @@ J9::Z::TreeEvaluator::VMnewEvaluator(TR::Node * node, TR::CodeGenerator * cg)
       //To retrieve the destination node->getSymbolReference() is used below after genHeapAlloc.
       if(!comp->getOption(TR_DisableDualTLH) && useDualTLH && node->canSkipZeroInitialization())
          {
-         if (node->getOpCodeValue() == TR::New)
-         node->setSymbolReference(comp->getSymRefTab()->findOrCreateNewObjectNoZeroInitSymbolRef(comp->getMethodSymbol()));
+         // For value types, the backout path should call jitNewValue helper call which is set up before code gen
+         if ((node->getOpCodeValue() == TR::New)
+             && (!TR::Compiler->om.areValueTypesEnabled() || (node->getSymbolReference() != comp->getSymRefTab()->findOrCreateNewValueSymbolRef(comp->getMethodSymbol()))))
+            node->setSymbolReference(comp->getSymRefTab()->findOrCreateNewObjectNoZeroInitSymbolRef(comp->getMethodSymbol()));
          else if (node->getOpCodeValue() == TR::newarray)
-         node->setSymbolReference(comp->getSymRefTab()->findOrCreateNewArrayNoZeroInitSymbolRef(comp->getMethodSymbol()));
+            node->setSymbolReference(comp->getSymRefTab()->findOrCreateNewArrayNoZeroInitSymbolRef(comp->getMethodSymbol()));
          else if (node->getOpCodeValue() == TR::anewarray)
-         node->setSymbolReference(comp->getSymRefTab()->findOrCreateANewArrayNoZeroInitSymbolRef(comp->getMethodSymbol()));
+            node->setSymbolReference(comp->getSymRefTab()->findOrCreateANewArrayNoZeroInitSymbolRef(comp->getMethodSymbol()));
          }
 
       if (enumReg == NULL && opCode != TR::New)
@@ -8915,7 +10324,7 @@ J9::Z::TreeEvaluator::VMnewEvaluator(TR::Node * node, TR::CodeGenerator * cg)
          /* Example of the OOL for newarray
           * Outlined Label L0048:    ; Denotes start of OOL for heap alloc
           * LHI     GPR_0120,0x5
-          * ASSOCREGS
+          * assocreg
           * PRE:
           * {GPR2:GPR_0112:R} {GPR1:GPR_0120:R}
           * BRASL   GPR_0117,0x00000000
@@ -8930,7 +10339,7 @@ J9::Z::TreeEvaluator::VMnewEvaluator(TR::Node * node, TR::CodeGenerator * cg)
       heapAllocOOL->swapInstructionListsWithCompilation();
       TR::Instruction * cursorHeapAlloc;
       // Generating OOL label: Outlined Label L00XX
-      cursorHeapAlloc = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, callLabel);
+      cursorHeapAlloc = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, callLabel);
       if (debugObj)
          debugObj->addInstructionComment(cursorHeapAlloc, "Denotes start of OOL for heap alloc");
       generateHelperCallForVMNewEvaluators(node, cg, true, resReg);
@@ -8951,12 +10360,88 @@ J9::Z::TreeEvaluator::VMnewEvaluator(TR::Node * node, TR::CodeGenerator * cg)
          genInitArrayHeader(node, iCursor, isVariableLen, classAddress, NULL, resReg, zeroReg,
                enumReg, dataSizeReg, temp1Reg, litPoolBaseReg, conditions, cg);
 
+#ifdef TR_TARGET_64BIT
+         /* Here we'll update dataAddr slot for both fixed and variable length arrays. Fixed length arrays are
+          * simple as we just need to check first child of the node for array size. For variable length arrays
+          * runtime size checks are needed to determine whether to use contiguous or discontiguous header layout.
+          *
+          * In both scenarios, arrays of non-zero size use contiguous header layout while zero size arrays use
+          * discontiguous header layout.
+          */
+         TR::Register *offsetReg = NULL;
+         TR::MemoryReference *dataAddrMR = NULL;
+         TR::MemoryReference *dataAddrSlotMR = NULL;
+
+         if (isVariableLen && TR::Compiler->om.compressObjectReferences())
+            {
+            /* We need to check enumReg (array size) at runtime to determine correct offset of dataAddr field.
+             * Here we deal only with compressed refs because dataAddr offset for discontiguous
+             * and contiguous arrays is the same in full refs.
+             */
+            if (comp->getOption(TR_TraceCG))
+               traceMsg(comp, "Node (%p): Dealing with compressed refs variable length array.\n", node);
+
+            TR_ASSERT_FATAL_WITH_NODE(node,
+               (fej9->getOffsetOfDiscontiguousDataAddrField() - fej9->getOffsetOfContiguousDataAddrField()) == 8,
+               "Offset of dataAddr field in discontiguous array is expected to be 8 bytes more than contiguous array. "
+               "But was %d bytes for discontigous and %d bytes for contiguous array.\n",
+               fej9->getOffsetOfDiscontiguousDataAddrField(), fej9->getOffsetOfContiguousDataAddrField());
+
+            offsetReg = cg->allocateRegister();
+            // Invert enumReg sign. 0 and negative numbers remain unchanged.
+            iCursor = generateRREInstruction(cg, TR::InstOpCode::LNGFR, node, offsetReg, enumReg, iCursor);
+            iCursor = generateRSInstruction(cg, TR::InstOpCode::SRLG, node, temp1Reg, offsetReg, 63, iCursor);
+            iCursor = generateRSInstruction(cg, TR::InstOpCode::SLLG, node, offsetReg, temp1Reg, 3, iCursor);
+            // Inverting the sign bit will leave us with either -8 (if enumCopyReg > 0) or 0 (if enumCopyReg == 0).
+            iCursor = generateRREInstruction(cg, TR::InstOpCode::LNGR, node, offsetReg, offsetReg, iCursor);
+
+            dataAddrMR = generateS390MemoryReference(resReg, offsetReg, TR::Compiler->om.discontiguousArrayHeaderSizeInBytes(), cg);
+            dataAddrSlotMR = generateS390MemoryReference(resReg, offsetReg, fej9->getOffsetOfDiscontiguousDataAddrField(), cg);
+            }
+         else if (!isVariableLen && node->getFirstChild()->getOpCode().isLoadConst() && node->getFirstChild()->getInt() == 0)
+            {
+            if (comp->getOption(TR_TraceCG))
+               traceMsg(comp, "Node (%p): Dealing with full/compressed refs fixed length zero size array.\n", node);
+
+            dataAddrMR = generateS390MemoryReference(resReg, TR::Compiler->om.discontiguousArrayHeaderSizeInBytes(), cg);
+            dataAddrSlotMR = generateS390MemoryReference(resReg, fej9->getOffsetOfDiscontiguousDataAddrField(), cg);
+            }
+         else
+            {
+            if (comp->getOption(TR_TraceCG))
+               {
+               traceMsg(comp,
+                  "Node (%p): Dealing with either full/compressed refs fixed length non-zero size array or full refs variable length array.\n",
+                  node);
+               }
+
+            if (!TR::Compiler->om.compressObjectReferences())
+               {
+               TR_ASSERT_FATAL_WITH_NODE(node,
+               fej9->getOffsetOfDiscontiguousDataAddrField() == fej9->getOffsetOfContiguousDataAddrField(),
+               "dataAddr field offset is expected to be same for both contiguous and discontiguous arrays in full refs. "
+               "But was %d bytes for discontiguous and %d bytes for contiguous array.\n",
+               fej9->getOffsetOfDiscontiguousDataAddrField(), fej9->getOffsetOfContiguousDataAddrField());
+               }
+
+            dataAddrMR = generateS390MemoryReference(resReg, TR::Compiler->om.contiguousArrayHeaderSizeInBytes(), cg);
+            dataAddrSlotMR = generateS390MemoryReference(resReg, fej9->getOffsetOfContiguousDataAddrField(), cg);
+            }
+
+            iCursor = generateRXInstruction(cg, TR::InstOpCode::LAY, node, temp1Reg, dataAddrMR, iCursor);
+            iCursor = generateRXInstruction(cg, TR::InstOpCode::STG, node, temp1Reg, dataAddrSlotMR, iCursor);
+
+         if (offsetReg)
+            {
+            conditions->addPostCondition(offsetReg, TR::RealRegister::AssignAny);
+            cg->stopUsingRegister(offsetReg);
+            }
+#endif /* TR_TARGET_64BIT */
          // Write Arraylet Pointer
          if (generateArraylets)
             {
             iCursor = generateS390ImmOp(cg, TR::InstOpCode::getAddOpCode(), node, temp1Reg, resReg, dataBegin, conditions, litPoolBaseReg);
-            if(TR::Compiler->vm.heapBaseAddress() == 0)
-            iCursor = generateS390ImmOp(cg, TR::InstOpCode::getAddOpCode(), node, temp1Reg, temp1Reg, -((int64_t)(TR::Compiler->vm.heapBaseAddress())), conditions, litPoolBaseReg);
+            iCursor = generateS390ImmOp(cg, TR::InstOpCode::getAddOpCode(), node, temp1Reg, temp1Reg, -((int64_t)(0)), conditions, litPoolBaseReg);
             if(TR::Compiler->om.compressedReferenceShiftOffset() > 0)
             iCursor = generateRSInstruction(cg, TR::InstOpCode::SRL, node, temp1Reg, TR::Compiler->om.compressedReferenceShiftOffset(), iCursor);
 
@@ -8970,12 +10455,12 @@ J9::Z::TreeEvaluator::VMnewEvaluator(TR::Node * node, TR::CodeGenerator * cg)
          genInitObjectHeader(node, iCursor, classAddress, classReg , resReg, zeroReg, temp1Reg, litPoolBaseReg, conditions, cg);
          }
 
-      TR_ASSERT((fej9->tlhHasBeenCleared() || J9JIT_TESTMODE || J9JIT_TOSS_CODE), "");
+      TR_ASSERT((fej9->tlhHasBeenCleared() || J9JIT_TOSS_CODE), "");
 
       //////////////////////////////////////////////////////////////////////////////////////////////////////
       ///============================ STAGE 5b: Prefetch after stores ===================================///
       //////////////////////////////////////////////////////////////////////////////////////////////////////
-      if (comp->target().cpu.isAtLeast(OMR_PROCESSOR_S390_Z10) && cg->enableTLHPrefetching())
+      if (cg->enableTLHPrefetching())
          {
          iCursor = generateS390MemInstruction(cg, TR::InstOpCode::PFD, node, 2, generateS390MemoryReference(resReg, 0x100, cg), iCursor);
          }
@@ -9048,13 +10533,13 @@ J9::Z::TreeEvaluator::VMnewEvaluator(TR::Node * node, TR::CodeGenerator * cg)
             TR::LabelSymbol * cFlowRegionStart = generateLabelSymbol(cg);
             TR::LabelSymbol * cFlowRegionEnd = generateLabelSymbol(cg);
 
-            generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, cFlowRegionStart, firstBRCToOOL->getPrev());
+            generateS390LabelInstruction(cg, TR::InstOpCode::label, node, cFlowRegionStart, firstBRCToOOL->getPrev());
             cFlowRegionStart->setStartInternalControlFlow();
 
-            generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, cFlowRegionEnd, conditions, secondBRCToOOL);
+            generateS390LabelInstruction(cg, TR::InstOpCode::label, node, cFlowRegionEnd, conditions, secondBRCToOOL);
             cFlowRegionEnd->setEndInternalControlFlow();
             }
-         iCursor = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, cFlowRegionEnd);
+         iCursor = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, cFlowRegionEnd);
          }
       else
          {
@@ -9066,10 +10551,10 @@ J9::Z::TreeEvaluator::VMnewEvaluator(TR::Node * node, TR::CodeGenerator * cg)
          while(next != NULL && !next->isBranchOp())
             next = next->getNext();
          TR_ASSERT(next != NULL && next->getPrev() != NULL, "Could not find branch instruction where internal control flow begins");
-         generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, cFlowRegionStart, next->getPrev());
+         generateS390LabelInstruction(cg, TR::InstOpCode::label, node, cFlowRegionStart, next->getPrev());
          cFlowRegionStart->setStartInternalControlFlow();
 
-         iCursor = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, cFlowRegionEnd, conditions);
+         iCursor = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, cFlowRegionEnd, conditions);
          cFlowRegionEnd->setEndInternalControlFlow();
          }
 
@@ -9140,7 +10625,7 @@ J9::Z::TreeEvaluator::VMarrayCheckEvaluator(TR::Node *node, TR::CodeGenerator *c
        node->isArrayChkPrimitiveArray2() ||
        node->isArrayChkReferenceArray2())
       {
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, cFlowRegionStart);
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, cFlowRegionStart);
       cFlowRegionStart->setStartInternalControlFlow();
       generateS390CompareAndBranchInstruction(cg, TR::InstOpCode::getCmpRegOpCode(), node, object1Reg, object2Reg, TR::InstOpCode::COND_BE, fallThrough, false, false);
       }
@@ -9168,7 +10653,7 @@ J9::Z::TreeEvaluator::VMarrayCheckEvaluator(TR::Node *node, TR::CodeGenerator *c
       if (!snippetLabel)
          {
          snippetLabel = generateLabelSymbol(cg);
-         generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, cFlowRegionStart);
+         generateS390LabelInstruction(cg, TR::InstOpCode::label, node, cFlowRegionStart);
          cFlowRegionStart->setStartInternalControlFlow();
          generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BZ,   node, snippetLabel);
 
@@ -9177,7 +10662,7 @@ J9::Z::TreeEvaluator::VMarrayCheckEvaluator(TR::Node *node, TR::CodeGenerator *c
          }
       else
          {
-         generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, cFlowRegionStart);
+         generateS390LabelInstruction(cg, TR::InstOpCode::label, node, cFlowRegionStart);
          cFlowRegionStart->setStartInternalControlFlow();
          generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BZ,   node, snippetLabel);
          }
@@ -9321,7 +10806,7 @@ J9::Z::TreeEvaluator::VMarrayCheckEvaluator(TR::Node *node, TR::CodeGenerator *c
    deps->addPostConditionIfNotAlreadyInserted(object2Reg, TR::RealRegister::AssignAny);  // 1st and 2nd object may be the same.
    deps->addPostCondition(tempReg, TR::RealRegister::AssignAny);
    deps->addPostCondition(tempClassReg, TR::RealRegister::AssignAny);
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, fallThrough, deps);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, fallThrough, deps);
    fallThrough->setEndInternalControlFlow();
 
    cg->stopUsingRegister(tempClassReg);
@@ -9429,7 +10914,7 @@ static bool inlineIsAssignableFrom(TR::Node *node, TR::CodeGenerator *cg)
      }
    deps->addPostCondition(tempReg, TR::RealRegister::AssignAny);
 
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, startLabel);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, startLabel);
 
    generateRRInstruction(cg, TR::InstOpCode::getLoadTestRegOpCode(), node, thisClassReg, thisClassReg);
    generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BE, node, outlinedCallLabel);
@@ -9473,7 +10958,7 @@ static bool inlineIsAssignableFrom(TR::Node *node, TR::CodeGenerator *cg)
 
    if (classDepth != -1)
       {
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, failLabel, deps);
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, failLabel, deps);
       generateRIInstruction(cg, TR::InstOpCode::LHI, node, tempReg, 0);
 
       cg->stopUsingRegister(objClassReg);
@@ -9481,7 +10966,7 @@ static bool inlineIsAssignableFrom(TR::Node *node, TR::CodeGenerator *cg)
       cg->stopUsingRegister(scratch1Reg);
       cg->stopUsingRegister(scratch2Reg);
       }
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, doneLabel, deps);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, doneLabel, deps);
 
    return true;
    }
@@ -9529,7 +11014,7 @@ J9::Z::TreeEvaluator::genGuardedLoadOOL(TR::Node *node, TR::CodeGenerator *cg,
    TR_S390OutOfLineCodeSection* outOfLineCodeSection = new (cg->trHeapMemory()) TR_S390OutOfLineCodeSection(slowPathLabel, mergeLabel, cg);
    cg->getS390OutOfLineCodeSectionList().push_front(outOfLineCodeSection);
    outOfLineCodeSection->swapInstructionListsWithCompilation();
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, slowPathLabel);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, slowPathLabel);
 
    cg->generateDebugCounter(TR::DebugCounter::debugCounterName(cg->comp(), "readBar/arraycopy/OOL"), 1, TR::DebugCounter::Cheap);
 
@@ -9543,7 +11028,7 @@ J9::Z::TreeEvaluator::genGuardedLoadOOL(TR::Node *node, TR::CodeGenerator *cg,
    loopDeps->addPostCondition(byteDstReg, TR::RealRegister::AssignAny);
    loopDeps->addPostCondition(byteLenReg, TR::RealRegister::AssignAny);
    srm->addScratchRegistersToDependencyList(loopDeps);
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, doneOOLLabel, loopDeps);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, doneOOLLabel, loopDeps);
    doneOOLLabel->setEndInternalControlFlow();
 
    generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, mergeLabel);
@@ -9617,7 +11102,7 @@ J9::Z::TreeEvaluator::genArrayCopyWithArrayStoreCHK(TR::Node* node,
 
    // Ready parameter 6: helper reg
    intptr_t *funcdescrptr = (intptr_t*) fej9->getReferenceArrayCopyHelperAddress();
-   if (comp->compileRelocatableCode())
+   if (comp->compileRelocatableCode() || comp->isOutOfProcessCompilation())
       {
       generateRegLitRefInstruction(cg, TR::InstOpCode::getLoadOpCode(), node, helperReg, (intptr_t)funcdescrptr, TR_ArrayCopyHelper, NULL, NULL, NULL);
       }
@@ -9650,7 +11135,7 @@ J9::Z::TreeEvaluator::genArrayCopyWithArrayStoreCHK(TR::Node* node,
    TR::Register *tmpReg    = cg->allocateRegister();
    TR::Register *R2SaveReg = cg->allocateRegister();
 
-   TR::SymbolReference* helperCallSymRef = cg->symRefTab()->findOrCreateRuntimeHelper(TR_S390referenceArrayCopyHelper, false, false, false);
+   TR::SymbolReference* helperCallSymRef = cg->symRefTab()->findOrCreateRuntimeHelper(TR_S390referenceArrayCopyHelper);
    TR::Snippet * helperCallSnippet = new (cg->trHeapMemory()) TR::S390HelperCallSnippet(cg, node, callLabel,
                                                                               helperCallSymRef, doneLabel);
    cg->addSnippet(helperCallSnippet);
@@ -9664,7 +11149,7 @@ J9::Z::TreeEvaluator::genArrayCopyWithArrayStoreCHK(TR::Node* node,
    generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, callLabel);
    gcPoint->setNeedsGCMap(0xFFFFFFFF);
 
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, doneLabel);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, doneLabel);
 
    if (cg->supportsJITFreeSystemStackPointer())
       {
@@ -9692,7 +11177,7 @@ J9::Z::TreeEvaluator::genArrayCopyWithArrayStoreCHK(TR::Node* node,
    gcPoint = generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, exceptionSnippetLabel);
    gcPoint->setNeedsGCMap(0xFFFFFFFF);
 
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, OKLabel, deps);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, OKLabel, deps);
 
    cg->stopUsingRegister(raReg);
    cg->stopUsingRegister(tmpReg);
@@ -9802,11 +11287,11 @@ void J9::Z::TreeEvaluator::genWrtbarForArrayCopy(TR::Node *node, TR::Register *s
       else
          TR_ASSERT(0, "genWrtbarForArrayCopy card marking not supported for RT");
       }
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, doneLabel, conditions);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, doneLabel, conditions);
    }
 
-extern TR::Register *
-VMinlineCompareAndSwap(TR::Node *node, TR::CodeGenerator *cg, TR::InstOpCode::Mnemonic casOp, bool isObj)
+TR::Register*
+J9::Z::TreeEvaluator::VMinlineCompareAndSwap(TR::Node *node, TR::CodeGenerator *cg, TR::InstOpCode::Mnemonic casOp, bool isObj)
    {
    TR::Register *scratchReg = NULL;
    TR::Register *objReg, *oldVReg, *newVReg;
@@ -9854,28 +11339,22 @@ VMinlineCompareAndSwap(TR::Node *node, TR::CodeGenerator *cg, TR::InstOpCode::Mn
          decompressedValueNode = decompressedValueNode->getFirstChild();
          }
 
-      if (decompressedValueNode->getOpCode().isSub() || TR::Compiler->vm.heapBaseAddress() == 0 || newVNode->isNull())
+      isValueCompressedReference = true;
+
+      while ((decompressedValueNode->getNumChildren() > 0) && (decompressedValueNode->getOpCodeValue() != TR::a2l))
          {
-         isValueCompressedReference = true;
+         decompressedValueNode = decompressedValueNode->getFirstChild();
          }
 
-      if (isValueCompressedReference)
+      if (decompressedValueNode->getOpCodeValue() == TR::a2l)
          {
-         while ((decompressedValueNode->getNumChildren() > 0) && (decompressedValueNode->getOpCodeValue() != TR::a2l))
-            {
-            decompressedValueNode = decompressedValueNode->getFirstChild();
-            }
-
-         if (decompressedValueNode->getOpCodeValue() == TR::a2l)
-            {
-            decompressedValueNode = decompressedValueNode->getFirstChild();
-            }
-
-         // Artificially bump the reference count on the value so that different registers are allocated for the
-         // compressed and decompressed values. This is done so that the card mark write barrier helper uses the
-         // decompressed value.
-         decompressedValueNode->incReferenceCount();
+         decompressedValueNode = decompressedValueNode->getFirstChild();
          }
+
+      // Artificially bump the reference count on the value so that different registers are allocated for the
+      // compressed and decompressed values. This is done so that the card mark write barrier helper uses the
+      // decompressed value.
+      decompressedValueNode->incReferenceCount();
       }
 
    // Eval old and new vals
@@ -9964,7 +11443,7 @@ VMinlineCompareAndSwap(TR::Node *node, TR::CodeGenerator *cg, TR::InstOpCode::Mn
    TR::RegisterDependencyConditions* cond = new (cg->trHeapMemory()) TR::RegisterDependencyConditions(0, 1, cg);
    cond->addPostCondition(resultReg, TR::RealRegister::AssignAny);
 
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, doneLabel, cond);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, doneLabel, cond);
 
    // Do wrtbar for Objects
    //
@@ -10007,7 +11486,7 @@ VMinlineCompareAndSwap(TR::Node *node, TR::CodeGenerator *cg, TR::InstOpCode::Mn
                                                                            // false #2 -> Don't do compile time check for heap obj
          }
 
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, doneLabelWrtBar, condWrtBar);
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, doneLabelWrtBar, condWrtBar);
 
       cg->stopUsingRegister(epReg);
       cg->stopUsingRegister(raReg);
@@ -10103,7 +11582,7 @@ J9::Z::TreeEvaluator::generateRuntimeInstrumentationOnOffSequence(TR::CodeGenera
    cg->getS390OutOfLineCodeSectionList().push_front(RIOnOffOOL);
    RIOnOffOOL->swapInstructionListsWithCompilation();
 
-   TR::Instruction * cursor = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, OOLStartLabel);
+   TR::Instruction * cursor = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, OOLStartLabel);
    if (debugObj)
       debugObj->addInstructionComment(cursor, "OOL RION/OFF seq");
 
@@ -10114,7 +11593,7 @@ J9::Z::TreeEvaluator::generateRuntimeInstrumentationOnOffSequence(TR::CodeGenera
 
    RIOnOffOOL->swapInstructionListsWithCompilation();
 
-   preced = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, OOLReturnLabel, preced);
+   preced = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, OOLReturnLabel, preced);
 
    // OOL's are appended to the instruction stream during RA.  If this is
    // emitted postRA, we have to attach it ourselves.
@@ -10135,10 +11614,8 @@ J9::Z::TreeEvaluator::generateRuntimeInstrumentationOnOffSequence(TR::CodeGenera
 extern "C" void _getSTCKLSOOffset(int32_t* offsetArray);  /* 390 asm stub */
 #endif
 
-/**
- * generate a single precision sqrt instruction
- */
-extern TR::Register * inlineSinglePrecisionSQRT(TR::Node *node, TR::CodeGenerator *cg)
+TR::Register*
+J9::Z::TreeEvaluator::inlineSinglePrecisionSQRT(TR::Node *node, TR::CodeGenerator *cg)
    {
    TR::Node * firstChild = node->getFirstChild();
    TR::Register * targetRegister = NULL;
@@ -10158,19 +11635,8 @@ extern TR::Register * inlineSinglePrecisionSQRT(TR::Node *node, TR::CodeGenerato
    return node->getRegister();
    }
 
-/** \brief
- *     Evaluates a sequence of instructions which generate the current time in terms of 1/2048 of micro-seconds.
- *
- *  \param cg
- *     The code generator used to generate the instructions.
- *
- *  \param node
- *     The node with which to associate the generated instructions with.
- *
- *  \return
- *     A register (or register pair for 31-bit) containing the current time in terms of 1/2048 of micro-seconds.
- */
-extern TR::Register* inlineCurrentTimeMaxPrecision(TR::CodeGenerator* cg, TR::Node* node)
+TR::Register*
+J9::Z::TreeEvaluator::inlineCurrentTimeMaxPrecision(TR::CodeGenerator* cg, TR::Node* node)
    {
    // STCKF is an S instruction and requires a 64-bit memory reference
    TR::SymbolReference* reusableTempSlot = cg->allocateReusableTempSlot();
@@ -10230,12 +11696,8 @@ extern TR::Register* inlineCurrentTimeMaxPrecision(TR::CodeGenerator* cg, TR::No
    return targetRegister;
    }
 
-extern TR::Register *inlineAtomicOps(
-      TR::Node *node,
-      TR::CodeGenerator *cg,
-      int8_t size,
-      TR::MethodSymbol *method,
-      bool isArray = false)
+TR::Register*
+J9::Z::TreeEvaluator::inlineAtomicOps(TR::Node *node, TR::CodeGenerator *cg, int8_t size, TR::MethodSymbol *method, bool isArray)
    {
    TR::Compilation *comp = cg->comp();
    TR_J9VMBase *fej9 = (TR_J9VMBase *)(comp->fe());
@@ -10527,7 +11989,7 @@ extern TR::Register *inlineAtomicOps(
    else
       generateRXInstruction(cg, TR::InstOpCode::getLoadOpCode(), node, tempReg, new (cg->trHeapMemory()) TR::MemoryReference(valueReg, fieldOffset, cg));
 
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, loopLabel);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, loopLabel);
    loopLabel->setStartInternalControlFlow();
 
    // Perform the addition operation, if necessary
@@ -10564,7 +12026,7 @@ extern TR::Register *inlineAtomicOps(
    if (deltaReg)
       dependencies->addPostCondition(deltaReg, TR::RealRegister::AssignAny);
 
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, cFlowRegionEnd, dependencies);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, cFlowRegionEnd, dependencies);
    cFlowRegionEnd->setEndInternalControlFlow();
 
    if (deltaChild != NULL)
@@ -10632,11 +12094,8 @@ evaluateTwo32BitLoadsInAConsecutiveEvenOddPair(
    return newRegisterPair;
    }
 
-extern TR::Register *
-inlineAtomicFieldUpdater(
-      TR::Node *node,
-      TR::CodeGenerator *cg,
-      TR::MethodSymbol *method)
+TR::Register*
+J9::Z::TreeEvaluator::inlineAtomicFieldUpdater(TR::Node *node, TR::CodeGenerator *cg, TR::MethodSymbol *method)
    {
    TR::Compilation *comp = cg->comp();
    TR_J9VMBase *fej9 = (TR_J9VMBase *)(comp->fe());
@@ -10747,7 +12206,7 @@ inlineAtomicFieldUpdater(
    TR_S390OutOfLineCodeSection *outlinedCall = new (cg->trHeapMemory()) TR_S390OutOfLineCodeSection(callLabel, doneLabel, cg);
    cg->getS390OutOfLineCodeSectionList().push_front(outlinedCall);
    outlinedCall->swapInstructionListsWithCompilation();
-   TR::Instruction * cursor = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, callLabel);
+   TR::Instruction * cursor = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, callLabel);
 
    if (cg->getDebug())
       cg->getDebug()->addInstructionComment(cursor, "Denotes start of OOL AtomicFieldUpdater");
@@ -10771,7 +12230,7 @@ inlineAtomicFieldUpdater(
       generateRRInstruction(cg, TR::InstOpCode::AR, node, resultReg, deltaReg);
       }
 
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, doneLabel);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, doneLabel);
 
    cg->stopUsingRegister(tempReg);
    cg->stopUsingRegister(deltaReg);
@@ -10782,10 +12241,8 @@ inlineAtomicFieldUpdater(
    return resultReg;
    }
 
-extern TR::Register *
-inlineKeepAlive(
-      TR::Node *node,
-      TR::CodeGenerator *cg)
+TR::Register*
+J9::Z::TreeEvaluator::inlineKeepAlive(TR::Node *node, TR::CodeGenerator *cg)
    {
    TR::Node *paramNode = node->getFirstChild();
    TR::Register *paramReg = cg->evaluate(paramNode);
@@ -10793,7 +12250,7 @@ inlineKeepAlive(
    conditions->addPreCondition(paramReg, TR::RealRegister::AssignAny);
    conditions->addPostCondition(paramReg, TR::RealRegister::AssignAny);
    TR::LabelSymbol *label = generateLabelSymbol(cg);
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, label, conditions);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, label, conditions);
    cg->decReferenceCount(paramNode);
    return NULL;
    }
@@ -10864,17 +12321,15 @@ genWrtBarForTM(
          // false #2 -> Don't do compile time check for heap obj
          }
 
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, doneLabelWrtBar, condWrtBar);
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, doneLabelWrtBar, condWrtBar);
 
       cg->stopUsingRegister(epReg);
       cg->stopUsingRegister(raReg);
       }
    }
 
-extern TR::Register *
-inlineConcurrentLinkedQueueTMOffer(
-      TR::Node *node,
-      TR::CodeGenerator *cg)
+TR::Register*
+J9::Z::TreeEvaluator::inlineConcurrentLinkedQueueTMOffer(TR::Node *node, TR::CodeGenerator *cg)
    {
    int32_t offsetTail = 0;
    int32_t offsetNext = 0;
@@ -11015,7 +12470,7 @@ inlineConcurrentLinkedQueueTMOffer(
       cursor = generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BE, node, insertLabel);
       cursor = generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, doneLabel);
 
-      cursor = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, insertLabel);
+      cursor = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, insertLabel);
 
       if (usesCompressedrefs)
          {
@@ -11039,13 +12494,13 @@ inlineConcurrentLinkedQueueTMOffer(
 
       cursor = generateRRInstruction(cg, TR::InstOpCode::XR, node, rReturn, rReturn);
 
-      cursor = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, doneLabel, deps);
+      cursor = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, doneLabel, deps);
 
       cursor = generateSInstruction(cg, TR::InstOpCode::TEND, node, generateS390MemoryReference(cg->machine()->getRealRegister(TR::RealRegister::GPR0),0,cg));
       }
 
    if (useNonConstrainedTM || disableTMOffer)
-      cursor = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, failLabel, deps);
+      cursor = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, failLabel, deps);
 
    genWrtBarForTM(node, cg, rP, rN, rReturn, true);
    genWrtBarForTM(node, cg, rThis, rN, rReturn, true);
@@ -11059,10 +12514,8 @@ inlineConcurrentLinkedQueueTMOffer(
    return rReturn;
    }
 
-extern TR::Register *
-inlineConcurrentLinkedQueueTMPoll(
-      TR::Node *node,
-      TR::CodeGenerator *cg)
+TR::Register*
+J9::Z::TreeEvaluator::inlineConcurrentLinkedQueueTMPoll(TR::Node *node, TR::CodeGenerator *cg)
    {
    int32_t offsetHead = 0;
    int32_t offsetNext = 0;
@@ -11221,15 +12674,15 @@ inlineConcurrentLinkedQueueTMPoll(
          }
 
       if (useNonConstrainedTM)
-         cursor = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, doneLabel);
+         cursor = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, doneLabel);
       else
-         cursor = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, doneLabel, deps);
+         cursor = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, doneLabel, deps);
 
       cursor = generateSInstruction(cg, TR::InstOpCode::TEND, node, generateS390MemoryReference(cg->machine()->getRealRegister(TR::RealRegister::GPR0),0,cg));
       }
 
    if (useNonConstrainedTM || disableTMPoll)
-      cursor = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, failLabel, deps);
+      cursor = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, failLabel, deps);
 
    if (usesCompressedrefs)
       {
@@ -11278,25 +12731,9 @@ VMgenerateCatchBlockBBStartPrologue(
       genLoadAddressConstant(cg, node, (uintptr_t) comp->getRecompilationInfo()->getCounterAddress(), biAddrReg);
 
       // Counter is 32-bit, so only use 32-bit opcodes
-      if (comp->target().cpu.isAtLeast(OMR_PROCESSOR_S390_Z10))
-         {
-         TR::MemoryReference * recompMR = generateS390MemoryReference(biAddrReg, 0, cg);
-         generateSIInstruction(cg, TR::InstOpCode::ASI, node, recompMR, -1);
-         recompMR->stopUsingMemRefRegister(cg);
-         }
-      else
-         {
-         TR::Register * recompCounterReg = cg->allocateRegister();
-         TR::MemoryReference * loadbiMR = generateS390MemoryReference(biAddrReg, 0, cg);
-         generateRXInstruction(cg, TR::InstOpCode::L, node, recompCounterReg, loadbiMR);
-         generateRIInstruction(cg, TR::InstOpCode::AHI, node, recompCounterReg, -1);
-         loadbiMR->stopUsingMemRefRegister(cg);
-         TR::MemoryReference * storebiMR = generateS390MemoryReference(biAddrReg, 0, cg);
-         generateRXInstruction(cg, TR::InstOpCode::ST, node, recompCounterReg, storebiMR);
-
-         cg->stopUsingRegister(recompCounterReg);
-         storebiMR->stopUsingMemRefRegister(cg);
-         }
+      TR::MemoryReference * recompMR = generateS390MemoryReference(biAddrReg, 0, cg);
+      generateSIInstruction(cg, TR::InstOpCode::ASI, node, recompMR, -1);
+      recompMR->stopUsingMemRefRegister(cg);
 
       // Check counter and induce recompilation if counter = 0
       TR::LabelSymbol * cFlowRegionStart = generateLabelSymbol(cg);
@@ -11312,13 +12749,13 @@ VMgenerateCatchBlockBBStartPrologue(
       dependencies->addPostCondition(tempReg1, cg->getEntryPointRegister());
       dependencies->addPostCondition(tempReg2, cg->getReturnAddressRegister());
       // Branch to induceRecompilation helper routine if counter is 0 - based on condition code of the preceding adds.
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, cFlowRegionStart);
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, cFlowRegionStart);
       cFlowRegionStart->setStartInternalControlFlow();
       generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BE, node, snippetLabel);
 
       TR::Snippet * snippet = new (cg->trHeapMemory()) TR::S390ForceRecompilationSnippet(cg, node, restartLabel, snippetLabel);
       cg->addSnippet(snippet);
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, restartLabel, dependencies);
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, restartLabel, dependencies);
 
       cg->stopUsingRegister(tempReg1);
       cg->stopUsingRegister(tempReg2);
@@ -11410,7 +12847,7 @@ J9::Z::TreeEvaluator::countDigitsEvaluator(TR::Node * node, TR::CodeGenerator * 
    generateRRInstruction(cg, !isLong ? TR::InstOpCode::LNR : TR::InstOpCode::LNGR, node, inputReg, inputReg);
 
    TR::LabelSymbol * cFloWRegionStart = generateLabelSymbol(cg);
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node,  cFloWRegionStart);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node,  cFloWRegionStart);
    cFloWRegionStart->setStartInternalControlFlow();
 
    if (isLong)
@@ -11434,20 +12871,20 @@ J9::Z::TreeEvaluator::countDigitsEvaluator(TR::Node * node, TR::CodeGenerator * 
 
       countDigitsHelper(node, cg, 0, work[0], inputReg, countReg, cFlowRegionEnd, isLong);           // 0 and 1
 
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, label[2]);       // LABEL 2
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, label[2]);       // LABEL 2
       countDigitsHelper(node, cg, 2, work[2], inputReg, countReg, cFlowRegionEnd, isLong);           // 2 and 3
 
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, label[5]);       // LABEL 5
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, label[5]);       // LABEL 5
 
       generateRXInstruction(cg, TR::InstOpCode::CG, node, inputReg, work[5]);
       generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BNH, node, label[6]);
 
       countDigitsHelper(node, cg, 4, work[4], inputReg, countReg, cFlowRegionEnd, isLong);           // 4 and 5
 
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, label[6]);       // LABEL 6
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, label[6]);       // LABEL 6
       countDigitsHelper(node, cg, 6, work[6], inputReg, countReg, cFlowRegionEnd, isLong);          // 6 and 7
 
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, label[11]);      // LABEL 11
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, label[11]);      // LABEL 11
 
       generateRXInstruction(cg, TR::InstOpCode::CG, node, inputReg, work[11]);
       generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BNH, node, label[14]);
@@ -11458,10 +12895,10 @@ J9::Z::TreeEvaluator::countDigitsEvaluator(TR::Node * node, TR::CodeGenerator * 
 
       countDigitsHelper(node, cg, 8, work[8], inputReg, countReg, cFlowRegionEnd, isLong);           // 8 and 9
 
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, label[10]);      // LABEL 10
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, label[10]);      // LABEL 10
       countDigitsHelper(node, cg, 10, work[10], inputReg, countReg, cFlowRegionEnd, isLong);  // 10 and 11
 
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, label[14]);      // LABEL 14
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, label[14]);      // LABEL 14
 
       generateRXInstruction(cg, TR::InstOpCode::CG, node, inputReg, work[14]);
       generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BNH, node, label[16]);
@@ -11474,14 +12911,14 @@ J9::Z::TreeEvaluator::countDigitsEvaluator(TR::Node * node, TR::CodeGenerator * 
       // LABEL 13
       countDigitsHelper(node, cg, 13, work[13], inputReg, countReg, cFlowRegionEnd, isLong);  // 13 and 14
 
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, label[16]);      // LABEL 16
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, label[16]);      // LABEL 16
 
       generateRXInstruction(cg, TR::InstOpCode::CG, node, inputReg, work[16]);
       generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BNH, node, label[17]);
       // LABEL 15
       countDigitsHelper(node, cg, 15, work[15], inputReg, countReg, cFlowRegionEnd, isLong);  // 15 and 16
 
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, label[17]);      // LABEL 17
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, label[17]);      // LABEL 17
       countDigitsHelper(node, cg, 17, work[17], inputReg, countReg, cFlowRegionEnd, isLong);  // 17 and 18
 
       for (int32_t i = 0; i < 18; i++)
@@ -11498,7 +12935,7 @@ J9::Z::TreeEvaluator::countDigitsEvaluator(TR::Node * node, TR::CodeGenerator * 
          }
 
       // We already generate the label instruction, why would we generate it again?
-      //generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, startLabel);
+      //generateS390LabelInstruction(cg, TR::InstOpCode::label, node, startLabel);
 
       generateRXInstruction(cg, TR::InstOpCode::C, node, inputReg, work[3]);
       generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BNH, node, label[5]);
@@ -11509,24 +12946,24 @@ J9::Z::TreeEvaluator::countDigitsEvaluator(TR::Node * node, TR::CodeGenerator * 
 
       countDigitsHelper(node, cg, 0, work[0], inputReg, countReg, cFlowRegionEnd, isLong);           // 0 and 1
 
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, label[2]);       // LABEL 2
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, label[2]);       // LABEL 2
       countDigitsHelper(node, cg, 2, work[2], inputReg, countReg, cFlowRegionEnd, isLong);           // 2 and 3
 
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, label[5]);       // LABEL 5
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, label[5]);       // LABEL 5
 
       generateRXInstruction(cg, TR::InstOpCode::C, node, inputReg, work[5]);
       generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BNH, node, label[7]);
 
       countDigitsHelper(node, cg, 4, work[4], inputReg, countReg, cFlowRegionEnd, isLong);           // 4 and 5
 
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, label[7]);       // LABEL 7
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, label[7]);       // LABEL 7
 
       generateRXInstruction(cg, TR::InstOpCode::C, node, inputReg, work[7]);
       generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BNH, node, label[8]);
 
       countDigitsHelper(node, cg, 6, work[6], inputReg, countReg, cFlowRegionEnd, isLong);           // 6 and 7
 
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, label[8]);       // LABEL 8
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, label[8]);       // LABEL 8
       countDigitsHelper(node, cg, 8, work[8], inputReg, countReg, cFlowRegionEnd, isLong);           // 8 and 9
 
 
@@ -11540,7 +12977,7 @@ J9::Z::TreeEvaluator::countDigitsEvaluator(TR::Node * node, TR::CodeGenerator * 
    cg->stopUsingRegister(workReg);
 
    // End
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, cFlowRegionEnd, dependencies);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, cFlowRegionEnd, dependencies);
    cFlowRegionEnd->setEndInternalControlFlow();
 
    node->setRegister(countReg);
@@ -11586,7 +13023,6 @@ J9::Z::TreeEvaluator::countDigitsHelper(TR::Node * node, TR::CodeGenerator * cg,
 TR::Register *
 J9::Z::TreeEvaluator::tstartEvaluator(TR::Node * node, TR::CodeGenerator * cg)
    {
-#ifndef PUBLIC_BUILD
    //   [0x00000000803797c8] (  0)  tstart
    //   [0x0000000080379738] (  1)    branch --> block 28 BBStart at [0x0000000080378bc8]
    //   [0x00000000803f15f8] (  1)      GlRegDeps
@@ -11737,7 +13173,6 @@ J9::Z::TreeEvaluator::tstartEvaluator(TR::Node * node, TR::CodeGenerator * cg)
    cg->decReferenceCount(brPersistentNode);
    cg->decReferenceCount(brTransientNode);
    cg->decReferenceCount(fallThrough);
-#endif
 
    return NULL;
    }
@@ -11748,10 +13183,8 @@ J9::Z::TreeEvaluator::tstartEvaluator(TR::Node * node, TR::CodeGenerator * cg)
 TR::Register *
 J9::Z::TreeEvaluator::tfinishEvaluator(TR::Node * node, TR::CodeGenerator * cg)
    {
-#ifndef PUBLIC_BUILD
    TR::MemoryReference * tempMR1 = generateS390MemoryReference(cg->machine()->getRealRegister(TR::RealRegister::GPR0),0,cg);
    TR::Instruction * cursor = generateSInstruction(cg, TR::InstOpCode::TEND, node, tempMR1);
-#endif
 
    return NULL;
    }
@@ -11762,7 +13195,6 @@ J9::Z::TreeEvaluator::tfinishEvaluator(TR::Node * node, TR::CodeGenerator * cg)
 TR::Register *
 J9::Z::TreeEvaluator::tabortEvaluator(TR::Node * node, TR::CodeGenerator * cg)
    {
-#ifndef PUBLIC_BUILD
    TR::Instruction *cursor;
    TR::LabelSymbol * labelDone = generateLabelSymbol(cg);
    TR::Register *codeReg = cg->allocateRegister();
@@ -11776,9 +13208,8 @@ J9::Z::TreeEvaluator::tabortEvaluator(TR::Node * node, TR::CodeGenerator * cg)
    generateRIInstruction(cg, cg->comp()->target().is64Bit() ? TR::InstOpCode::LGHI : TR::InstOpCode::LHI, node, codeReg, 0x100);
    TR::MemoryReference *codeMR = generateS390MemoryReference(codeReg, 0, cg);
    cursor = generateSInstruction(cg, TR::InstOpCode::TABORT, node, codeMR);
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, labelDone);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, labelDone);
    cg->stopUsingRegister(codeReg);
-#endif
    return NULL;
    }
 
@@ -11867,7 +13298,7 @@ J9::Z::TreeEvaluator::generateSoftwareReadBarrier(TR::Node* node,
       deps = generateRegisterDependencyConditions(0, 6, cg);
       TR::LabelSymbol* startICFLabel = generateLabelSymbol(cg);
 
-      generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, startICFLabel);
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, startICFLabel);
       startICFLabel->setStartInternalControlFlow();
       }
 
@@ -11922,14 +13353,14 @@ J9::Z::TreeEvaluator::generateSoftwareReadBarrier(TR::Node* node,
    TR::Instruction *gcPoint = generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, callLabel);
    gcPoint->setNeedsGCMap(0);
    auto readBarHelperSnippet = new (cg->trHeapMemory()) TR::S390HelperCallSnippet(cg, node, callLabel,
-                                                                                  cg->symRefTab()->findOrCreateRuntimeHelper(TR_softwareReadBarrier, false, false, false),
+                                                                                  cg->symRefTab()->findOrCreateRuntimeHelper(TR_softwareReadBarrier),
                                                                                   callEndLabel);
    cg->addSnippet(readBarHelperSnippet);
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, callEndLabel);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, callEndLabel);
 
    // Reload the object after helper call.
    generateRXInstruction(cg, loadOpCode, node, resultReg, generateS390MemoryReference(fieldAddrReg, 0, cg));
-   TR::Instruction* cursor = generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, doneLabel);
+   TR::Instruction* cursor = generateS390LabelInstruction(cg, TR::InstOpCode::label, node, doneLabel);
    if (notInsideICF)
       {
       cursor->setDependencyConditions(deps);
@@ -12063,4 +13494,455 @@ J9::Z::TreeEvaluator::generateLoadAndStoreForArrayCopy(TR::Node *node, TR::CodeG
       {
       OMR::TreeEvaluatorConnector::generateLoadAndStoreForArrayCopy(node, cg, srcMemRef, dstMemRef, srm, elenmentType, needsGuardedLoad, deps);
       }
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::inlineIntegerToCharsForLatin1Strings(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   TR::Compilation *comp = cg->comp();
+
+   TR_ResolvedMethod *candidateToStringMethod = NULL;
+   if (node->getInlinedSiteIndex() != -1)
+      {
+      candidateToStringMethod = comp->getInlinedResolvedMethod(node->getInlinedSiteIndex());
+      }
+   else
+      {
+      candidateToStringMethod = comp->getCurrentMethod();
+      }
+   // If method caller of Integer.stringSize or Long.stringSize is not Integer.toString(I) or Long.toString(J), then we don't inline
+   if (candidateToStringMethod->getRecognizedMethod() != TR::java_lang_Long_toString &&
+            candidateToStringMethod->getRecognizedMethod() != TR::java_lang_Integer_toString)
+      {
+      return NULL;
+      }
+
+   if (comp->getOption(TR_TraceCG))
+      {
+      traceMsg(comp, "inlineIntegerToCharsForLatin1Strings (compressed strings)\n");
+      }
+   TR::Node *inputValueNode = node->getChild(0);
+   TR::Node *stringSizeNode = node->getChild(1);
+   TR::Node *byteArrayNode = node->getChild(2);
+
+   TR::Register *inputValueReg = cg->evaluate(inputValueNode);
+   TR::Register *stringSizeReg = cg->gprClobberEvaluate(stringSizeNode, true);
+   TR::Register *byteArrayReg = cg->gprClobberEvaluate(byteArrayNode, true);
+
+   bool inputIs64Bit = inputValueNode->getDataType() == TR::Int64;
+
+   TR::MemoryReference *destinationArrayMemRef = generateS390MemoryReference(byteArrayReg, TR::Compiler->om.contiguousArrayHeaderSizeInBytes(), cg);
+
+   TR::LabelSymbol *cFlowRegionStart = generateLabelSymbol(cg);
+   cFlowRegionStart->setStartInternalControlFlow();
+   TR::LabelSymbol *cFlowRegionEnd = generateLabelSymbol(cg);
+   cFlowRegionEnd->setEndInternalControlFlow();
+
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, cFlowRegionStart);
+
+   // If input is 0, then do the work in GPRs and exit.
+   // TODO: Measure performance of [1,9] here vs vanilla Java code to see what's faster. If vanilla java, then we should bail from here accordingly.
+   // (See https://github.ibm.com/runtimes/openj9/pull/385#discussion_r5004355 for discussion)
+   TR::Register *numCharsRemainingReg = cg->allocateRegister(); // this is also the index of the position of the first char after we have populated the buffer
+   TR::LabelSymbol *nonZeroInputLabel = generateLabelSymbol(cg);
+   generateS390CompareAndBranchInstruction(cg, inputIs64Bit ? TR::InstOpCode::CG : TR::InstOpCode::C, node, inputValueReg, 0, TR::InstOpCode::COND_BNE, nonZeroInputLabel, false);
+   generateSIInstruction(cg, TR::InstOpCode::MVI, node, generateS390MemoryReference(*destinationArrayMemRef, 0, cg), 48);
+   generateRILInstruction(cg, TR::InstOpCode::IILF, node, numCharsRemainingReg, 0);
+   generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, cFlowRegionEnd);
+
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, nonZeroInputLabel);
+
+   TR::LabelSymbol *handleDigitsLabel = generateLabelSymbol(cg);
+   // First handle negative sign if needed. Then proceed to handleDigitsLabel to process the digits.
+   generateS390CompareAndBranchInstruction(cg, inputIs64Bit ? TR::InstOpCode::CG : TR::InstOpCode::C, node, inputValueReg, 0, TR::InstOpCode::COND_BNL, handleDigitsLabel, false);
+   generateRILInstruction(cg, TR::InstOpCode::SLFI, node, stringSizeReg, 1);
+   generateSIInstruction(cg, TR::InstOpCode::MVI, node, generateS390MemoryReference(*destinationArrayMemRef, 0, cg), 45);
+   generateRILInstruction(cg, TR::InstOpCode::getAddImmOpCode(), node, byteArrayReg, 1);
+
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, handleDigitsLabel);
+   TR::Register *intToPDReg = cg->allocateRegister(TR_VRF);
+   // Load all digits into packed decimal format.
+   generateVRIiInstruction(cg, inputIs64Bit ? TR::InstOpCode::VCVDG : TR::InstOpCode::VCVD, node, intToPDReg, inputValueReg, inputIs64Bit ? 19 : 10, 0x1);
+   TR::Register *maskReg = cg->allocateRegister(TR_VRF);
+   TR::Register *zonedDecimalReg1 = cg->allocateRegister(TR_VRF);
+   TR::Register *zonedDecimalReg2 = NULL;
+
+   TR::RegisterDependencyConditions *dependencies = NULL;
+
+   if (inputIs64Bit)
+      {
+      // if the long input value is greater than 16 digits in length, then we need two vector registers to do the conversion. so jump to lengthgreaterthan16label
+      // to handle that case.
+      TR::LabelSymbol *lengthGreaterThan16Label = generateLabelSymbol(cg);
+      generateS390CompareAndBranchInstruction(cg, TR::InstOpCode::C, node, stringSizeReg, 16, TR::InstOpCode::COND_BH, lengthGreaterThan16Label, false);
+      // this instruction unpacks the packed decimal in inttppdreg to zoned decimal format. it will do this for the rightmost 16 digits.
+      // it populates the higher 4 bits of each byte with the "zone" bits and the bottom 4 bits with each digit from the packed decimal sequence.
+      generateVRRkInstruction(cg, TR::InstOpCode::VUPKZL, node, zonedDecimalReg1, intToPDReg, 0 /*m3*/);
+      // now we zero out the zone bits because we don't need them.
+      generateVRIbInstruction(cg, TR::InstOpCode::VGM, node, maskReg, 4, 7, 0);
+      generateVRRcInstruction(cg, TR::InstOpCode::VN, node, zonedDecimalReg1, zonedDecimalReg1, maskReg, 0, 0, 0);
+      // now the rightmost 10 bytes should hold the entire integer in packed decimal format. so let's add 48 to each byte to convert each digit to ascii.
+      generateVRIaInstruction(cg, TR::InstOpCode::VREPI, node, maskReg, 48, 0);
+      generateVRRcInstruction(cg, TR::InstOpCode::VA, node, zonedDecimalReg1, zonedDecimalReg1, maskReg, 0);
+      // for the purposes of this evaluator, stringsizereg contains the length of the resulting string. ex if input is 2147483647, stringsizereg will be 10.
+      // when storing using vstrl, the index register specifying the first byte to store is 0 based. meanwhile
+      // stringsizereg is 1 based. so we must first subtract 1 from stringsizereg so the calculation is done correctly by the instruction.
+      // ex. if  we specify 10 in vstrl, the instruction will do 15-10=5 to figure out that it needs to store bytes 5 to 15 instead of 6 to 15.
+      generateRILInstruction(cg, TR::InstOpCode::SLFI, node, stringSizeReg, 1);
+      // the memory reference should already be pointing to where the most significant digit is to be stored. so we just have to create the vstrl instruction now.
+      generateVRSdInstruction(cg, TR::InstOpCode::VSTRLR, node, stringSizeReg, zonedDecimalReg1, generateS390MemoryReference(*destinationArrayMemRef, 0, cg));
+      generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, cFlowRegionEnd);
+
+      // if we end up here, then there are more than 16 digits in the input value. this instruction sequence is similar to the one above, except that
+      // we handle the 1 to 3 of the most significant digits in a separate register. we then store the value in this register before storing the remainder of the digits.
+      generateS390LabelInstruction(cg, TR::InstOpCode::label, node, lengthGreaterThan16Label);
+      zonedDecimalReg2 = cg->allocateRegister(TR_VRF); // holds the most significant digits. can be anywhere from 1-3 digits.
+      generateVRRkInstruction(cg, TR::InstOpCode::VUPKZL, node, zonedDecimalReg1, intToPDReg, 0 /*m3*/);
+      generateVRRkInstruction(cg, TR::InstOpCode::VUPKZH, node, zonedDecimalReg2, intToPDReg, 0 /*m3*/);
+      // now we zero out the zone bits because we don't need them.
+      generateVRIbInstruction(cg, TR::InstOpCode::VGM, node, maskReg, 4, 7, 0);
+      generateVRRcInstruction(cg, TR::InstOpCode::VN, node, zonedDecimalReg1, zonedDecimalReg1, maskReg, 0, 0, 0);
+      generateVRRcInstruction(cg, TR::InstOpCode::VN, node, zonedDecimalReg2, zonedDecimalReg2, maskReg, 0, 0, 0);
+      // now add 48 to each byte.
+      generateVRIaInstruction(cg, TR::InstOpCode::VREPI, node, maskReg, 48, 0);
+      generateVRRcInstruction(cg, TR::InstOpCode::VA, node, zonedDecimalReg1, zonedDecimalReg1, maskReg, 0);
+      generateVRRcInstruction(cg, TR::InstOpCode::VA, node, zonedDecimalReg2, zonedDecimalReg2, maskReg, 0);
+      // now calculate how many digits are in the top half of the zoned decimal (i.e. zoneddecimalreg2) --> (stringsizereg - 16) - 1 = stringsizereg - 17
+      generateRILInstruction(cg, TR::InstOpCode::SLFI, node, stringSizeReg, 17);
+      // the memory reference should already be pointing to where the most significant digit is to be stored. so we just have to create the vstrl instruction now.
+      generateVRSdInstruction(cg, TR::InstOpCode::VSTRLR, node, stringSizeReg, zonedDecimalReg2, generateS390MemoryReference(*destinationArrayMemRef, 0, cg));
+      // increment bytearrayreg by stringsizereg+1 to move buffer pointer forward so we can write remaining bytes.
+      generateRILInstruction(cg, TR::InstOpCode::AFI, node, stringSizeReg, 1);
+      generateRRInstruction(cg, TR::InstOpCode::getAddRegWidenOpCode(), node, byteArrayReg, stringSizeReg);
+      generateVSIInstruction(cg, TR::InstOpCode::VSTRL, node, zonedDecimalReg1, generateS390MemoryReference(*destinationArrayMemRef, 0, cg), 15);
+
+      dependencies = generateRegisterDependencyConditions(0, 8, cg);
+      dependencies->addPostCondition(zonedDecimalReg2, TR::RealRegister::AssignAny);
+      }
+   else
+      {
+      // This instruction unpacks the packed decimal in intTpPDReg to zoned decimal format. It will do this for the rightmost 16 digits.
+      // It populates the higher 4 bits of each byte with the "zone" bits and the bottom 4 bits with each digit from the packed decimal sequence.
+      generateVRRkInstruction(cg, TR::InstOpCode::VUPKZL, node, zonedDecimalReg1, intToPDReg, 0 /*M3*/);
+      // Now we zero out the zone bits because we don't need them.
+      generateVRIbInstruction(cg, TR::InstOpCode::VGM, node, maskReg, 4, 7, 0);
+      generateVRRcInstruction(cg, TR::InstOpCode::VN, node, zonedDecimalReg1, zonedDecimalReg1, maskReg, 0, 0, 0);
+      // Now the rightmost 10 bytes should hold the entire integer value in packed decimal form. So let's add 48 to each byte to convert each digit to ASCII.
+      generateVRIaInstruction(cg, TR::InstOpCode::VREPI, node, maskReg, 48, 0);
+      generateVRRcInstruction(cg, TR::InstOpCode::VA, node, zonedDecimalReg1, zonedDecimalReg1, maskReg, 0);
+
+      // For the purposes of this evaluator, stringSizeReg contains the length of the resulting string. Ex if input is 2147483647, stringSizeReg will be 10.
+      // When storing using VSTRL, the index register specifying the first byte to store is 0 based. Meanwhile
+      // stringSizeReg is 1 based. So we must first subtract 1 from stringSizeReg so the calculation is done correctly by the instruction.
+      // ex. if  we specify 10 in VSTRL, the instruction will do 15-10=5 to figure out that it needs to store bytes 5 to 15 instead of 6 to 15.
+      generateRILInstruction(cg, TR::InstOpCode::SLFI, node, stringSizeReg, 1);
+      // The memory reference should already be pointing to where the most significant digit is to be stored. So we just have to create the VSTRL instruction now.
+      generateVRSdInstruction(cg, TR::InstOpCode::VSTRLR, node, stringSizeReg, zonedDecimalReg1, generateS390MemoryReference(*destinationArrayMemRef, 0, cg));
+
+      dependencies = generateRegisterDependencyConditions(0, 7, cg);
+      }
+
+   dependencies->addPostCondition(inputValueReg, TR::RealRegister::AssignAny);
+   dependencies->addPostCondition(byteArrayReg, TR::RealRegister::AssignAny);
+   dependencies->addPostCondition(stringSizeReg, TR::RealRegister::AssignAny);
+   dependencies->addPostCondition(numCharsRemainingReg, TR::RealRegister::AssignAny);
+   dependencies->addPostCondition(intToPDReg, TR::RealRegister::AssignAny);
+   dependencies->addPostCondition(maskReg, TR::RealRegister::AssignAny);
+   dependencies->addPostCondition(zonedDecimalReg1, TR::RealRegister::AssignAny);
+
+   // For the purposes of inlining Integer.toString and Long.toString, the return value of the getChars API will always be 0. So we load it here manually.
+   generateRILInstruction(cg, TR::InstOpCode::IILF, node, numCharsRemainingReg, 0);
+
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, cFlowRegionEnd, dependencies);
+
+   cg->decReferenceCount(inputValueNode);
+   cg->decReferenceCount(stringSizeNode);
+   cg->decReferenceCount(byteArrayNode);
+
+   cg->stopUsingRegister(intToPDReg);
+   cg->stopUsingRegister(maskReg);
+   cg->stopUsingRegister(zonedDecimalReg1);
+
+   cg->stopUsingRegister(byteArrayReg);
+   cg->stopUsingRegister(stringSizeReg);
+   cg->stopUsingRegister(zonedDecimalReg2);
+
+   return node->setRegister(numCharsRemainingReg);
+   }
+
+TR::Register*
+J9::Z::TreeEvaluator::inlineIntegerToCharsForUTF16Strings(TR::Node *node, TR::CodeGenerator *cg)
+   {
+   TR::Compilation *comp = cg->comp();
+
+   TR_ResolvedMethod *candidateToStringMethod = NULL;
+   if (node->getInlinedSiteIndex() != -1)
+      {
+      candidateToStringMethod = comp->getInlinedResolvedMethod(node->getInlinedSiteIndex());
+      }
+   else
+      {
+      candidateToStringMethod = comp->getCurrentMethod();
+      }
+   // If method caller of Integer.stringSize or Long.stringSize is not Integer.toString(I) or Long.toString(J), then we don't inline
+   if (candidateToStringMethod->getRecognizedMethod() != TR::java_lang_Long_toString &&
+            candidateToStringMethod->getRecognizedMethod() != TR::java_lang_Integer_toString)
+      {
+      return NULL;
+      }
+
+   if (comp->getOption(TR_TraceCG))
+      {
+      traceMsg(comp, "inlineIntegerToCharsForUTF16Strings (decompressed strings)\n");
+      }
+   TR::Node *inputValueNode = node->getChild(0);
+   TR::Node *stringSizeNode = node->getChild(1);
+   TR::Node *byteArrayNode = node->getChild(2);
+
+   TR::Register *inputValueReg = cg->evaluate(inputValueNode);
+   TR::Register *stringSizeReg = cg->gprClobberEvaluate(stringSizeNode, true);
+   TR::Register *byteArrayReg = cg->gprClobberEvaluate(byteArrayNode, true);
+
+   bool inputIs64Bit = inputValueNode->getDataType() == TR::Int64;
+
+   TR::LabelSymbol *cFlowRegionStart = generateLabelSymbol(cg);
+   cFlowRegionStart->setStartInternalControlFlow();
+   TR::LabelSymbol *cFlowRegionEnd = generateLabelSymbol(cg);
+   cFlowRegionEnd->setEndInternalControlFlow();
+
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, cFlowRegionStart);
+
+   // If input is 0, just do the work in GPRs and exit.
+   TR::Register *numCharsRemainingReg = cg->allocateRegister(); // this is also the index of the position of the first char after we have populated the buffer
+   TR::LabelSymbol *nonZeroInputLabel = generateLabelSymbol(cg);
+   generateS390CompareAndBranchInstruction(cg, inputIs64Bit ? TR::InstOpCode::CG : TR::InstOpCode::C, node, inputValueReg, 0, TR::InstOpCode::COND_BNE, nonZeroInputLabel, false);
+   TR::MemoryReference *destinationArrayMemRef = generateS390MemoryReference(byteArrayReg, TR::Compiler->om.contiguousArrayHeaderSizeInBytes(), cg);
+   generateSILInstruction(cg, TR::InstOpCode::MVHHI, node, destinationArrayMemRef, 48);
+   generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, cFlowRegionEnd);
+
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, nonZeroInputLabel);
+
+   TR::LabelSymbol *handleDigitsLabel = generateLabelSymbol(cg);
+   // Handle negative sign first.
+   generateS390CompareAndBranchInstruction(cg, inputIs64Bit ? TR::InstOpCode::CG : TR::InstOpCode::C, node, inputValueReg, 0, TR::InstOpCode::COND_BNL, handleDigitsLabel, false);
+   generateRILInstruction(cg, TR::InstOpCode::SLFI, node, stringSizeReg, 1);
+   generateSILInstruction(cg, TR::InstOpCode::MVHHI, node, generateS390MemoryReference(*destinationArrayMemRef, 0, cg), 45);
+   generateRILInstruction(cg, TR::InstOpCode::getAddImmOpCode(), node, byteArrayReg, 2);
+
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, handleDigitsLabel);
+
+   TR::Register *intToPDReg = cg->allocateRegister(TR_VRF);
+   // Load all digits into packed decimal format.
+   generateVRIiInstruction(cg, inputIs64Bit ? TR::InstOpCode::VCVDG : TR::InstOpCode::VCVD, node, intToPDReg, inputValueReg, inputIs64Bit ? 19 : 10, 0x1);
+   TR::Register *maskReg = cg->allocateRegister(TR_VRF);
+   TR::Register *asciiOffset = cg->allocateRegister(TR_VRF);
+   generateVRIbInstruction(cg, TR::InstOpCode::VGM, node, maskReg, 4, 7, 0);
+   generateVRIaInstruction(cg, TR::InstOpCode::VREPI, node, asciiOffset, 48, 0);
+   TR::Register *zonedDecimalRegLower = cg->allocateRegister(TR_VRF);
+
+   TR::LabelSymbol *moreThan9DigitsLabel = generateLabelSymbol(cg);
+   // Depending on the length of the resulting string, we will need different amounts of vector registers to do the conversion. We test for that
+   // here and then branch to a handcrafted routine for each scenario. This creates some redundancy in the code generated (hence increasing footprint),
+   // however it reduces checks/branches during runtime preventing bottlenecks.
+   generateS390CompareAndBranchInstruction(cg, TR::InstOpCode::C, node, stringSizeReg, 8, TR::InstOpCode::COND_BH, moreThan9DigitsLabel, false);
+
+   // In this scenario we only need one vector register to do the conversion as there are less than 9 digits to process
+   // If we are here, then 0 =< stringSizeReg <= 8
+   // Unpack packed decimal into zoned decimal. This should take a maximum of 8 bytes.
+   generateVRRkInstruction(cg, TR::InstOpCode::VUPKZL, node, zonedDecimalRegLower, intToPDReg, 0 /*M3*/);
+   // Remove the zone bits
+   generateVRRcInstruction(cg, TR::InstOpCode::VN, node, zonedDecimalRegLower, zonedDecimalRegLower, maskReg, 0, 0, 0);
+   // Now the rightmost 10 bytes should hold the entire integer we care about. So let's add 48 to each byte.
+   generateVRRcInstruction(cg, TR::InstOpCode::VA, node, zonedDecimalRegLower, zonedDecimalRegLower, asciiOffset, 0);
+
+   // For the purposes of this evaluator, stringSizeReg contains the length of the resulting string. Ex if input is 2147483647, stringSizeReg will be 10.
+   // When storing using VSTRL, the index register specifying the first byte to store is 0 based. Meanwhile
+   // stringSizeReg is 1 based. So we must first subtract 1 from stringSizeReg so the calculation is done correctly by the instruction.
+   // ex. if  we specify 10 in VSTRL, the instruction will do 15-10=5 to figure out that it needs to store bytes 5 to 15 instead of 6 to 15.
+   // Since each character is 2 bytes in length, we must first multiply by 2.
+   generateRSInstruction(cg, TR::InstOpCode::SLA, node, stringSizeReg, 1);
+   generateRILInstruction(cg, TR::InstOpCode::SLFI, node, stringSizeReg, 1);
+   // Finally, unpack the data in zonedDecimalReg1 using VUPL. The result should take no more than 16 bytes.
+   generateVRRaInstruction(cg, TR::InstOpCode::VUPLL, node, zonedDecimalRegLower, zonedDecimalRegLower, 0, 0, 0);
+   // The memory reference should already be pointing to where the most significant digit is to be stored. So we just have to create the VSTRL instruction now.
+   generateVRSdInstruction(cg, TR::InstOpCode::VSTRLR, node, stringSizeReg, zonedDecimalRegLower, generateS390MemoryReference(*destinationArrayMemRef, 0, cg));
+   generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, cFlowRegionEnd);
+
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, moreThan9DigitsLabel);
+   TR::LabelSymbol *moreThan16DigitsLabel = generateLabelSymbol(cg);
+   generateS390CompareAndBranchInstruction(cg, TR::InstOpCode::C, node, stringSizeReg, 16, TR::InstOpCode::COND_BH, moreThan16DigitsLabel, false);
+   // Need two intermediate vector registers to process input values that are greater than 8 digits and less than 17.
+   // For Integers between the length of 8 and 16, we must do as above but also use VUPLH to load the higher order digits. Note that the result
+   // of converting packed decimal to zoned decimal will fit in 16 bytes, so we only need to use VUPKZL still.
+   generateVRRkInstruction(cg, TR::InstOpCode::VUPKZL, node, zonedDecimalRegLower, intToPDReg, 0 /*M3*/);
+   // Remove the zone bits
+   generateVRRcInstruction(cg, TR::InstOpCode::VN, node, zonedDecimalRegLower, zonedDecimalRegLower, maskReg, 0, 0, 0);
+   // Now the rightmost 16 bytes should hold the entire intege we care about. So let's add 48 to each byte.
+   generateVRRcInstruction(cg, TR::InstOpCode::VA, node, zonedDecimalRegLower, zonedDecimalRegLower, asciiOffset, 0);
+   // We know zonedDecimalRegLower will be full when we unpack. So we store all bytes in it. But we don't know if
+   // zonedDecimalRegLowerUpperHalf will be full. So we must calculate "stringSize-8" to figure out how many extra digits remain.
+   // ex if stringSize = 10, then 10-8 = 2 digits in upper half. 15 - 2*2-1 = 12 --> 12,13,14,15 are the bytes stored to memory.
+   generateRILInstruction(cg, TR::InstOpCode::SLFI, node, stringSizeReg, 8);
+   generateRSInstruction(cg, TR::InstOpCode::SLA, node, stringSizeReg, 1);
+   generateRILInstruction(cg, TR::InstOpCode::SLFI, node, stringSizeReg, 1);
+   // now stringSize will have position of byte in upper half.
+   // Finally, unpack the higher 8 bytes in zonedDecimalReg1 using VUPLH.
+   TR::Register *zonedDecimalRegLowerUpperHalf = cg->allocateRegister(TR_VRF);
+   generateVRRaInstruction(cg, TR::InstOpCode::VUPLH, node, zonedDecimalRegLowerUpperHalf, zonedDecimalRegLower, 0, 0, 0);
+   // And unpack the lower 8 bytes using VUPLL
+   generateVRRaInstruction(cg, TR::InstOpCode::VUPLL, node, zonedDecimalRegLower, zonedDecimalRegLower, 0, 0, 0);
+   // Store the higher half first as it holds the most significant digits.
+   generateVRSdInstruction(cg, TR::InstOpCode::VSTRLR, node, stringSizeReg, zonedDecimalRegLowerUpperHalf, generateS390MemoryReference(*destinationArrayMemRef, 0, cg));
+
+   // Advance the memoryReference pointer then store the bottom half
+   generateRILInstruction(cg, TR::InstOpCode::AFI, node, stringSizeReg, 1);
+   generateRRInstruction(cg, TR::InstOpCode::getAddRegWidenOpCode(), node, byteArrayReg, stringSizeReg);
+   generateVSIInstruction(cg, TR::InstOpCode::VSTRL, node, zonedDecimalRegLower, generateS390MemoryReference(*destinationArrayMemRef, 0, cg), 15);
+   generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, cFlowRegionEnd);
+
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, moreThan16DigitsLabel);
+   // In this scenario we have between 17 and 19 digits. The logic is similar to before, except we use VUPKZH to unpack the most significant digits (could be anywhere from 1 to 3 digits).
+   // We first unpack into lower and upper zoned decimal halves.
+   generateVRRkInstruction(cg, TR::InstOpCode::VUPKZL, node, zonedDecimalRegLower, intToPDReg, 0 /*M3*/);
+   TR::Register *zonedDecimalRegHigher = cg->allocateRegister(TR_VRF);
+   generateVRRkInstruction(cg, TR::InstOpCode::VUPKZH, node, zonedDecimalRegHigher, intToPDReg, 0 /*M3*/);
+   // Now remove the zone bits in both
+   generateVRRcInstruction(cg, TR::InstOpCode::VN, node, zonedDecimalRegLower, zonedDecimalRegLower, maskReg, 0, 0, 0);
+   generateVRRcInstruction(cg, TR::InstOpCode::VN, node, zonedDecimalRegHigher, zonedDecimalRegHigher, maskReg, 0, 0, 0);
+   // And add 0x30 to all
+   generateVRRcInstruction(cg, TR::InstOpCode::VA, node, zonedDecimalRegLower, zonedDecimalRegLower, asciiOffset, 0);
+   generateVRRcInstruction(cg, TR::InstOpCode::VA, node, zonedDecimalRegHigher, zonedDecimalRegHigher, asciiOffset, 0);
+   // Now unpack the higher half --> i.e. process the most significant digits (anywhere from 1 to 3 digits)
+   generateVRRaInstruction(cg, TR::InstOpCode::VUPLL, node, zonedDecimalRegHigher, zonedDecimalRegHigher, 0, 0, 0);
+   // Calculate how many digits we need to store in this higher half.
+   generateRILInstruction(cg, TR::InstOpCode::SLFI, node, stringSizeReg, 16);
+   generateRSInstruction(cg, TR::InstOpCode::SLA, node, stringSizeReg, 1);
+   generateRILInstruction(cg, TR::InstOpCode::SLFI, node, stringSizeReg, 1);
+   // Store that many bytes from this register
+   generateVRSdInstruction(cg, TR::InstOpCode::VSTRLR, node, stringSizeReg, zonedDecimalRegHigher, generateS390MemoryReference(*destinationArrayMemRef, 0, cg));
+   // Advance buffer pointer
+   generateRILInstruction(cg, TR::InstOpCode::AFI, node, stringSizeReg, 1);
+   generateRRInstruction(cg, TR::InstOpCode::getAddRegWidenOpCode(), node, byteArrayReg, stringSizeReg);
+   // unpack zonedDecimalRegLower into upper and lower halves --> i.e. we now process the least significant 16 digits.
+   generateVRRaInstruction(cg, TR::InstOpCode::VUPLH, node, zonedDecimalRegLowerUpperHalf, zonedDecimalRegLower, 0, 0, 0);
+   generateVRRaInstruction(cg, TR::InstOpCode::VUPLL, node, zonedDecimalRegLower, zonedDecimalRegLower, 0, 0, 0);
+   generateVSIInstruction(cg, TR::InstOpCode::VSTRL, node, zonedDecimalRegLowerUpperHalf, generateS390MemoryReference(*destinationArrayMemRef, 0, cg), 15);
+   // Advance Pointer then store again.
+   generateRILInstruction(cg, TR::InstOpCode::getAddImmOpCode(), node, byteArrayReg, 16);
+   generateVSIInstruction(cg, TR::InstOpCode::VSTRL, node, zonedDecimalRegLower, generateS390MemoryReference(*destinationArrayMemRef, 0, cg), 15);
+
+   TR::RegisterDependencyConditions *dependencies = generateRegisterDependencyConditions(0, 10, cg);
+   dependencies->addPostCondition(inputValueReg, TR::RealRegister::AssignAny);
+   dependencies->addPostCondition(byteArrayReg, TR::RealRegister::AssignAny);
+   dependencies->addPostCondition(stringSizeReg, TR::RealRegister::AssignAny);
+   dependencies->addPostCondition(numCharsRemainingReg, TR::RealRegister::AssignAny);
+   dependencies->addPostCondition(intToPDReg, TR::RealRegister::AssignAny);
+   dependencies->addPostCondition(maskReg, TR::RealRegister::AssignAny);
+   dependencies->addPostCondition(asciiOffset, TR::RealRegister::AssignAny);
+   dependencies->addPostCondition(zonedDecimalRegLower, TR::RealRegister::AssignAny);
+   dependencies->addPostCondition(zonedDecimalRegLowerUpperHalf, TR::RealRegister::AssignAny);
+   dependencies->addPostCondition(zonedDecimalRegHigher, TR::RealRegister::AssignAny);
+
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, cFlowRegionEnd, dependencies);
+
+   // For the purposes of inlining Integer.toString and Long.toString, the return value of the getChars API will always be 0. So we load it here manually.
+   generateRILInstruction(cg, TR::InstOpCode::IILF, node, numCharsRemainingReg, 0);
+
+   cg->decReferenceCount(inputValueNode);
+   cg->decReferenceCount(stringSizeNode);
+   cg->decReferenceCount(byteArrayNode);
+
+   cg->stopUsingRegister(intToPDReg);
+   cg->stopUsingRegister(maskReg);
+   cg->stopUsingRegister(asciiOffset);
+   cg->stopUsingRegister(zonedDecimalRegLower);
+
+   cg->stopUsingRegister(byteArrayReg);
+   cg->stopUsingRegister(stringSizeReg);
+
+   cg->stopUsingRegister(zonedDecimalRegLowerUpperHalf);
+   cg->stopUsingRegister(zonedDecimalRegHigher);
+
+   return node->setRegister(numCharsRemainingReg);
+   }
+
+ /*
+  * This method inlines calls to Integer.stringSize and Long.stringSize using the VCLZDP instruction on z16
+  */
+TR::Register*
+J9::Z::TreeEvaluator::inlineIntegerStringSize(TR::Node* node, TR::CodeGenerator* cg)
+   {
+   TR::Compilation *comp = cg->comp();
+   static const bool disableIntegerStringSizeBranch = feGetEnv("TR_disableStringSizeBranch") != NULL;
+   TR::Node *inputValueNode = node->getChild(0);
+   bool inputIs64Bit = inputValueNode->getDataType() == TR::Int64;
+   TR::Register *inputValueReg = cg->evaluate(inputValueNode);
+
+   TR::LabelSymbol *cFlowRegionStart = generateLabelSymbol(cg);
+   cFlowRegionStart->setStartInternalControlFlow();
+   TR::LabelSymbol *cFlowRegionEnd = generateLabelSymbol(cg);
+   cFlowRegionEnd->setEndInternalControlFlow();
+   TR::LabelSymbol *inputValueZeroLabel = generateLabelSymbol(cg);
+   TR::LabelSymbol *countNumDigitsLabel = generateLabelSymbol(cg);
+
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, cFlowRegionStart);
+   TR::Register *lengthReg = cg->allocateRegister();
+   // If value is 0, we branch to end as string is "0"
+   generateRIInstruction(cg, TR::InstOpCode::LHI, node, lengthReg, 1);
+   generateS390CompareAndBranchInstruction(cg, inputIs64Bit ? TR::InstOpCode::CG : TR::InstOpCode::C, node, inputValueReg, 0, TR::InstOpCode::COND_BE, cFlowRegionEnd, false);
+
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, countNumDigitsLabel);
+   TR::Register *intToPDReg = cg->allocateRegister(TR_VRF);
+   TR::Register *maxNumDigitsReg = cg->allocateRegister(TR_VRF);
+   TR::Register *lengthVectorReg = cg->allocateRegister(TR_VRF);
+   TR::Register *signBitConstant = disableIntegerStringSizeBranch ? cg->allocateRegister(TR_VRF) : NULL;
+   if (disableIntegerStringSizeBranch)
+      {
+      generateVRIaInstruction(cg, TR::InstOpCode::VLEIB, node, signBitConstant, 1, 15);
+      }
+   generateVRIaInstruction(cg, TR::InstOpCode::VLEIB, node, maxNumDigitsReg, 31, 7);
+   generateVRIiInstruction(cg, inputIs64Bit ? TR::InstOpCode::VCVDG : TR::InstOpCode::VCVD, node, intToPDReg, inputValueReg, inputIs64Bit ? 19 : 10, 0x1);
+   TR::Register *leadingZerosReg = cg->allocateRegister(TR_VRF);
+   generateVRRkInstruction(cg, TR::InstOpCode::VCLZDP, node, leadingZerosReg, intToPDReg, 0 /*M3*/);
+   // Now subtract to get length of string
+   generateVRRcInstruction(cg, TR::InstOpCode::VS, node, lengthVectorReg, maxNumDigitsReg, leadingZerosReg, 0);
+
+   if (disableIntegerStringSizeBranch)
+      {
+      generateVRRcInstruction(cg, TR::InstOpCode::VN, node, intToPDReg, intToPDReg, signBitConstant, 0, 0, 0);
+      generateVRRcInstruction(cg, TR::InstOpCode::VA, node, lengthVectorReg, lengthVectorReg, intToPDReg, 0);
+      }
+   else
+      {
+      generateVRScInstruction(cg, TR::InstOpCode::VLGV, node, lengthReg, lengthVectorReg, generateS390MemoryReference(7, cg), 0);
+      // If value is greater than 0, we branch to end. Otherwise we add 1 to lengthReg to account for '-' sign.
+      generateS390CompareAndBranchInstruction(cg, inputIs64Bit ? TR::InstOpCode::CG : TR::InstOpCode::C, node, inputValueReg, 0, TR::InstOpCode::COND_BNL, cFlowRegionEnd, false);
+      generateRILInstruction(cg, TR::InstOpCode::AFI, node, lengthReg, 1);
+      }
+
+   TR::RegisterDependencyConditions *dependencies = generateRegisterDependencyConditions(0, disableIntegerStringSizeBranch ? 7 : 6, cg);
+   dependencies->addPostCondition(inputValueReg, TR::RealRegister::AssignAny);
+   dependencies->addPostCondition(intToPDReg, TR::RealRegister::AssignAny);
+   dependencies->addPostCondition(leadingZerosReg, TR::RealRegister::AssignAny);
+   dependencies->addPostCondition(lengthReg, TR::RealRegister::AssignAny);
+   dependencies->addPostCondition(maxNumDigitsReg, TR::RealRegister::AssignAny);
+   dependencies->addPostCondition(lengthVectorReg, TR::RealRegister::AssignAny);
+   if (disableIntegerStringSizeBranch)
+      {
+      dependencies->addPostCondition(signBitConstant, TR::RealRegister::AssignAny);
+      }
+
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, cFlowRegionEnd, dependencies);
+
+   cg->decReferenceCount(inputValueNode);
+   cg->stopUsingRegister(intToPDReg);
+   cg->stopUsingRegister(leadingZerosReg);
+   cg->stopUsingRegister(maxNumDigitsReg);
+   cg->stopUsingRegister(lengthVectorReg);
+   if (disableIntegerStringSizeBranch)
+      {
+      cg->stopUsingRegister(signBitConstant);
+      }
+
+   return node->setRegister(lengthReg);
    }

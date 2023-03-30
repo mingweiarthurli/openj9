@@ -1,6 +1,6 @@
 /*[INCLUDE-IF Sidecar17]*/
 /*******************************************************************************
- * Copyright (c) 2016, 2016 IBM Corp. and others
+ * Copyright (c) 2016, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -26,13 +26,13 @@ import java.security.BasicPermission;
 import java.security.Permission;
 
 /**
- * This class defines GPU permissions as described in the table below.
+ * This class defines GPU permissions as described in the following table.
  *
- * <table border=1 cellpadding=5>
+ * <table border=1 style="padding:5px">
  * <caption>GPU Permissions</caption>
  * <tr>
- * <th align='left'>Permission Name</th>
- * <th align='left'>Allowed Action</th>
+ * <th style="text-align:left">Permission Name</th>
+ * <th style="text-align:left">Allowed Action</th>
  * </tr>
  * <tr>
  * <td>access</td>

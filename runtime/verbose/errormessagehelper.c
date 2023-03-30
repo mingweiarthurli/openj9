@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2015, 2019 IBM Corp. and others
+ * Copyright (c) 2015, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -356,10 +356,10 @@ prepareVerificationTypeBuffer(StackMapFrame* stackMapFrame, MethodContextInfo* m
 		cpInfo.bytes = (U_8*)methodInfo->signature.bytes;
 		cpInfo.slot1 = (U_32)methodInfo->signature.length;
 
-		/* Calls isInitOrClinitImpl() to determine whether the method is either "<init>" or "<clinit>".
-		 * It returns 1) 0 if name is a normal name 2) 1 if '<init>' or 3) 2 if '<clinit>'
+		/* Calls isInitOrClinitOrNewImpl() to determine whether the method is "<init>", "<clinit>", or "<new>".
+		 * It returns 0 if name is a normal name, CFR_METHOD_NAME_INIT if '<init>', CFR_METHOD_NAME_CLINIT if '<clinit>', and CFR_METHOD_NAME_NEW if '<new>'
 		 */
-		if (CFR_METHOD_NAME_INIT == bcvIsInitOrClinit(&cpInfo)) {
+		if (CFR_METHOD_NAME_INIT == bcvIsInitOrClinitOrNew(&cpInfo)) {
 			vrfyType = CFR_STACKMAP_TYPE_INIT_OBJECT;  /* "this" of an <init> method (cfreader.h) */
 		} else {
 			vrfyType = CFR_STACKMAP_TYPE_OBJECT;
@@ -532,7 +532,27 @@ decodeConstuctedStackMapFrameData(StackMapFrame* stackMapFrame, U_8* nextStackma
 	VerificationTypeInfo* currentVerificationTypeEntry = stackMapFrame->entries;
 	U_16 maxStack = methodInfo->maxStack;
 	U_16 maxLocals = methodInfo->maxLocals;
-	IDATA lastIndex = stackBaseIndex - 1;
+	/* The layout of 'locals' and 'stack' in each stackmap frame of a constructed stackmaps looks as follows:
+	 * +-----------------------+------------------+
+	 * |         locals        |     stack        |
+	 * +-----------------------+------------------+
+	 * 0                      | |
+	 *                lastIndex stackBaseIndex
+	 * It shows that stackBaseIndex points to the 1st element of 'stack' while lastIndex points to
+	 * the last element of 'locals'.
+	 *
+	 * Initially, both stackBaseIndex and stackTopIndex are set to -1 by default before the stackmaps
+	 * are constructed internally against the class bytecode (class version <= 50) via simulateStack(),
+	 * in which case both 'locals' and 'stack' are empty in each stackmap frame of the stackmaps.
+	 * (See the code of initializing stackmaps in j9bcv_verifyBytecodes() at bcverify.c)
+	 *
+	 * Thus, there are 3 cases in terms of a given stackmap frame of the constructed stackmaps:
+	 * 1)if stackBaseIndex == -1(which means that both 'locals' and 'stack' are empty), lastIndex is -1.
+	 * 2)if stackBaseIndex == 0 (which means that there is 1 element in 'locals'), lastIndex is 0.
+	 * 3)if stackBaseIndex >= 1 (which means that there is at least 1 element in 'locals'),
+	 *   lastIndex is (stackBaseIndex - 1).
+	 */
+	IDATA lastIndex = (stackBaseIndex >= 1) ? (stackBaseIndex - 1) : stackBaseIndex;
 	IDATA slot = 0;
 	IDATA dataTypeCode = DATATYPE_1_SLOT;
 	BOOLEAN nonTopFound = FALSE;
@@ -629,8 +649,16 @@ convertBcvToCfrType(MethodContextInfo* methodInfo, StackMapFrame* stackMapFrame,
 		break;
 	case BCV_OBJECT_OR_ARRAY:
 	default:
-		*currentVerificationTypeEntry = pushVerificationTypeInfo(methodInfo, stackMapFrame, *currentVerificationTypeEntry, CFR_STACKMAP_TYPE_OBJECT, INDEX_CLASSNAMELIST, bcvType);
-		break;
+		{
+			U_8 objTypeTag = CFR_STACKMAP_TYPE_OBJECT;
+	#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+			if (J9_ARE_ALL_BITS_SET(bcvType, BCV_PRIMITIVE_VALUETYPE)) {
+				objTypeTag = CFR_STACKMAP_TYPE_PRIMITIVE_OBJECT;
+			}
+	#endif /* #if defined(J9VM_OPT_VALHALLA_VALUE_TYPES) */
+			*currentVerificationTypeEntry = pushVerificationTypeInfo(methodInfo, stackMapFrame, *currentVerificationTypeEntry, objTypeTag, INDEX_CLASSNAMELIST, bcvType);
+			break;
+		}
 	}
 
 	/* Set to out-of-memory if unable to allocate memory for data type in the verification type buffer  */
@@ -799,6 +827,7 @@ releaseVerificationTypeBuffer(StackMapFrame* stackMapFrame, MethodContextInfo* m
 	if (NULL != stackMapFrame->entries) {
 		PORT_ACCESS_FROM_PORT(methodInfo->portLib);
 		j9mem_free_memory(stackMapFrame->entries);
+		stackMapFrame->entries = NULL;
 	}
 }
 
@@ -839,6 +868,9 @@ mapDataTypeToUTF8String(J9UTF8Ref* dataType, StackMapFrame* stackMapFrame, Metho
 		dataType->arity = (U_8)typeValue;
 		break;
 	case CFR_STACKMAP_TYPE_OBJECT:
+#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+	case CFR_STACKMAP_TYPE_PRIMITIVE_OBJECT:
+#endif /* #if defined(J9VM_OPT_VALHALLA_VALUE_TYPES) */
 	{
 		/* Set the name string for object reference.
 		 * Identify what the type index value is according to the index attribute.
@@ -922,8 +954,8 @@ printTypeInfoToBuffer(MessageBuffer* buf, U_8 tag, J9UTF8Ref* dataType, BOOLEAN 
 	switch(tag) {
 	case CFR_STACKMAP_TYPE_TOP:
 		/* Only print the 2nd slot of long/double type to the error message buffer for the "Reason" section in the error message framework. */
-		if ((0 == strncmp((char*)dataType->bytes, TYPE_LONG, sizeof(TYPE_LONG) - 1))
-		|| (0 == strncmp((char*)dataType->bytes, TYPE_DOUBLE, sizeof(TYPE_DOUBLE) - 1))
+		if (J9UTF8_DATA_EQUALS(TYPE_LONG, sizeof(TYPE_LONG) - 1, dataType->bytes, dataType->length)
+		 || J9UTF8_DATA_EQUALS(TYPE_DOUBLE, sizeof(TYPE_DOUBLE) - 1, dataType->bytes, dataType->length)
 		) {
 			printMessage(buf, "%.*s_2nd", dataType->length, dataType->bytes);
 		} else {
@@ -978,6 +1010,16 @@ printTypeInfoToBuffer(MessageBuffer* buf, U_8 tag, J9UTF8Ref* dataType, BOOLEAN 
 				(dataType->arity > 0) ? 1 : 0, ";"	/* class suffix ';' only when arity > 0 */
 				);
 		break;
+#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+	case CFR_STACKMAP_TYPE_PRIMITIVE_OBJECT:
+		/* Object, init/new object and object 'reference' */
+		printMessage(buf, "'%.*s%.*s%.*s'",
+				 1, "Q",	/* class prefix 'Q' for the primitive object */
+				dataType->length, dataType->bytes,	/* class name */
+				 1, ";"	/* class suffix ';' */
+				);
+		break;
+#endif /* #if defined(J9VM_OPT_VALHALLA_VALUE_TYPES) */
 	default:
 		Assert_VRB_ShouldNeverHappen();
 		break;

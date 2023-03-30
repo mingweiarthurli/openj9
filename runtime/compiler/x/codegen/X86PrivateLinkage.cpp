@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -163,7 +163,7 @@ void J9::X86::PrivateLinkage::copyGlRegDepsToParameterSymbols(TR::Node *bbStart,
 
 TR::Instruction *J9::X86::PrivateLinkage::copyStackParametersToLinkageRegisters(TR::Instruction *procEntryInstruction)
    {
-   TR_ASSERT(procEntryInstruction && procEntryInstruction->getOpCodeValue() == PROCENTRY, "assertion failure");
+   TR_ASSERT(procEntryInstruction && procEntryInstruction->getOpCodeValue() == TR::InstOpCode::proc, "assertion failure");
    TR::Instruction *intrpPrev = procEntryInstruction->getPrev(); // The instruction before the interpreter entry point
    movLinkageRegisters(intrpPrev, false);
    return intrpPrev->getNext();
@@ -431,7 +431,7 @@ static TR::Instruction *initializeLocals(TR::Instruction      *cursor,
          {
          cursor = new (cg->trHeapMemory()) TR::X86MemRegInstruction(
             cursor,
-            SMemReg(),
+            TR::InstOpCode::SMemReg(),
             generateX86MemoryReference(framePointer, offset, cg),
             sourceReg,
             cg);
@@ -448,17 +448,17 @@ static TR::Instruction *initializeLocals(TR::Instruction      *cursor,
 
       cursor = new (cg->trHeapMemory()) TR::X86RegMemInstruction(
                   cursor,
-                  LEARegMem(),
+                  TR::InstOpCode::LEARegMem(),
                   loopReg,
                   generateX86MemoryReference(sourceReg, count-1, cg),
                   cg);
 
       TR::LabelSymbol *loopLabel = generateLabelSymbol(cg);
-      cursor = new (cg->trHeapMemory()) TR::X86LabelInstruction(cursor, LABEL, loopLabel, cg);
+      cursor = new (cg->trHeapMemory()) TR::X86LabelInstruction(cursor, TR::InstOpCode::label, loopLabel, cg);
 
       cursor = new (cg->trHeapMemory()) TR::X86MemRegInstruction(
          cursor,
-         SMemReg(),
+         TR::InstOpCode::SMemReg(),
          generateX86MemoryReference(
             framePointer,
             loopReg,
@@ -468,8 +468,8 @@ static TR::Instruction *initializeLocals(TR::Instruction      *cursor,
          sourceReg,
          cg);
 
-      cursor = new (cg->trHeapMemory()) TR::X86RegImmInstruction(cursor, SUB4RegImms, loopReg, 1, cg);
-      cursor = new (cg->trHeapMemory()) TR::X86LabelInstruction(cursor, JAE4, loopLabel, cg);
+      cursor = new (cg->trHeapMemory()) TR::X86RegImmInstruction(cursor, TR::InstOpCode::SUB4RegImms, loopReg, 1, cg);
+      cursor = new (cg->trHeapMemory()) TR::X86LabelInstruction(cursor, TR::InstOpCode::JAE4, loopLabel, cg);
       }
 
    return cursor;
@@ -596,7 +596,7 @@ void J9::X86::PrivateLinkage::createPrologue(TR::Instruction *cursor)
          //
          cursor = new (trHeapMemory()) TR::X86PaddingInstruction(cursor, minInstructionSize, TR_AtomicNoOpPadding, cg());
          }
-      cursor = new (trHeapMemory()) TR::Instruction(BADIA32Op, cursor, cg());
+      cursor = new (trHeapMemory()) TR::Instruction(TR::InstOpCode::INT3, cursor, cg());
       }
 
    // Compute the nature of the preserved regs
@@ -703,7 +703,7 @@ void J9::X86::PrivateLinkage::createPrologue(TR::Instruction *cursor)
       );
 #endif
 
-   // Set the VFP state for the PROCENTRY instruction
+   // Set the VFP state for the TR::InstOpCode::proc instruction
    //
    if (_properties.getAlwaysDedicateFramePointerRegister())
       {
@@ -740,7 +740,7 @@ void J9::X86::PrivateLinkage::createPrologue(TR::Instruction *cursor)
          TR_ASSERT(minInstructionSize <= 5, "Can't guarantee SUB instruction will be at least %d bytes", minInstructionSize);
          TR_ASSERT(allocSize >= 1, "When allocSize >= 1, the frame should be small or large, but never medium");
 
-         const TR_X86OpCodes subOp = (allocSize <= 127 && getMinimumFirstInstructionSize() <= 3)? SUBRegImms() : SUBRegImm4();
+         const TR::InstOpCode::Mnemonic subOp = (allocSize <= 127 && getMinimumFirstInstructionSize() <= 3)? TR::InstOpCode::SUBRegImms() : TR::InstOpCode::SUBRegImm4();
          cursor = new (trHeapMemory()) TR::X86RegImmInstruction(cursor, subOp, espReal, allocSize, cg());
 
          minInstructionSize = 0; // The SUB satisfies the constraint
@@ -750,7 +750,7 @@ void J9::X86::PrivateLinkage::createPrologue(TR::Instruction *cursor)
       if (doOverflowCheck)
          {
          TR::X86VFPSaveInstruction* vfp = generateVFPSaveInstruction(cursor, cg());
-         cursor = generateStackOverflowCheckInstruction(vfp, CMPRegMem(), espReal, generateX86MemoryReference(metaDataReg, cg()->getStackLimitOffset(), cg()), cg());
+         cursor = generateStackOverflowCheckInstruction(vfp, TR::InstOpCode::CMPRegMem(), espReal, generateX86MemoryReference(metaDataReg, cg()->getStackLimitOffset(), cg()), cg());
 
          TR::LabelSymbol* begLabel = generateLabelSymbol(cg());
          TR::LabelSymbol* endLabel = generateLabelSymbol(cg());
@@ -759,27 +759,30 @@ void J9::X86::PrivateLinkage::createPrologue(TR::Instruction *cursor)
          endLabel->setEndInternalControlFlow();
          checkLabel->setStartOfColdInstructionStream();
 
-         cursor = generateLabelInstruction(cursor, LABEL, begLabel, cg());
-         cursor = generateLabelInstruction(cursor, JBE4, checkLabel, cg());
-         cursor = generateLabelInstruction(cursor, LABEL, endLabel, cg());
+         cursor = generateLabelInstruction(cursor, TR::InstOpCode::label, begLabel, cg());
+         cursor = generateLabelInstruction(cursor, TR::InstOpCode::JBE4, checkLabel, cg());
+         cursor = generateLabelInstruction(cursor, TR::InstOpCode::label, endLabel, cg());
 
          // At this point, cg()->getAppendInstruction() is already in the cold code section.
          generateVFPRestoreInstruction(vfp, cursor->getNode(), cg());
-         generateLabelInstruction(LABEL, cursor->getNode(), checkLabel, cg());
-         generateRegImmInstruction(MOV4RegImm4, cursor->getNode(), machine()->getRealRegister(TR::RealRegister::edi), allocSize, cg());
+         generateLabelInstruction(TR::InstOpCode::label, cursor->getNode(), checkLabel, cg());
+         generateRegImmInstruction(TR::InstOpCode::MOV4RegImm4, cursor->getNode(), machine()->getRealRegister(TR::RealRegister::edi), allocSize, cg());
          if (doAllocateFrameSpeculatively)
             {
-            generateRegImmInstruction(ADDRegImm4(), cursor->getNode(), espReal, allocSize, cg());
+            generateRegImmInstruction(TR::InstOpCode::ADDRegImm4(), cursor->getNode(), espReal, allocSize, cg());
             }
          TR::SymbolReference* helper = comp()->getSymRefTab()->findOrCreateStackOverflowSymbolRef(NULL);
-         jitOverflowCheck = generateImmSymInstruction(CALLImm4, cursor->getNode(), (uintptr_t)helper->getMethodAddress(), helper, cg());
+         jitOverflowCheck = generateImmSymInstruction(TR::InstOpCode::CALLImm4, cursor->getNode(), (uintptr_t)helper->getMethodAddress(), helper, cg());
          jitOverflowCheck->setNeedsGCMap(0xFF00FFFF);
          if (doAllocateFrameSpeculatively)
             {
-            generateRegImmInstruction(SUBRegImm4(), cursor->getNode(), espReal, allocSize, cg());
+            generateRegImmInstruction(TR::InstOpCode::SUBRegImm4(), cursor->getNode(), espReal, allocSize, cg());
             }
-         generateLabelInstruction(JMP4, cursor->getNode(), endLabel, cg());
+         generateLabelInstruction(TR::InstOpCode::JMP4, cursor->getNode(), endLabel, cg());
          }
+
+      if (cg()->canEmitBreakOnDFSet())
+         cursor = generateBreakOnDFSet(cg(), cursor);
 
       if (atlas)
          {
@@ -838,7 +841,7 @@ void J9::X86::PrivateLinkage::createPrologue(TR::Instruction *cursor)
    else if (!doAllocateFrameSpeculatively)
       {
       TR_ASSERT(minInstructionSize <= 5, "Can't guarantee SUB instruction will be at least %d bytes", minInstructionSize);
-      const TR_X86OpCodes subOp = (allocSize <= 127 && getMinimumFirstInstructionSize() <= 3)? SUBRegImms() : SUBRegImm4();
+      const TR::InstOpCode::Mnemonic subOp = (allocSize <= 127 && getMinimumFirstInstructionSize() <= 3)? TR::InstOpCode::SUBRegImms() : TR::InstOpCode::SUBRegImm4();
       cursor = new (trHeapMemory()) TR::X86RegImmInstruction(cursor, subOp, espReal, allocSize, cg());
       }
 
@@ -883,20 +886,20 @@ void J9::X86::PrivateLinkage::createPrologue(TR::Instruction *cursor)
       //Load the 64 bit paint value into a paint reg.
 #ifdef TR_TARGET_64BIT
        paintReg = machine()->getRealRegister(TR::RealRegister::r8);
-       cursor = new (trHeapMemory()) TR::AMD64RegImm64Instruction(cursor, MOV8RegImm64, paintReg, paintValue64, cg());
+       cursor = new (trHeapMemory()) TR::AMD64RegImm64Instruction(cursor, TR::InstOpCode::MOV8RegImm64, paintReg, paintValue64, cg());
 #endif
 
       //Perform the paint.
       //
-      cursor = new (trHeapMemory()) TR::X86RegImmInstruction(cursor, MOVRegImm4(), frameSlotIndexReg, paintSize, cg());
-      cursor = new (trHeapMemory()) TR::X86LabelInstruction(cursor, LABEL, startLabel, cg());
+      cursor = new (trHeapMemory()) TR::X86RegImmInstruction(cursor, TR::InstOpCode::MOVRegImm4(), frameSlotIndexReg, paintSize, cg());
+      cursor = new (trHeapMemory()) TR::X86LabelInstruction(cursor, TR::InstOpCode::label, startLabel, cg());
       if (comp()->target().is64Bit())
-         cursor = new (trHeapMemory()) TR::X86MemRegInstruction(cursor, S8MemReg, generateX86MemoryReference(espReal, frameSlotIndexReg, 0,(uint8_t) paintSlotsOffset, cg()), paintReg, cg());
+         cursor = new (trHeapMemory()) TR::X86MemRegInstruction(cursor, TR::InstOpCode::S8MemReg, generateX86MemoryReference(espReal, frameSlotIndexReg, 0,(uint8_t) paintSlotsOffset, cg()), paintReg, cg());
       else
-         cursor = new (trHeapMemory()) TR::X86MemImmInstruction(cursor, SMemImm4(), generateX86MemoryReference(espReal, frameSlotIndexReg, 0,(uint8_t) paintSlotsOffset, cg()), paintValue32, cg());
-      cursor = new (trHeapMemory()) TR::X86RegImmInstruction(cursor, SUBRegImms(), frameSlotIndexReg, sizeof(intptr_t),cg());
-      cursor = new (trHeapMemory()) TR::X86RegImmInstruction(cursor, CMPRegImm4(), frameSlotIndexReg, paintBound, cg());
-      cursor = new (trHeapMemory()) TR::X86LabelInstruction(cursor, JGE4, startLabel,cg());
+         cursor = new (trHeapMemory()) TR::X86MemImmInstruction(cursor, TR::InstOpCode::SMemImm4(), generateX86MemoryReference(espReal, frameSlotIndexReg, 0,(uint8_t) paintSlotsOffset, cg()), paintValue32, cg());
+      cursor = new (trHeapMemory()) TR::X86RegImmInstruction(cursor, TR::InstOpCode::SUBRegImms(), frameSlotIndexReg, sizeof(intptr_t),cg());
+      cursor = new (trHeapMemory()) TR::X86RegImmInstruction(cursor, TR::InstOpCode::CMPRegImm4(), frameSlotIndexReg, paintBound, cg());
+      cursor = new (trHeapMemory()) TR::X86LabelInstruction(cursor, TR::InstOpCode::JGE4, startLabel,cg());
       }
 
    // Save preserved regs
@@ -927,7 +930,7 @@ void J9::X86::PrivateLinkage::createPrologue(TR::Instruction *cursor)
 
       if (numReferenceLocalSlotsToInitialize > 0 || numInternalPointerSlotsToInitialize > 0)
          {
-         cursor = new (trHeapMemory()) TR::X86RegRegInstruction(cursor, XORRegReg(), scratchReg, scratchReg, cg());
+         cursor = new (trHeapMemory()) TR::X86RegRegInstruction(cursor, TR::InstOpCode::XORRegReg(), scratchReg, scratchReg, cg());
 
          // Initialize locals that are live on entry
          //
@@ -1019,6 +1022,9 @@ TR::Instruction *J9::X86::PrivateLinkage::deallocateFrameIfNeeded(TR::Instructio
 
 void J9::X86::PrivateLinkage::createEpilogue(TR::Instruction *cursor)
    {
+   if (cg()->canEmitBreakOnDFSet())
+      cursor = generateBreakOnDFSet(cg(), cursor);
+
    TR::RealRegister* espReal = machine()->getRealRegister(TR::RealRegister::esp);
 
    cursor = cg()->generateDebugCounter(cursor, "cg.epilogues", 1, TR::DebugCounter::Expensive);
@@ -1033,19 +1039,19 @@ void J9::X86::PrivateLinkage::createEpilogue(TR::Instruction *cursor)
       {
       // Restore stack pointer from frame pointer
       //
-      cursor = generateRegRegInstruction(cursor, MOVRegReg(), espReal, machine()->getRealRegister(_properties.getFramePointerRegister()), cg());
-      cursor = generateRegInstruction(cursor, POPReg, machine()->getRealRegister(_properties.getFramePointerRegister()), cg());
+      cursor = generateRegRegInstruction(cursor, TR::InstOpCode::MOVRegReg(), espReal, machine()->getRealRegister(_properties.getFramePointerRegister()), cg());
+      cursor = generateRegInstruction(cursor, TR::InstOpCode::POPReg, machine()->getRealRegister(_properties.getFramePointerRegister()), cg());
       }
    else
       {
       auto frameSize = cg()->getFrameSizeInBytes();
       if (frameSize != 0)
          {
-         cursor = generateRegImmInstruction(cursor, (frameSize <= 127) ? ADDRegImms() : ADDRegImm4(), espReal, frameSize, cg());
+         cursor = generateRegImmInstruction(cursor, (frameSize <= 127) ? TR::InstOpCode::ADDRegImms() : TR::InstOpCode::ADDRegImm4(), espReal, frameSize, cg());
          }
       }
 
-   if (cursor->getNext()->getOpCodeValue() == RETImm2)
+   if (cursor->getNext()->getOpCodeValue() == TR::InstOpCode::RETImm2)
       {
       toIA32ImmInstruction(cursor->getNext())->setSourceImmediate(comp()->getJittedMethodSymbol()->getNumParameterSlots() << getProperties().getParmSlotShift());
       }
@@ -1084,7 +1090,7 @@ J9::X86::PrivateLinkage::buildDirectDispatch(
          {
          if (TR::SimpleRegex::matchIgnoringLocale(r, name))
             {
-            generateInstruction(BADIA32Op, callNode, cg());
+            generateInstruction(TR::InstOpCode::INT3, callNode, cg());
             }
          }
       }
@@ -1111,7 +1117,7 @@ J9::X86::PrivateLinkage::buildDirectDispatch(
 
    // Create the internal control flow region and VFP adjustment
    //
-   generateLabelInstruction(startBookmark, LABEL, startLabel, site.getPreConditionsUnderConstruction(), cg());
+   generateLabelInstruction(startBookmark, TR::InstOpCode::label, startLabel, site.getPreConditionsUnderConstruction(), cg());
    if (getProperties().getCallerCleanup())
       {
       // TODO: Caller must clean up
@@ -1124,7 +1130,7 @@ J9::X86::PrivateLinkage::buildDirectDispatch(
       {
       generateVFPCallCleanupInstruction(-site.getArgSize(), callNode, cg());
       }
-   generateLabelInstruction(LABEL, callNode, doneLabel, site.getPostConditionsUnderConstruction(), cg());
+   generateLabelInstruction(TR::InstOpCode::label, callNode, doneLabel, site.getPostConditionsUnderConstruction(), cg());
 
    // Stop using the killed registers that are not going to persist
    //
@@ -1138,7 +1144,7 @@ J9::X86::PrivateLinkage::buildDirectDispatch(
          // If the method returns a floating-point value that is not used, insert a
          // dummy store to eventually pop the value from the floating-point stack.
          //
-         generateFPSTiST0RegRegInstruction(FSTRegReg, callNode, returnRegister, returnRegister, cg());
+         generateFPSTiST0RegRegInstruction(TR::InstOpCode::FSTRegReg, callNode, returnRegister, returnRegister, cg());
          }
       else if (forceX87LinkageForSSE && returnRegister->getKind() == TR_FPR)
          {
@@ -1176,7 +1182,7 @@ TR::X86CallSite::X86CallSite(TR::Node *callNode, TR::Linkage *calleeLinkage)
       //
       TR::Method *interfaceMethod = getMethodSymbol()->getMethod();
       int32_t len = interfaceMethod->classNameLength();
-      char * s = classNameToSignature(interfaceMethod->classNameChars(), len, comp());
+      char * s = TR::Compiler->cls.classNameToSignature(interfaceMethod->classNameChars(), len, comp());
       _interfaceClassOfMethod = fej9->getClassFromSignature(s, len, getSymbolReference()->getOwningMethod(comp()));
       }
 
@@ -1255,7 +1261,7 @@ void TR::X86CallSite::setupVirtualGuardInfo()
                {
                TR_ResolvedMethod * method = chTable->findSingleAbstractImplementer(thisClass, methodSymRef->getOffset(), methodSymRef->getOwningMethod(comp()), comp());
                if (method &&
-                   ((method->isSameMethod(comp()->getCurrentMethod()) && !comp()->isDLT()) ||
+                   (comp()->isRecursiveMethodTarget(method) ||
                     !method->isInterpreted() ||
                     method->isJITInternalNative()))
                   {
@@ -1270,7 +1276,7 @@ void TR::X86CallSite::setupVirtualGuardInfo()
                   {
                   TR_ResolvedMethod *calleeMethod = methodSymRef->getOwningMethod(comp())->getResolvedVirtualMethod(comp(), refinedThisClass, methodSymRef->getOffset());
                   if (calleeMethod &&
-                      ((calleeMethod->isSameMethod(comp()->getCurrentMethod()) && !comp()->isDLT()) ||
+                      (comp()->isRecursiveMethodTarget(calleeMethod) ||
                        !calleeMethod->isInterpreted() ||
                        calleeMethod->isJITInternalNative()))
                      {
@@ -1338,12 +1344,11 @@ void TR::X86CallSite::computeProfiledTargets()
                {
                topValue = 0;
                }
-            // We can't do this guarded devirtualization if the profile data is not correct for this context. See defect 98813
             else
                {
                //printf("Checking is instanceof for top %p for %s\n", topValue, methodSymRef->getSymbol()->getResolvedMethodSymbol()->getResolvedMethod()->signature(comp()->trMemory())); fflush(stdout);
-               TR_OpaqueClassBlock *callSiteMethod = methodSymRef->getSymbol()->getResolvedMethodSymbol()->getResolvedMethod()->classOfMethod();
-               if (fej9->isInstanceOf((TR_OpaqueClassBlock *)topValue, callSiteMethod, true, true) != TR_yes)
+               TR_OpaqueClassBlock *callSiteMethodClass = methodSymRef->getSymbol()->getResolvedMethodSymbol()->getResolvedMethod()->classOfMethod();
+               if (!cg()->isProfiledClassAndCallSiteCompatible((TR_OpaqueClassBlock *)topValue, callSiteMethodClass))
                   {
                   topValue = 0;
                   }
@@ -1533,8 +1538,13 @@ bool TR::X86CallSite::resolvedVirtualShouldUseVFTCall()
    TR_J9VMBase *fej9 = (TR_J9VMBase *)(fe());
    TR_ASSERT(getMethodSymbol()->isVirtual() && !getSymbolReference()->isUnresolved(), "assertion failure");
 
+   // WARNING: VPIC doesn't work for resolved calls at the moment, so setting
+   // TR_EnableVPICForResolvedVirtualCalls won't work. The most straightforward
+   // way to get VPIC to support (most) resolved calls is to simply treat them
+   // the same way as unresolved ones, but that isn't allowed when we are
+   // promising isResolvedVirtualDispatchGuaranteed().
    return
-      !fej9->forceUnresolvedDispatch() &&
+      fej9->isResolvedVirtualDispatchGuaranteed(comp()) &&
       (!comp()->getOption(TR_EnableVPICForResolvedVirtualCalls)    ||
        getProfiledTargets()                                        ||
        getCallNode()->isTheVirtualCallNodeForAGuardedInlinedCall() ||
@@ -1547,8 +1557,8 @@ void TR::X86CallSite::stopAddingConditions()
    TR_J9VMBase *fej9 = (TR_J9VMBase *)(fe());
    if (COPY_PRECONDITIONS_TO_POSTCONDITIONS)
       {
-      TR_X86RegisterDependencyGroup *preconditions  = getPreConditionsUnderConstruction()->getPreConditions();
-      TR_X86RegisterDependencyGroup *postconditions = getPostConditionsUnderConstruction()->getPostConditions();
+      TR::RegisterDependencyGroup *preconditions  = getPreConditionsUnderConstruction()->getPreConditions();
+      TR::RegisterDependencyGroup *postconditions = getPostConditionsUnderConstruction()->getPostConditions();
       for (uint8_t i = 0; i < getPreConditionsUnderConstruction()->getAddCursorForPre(); i++)
          {
          TR::RegisterDependency *pre  = preconditions->getRegisterDependency(i);
@@ -1738,6 +1748,7 @@ TR::Register *J9::X86::PrivateLinkage::buildIndirectDispatch(TR::Node *callNode)
          switch (method->getMandatoryRecognizedMethod())
             {
             case TR::java_lang_invoke_ComputedCalls_dispatchVirtual:
+            case TR::com_ibm_jit_JITHelpers_dispatchVirtual:
                {
                // Need a j2i thunk for the method that will ultimately be dispatched by this handle call
                char *j2iSignature = fej9->getJ2IThunkSignatureForDispatchVirtual(methodSymbol->getMethod()->signatureChars(), methodSymbol->getMethod()->signatureLength(), comp());
@@ -1808,7 +1819,7 @@ TR::Register *J9::X86::PrivateLinkage::buildIndirectDispatch(TR::Node *callNode)
 
             picSlot = i.getNext();
             if (picSlot)
-               generateLabelInstruction(LABEL, site.getCallNode(), picMismatchLabel, cg());
+               generateLabelInstruction(TR::InstOpCode::label, site.getCallNode(), picMismatchLabel, cg());
             }
 
          site.setFirstPICSlotInstruction(NULL);
@@ -1851,10 +1862,10 @@ TR::Register *J9::X86::PrivateLinkage::buildIndirectDispatch(TR::Node *callNode)
 
    // Create the internal control flow region and VFP adjustment
    //
-   generateLabelInstruction(startBookmark, LABEL, startLabel, site.getPreConditionsUnderConstruction(), cg());
+   generateLabelInstruction(startBookmark, TR::InstOpCode::label, startLabel, site.getPreConditionsUnderConstruction(), cg());
    if (!getProperties().getCallerCleanup())
       generateVFPCallCleanupInstruction(-site.getArgSize(), callNode, cg());
-   generateLabelInstruction(LABEL, callNode, doneLabel, site.getPostConditionsUnderConstruction(), cg());
+   generateLabelInstruction(TR::InstOpCode::label, callNode, doneLabel, site.getPostConditionsUnderConstruction(), cg());
 
    // Stop using the killed registers that are not going to persist
    //
@@ -1868,7 +1879,7 @@ TR::Register *J9::X86::PrivateLinkage::buildIndirectDispatch(TR::Node *callNode)
          // If the method returns a floating-point value that is not used, insert a
          // dummy store to eventually pop the value from the floating-point stack.
          //
-         generateFPSTiST0RegRegInstruction(FSTRegReg, callNode, returnRegister, returnRegister, cg());
+         generateFPSTiST0RegRegInstruction(TR::InstOpCode::FSTRegReg, callNode, returnRegister, returnRegister, cg());
          }
       else if (forceX87LinkageForSSE && returnRegister->getKind() == TR_FPR)
          {
@@ -1921,11 +1932,11 @@ void J9::X86::PrivateLinkage::buildDirectCall(TR::SymbolReference *methodSymRef,
       // Load the RAM method into rdi and call the helper
       if (comp()->target().is64Bit())
          {
-         generateRegImm64Instruction(MOV8RegImm64, callNode, ramMethodReg, (uint64_t)(uintptr_t)methodSymbol->getMethodAddress(), cg());
+         generateRegImm64Instruction(TR::InstOpCode::MOV8RegImm64, callNode, ramMethodReg, (uint64_t)(uintptr_t)methodSymbol->getMethodAddress(), cg());
          }
       else
          {
-         generateRegImmInstruction(MOV4RegImm4, callNode, ramMethodReg, (uint32_t)(uintptr_t)methodSymbol->getMethodAddress(), cg());
+         generateRegImmInstruction(TR::InstOpCode::MOV4RegImm4, callNode, ramMethodReg, (uint32_t)(uintptr_t)methodSymbol->getMethodAddress(), cg());
          }
 
       callInstr = generateHelperCallInstruction(callNode, TR_j2iTransition, NULL, cg());
@@ -1940,8 +1951,8 @@ void J9::X86::PrivateLinkage::buildDirectCall(TR::SymbolReference *methodSymRef,
       TR::Register *nativeMethodReg = cg()->allocateRegister();
       site.addPostCondition(nativeMethodReg, TR::RealRegister::edi);
 
-      generateRegImm64Instruction(MOV8RegImm64, callNode, nativeMethodReg, (uint64_t)(uintptr_t)methodSymbol->getMethodAddress(), cg());
-      callInstr = generateRegInstruction(CALLReg, callNode, nativeMethodReg, cg());
+      generateRegImm64Instruction(TR::InstOpCode::MOV8RegImm64, callNode, nativeMethodReg, (uint64_t)(uintptr_t)methodSymbol->getMethodAddress(), cg());
+      callInstr = generateRegInstruction(TR::InstOpCode::CALLReg, callNode, nativeMethodReg, cg());
       cg()->stopUsingRegister(nativeMethodReg);
       }
    else if (methodSymRef->isUnresolved() || methodSymbol->isInterpreted()
@@ -1953,7 +1964,7 @@ void J9::X86::PrivateLinkage::buildDirectCall(TR::SymbolReference *methodSymRef,
       cg()->addSnippet(snippet);
       snippet->gcMap().setGCRegisterMask(site.getPreservedRegisterMask());
 
-      callInstr = generateImmSymInstruction(CALLImm4, callNode, 0, new (trHeapMemory()) TR::SymbolReference(comp()->getSymRefTab(), label), cg());
+      callInstr = generateImmSymInstruction(TR::InstOpCode::CALLImm4, callNode, 0, new (trHeapMemory()) TR::SymbolReference(comp()->getSymRefTab(), label), cg());
       generateBoundaryAvoidanceInstruction(TR::X86BoundaryAvoidanceInstruction::unresolvedAtomicRegions, 8, 8, callInstr, cg());
 
       // Nop is necessary due to confusion when resolving shared slots at a transition
@@ -1962,7 +1973,7 @@ void J9::X86::PrivateLinkage::buildDirectCall(TR::SymbolReference *methodSymRef,
       }
    else
       {
-      callInstr = generateImmSymInstruction(CALLImm4, callNode, (uintptr_t)methodSymbol->getMethodAddress(), methodSymRef, cg());
+      callInstr = generateImmSymInstruction(TR::InstOpCode::CALLImm4, callNode, (uintptr_t)methodSymbol->getMethodAddress(), methodSymRef, cg());
 
       if (comp()->target().isSMP() && !methodSymbol->isHelper())
          {
@@ -2081,12 +2092,12 @@ bool J9::X86::PrivateLinkage::buildVirtualGuard(TR::X86CallSite &site, TR::Label
       // We can do an explicit guard
       //
       uint32_t overRiddenBit = fej9->offsetOfIsOverriddenBit();
-      TR_X86OpCodes opCode;
+      TR::InstOpCode::Mnemonic opCode;
 
       if (overRiddenBit <= 0xff)
-         opCode = TEST1MemImm1;
+         opCode = TR::InstOpCode::TEST1MemImm1;
       else
-         opCode = TEST4MemImm4;
+         opCode = TR::InstOpCode::TEST4MemImm4;
 
       generateMemImmInstruction(
          opCode,
@@ -2096,7 +2107,7 @@ bool J9::X86::PrivateLinkage::buildVirtualGuard(TR::X86CallSite &site, TR::Label
          cg()
          );
 
-      generateLabelInstruction(JNE4, callNode, revirtualizeLabel, cg());
+      generateLabelInstruction(TR::InstOpCode::JNE4, callNode, revirtualizeLabel, cg());
 
       return true;
       }
@@ -2108,14 +2119,14 @@ bool J9::X86::PrivateLinkage::buildVirtualGuard(TR::X86CallSite &site, TR::Label
       }
    }
 
-TR::Instruction *J9::X86::PrivateLinkage::buildVFTCall(TR::X86CallSite &site, TR_X86OpCode dispatchOp, TR::Register *targetAddressReg, TR::MemoryReference *targetAddressMemref)
+TR::Instruction *J9::X86::PrivateLinkage::buildVFTCall(TR::X86CallSite &site, TR::InstOpCode dispatchOp, TR::Register *targetAddressReg, TR::MemoryReference *targetAddressMemref)
    {
    TR::Node *callNode = site.getCallNode();
    if (cg()->enableSinglePrecisionMethods() &&
        comp()->getJittedMethodSymbol()->usesSinglePrecisionMode())
       {
       auto cds = cg()->findOrCreate2ByteConstant(callNode, DOUBLE_PRECISION_ROUND_TO_NEAREST);
-      generateMemInstruction(LDCWMem, callNode, generateX86MemoryReference(cds, cg()), cg());
+      generateMemInstruction(TR::InstOpCode::LDCWMem, callNode, generateX86MemoryReference(cds, cg()), cg());
       }
 
    TR::Instruction *callInstr;
@@ -2133,33 +2144,35 @@ TR::Instruction *J9::X86::PrivateLinkage::buildVFTCall(TR::X86CallSite &site, TR
       TR::Node *callNode = site.getCallNode();
       TR::ResolvedMethodSymbol *resolvedMethodSymbol = callNode->getSymbol()->getResolvedMethodSymbol();
       bool mayReachJ2IThunk = true;
-      if (resolvedMethodSymbol && resolvedMethodSymbol->getRecognizedMethod() == TR::java_lang_invoke_ComputedCalls_dispatchDirect)
+      if (resolvedMethodSymbol &&
+            (resolvedMethodSymbol->getRecognizedMethod() == TR::java_lang_invoke_ComputedCalls_dispatchDirect ||
+            resolvedMethodSymbol->getRecognizedMethod() == TR::com_ibm_jit_JITHelpers_dispatchComputedStaticCall))
          mayReachJ2IThunk = false;
       if (mayReachJ2IThunk && dispatchOp.isCallOp())
          {
          // Bad news.
          //
          // icallVMprJavaSendPatchupVirtual requires that a virtual call site
-         // either (1) uses a CALLMem with a fixed VFT offset, or (2) puts the
-         // VFT index into r8 and uses a CALLImm4 with a fixed call target.
+         // either (1) uses a TR::InstOpCode::CALLMem with a fixed VFT offset, or (2) puts the
+         // VFT index into r8 and uses a TR::InstOpCode::CALLImm4 with a fixed call target.
          // We have neither a fixed VFT offset nor a fixed call target!
-         // Adding support for CALLReg is difficult because the instruction is
+         // Adding support for TR::InstOpCode::CALLReg is difficult because the instruction is
          // a different length, making it hard to back up and disassemble it.
          //
          // Therefore, we cannot have the return address pointing after a
-         // CALLReg instruction.  Instead, we use a CALLImm4 with a fixed
-         // displacement to get to out-of-line instructions that do a JMPReg.
+         // TR::InstOpCode::CALLReg instruction.  Instead, we use a TR::InstOpCode::CALLImm4 with a fixed
+         // displacement to get to out-of-line instructions that do a TR::InstOpCode::JMPReg.
 
          // Mainline call
          //
          TR::LabelSymbol *jmpLabel   = TR::LabelSymbol::create(cg()->trHeapMemory(),cg());
-         callInstr = generateLabelInstruction(CALLImm4, callNode, jmpLabel, cg());
+         callInstr = generateLabelInstruction(TR::InstOpCode::CALLImm4, callNode, jmpLabel, cg());
 
          // Jump outlined
          //
          {
          TR_OutlinedInstructionsGenerator og(jmpLabel, callNode, cg());
-         generateRegInstruction(JMPReg, callNode, targetAddressReg, cg());
+         generateRegInstruction(TR::InstOpCode::JMPReg, callNode, targetAddressReg, cg());
          og.endOutlinedInstructionSequence();
          }
 
@@ -2192,7 +2205,7 @@ TR::Instruction *J9::X86::PrivateLinkage::buildVFTCall(TR::X86CallSite &site, TR
        comp()->getJittedMethodSymbol()->usesSinglePrecisionMode())
       {
       auto cds = cg()->findOrCreate2ByteConstant(callNode, SINGLE_PRECISION_ROUND_TO_NEAREST);
-      generateMemInstruction(LDCWMem, callNode, generateX86MemoryReference(cds, cg()), cg());
+      generateMemInstruction(TR::InstOpCode::LDCWMem, callNode, generateX86MemoryReference(cds, cg()), cg());
       }
 
    return callInstr;
@@ -2273,7 +2286,7 @@ TR::Register *J9::X86::PrivateLinkage::buildCallPostconditions(TR::X86CallSite &
    // (The typical example is the ramMethod.)
    //
    int32_t gprsAlreadyPresent = TR::RealRegister::noRegMask;
-   TR_X86RegisterDependencyGroup *group = dependencies->getPostConditions();
+   TR::RegisterDependencyGroup *group = dependencies->getPostConditions();
    for (int i = 0; i < dependencies->getAddCursorForPost(); i++)
       {
       TR::RegisterDependency *dep = group->getRegisterDependency(i);
@@ -2289,7 +2302,7 @@ TR::Register *J9::X86::PrivateLinkage::buildCallPostconditions(TR::X86CallSite &
       // postcondition, thus indicating that the arguments are preserved.
       // Note: this assumes the postcondition regdeps have preconditions too; see COPY_PRECONDITIONS_TO_POSTCONDITIONS.
       //
-      TR_X86RegisterDependencyGroup *preConditions = dependencies->getPreConditions();
+      TR::RegisterDependencyGroup *preConditions = dependencies->getPreConditions();
       for (int i = 0; i < dependencies->getAddCursorForPre(); i++)
          {
          TR::RegisterDependency *preCondition = preConditions->getRegisterDependency(i);
@@ -2396,7 +2409,7 @@ void J9::X86::PrivateLinkage::buildVPIC(TR::X86CallSite &site, TR::LabelSymbol *
    TR_ASSERT(doneLabel, "a doneLabel is required for VPIC dispatches");
 
    if (entryLabel)
-      generateLabelInstruction(LABEL, site.getCallNode(), entryLabel, cg());
+      generateLabelInstruction(TR::InstOpCode::label, site.getCallNode(), entryLabel, cg());
 
    int32_t numVPicSlots = VPicParameters.defaultNumberOfSlots;
 
@@ -2486,7 +2499,7 @@ void J9::X86::PrivateLinkage::buildInterfaceDispatchUsingLastITable (TR::X86Call
       // TODO: This is lame.  Without IPIC slots, generating this sequence
       // upside-down is sub-optimal.
       //
-         generateLabelInstruction(JMP4, callNode, lastITableTestLabel, cg());
+         generateLabelInstruction(TR::InstOpCode::JMP4, callNode, lastITableTestLabel, cg());
       }
 
    TR::Register *vftReg          = site.evaluateVFT();
@@ -2496,14 +2509,14 @@ void J9::X86::PrivateLinkage::buildInterfaceDispatchUsingLastITable (TR::X86Call
    vtableIndexRegDeps->addPreCondition(vtableIndexReg, getProperties().getVTableIndexArgumentRegister(), cg());
    // Now things get weird.
    //
-   // We're going to generate the lastITable sequence sequence upside-down.
+   // We're going to generate the lastITable sequence upside-down.
    // We'll generate the dispatch sequence first, and THEN we'll generate
    // the test that guards that dispatch.
    //
    // Why?
    //
    // 1) You can't call a j2i thunk with your return address pointing at a
-   //    CALLMem unless that CALLMem has a displacement which equals the jit
+   //    TR::InstOpCode::CALLMem unless that TR::InstOpCode::CALLMem has a displacement which equals the jit
    //    vtable offset.  We don't know the vtable offset statically, so we
    //    must pass it in r8 and leave the return address pointing at a CALLImm.
    //
@@ -2539,10 +2552,10 @@ void J9::X86::PrivateLinkage::buildInterfaceDispatchUsingLastITable (TR::X86Call
    // The dispatch sequence
    //
 
-   TR::Instruction *lastITableDispatchStart = generateLabelInstruction(  LABEL, callNode, lastITableDispatchLabel, cg());
-   generateRegImmInstruction( MOV4RegImm4, callNode, vtableIndexReg, fej9->getITableEntryJitVTableOffset(), cg());
-   generateRegMemInstruction( SUBRegMem(), callNode, vtableIndexReg, generateX86MemoryReference(scratchReg, fej9->convertITableIndexToOffset(itableIndex), cg()), cg());
-   buildVFTCall(site,         JMPMem, NULL, generateX86MemoryReference(vftReg, vtableIndexReg, 0, cg()));
+   TR::Instruction *lastITableDispatchStart = generateLabelInstruction(  TR::InstOpCode::label, callNode, lastITableDispatchLabel, cg());
+   generateRegImmInstruction( TR::InstOpCode::MOV4RegImm4, callNode, vtableIndexReg, fej9->getITableEntryJitVTableOffset(), cg());
+   generateRegMemInstruction( TR::InstOpCode::SUBRegMem(), callNode, vtableIndexReg, generateX86MemoryReference(scratchReg, fej9->convertITableIndexToOffset(itableIndex), cg()), cg());
+   buildVFTCall(site,         TR::InstOpCode::JMPMem, NULL, generateX86MemoryReference(vftReg, vtableIndexReg, 0, cg()));
 
    // Without PIC slots, lastITableDispatchStart takes the place of various "first instruction" pointers
    //
@@ -2553,10 +2566,10 @@ void J9::X86::PrivateLinkage::buildInterfaceDispatchUsingLastITable (TR::X86Call
 
    // The test sequence
    //
-   generateLabelInstruction(LABEL, callNode, lastITableTestLabel, cg());
+   generateLabelInstruction(TR::InstOpCode::label, callNode, lastITableTestLabel, cg());
    if (breakBeforeInterfaceDispatchUsingLastITable)
-      generateInstruction(BADIA32Op, callNode, cg());
-   generateRegMemInstruction(LRegMem(), callNode, scratchReg, generateX86MemoryReference(vftReg, (int32_t)fej9->getOffsetOfLastITableFromClassField(), cg()), cg());
+      generateInstruction(TR::InstOpCode::INT3, callNode, cg());
+   generateRegMemInstruction(TR::InstOpCode::LRegMem(), callNode, scratchReg, generateX86MemoryReference(vftReg, (int32_t)fej9->getOffsetOfLastITableFromClassField(), cg()), cg());
    bool use32BitInterfacePointers = comp()->target().is32Bit();
    if (comp()->useCompressedPointers() /* actually compressed object headers */)
       {
@@ -2566,7 +2579,7 @@ void J9::X86::PrivateLinkage::buildInterfaceDispatchUsingLastITable (TR::X86Call
    if (use32BitInterfacePointers)
       {
       // The field is 8 bytes, but only 4 matter
-      generateMemImmInstruction(CMP4MemImm4,
+      generateMemImmInstruction(TR::InstOpCode::CMP4MemImm4,
                                 callNode,
                                 generateX86MemoryReference(scratchReg, fej9->getOffsetOfInterfaceClassFromITableField(), cg()),
                                 (int32_t)(intptr_t)declaringClass,
@@ -2578,17 +2591,17 @@ void J9::X86::PrivateLinkage::buildInterfaceDispatchUsingLastITable (TR::X86Call
       TR::Register *interfaceClassReg = vtableIndexReg;
       auto cds = cg()->findOrCreate8ByteConstant(site.getCallNode(), (intptr_t)declaringClass);
       TR::MemoryReference *interfaceClassAddr = generateX86MemoryReference(cds, cg());
-      generateRegMemInstruction(LRegMem(), callNode, interfaceClassReg, interfaceClassAddr, cg());
-      generateMemRegInstruction(CMPMemReg(),
+      generateRegMemInstruction(TR::InstOpCode::LRegMem(), callNode, interfaceClassReg, interfaceClassAddr, cg());
+      generateMemRegInstruction(TR::InstOpCode::CMPMemReg(),
                                 callNode,
                                 generateX86MemoryReference(scratchReg, fej9->getOffsetOfInterfaceClassFromITableField(), cg()),
                                 interfaceClassReg, cg());
       }
 
-   generateLongLabelInstruction(JNE4, callNode, lookupDispatchSnippetLabel, cg()); // PICBuilder needs this to have a 4-byte offset
+   generateLongLabelInstruction(TR::InstOpCode::JNE4, callNode, lookupDispatchSnippetLabel, cg()); // PICBuilder needs this to have a 4-byte offset
    if (comp()->target().is32Bit())
       generatePaddingInstruction(3, callNode, cg());
-   generateLabelInstruction(CALLImm4, callNode, lastITableDispatchLabel, vtableIndexRegDeps, cg());
+   generateLabelInstruction(TR::InstOpCode::CALLImm4, callNode, lastITableDispatchLabel, vtableIndexRegDeps, cg());
 
    cg()->stopUsingRegister(vtableIndexReg);
    TR::RealRegister::RegNum otherScratchRegister = getProperties().getJ9MethodArgumentRegister(); // scratch reg other than the vtable index reg

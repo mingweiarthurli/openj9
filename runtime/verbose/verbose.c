@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -69,7 +69,6 @@
 #define _UTE_STATIC_
 #include "ut_j9vrb.h"
 
-#define THIS_DLL_NAME J9_VERBOSE_DLL_NAME
 #define OPT_VERBOSE "-verbose"
 #define OPT_JNI "jni"
 #define OPT_CLASS "class"
@@ -92,6 +91,10 @@
 #define OPT_NONE "none"
 #define OPT_VERBOSE_JNI "-verbose:jni"
 #define OPT_VERBOSE_NONE "-verbose:none"
+#if (JAVA_SPEC_VERSION >= 11)
+#define OPT_MODULE "module"
+#define OPT_NOMODULE "nomodule"
+#endif /* (JAVA_SPEC_VERSION >= 11) */
 #define DEFAULT_STACKWALK_VERBOSE_LEVEL 100
 
 #define GET_SUPERCLASS(clazz) \
@@ -128,6 +131,10 @@ static void verboseClassVerificationFallback(J9HookInterface** hook, UDATA event
 static void verboseClassVerificationEnd(J9HookInterface** hook, UDATA eventNum, void* eventData, void* userData);
 static void verboseMethodVerificationStart(J9HookInterface** hook, UDATA eventNum, void* eventData, void* userData);
 static void verboseStackMapFrameVerification(J9HookInterface** hook, UDATA eventNum, void* eventData, void* userData);
+#if (JAVA_SPEC_VERSION >= 11)
+static void verboseHookModuleLoad (J9HookInterface** hook, UDATA eventNum, void* eventData, void* userData);
+static void verboseHookModuleUnload (J9HookInterface** hook, UDATA eventNum, void* eventData, void* userData);
+#endif /* (JAVA_SPEC_VERSION >= 11) */
 
 typedef struct VerboseVerificationBuffer {
 	UDATA size;
@@ -633,6 +640,12 @@ parseVerboseArgument(char* options, J9VerboseSettings* verboseOptions, char** er
 			verboseOptions->relocations = VERBOSE_SETTINGS_SET;
 		} else if(strcmp(options, OPT_ROMCLASS)==0) {
 			verboseOptions->romclass = VERBOSE_SETTINGS_SET;
+#if (JAVA_SPEC_VERSION >= 11)
+		} else if(strcmp(options, OPT_NOMODULE)==0) {
+			verboseOptions->module = VERBOSE_SETTINGS_IGNORE;
+		} else if(strcmp(options, OPT_MODULE)==0) {
+			verboseOptions->module = VERBOSE_SETTINGS_SET;
+#endif /* (JAVA_SPEC_VERSION >= 11) */
 		} else if(strcmp(options, OPT_NONE)==0) {
 			/* Do nothing. Only gets here if user specified -verbose:class,none or similar nonsense. */
 			memset(verboseOptions, 0, sizeof(J9VerboseSettings));
@@ -735,7 +748,7 @@ IDATA J9VMDllMain(J9JavaVM* vm, IDATA stage, void* reserved) {
 			break;
 
 		case VERBOSE_INIT_STAGE :
-			loadInfo = FIND_DLL_TABLE_ENTRY( THIS_DLL_NAME );
+			loadInfo = getVerboseDllLoadInfo(vm);
 
 			vm->verboseLevel = 0;
 			vm->setVerboseState = &setVerboseState;
@@ -796,7 +809,7 @@ IDATA J9VMDllMain(J9JavaVM* vm, IDATA stage, void* reserved) {
 			break;
 
 		case LIBRARIES_ONUNLOAD :
-			loadInfo = FIND_DLL_TABLE_ENTRY( THIS_DLL_NAME );
+			loadInfo = getVerboseDllLoadInfo(vm);
 			if( IS_STAGE_COMPLETED( loadInfo->completedBits, VERBOSE_INIT_STAGE ) && vm->verboseStruct ) {
 				j9mem_free_memory(vm->verboseStruct );
 				vm->verboseStruct = NULL;
@@ -1122,6 +1135,15 @@ setVerboseState( J9JavaVM *vm, J9VerboseSettings *verboseOptions, char **errorSt
 		vm->verboseStruct->getCfrExceptionDetails = generateJ9CfrExceptionDetails;
 		vm->verboseStruct->getRtvExceptionDetails = generateJ9RtvExceptionDetails;
 	}
+
+#if (JAVA_SPEC_VERSION >= 11)
+	if (VERBOSE_SETTINGS_SET == verboseOptions->module) {
+		vmHooks = vm->internalVMFunctions->getVMHookInterface(vm);
+		(*vmHooks)->J9HookRegisterWithCallSite(vmHooks, J9HOOK_VM_MODULE_LOAD, verboseHookModuleLoad, OMR_GET_CALLSITE(), NULL);
+		(*vmHooks)->J9HookRegisterWithCallSite(vmHooks, J9HOOK_VM_MODULE_UNLOAD, verboseHookModuleUnload, OMR_GET_CALLSITE(), NULL);
+	}
+#endif /* (JAVA_SPEC_VERSION >= 11) */
+
 	omrthread_monitor_exit( vm->verboseStateMutex );
 
 	return result;
@@ -1332,6 +1354,50 @@ verboseStackMapFrameVerification(J9HookInterface** hook, UDATA eventNum, void* e
 
 	releaseVerboseVerificationBuffer(PORTLIB, &buf, byteArray);
 }
+
+#if (JAVA_SPEC_VERSION >= 11)
+static void
+printModule(J9VMThread* vmThread, char* message, J9Module* module)
+{
+	char moduleNameBuf[J9VM_PACKAGE_NAME_BUFFER_LENGTH];
+	char *moduleNameUTF = NULL;
+	J9UTF8 *jrtURL = NULL;
+	char* template = "%s: %s from: %.*s\n";
+
+	PORT_ACCESS_FROM_VMC(vmThread);
+
+	/* module name */
+	moduleNameUTF = vmThread->javaVM->internalVMFunctions->copyStringToUTF8WithMemAlloc(
+		vmThread, module->moduleName, J9_STR_NULL_TERMINATE_RESULT, "", 0, moduleNameBuf, J9VM_PACKAGE_NAME_BUFFER_LENGTH, NULL);
+
+	/* module location */
+	jrtURL = getModuleJRTURL(vmThread, module->classLoader, module);
+
+	j9tty_printf(PORTLIB, template, message, moduleNameUTF, J9UTF8_LENGTH(jrtURL), J9UTF8_DATA(jrtURL));
+
+	if (moduleNameUTF != moduleNameBuf) {
+		j9mem_free_memory((void *)moduleNameUTF);
+	}
+}
+
+static void
+verboseHookModuleLoad(J9HookInterface** hook, UDATA eventNum, void* eventData, void* userData)
+{
+	J9VMModuleLoadEvent* event = eventData;
+	char* message = "module load";
+
+	printModule(event->currentThread, message, event->module);
+}
+
+static void
+verboseHookModuleUnload(J9HookInterface** hook, UDATA eventNum, void* eventData, void* userData)
+{
+	J9VMModuleUnloadEvent* event = eventData;
+	char* message = "module unload";
+
+	printModule(event->currentThread, message, event->module);
+}
+#endif /* (JAVA_SPEC_VERSION >= 11) */
 
 /*
  * Prints out PC corresponds to the stack map frame.
@@ -1653,9 +1719,9 @@ toExternalQualifiedName(J9PortLibrary* portLibrary, VerboseVerificationBuffer* b
 
 		/* if existing buffer dose not fit the data, use allocated buffer from heap */
 		if (buf->size < (UDATA)J9UTF8_LENGTH(utf)) {
-			qualified = (J9UTF8*)j9mem_allocate_memory((sizeof(utf->length) + utf->length), OMRMEM_CATEGORY_VM);
+			qualified = (J9UTF8*)j9mem_allocate_memory(sizeof(J9UTF8) + J9UTF8_LENGTH(utf), OMRMEM_CATEGORY_VM);
 			if (NULL == qualified) {
-				Trc_VRB_Allocate_Memory_Failed(sizeof(utf->length) + utf->length);
+				Trc_VRB_Allocate_Memory_Failed(sizeof(J9UTF8) + J9UTF8_LENGTH(utf));
 				return NULL;
 			} else {
 				buf->buffer = (U_8*)qualified;
@@ -1664,17 +1730,17 @@ toExternalQualifiedName(J9PortLibrary* portLibrary, VerboseVerificationBuffer* b
 			qualified = (J9UTF8*)buf->buffer;
 		}
 
-		data = utf->data;
-		extData = qualified->data;
-		qualified->length = 0;
-		while (qualified->length != utf->length) {
+		data = J9UTF8_DATA(utf);
+		extData = J9UTF8_DATA(qualified);
+		J9UTF8_SET_LENGTH(qualified, 0);
+		while (J9UTF8_LENGTH(qualified) != J9UTF8_LENGTH(utf)) {
 			*extData = (('/' == *data) ? '.' : *data);
 			extData += 1;
 			data += 1;
-			qualified->length += 1;
+			J9UTF8_SET_LENGTH(qualified, J9UTF8_LENGTH(qualified) + 1);
 		}
 
-		buf->cursor = sizeof(qualified->length) + qualified->length;
+		buf->cursor = sizeof(J9UTF8) + J9UTF8_LENGTH(qualified);
 	}
 
 	return qualified;

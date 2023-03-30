@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2000, 2019 IBM Corp. and others
+# Copyright (c) 2000, 2022 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
 # OpenJDK Assembly Exception [2].
 #
 # [1] https://www.gnu.org/software/classpath/license.html
-# [2] http://openjdk.java.net/legal/assembly-exception.html
+# [2] https://openjdk.org/legal/assembly-exception.html
 #
 # SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 #
@@ -32,7 +32,7 @@
 #
 # Every NLS message needs to have the following information provided:
 #
-# J9NLS_VM_SAMPLE_MESSAGE=This is a sample message that takes two parameters parameter 1 is a string  %1$s  parameter 2 is a number  %2$d
+# J9NLS_VM_SAMPLE_MESSAGE=This is a sample message that takes two parameters parameter 1 is a string %1$s parameter 2 is a number %2$d
 # J9NLS_VM_SAMPLE_MESSAGE.sample_input_1=string parameter
 # J9NLS_VM_SAMPLE_MESSAGE.sample_input_2=2
 # J9NLS_VM_SAMPLE_MESSAGE.explanation=Explanation for what the message means
@@ -83,7 +83,7 @@ J9NLS_JCL_NOTJ9.user_response=Ensure that the class library is compatible with t
 
 # END NON-TRANSLATABLE
 
-# This error occurs if the JCL and VM doesn't have the same master version
+# This error occurs if the JCL and VM doesn't have the same branch version
 # (i.e. JCL and VM come from different development streams)
 J9NLS_JCL_INCOMPATIBLE_CL_VERSION=\u041d\u0435\u0441\u043e\u0432\u043c\u0435\u0441\u0442\u0438\u043c\u0430\u044f \u0432\u0435\u0440\u0441\u0438\u044f \u0431\u0438\u0431\u043b\u0438\u043e\u0442\u0435\u043a\u0438 \u043a\u043b\u0430\u0441\u0441\u043e\u0432: JCL %1$x, VM %2$x
 # START NON-TRANSLATABLE
@@ -375,7 +375,7 @@ J9NLS_JCL_METHODTYPE_CLASS_LOADING_CONSTRAINT.sample_input_1=SomeClassloader
 J9NLS_JCL_METHODTYPE_CLASS_LOADING_CONSTRAINT.sample_input_2=2
 J9NLS_JCL_METHODTYPE_CLASS_LOADING_CONSTRAINT.sample_input_3=SomeClassloader2
 J9NLS_JCL_METHODTYPE_CLASS_LOADING_CONSTRAINT.sample_input_4=4
-J9NLS_JCL_METHODTYPE_CLASS_LOADING_CONSTRAINT.explanation=A class loading constraint has been violated.  The two class loader's have different classes for one of the class names in the signature.
+J9NLS_JCL_METHODTYPE_CLASS_LOADING_CONSTRAINT.explanation=A class loading constraint has been violated. The two class loader's have different classes for one of the class names in the signature.
 J9NLS_JCL_METHODTYPE_CLASS_LOADING_CONSTRAINT.system_action=A java/lang/LinkageError will be thrown
 J9NLS_JCL_METHODTYPE_CLASS_LOADING_CONSTRAINT.user_response=Check the Classes supplied to the MethodType to determine why a cross-class loader constraint has been violated.
 # END NON-TRANSLATABLE
@@ -436,3 +436,11 @@ J9NLS_JCL_NEST_MEMBER_CLAIMS_DIFFERENT_NEST_HOST.system_action=The JVM will thro
 J9NLS_JCL_NEST_MEMBER_CLAIMS_DIFFERENT_NEST_HOST.user_response=Contact the provider of the classfile for a corrected version.
 # END NON-TRANSLATABLE
 
+J9NLS_JCL_DUPLICATE_CLASS_DEFINITION=\u041e\u0431\u043d\u0430\u0440\u0443\u0436\u0435\u043d\u043e \u043f\u043e\u0432\u0442\u043e\u0440\u044f\u044e\u0449\u0435\u0435\u0441\u044f \u043e\u043f\u0440\u0435\u0434\u0435\u043b\u0435\u043d\u0438\u0435 \u043a\u043b\u0430\u0441\u0441\u0430 \u0434\u043b\u044f %2$.*1$s
+# START NON-TRANSLATABLE
+J9NLS_JCL_DUPLICATE_CLASS_DEFINITION.sample_input_1=3
+J9NLS_JCL_DUPLICATE_CLASS_DEFINITION.sample_input_2=Foo
+J9NLS_JCL_DUPLICATE_CLASS_DEFINITION.explanation=A duplicated class definition is found.
+J9NLS_JCL_DUPLICATE_CLASS_DEFINITION.system_action=The JVM will throw a LinkageError.
+J9NLS_JCL_DUPLICATE_CLASS_DEFINITION.user_response=Ensure there is no duplicate definition for the class in the message and try again.
+# END NON-TRANSLATABLE

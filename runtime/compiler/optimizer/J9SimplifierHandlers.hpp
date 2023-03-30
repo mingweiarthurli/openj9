@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2018 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -41,9 +41,6 @@ TR::Node * zdsls2pdSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier
 TR::Node * zdsle2zdSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
 TR::Node * zd2pdSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
 TR::Node * pd2zdSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
-TR::Node * zd2dfSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
-TR::Node * df2zdSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
-TR::Node * df2zdSetSignSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
 TR::Node * pd2iSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
 TR::Node * pd2lSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
 TR::Node * i2pdSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
@@ -63,21 +60,6 @@ TR::Node * pd2fSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s
 TR::Node * pdshlSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
 TR::Node * pdshlSetSignSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
 TR::Node * pdshrSetSignSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
-TR::Node * pd2dfSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
-TR::Node * df2pdSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
 TR::Node * pdnegSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
-TR::Node * ifDFPCompareSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
-TR::Node * dfp2dfpSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
-TR::Node * df2pdSetSignSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
-TR::Node * int2dfpSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
-TR::Node * dfp2intSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
-TR::Node * dfpShiftLeftSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
-TR::Node * dfpShiftRightSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
-TR::Node * dfpModifyPrecisionSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
-TR::Node * dfpSetSignSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
-TR::Node * dfpFloorSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
-TR::Node * dfpAddSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
-TR::Node * dfpMulSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
-TR::Node * dfpDivSimplifier(TR::Node * node, TR::Block * block, TR::Simplifier * s);
 
 #endif

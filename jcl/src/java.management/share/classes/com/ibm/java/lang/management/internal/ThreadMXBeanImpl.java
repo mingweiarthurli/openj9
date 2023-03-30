@@ -1,6 +1,6 @@
-/*[INCLUDE-IF Sidecar17]*/
+/*[INCLUDE-IF JAVA_SPEC_VERSION >= 8]*/
 /*******************************************************************************
- * Copyright (c) 2007, 2019 IBM Corp. and others
+ * Copyright (c) 2007, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -41,6 +41,9 @@ import openj9.management.internal.ThreadInfoBase;
  *
  * @since 1.5
  */
+/*[IF JAVA_SPEC_VERSION >= 17]*/
+@SuppressWarnings("removal")
+/*[ENDIF] JAVA_SPEC_VERSION >= 17 */
 public class ThreadMXBeanImpl implements ThreadMXBean {
 
 	private static final ThreadMXBeanImpl instance = new ThreadMXBeanImpl();
@@ -84,6 +87,7 @@ public class ThreadMXBeanImpl implements ThreadMXBean {
 	 */
 	@Override
 	public long[] findMonitorDeadlockedThreads() {
+		@SuppressWarnings("removal")
 		SecurityManager security = System.getSecurityManager();
 		if (security != null) {
 			security.checkPermission(ManagementPermissionHelper.MPMONITOR);
@@ -103,6 +107,7 @@ public class ThreadMXBeanImpl implements ThreadMXBean {
 	 */
 	@Override
 	public long[] getAllThreadIds() {
+		@SuppressWarnings("removal")
 		SecurityManager security = System.getSecurityManager();
 		if (security != null) {
 			security.checkPermission(ManagementPermissionHelper.MPMONITOR);
@@ -113,6 +118,9 @@ public class ThreadMXBeanImpl implements ThreadMXBean {
 	/**
 	 * {@inheritDoc}
 	 */
+	/*[IF JAVA_SPEC_VERSION >= 19]*/
+	@SuppressWarnings("deprecation")
+	/*[ENDIF] JAVA_SPEC_VERSION >= 19 */
 	@Override
 	public long getCurrentThreadCpuTime() {
 		long result = -1;
@@ -130,6 +138,9 @@ public class ThreadMXBeanImpl implements ThreadMXBean {
 	/**
 	 * {@inheritDoc}
 	 */
+	/*[IF JAVA_SPEC_VERSION >= 19]*/
+	@SuppressWarnings("deprecation")
+	/*[ENDIF] JAVA_SPEC_VERSION >= 19 */
 	@Override
 	public long getCurrentThreadUserTime() {
 		long result = -1;
@@ -245,6 +256,7 @@ public class ThreadMXBeanImpl implements ThreadMXBean {
 	 */
 	@Override
 	public ThreadInfo[] getThreadInfo(long[] ids, int maxDepth) {
+		@SuppressWarnings("removal")
 		SecurityManager security = System.getSecurityManager();
 		if (security != null) {
 			security.checkPermission(ManagementPermissionHelper.MPMONITOR);
@@ -306,7 +318,7 @@ public class ThreadMXBeanImpl implements ThreadMXBean {
 		return getThreadInfoCommon(ids, lockedMonitors, lockedSynchronizers, Integer.MAX_VALUE);
 	}
 
-	/*[IF Java10]*/
+	/*[IF JAVA_SPEC_VERSION >= 10]*/
 	@Override
 	public ThreadInfo[] getThreadInfo(long[] ids, boolean lockedMonitors,
 			boolean lockedSynchronizers, int maxDepth) {
@@ -316,7 +328,7 @@ public class ThreadMXBeanImpl implements ThreadMXBean {
 		}
 		return getThreadInfoCommon(ids, lockedMonitors, lockedSynchronizers, maxDepth);
 	}
-	/*[ENDIF]*/ // Java10
+	/*[ENDIF] JAVA_SPEC_VERSION >= 10 */
 
 	private ThreadInfo[] getThreadInfoCommon(long[] ids, boolean lockedMonitors,
 			boolean lockedSynchronizers, int maxDepth) {
@@ -330,6 +342,7 @@ public class ThreadMXBeanImpl implements ThreadMXBean {
 			throw new UnsupportedOperationException(com.ibm.oti.util.Msg.getString("K05FB")); //$NON-NLS-1$
 		}
 
+		@SuppressWarnings("removal")
 		SecurityManager security = System.getSecurityManager();
 		if (security != null) {
 			security.checkPermission(ManagementPermissionHelper.MPMONITOR);
@@ -353,6 +366,7 @@ public class ThreadMXBeanImpl implements ThreadMXBean {
 	 */
 	@Override
 	public ThreadInfo getThreadInfo(long id, int maxDepth) {
+		@SuppressWarnings("removal")
 		SecurityManager security = System.getSecurityManager();
 		if (security != null) {
 			security.checkPermission(ManagementPermissionHelper.MPMONITOR);
@@ -545,6 +559,7 @@ public class ThreadMXBeanImpl implements ThreadMXBean {
 	 */
 	@Override
 	public void resetPeakThreadCount() {
+		@SuppressWarnings("removal")
 		SecurityManager security = System.getSecurityManager();
 		if (security != null) {
 			security.checkPermission(ManagementPermissionHelper.MPCONTROL);
@@ -569,6 +584,7 @@ public class ThreadMXBeanImpl implements ThreadMXBean {
 			throw new UnsupportedOperationException(com.ibm.oti.util.Msg.getString("K05FA")); //$NON-NLS-1$
 		}
 
+		@SuppressWarnings("removal")
 		SecurityManager security = System.getSecurityManager();
 		if (security != null) {
 			security.checkPermission(ManagementPermissionHelper.MPCONTROL);
@@ -593,6 +609,7 @@ public class ThreadMXBeanImpl implements ThreadMXBean {
 			throw new UnsupportedOperationException(com.ibm.oti.util.Msg.getString("K05F9")); //$NON-NLS-1$
 		}
 
+		@SuppressWarnings("removal")
 		SecurityManager security = System.getSecurityManager();
 		if (security != null) {
 			security.checkPermission(ManagementPermissionHelper.MPCONTROL);
@@ -639,6 +656,7 @@ public class ThreadMXBeanImpl implements ThreadMXBean {
 			throw new UnsupportedOperationException(com.ibm.oti.util.Msg.getString("K05FB")); //$NON-NLS-1$
 		}
 
+		@SuppressWarnings("removal")
 		SecurityManager security = System.getSecurityManager();
 		if (security != null) {
 			security.checkPermission(ManagementPermissionHelper.MPMONITOR);
@@ -672,6 +690,7 @@ public class ThreadMXBeanImpl implements ThreadMXBean {
 			/*[MSG "K05FB", "Monitoring of ownable synchronizer usage is not supported on this virtual machine"]*/
 			throw new UnsupportedOperationException(com.ibm.oti.util.Msg.getString("K05FB")); //$NON-NLS-1$
 		}
+		@SuppressWarnings("removal")
 		SecurityManager security = System.getSecurityManager();
 		if (security != null) {
 			security.checkPermission(ManagementPermissionHelper.MPMONITOR);
@@ -680,7 +699,7 @@ public class ThreadMXBeanImpl implements ThreadMXBean {
 		return makeThreadInfos(threadInfoBaseArray);
 	}
 
-	/*[IF Java10]*/
+	/*[IF JAVA_SPEC_VERSION >= 10]*/
 	/**
 	 * {@inheritDoc}
 	 */
@@ -693,7 +712,7 @@ public class ThreadMXBeanImpl implements ThreadMXBean {
 		}
 		return dumpAllThreadsCommon(lockedMonitors, lockedSynchronizers, maxDepth);
 	}
-	/*[ENDIF]*/ // Java10
+	/*[ENDIF] JAVA_SPEC_VERSION >= 10 */
 
 	/**
 	 * @param lockedMonitors
@@ -736,6 +755,7 @@ public class ThreadMXBeanImpl implements ThreadMXBean {
 	 * To satisfy com.ibm.lang.management.ThreadMXBean.
 	 */
 	public long[] getNativeThreadIds(long[] threadIDs) throws IllegalArgumentException, SecurityException {
+		@SuppressWarnings("removal")
 		SecurityManager security = System.getSecurityManager();
 		if (null != security) {
 			security.checkPermission(ManagementPermissionHelper.MPMONITOR);
@@ -758,6 +778,7 @@ public class ThreadMXBeanImpl implements ThreadMXBean {
 	 * To satisfy com.ibm.lang.management.
 	 */
 	public long getNativeThreadId(long threadId) throws IllegalArgumentException, SecurityException {
+		@SuppressWarnings("removal")
 		SecurityManager security = System.getSecurityManager();
 		if (null != security) {
 			security.checkPermission(ManagementPermissionHelper.MPMONITOR);

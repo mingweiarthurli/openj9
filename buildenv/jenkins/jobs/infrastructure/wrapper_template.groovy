@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2019, 2020 IBM Corp. and others
+ * Copyright (c) 2019, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -116,7 +116,8 @@ pipelineJob(job_name) {
             if (triggers.pull_request_builder) {
                 githubPullRequest {
                     admins(triggers.pull_request_builder.admin_list)
-                    blackListCommitAuthor(triggers.pull_request_builder.blacklist)
+                    // #10071 This function name is defined by the plugin https://plugins.jenkins.io/ghprb/
+                    blackListCommitAuthor(triggers.pull_request_builder.block_list)
                     cron(triggers.pull_request_builder.cron)
                     triggerPhrase(triggers.pull_request_builder.trigger_phrase)
                     onlyTriggerPhrase()

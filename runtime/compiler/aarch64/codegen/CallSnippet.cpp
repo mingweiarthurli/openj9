@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2019, 2020 IBM Corp. and others
+ * Copyright (c) 2019, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -34,6 +34,10 @@
 #include "il/LabelSymbol.hpp"
 #include "il/Node.hpp"
 #include "il/Node_inlines.hpp"
+
+#if defined(OSX)
+#include <pthread.h> // for pthread_jit_write_protect_np
+#endif
 
 static uint8_t *storeArgumentItem(TR::InstOpCode::Mnemonic op, uint8_t *buffer, TR::RealRegister *reg, int32_t offset, TR::CodeGenerator *cg)
    {
@@ -248,7 +252,7 @@ uint8_t *TR::ARM64CallSnippet::emitSnippetBody()
    // Flush in-register arguments back to the stack for interpreter
    cursor = flushArgumentsToStack(cursor, callNode, getSizeOfArguments(), cg());
 
-   glueRef = cg()->symRefTab()->findOrCreateRuntimeHelper(getHelper(), false, false, false);
+   glueRef = cg()->symRefTab()->findOrCreateRuntimeHelper(getHelper());
 
    // 'b glueRef' for jitInduceOSRAtCurrentPC, 'bl glueRef' otherwise
    // we use "b" for induceOSR because we want the helper to think that it's been called from the mainline code and not from the snippet.
@@ -287,7 +291,7 @@ uint8_t *TR::ARM64CallSnippet::emitSnippetBody()
             {
             cg()->jitAddPicToPatchOnClassRedefinition((void *)methodSymbol->getMethodAddress(), (void *)cursor);
             cg()->addExternalRelocation(new (cg()->trHeapMemory()) TR::ExternalRelocation(cursor, (uint8_t *)methodSymRef,
-                                                                                    getNode() ? (uint8_t *)getNode()->getInlinedSiteIndex() : (uint8_t *)-1,
+                                                                                    getNode() ? (uint8_t *)(intptr_t)getNode()->getInlinedSiteIndex() : (uint8_t *)-1,
                                                                                     TR_MethodObject, cg()),
                                        __FILE__, __LINE__, callNode);
             }
@@ -301,8 +305,110 @@ uint8_t *TR::ARM64CallSnippet::emitSnippetBody()
    return cursor+4;
    }
 
+static void
+printArgumentFlush(TR_Debug *debug, TR::FILE *pOutFile, uint8_t *cursor, const char *mnemonic, uint32_t offset, TR::Register *reg, TR::Register *stackReg)
+   {
+   debug->printPrefix(pOutFile, NULL, cursor, 4);
+   trfprintf(pOutFile, "%s \t", mnemonic);
+   debug->print(pOutFile, reg, TR_WordReg);
+   trfprintf(pOutFile, ", [");
+   debug->print(pOutFile, stackReg, TR_WordReg);
+   trfprintf(pOutFile, ", %d]", offset);
+   }
+
+uint8_t *
+TR_Debug::printARM64ArgumentsFlush(TR::FILE *pOutFile, TR::Node *callNode, uint8_t *cursor, int32_t argSize)
+   {
+   uint32_t intArgNum=0, floatArgNum=0, offset;
+   TR::Machine *machine = _cg->machine();
+   TR::Linkage* linkage = _cg->getLinkage(callNode->getSymbol()->castToMethodSymbol()->getLinkageConvention());
+   const TR::ARM64LinkageProperties &linkageProperties = linkage->getProperties();
+   int32_t argStart = callNode->getFirstArgumentIndex();
+   TR::RealRegister *stackPtr = _cg->getStackPointerRegister();
+
+   if (linkageProperties.getRightToLeft())
+      offset = linkage->getOffsetToFirstParm();
+   else
+      offset = argSize+linkage->getOffsetToFirstParm();
+
+   for (int32_t i=argStart; i<callNode->getNumChildren();i++)
+      {
+      TR::Node *child = callNode->getChild(i);
+      switch (child->getDataType())
+         {
+         case TR::Int8:
+         case TR::Int16:
+         case TR::Int32:
+            if (!linkageProperties.getRightToLeft())
+               offset -= TR::Compiler->om.sizeofReferenceAddress();
+            if (intArgNum < linkageProperties.getNumIntArgRegs())
+               {
+               printArgumentFlush(this, pOutFile, cursor, "strimmw", offset, machine->getRealRegister(linkageProperties.getIntegerArgumentRegister(intArgNum)), stackPtr);
+               cursor += 4;
+               }
+            intArgNum++;
+            if (linkageProperties.getRightToLeft())
+               offset += TR::Compiler->om.sizeofReferenceAddress();
+            break;
+         case TR::Address:
+            if (!linkageProperties.getRightToLeft())
+               offset -= TR::Compiler->om.sizeofReferenceAddress();
+            if (intArgNum < linkageProperties.getNumIntArgRegs())
+               {
+               printArgumentFlush(this, pOutFile, cursor, "strimmx", offset, machine->getRealRegister(linkageProperties.getIntegerArgumentRegister(intArgNum)), stackPtr);
+               cursor += 4;
+               }
+            intArgNum++;
+            if (linkageProperties.getRightToLeft())
+               offset += TR::Compiler->om.sizeofReferenceAddress();
+            break;
+         case TR::Int64:
+            if (!linkageProperties.getRightToLeft())
+               offset -= 2*TR::Compiler->om.sizeofReferenceAddress();
+            if (intArgNum < linkageProperties.getNumIntArgRegs())
+               {
+               printArgumentFlush(this, pOutFile, cursor, "strimmx", offset, machine->getRealRegister(linkageProperties.getIntegerArgumentRegister(intArgNum)), stackPtr);
+               cursor += 4;
+               }
+            intArgNum++;
+            if (linkageProperties.getRightToLeft())
+               offset += 2*TR::Compiler->om.sizeofReferenceAddress();
+            break;
+         case TR::Float:
+            if (!linkageProperties.getRightToLeft())
+               offset -= TR::Compiler->om.sizeofReferenceAddress();
+            if (floatArgNum < linkageProperties.getNumFloatArgRegs())
+               {
+               printArgumentFlush(this, pOutFile, cursor, "vstrimms", offset, machine->getRealRegister(linkageProperties.getFloatArgumentRegister(floatArgNum)), stackPtr);
+               cursor += 4;
+               }
+            floatArgNum++;
+            if (linkageProperties.getRightToLeft())
+               offset += TR::Compiler->om.sizeofReferenceAddress();
+            break;
+         case TR::Double:
+            if (!linkageProperties.getRightToLeft())
+               offset -= 2*TR::Compiler->om.sizeofReferenceAddress();
+            if (floatArgNum < linkageProperties.getNumFloatArgRegs())
+               {
+               printArgumentFlush(this, pOutFile, cursor, "vstrimmd", offset, machine->getRealRegister(linkageProperties.getFloatArgumentRegister(floatArgNum)), stackPtr);
+               cursor += 4;
+               }
+            floatArgNum++;
+            if (linkageProperties.getRightToLeft())
+               offset += 2*TR::Compiler->om.sizeofReferenceAddress();
+            break;
+
+         default:
+            TR_ASSERT_FATAL(false, "Unknown argument type %d", child->getDataType());
+            break;
+         }
+      }
+      return cursor;
+   }
+
 void
-TR_Debug::print(TR::FILE *pOutFile, TR::ARM64CallSnippet * snippet)
+TR_Debug::print(TR::FILE *pOutFile, TR::ARM64CallSnippet *snippet)
    {
    TR::Node            *callNode     = snippet->getNode();
    TR::SymbolReference *glueRef      = _cg->getSymRef(snippet->getHelper());
@@ -312,7 +418,35 @@ TR_Debug::print(TR::FILE *pOutFile, TR::ARM64CallSnippet * snippet)
    uint8_t *bufferPos = snippet->getSnippetLabel()->getCodeLocation();
    printSnippetLabel(pOutFile, snippet->getSnippetLabel(), bufferPos, getName(snippet), getName(methodSymRef));
 
-   //TODO print snippet body
+   bufferPos = printARM64ArgumentsFlush(pOutFile, callNode, bufferPos, snippet->getSizeOfArguments());
+
+   char *info = "";
+   intptr_t target = reinterpret_cast<intptr_t>(glueRef->getMethodAddress());
+   int32_t distance;
+   if (isBranchToTrampoline(glueRef, bufferPos, distance))
+      {
+      target = static_cast<intptr_t>(distance) + reinterpret_cast<intptr_t>(bufferPos);
+      info = " Through trampoline";
+      TR_ASSERT_FATAL(constantIsSignedImm28(distance), "Trampoline too far away.");
+      }
+
+   printPrefix(pOutFile, NULL, bufferPos, 4);
+   trfprintf(pOutFile, "%s \t" POINTER_PRINTF_FORMAT "\t\t; %s%s", (glueRef->isOSRInductionHelper() ? "b" : "bl"), target, getName(glueRef), info);
+   bufferPos += 4;
+
+   printPrefix(pOutFile, NULL, bufferPos, sizeof(intptr_t));
+   trfprintf(pOutFile, ".dword \t" POINTER_PRINTF_FORMAT "\t\t; Code cache return address", snippet->getCallRA());
+   bufferPos += sizeof(intptr_t);
+
+   if (!glueRef->isOSRInductionHelper())
+      {
+      printPrefix(pOutFile, NULL, bufferPos, sizeof(intptr_t));
+      trfprintf(pOutFile, ".dword \t" POINTER_PRINTF_FORMAT "\t\t; Method Pointer", *(reinterpret_cast<uintptr_t *>(bufferPos)));
+      bufferPos += sizeof(intptr_t);
+      }
+
+   printPrefix(pOutFile, NULL, bufferPos, 4);
+   trfprintf(pOutFile, ".word \t0x%08x\t\t; Lock Word For Compilation", *(reinterpret_cast<int32_t *>(bufferPos)));
    }
 
 uint32_t TR::ARM64CallSnippet::getLength(int32_t estimatedSnippetStart)
@@ -357,7 +491,7 @@ uint8_t *TR::ARM64UnresolvedCallSnippet::emitSnippetBody()
    cg()->addExternalRelocation(new (cg()->trHeapMemory()) TR::ExternalRelocation(
                                cursor,
                                *(uint8_t **)cursor,
-                               getNode() ? (uint8_t *)getNode()->getInlinedSiteIndex() : (uint8_t *)-1,
+                               getNode() ? (uint8_t *)(intptr_t)getNode()->getInlinedSiteIndex() : (uint8_t *)-1,
                                TR_Trampolines, cg()),
                                __FILE__, __LINE__, getNode());
    cursor += 8;
@@ -389,11 +523,45 @@ uint8_t *TR::ARM64UnresolvedCallSnippet::emitSnippetBody()
    }
 
 void
-TR_Debug::print(TR::FILE *pOutFile, TR::ARM64UnresolvedCallSnippet * snippet)
+TR_Debug::print(TR::FILE *pOutFile, TR::ARM64UnresolvedCallSnippet *snippet)
    {
    print(pOutFile, (TR::ARM64CallSnippet *) snippet);
 
-   //TODO print snippet body
+   uint8_t *cursor = snippet->getSnippetLabel()->getCodeLocation() + snippet->getLength(0) - (sizeof(intptr_t) * 2);
+
+   TR::SymbolReference *methodSymRef = snippet->getNode()->getSymbolReference();
+   TR::MethodSymbol    *methodSymbol = methodSymRef->getSymbol()->castToMethodSymbol();
+
+   intptr_t helperLookupOffset;
+   switch (snippet->getNode()->getDataType())
+      {
+      case TR::NoType:
+         helperLookupOffset = 0;
+         break;
+      case TR::Int32:
+         helperLookupOffset = 8;
+         break;
+      case TR::Int64:
+      case TR::Address:
+         helperLookupOffset = 16;
+         break;
+      case TR::Float:
+         helperLookupOffset = 24;
+         break;
+      case TR::Double:
+         helperLookupOffset = 32;
+         break;
+      }
+
+   printPrefix(pOutFile, NULL, cursor, sizeof(intptr_t));
+   trfprintf(pOutFile, ".dword \t" POINTER_PRINTF_FORMAT "\t\t; Pointer To Constant Pool", *(reinterpret_cast<intptr_t *>(cursor)));
+   cursor += sizeof(intptr_t);
+
+   printPrefix(pOutFile, NULL, cursor, 8);
+   trfprintf(pOutFile,
+           ".dword \t%016llx\t\t; Offset | Flag | CP Index",
+           (helperLookupOffset << 56) | methodSymRef->getCPIndexForVM());
+   cursor += 8;
    }
 
 uint32_t TR::ARM64UnresolvedCallSnippet::getLength(int32_t estimatedSnippetStart)
@@ -407,7 +575,7 @@ uint8_t *TR::ARM64VirtualUnresolvedSnippet::emitSnippetBody()
    uint8_t *cursor = cg()->getBinaryBufferCursor();
    TR::Node *callNode = getNode();
    TR::SymbolReference *methodSymRef = callNode->getSymbolReference();
-   TR::SymbolReference *glueRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_ARM64virtualUnresolvedHelper, false, false, false);
+   TR::SymbolReference *glueRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_ARM64virtualUnresolvedHelper);
    TR_J9VMBase *fej9 = (TR_J9VMBase *)(comp->fe());
    void *thunk = fej9->getJ2IThunk(callNode->getSymbolReference()->getSymbol()->castToMethodSymbol()->getMethod(), comp);
 
@@ -441,7 +609,7 @@ uint8_t *TR::ARM64VirtualUnresolvedSnippet::emitSnippetBody()
    cg()->addExternalRelocation(new (cg()->trHeapMemory()) TR::ExternalRelocation(
                                cursor,
                                *(uint8_t **)cursor,
-                               getNode() ? (uint8_t *)getNode()->getInlinedSiteIndex() : (uint8_t *)-1,
+                               getNode() ? (uint8_t *)(intptr_t)getNode()->getInlinedSiteIndex() : (uint8_t *)-1,
                                TR_Thunks, cg()),
                                __FILE__, __LINE__, getNode());
    cursor += sizeof(intptr_t);
@@ -547,25 +715,27 @@ uint8_t *TR::ARM64InterfaceCallSnippet::emitSnippetBody()
    {
    TR::Compilation *comp = cg()->comp();
    uint8_t *cursor = cg()->getBinaryBufferCursor();
+   uint8_t *blAddress;
    TR::Node *callNode = getNode();
    TR::SymbolReference *methodSymRef = getNode()->getSymbolReference();
-   TR::SymbolReference *glueRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_ARM64interfaceCallHelper, false, false, false);
-   TR_J9VMBase *fej9 = (TR_J9VMBase *)(comp->fe());
+   TR::SymbolReference *glueRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_ARM64interfaceCallHelper);
+   TR_J9VMBase *fej9 = reinterpret_cast<TR_J9VMBase *>(comp->fe());
    void* thunk = fej9->getJ2IThunk(callNode->getSymbolReference()->getSymbol()->castToMethodSymbol()->getMethod(), comp);
 
    // for alignment of intptr_t data
-   if (((uint64_t)cursor % sizeof(intptr_t)) == 0)
+   if ((reinterpret_cast<uint64_t>(cursor) % sizeof(intptr_t)) == 0)
       {
-      *(int32_t *)cursor = 0xdeadc0de;
+      *reinterpret_cast<int32_t *>(cursor) = 0xdeadc0de;
       cursor += sizeof(int32_t);
       }
 
    getSnippetLabel()->setCodeLocation(cursor);
 
    // bl glueRef
-   *(int32_t *)cursor = cg()->encodeHelperBranchAndLink(glueRef, cursor, callNode);
+   *reinterpret_cast<uint32_t *>(cursor) = cg()->encodeHelperBranchAndLink(glueRef, cursor, callNode);
+   blAddress = cursor;
    cursor += ARM64_INSTRUCTION_LENGTH;
-   TR_ASSERT(((uint64_t)cursor % sizeof(intptr_t)) == 0, "Snippet data is not aligned");
+   TR_ASSERT_FATAL((reinterpret_cast<uint64_t>(cursor) % sizeof(intptr_t)) == 0, "Snippet data is not aligned");
 
    // Store the code cache RA
    *(intptr_t *)cursor = (intptr_t)getReturnLabel()->getCodeLocation();
@@ -577,26 +747,47 @@ uint8_t *TR::ARM64InterfaceCallSnippet::emitSnippetBody()
    cursor += sizeof(intptr_t);
 
    // CP
-   intptr_t cpAddr = (intptr_t)methodSymRef->getOwningMethod(comp)->constantPool();
-   *(intptr_t *)cursor = cpAddr;
+   intptr_t cpAddr = reinterpret_cast<intptr_t>(methodSymRef->getOwningMethod(comp)->constantPool());
+   *reinterpret_cast<intptr_t *>(cursor) = cpAddr;
    uint8_t *j2iThunkRelocationPoint = cursor;
    cursor += sizeof(intptr_t);
 
    // CP index
-   *(intptr_t *)cursor = methodSymRef->getCPIndexForVM();
+   *reinterpret_cast<intptr_t *>(cursor) = methodSymRef->getCPIndexForVM();
    cursor += sizeof(intptr_t);
 
    // 2 slots for resolved values (interface class and iTable index)
-   *(intptr_t *)cursor = 0;
+   *reinterpret_cast<intptr_t *>(cursor) = 0;
    cursor += sizeof(intptr_t);
-   *(intptr_t *)cursor = 0;
+   *reinterpret_cast<intptr_t *>(cursor) = 0;
    cursor += sizeof(intptr_t);
+
+   _firstClassCacheSlotLabel->setCodeLocation(cursor);
+   _firstBranchAddressCacheSlotLabel->setCodeLocation(cursor + sizeof(intptr_t));
+   _secondClassCacheSlotLabel->setCodeLocation(cursor + 2*sizeof(intptr_t));
+   _secondBranchAddressCacheSlotLabel->setCodeLocation(cursor + 3*sizeof(intptr_t));
+   // Initialize for: two class ptrs, two target addrs
+   // Initialize target addrs with the address of the bl
+   *reinterpret_cast<intptr_t *>(cursor) = -1;
+   *reinterpret_cast<intptr_t *>(cursor + sizeof(intptr_t)) = reinterpret_cast<intptr_t>(blAddress);
+   *reinterpret_cast<intptr_t *>(cursor + 2*sizeof(intptr_t)) = -1;
+   *reinterpret_cast<intptr_t *>(cursor + 3*sizeof(intptr_t)) = reinterpret_cast<intptr_t>(blAddress);
+
+   // Register for relocation of the 1st target address
+   cg()->addExternalRelocation(new (cg()->trHeapMemory()) TR::ExternalRelocation(cursor + sizeof(intptr_t), NULL, TR_AbsoluteMethodAddress, cg()),
+         __FILE__, __LINE__, callNode);
+
+   // Register for relocation of the 2nd target address
+   cg()->addExternalRelocation(new (cg()->trHeapMemory()) TR::ExternalRelocation(cursor + 3*sizeof(intptr_t), NULL, TR_AbsoluteMethodAddress, cg()),
+         __FILE__, __LINE__, callNode);
+
+   cursor += 4*sizeof(intptr_t);
 
    /*
     * J2I thunk address.
     * This is used for private nestmate calls.
     */
-   *(intptr_t*)cursor = (intptr_t)thunk;
+   *reinterpret_cast<intptr_t*>(cursor) = reinterpret_cast<intptr_t>(thunk);
    if (comp->compileRelocatableCode())
       {
       auto info =
@@ -608,14 +799,14 @@ uint8_t *TR::ARM64InterfaceCallSnippet::emitSnippetBody()
       info->data1 = cpAddr;
 
       // data2 = inlined site index
-      info->data2 = callNode ? callNode->getInlinedSiteIndex() : (uintptr_t)-1;
+      info->data2 = callNode ? callNode->getInlinedSiteIndex() : static_cast<uintptr_t>(-1);
 
       // data3 = distance in bytes from Constant Pool Pointer to J2I Thunk
-      info->data3 = (intptr_t)cursor - (intptr_t)j2iThunkRelocationPoint;
+      info->data3 = reinterpret_cast<intptr_t>(cursor) - reinterpret_cast<intptr_t>(j2iThunkRelocationPoint);
 
       cg()->addExternalRelocation(new (cg()->trHeapMemory()) TR::ExternalRelocation(
                                   j2iThunkRelocationPoint,
-                                  (uint8_t *)info,
+                                  reinterpret_cast<uint8_t *>(info),
                                   NULL,
                                   TR_J2IVirtualThunkPointer, cg()),
                                   __FILE__, __LINE__, callNode);
@@ -660,6 +851,22 @@ TR_Debug::print(TR::FILE *pOutFile, TR::ARM64InterfaceCallSnippet * snippet)
    cursor += sizeof(intptr_t);
 
    printPrefix(pOutFile, NULL, cursor, sizeof(intptr_t));
+   trfprintf(pOutFile, ".dword \t" POINTER_PRINTF_FORMAT "\t\t; First Class Pointer", *(intptr_t *)cursor);
+   cursor += sizeof(intptr_t);
+
+   printPrefix(pOutFile, NULL, cursor, sizeof(intptr_t));
+   trfprintf(pOutFile, ".dword \t" POINTER_PRINTF_FORMAT "\t\t; First Class Target", *(intptr_t *)cursor);
+   cursor += sizeof(intptr_t);
+
+   printPrefix(pOutFile, NULL, cursor, sizeof(intptr_t));
+   trfprintf(pOutFile, ".dword \t" POINTER_PRINTF_FORMAT "\t\t; Second Class Pointer", *(intptr_t *)cursor);
+   cursor += sizeof(intptr_t);
+
+   printPrefix(pOutFile, NULL, cursor, sizeof(intptr_t));
+   trfprintf(pOutFile, ".dword \t" POINTER_PRINTF_FORMAT "\t\t; Second Class Target", *(intptr_t *)cursor);
+   cursor += sizeof(intptr_t);
+
+   printPrefix(pOutFile, NULL, cursor, sizeof(intptr_t));
    trfprintf(pOutFile, ".dword \t" POINTER_PRINTF_FORMAT "\t\t; J2I thunk address for private", *(intptr_t *)cursor);
    }
 
@@ -668,15 +875,19 @@ uint32_t TR::ARM64InterfaceCallSnippet::getLength(int32_t estimatedSnippetStart)
    /*
     * (1 word for alignment)
     * 1 instruction
-    * 6 address fields:
+    * 10 address fields:
     *   - Code cache RA
     *   - CP Pointer
     *   - CP Index
     *   - Interface Class Pointer
     *   - ITable Index (may also contain a tagged J9Method* when handling nestmates)
+    *   - First Class Pointer
+    *   - First Class Target
+    *   - Second Class Pointer
+    *   - Second Class Target
     *   - J2I thunk address
     */
-   return ARM64_INSTRUCTION_LENGTH + sizeof(intptr_t)*6 + sizeof(int32_t);
+   return ARM64_INSTRUCTION_LENGTH + sizeof(intptr_t)*10 + sizeof(int32_t);
    }
 
 uint8_t *TR::ARM64CallSnippet::generateVIThunk(TR::Node *callNode, int32_t argSize, TR::CodeGenerator *cg)
@@ -716,7 +927,11 @@ uint8_t *TR::ARM64CallSnippet::generateVIThunk(TR::Node *callNode, int32_t argSi
                          cg->getDebug()->getName(dataType));
       }
 
-   dispatcher = (uintptr_t)cg->symRefTab()->findOrCreateRuntimeHelper(helper, false, false, false)->getMethodAddress();
+#if defined(OSX)
+   pthread_jit_write_protect_np(0);
+#endif
+
+   dispatcher = (uintptr_t)cg->symRefTab()->findOrCreateRuntimeHelper(helper)->getMethodAddress();
 
    buffer = flushArgumentsToStack(buffer, callNode, argSize, cg);
 
@@ -748,6 +963,10 @@ uint8_t *TR::ARM64CallSnippet::generateVIThunk(TR::Node *callNode, int32_t argSi
 
 #ifdef TR_HOST_ARM64
    arm64CodeSync(thunk, codeSize);
+#endif
+
+#if defined(OSX)
+   pthread_jit_write_protect_np(1);
 #endif
 
    return returnValue;
@@ -788,7 +1007,11 @@ TR_J2IThunk *TR::ARM64CallSnippet::generateInvokeExactJ2IThunk(TR::Node *callNod
                   cg->getDebug()->getName(dataType));
       }
 
-   dispatcher = (intptr_t)cg->symRefTab()->findOrCreateRuntimeHelper(helper, false, false, false)->getMethodAddress();
+#if defined(OSX)
+   pthread_jit_write_protect_np(0);
+#endif
+
+   dispatcher = (intptr_t)cg->symRefTab()->findOrCreateRuntimeHelper(helper)->getMethodAddress();
 
    buffer = flushArgumentsToStack(buffer, callNode, argSize, cg);
 
@@ -817,6 +1040,10 @@ TR_J2IThunk *TR::ARM64CallSnippet::generateInvokeExactJ2IThunk(TR::Node *callNod
 
 #ifdef TR_HOST_ARM64
    arm64CodeSync(thunk->entryPoint(), codeSize);
+#endif
+
+#if defined(OSX)
+   pthread_jit_write_protect_np(1);
 #endif
 
    return thunk;

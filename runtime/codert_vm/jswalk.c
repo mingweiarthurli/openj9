@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -186,7 +186,7 @@ UDATA  jitWalkStackFrames(J9StackWalkState *walkState)
 		walkState->outgoingArgCount = walkState->argCount;
 
 		if ((!(walkState->flags & J9_STACKWALK_SKIP_INLINES)) && getJitInlinedCallInfo(walkState->jitInfo)) {
-			jitGetMapsFromPC(walkState->walkThread->javaVM, walkState->jitInfo, (UDATA) walkState->pc, &(walkState->stackMap), &(walkState->inlineMap));
+			jitGetMapsFromPC(walkState->currentThread, walkState->javaVM, walkState->jitInfo, (UDATA) walkState->pc, &(walkState->stackMap), &(walkState->inlineMap));
 			if (NULL != walkState->inlineMap) {
 				walkState->inlinedCallSite = getFirstInlinedCallSite(walkState->jitInfo, walkState->inlineMap);
 
@@ -217,7 +217,7 @@ resumeWalkInline:
 				}
 			}
 		} else if (walkState->flags & J9_STACKWALK_RECORD_BYTECODE_PC_OFFSET) {
-			jitGetMapsFromPC(walkState->walkThread->javaVM, walkState->jitInfo, (UDATA) walkState->pc, &(walkState->stackMap), &(walkState->inlineMap));
+			jitGetMapsFromPC(walkState->currentThread, walkState->javaVM, walkState->jitInfo, (UDATA) walkState->pc, &(walkState->stackMap), &(walkState->inlineMap));
 		}
 
 		SET_A0_CP_METHOD(walkState);
@@ -276,7 +276,7 @@ resumeNonInline:
 		 * This is safe to do as the I2J values were saved by the interpreter at
 		 * the transition point, and can be assumed to be valid.
 		 */
-		if (walkState->errorMode != J9_STACKWALK_ERROR_MODE_IGNORE) {
+		if (J9_ARE_NO_BITS_SET(walkState->flags, J9_STACKWALK_NO_ERROR_REPORT)) {
 			/* Avoid recursive error situations */
 			if (0 == (walkState->walkThread->privateFlags & J9_PRIVATE_FLAGS_STACK_CORRUPT)) {
 				walkState->walkThread->privateFlags |= J9_PRIVATE_FLAGS_STACK_CORRUPT;
@@ -457,6 +457,9 @@ static UDATA walkTransitionFrame(J9StackWalkState *walkState)
 			walkState->unwindSP = (UDATA *) UNTAG2(j2iFrame->taggedReturnSP, UDATA *);
 			UPDATE_PC_FROM(walkState, j2iFrame->returnAddress);
 		} else {
+			if (J9_ARE_ANY_BITS_SET(walkState->flags, J9_STACKWALK_NO_ERROR_REPORT)) {
+				return J9_STACKWALK_STOP_ITERATING;
+			}
 			/* Choke & Die */
 #ifndef J9VM_INTERP_STACKWALK_TRACING
 			/* Symbol not visible from verbose */
@@ -514,8 +517,11 @@ static void jitWalkFrame(J9StackWalkState *walkState, UDATA walkLocals, void *st
 	WALK_METHOD_CLASS(walkState);
 
 	if (stackMap == NULL) {
-		stackMap = getStackMapFromJitPC(walkState->walkThread->javaVM, walkState->jitInfo, (UDATA) walkState->pc);
+		stackMap = getStackMapFromJitPC(walkState->currentThread, walkState->javaVM, walkState->jitInfo, (UDATA) walkState->pc);
 		if (stackMap == NULL) {
+			if (J9_ARE_ANY_BITS_SET(walkState->flags, J9_STACKWALK_NO_ERROR_REPORT)) {
+				return;
+			}
 			PORT_ACCESS_FROM_WALKSTATE(walkState);
 			J9ROMMethod * romMethod = J9_ROM_METHOD_FROM_RAM_METHOD(walkState->method);
 			J9UTF8 * className = J9ROMCLASS_CLASSNAME(J9_CLASS_FROM_METHOD(walkState->method)->romClass);
@@ -548,7 +554,7 @@ static void jitWalkFrame(J9StackWalkState *walkState, UDATA walkLocals, void *st
 	variableInternalPtrSize = 0;
 	registerMap = getJitRegisterMap(walkState->jitInfo, stackMap);
 	jitDescriptionCursor = getJitStackSlots(walkState->jitInfo, stackMap);
-	stackAllocMapCursor = getStackAllocMapFromJitPC(walkState->walkThread->javaVM, walkState->jitInfo, (UDATA) walkState->pc, stackMap);
+	stackAllocMapCursor = getStackAllocMapFromJitPC(walkState->currentThread, walkState->jitInfo, (UDATA) walkState->pc, stackMap);
 
 	walkState->slotType = J9_STACKWALK_SLOT_TYPE_METHOD_LOCAL;
 	walkState->slotIndex = 0;
@@ -1046,7 +1052,7 @@ static void jitWalkResolveMethodFrame(J9StackWalkState *walkState)
 			 * If errors are not being reported, stop walking this frame,
 			 * which will likely lead to further errors or crashes.
 			 */
-			if (walkState->errorMode != J9_STACKWALK_ERROR_MODE_IGNORE) {
+			if (J9_ARE_NO_BITS_SET(walkState->flags, J9_STACKWALK_NO_ERROR_REPORT)) {
 				/* Avoid recursive error situations */
 				if (0 == (walkState->walkThread->privateFlags & J9_PRIVATE_FLAGS_STACK_CORRUPT)) {
 					walkState->walkThread->privateFlags |= J9_PRIVATE_FLAGS_STACK_CORRUPT;
@@ -1055,7 +1061,7 @@ static void jitWalkResolveMethodFrame(J9StackWalkState *walkState)
 			}
 			return;
 		}
-		jitGetMapsFromPC(walkState->walkThread->javaVM, metaData, (UDATA)walkState->pc, &stackMap, &inlineMap);
+		jitGetMapsFromPC(walkState->currentThread, walkState->javaVM, metaData, (UDATA)walkState->pc, &stackMap, &inlineMap);
 
 		/* If there are no inlines, use the outer method.  Otherwise, use the innermost inline at the current PC */
 
@@ -1219,6 +1225,9 @@ static void jitWalkResolveMethodFrame(J9StackWalkState *walkState)
 		while ((sigChar = jitNextSigChar(&sigData)) != ')') {
 
 			switch (sigChar) {
+#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+				case 'Q': /* fall through */
+#endif /* #if defined(J9VM_OPT_VALHALLA_VALUE_TYPES) */
 				case 'L':
 #ifdef J9SW_ARGUMENT_REGISTER_COUNT
 					if (stackSpillCount) {
@@ -1326,6 +1335,9 @@ static UDATA jitNextSigChar(U_8 ** utfData)
 			}
 			/* Fall through to consume type name, utfChar == 'L' for return value */
 
+#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+		case 'Q': /* fall through */
+#endif /* #if defined(J9VM_OPT_VALHALLA_VALUE_TYPES) */
 		case 'L':
 			while (jitNextUTFChar(utfData) != ';') ;
 	}
@@ -1478,53 +1490,55 @@ J9JITExceptionTable * jitGetExceptionTableFromPC(J9VMThread * vmThread, UDATA ji
 {
 	UDATA maskedPC = (UDATA)MASK_PC(jitPC);
 #ifdef J9JIT_ARTIFACT_SEARCH_CACHE_ENABLE
-	J9JITExceptionTable *exceptionTable = NULL;
 	TR_jit_artifact_search_cache *artifactSearchCache = vmThread->jitArtifactSearchCache;
-	TR_jit_artifact_search_cache *cacheEntry = NULL;
-	if (NULL == artifactSearchCache) {
-		TR_jit_artifact_search_cache *existingCache = NULL;
-		PORT_ACCESS_FROM_JAVAVM(vmThread->javaVM);
-		artifactSearchCache = j9mem_allocate_memory(JIT_ARTIFACT_SEARCH_CACHE_SIZE * sizeof (TR_jit_artifact_search_cache), OMRMEM_CATEGORY_JIT);
+	if (J9_ARE_NO_BITS_SET((UDATA)artifactSearchCache, J9_STACKWALK_NO_JIT_CACHE)) {
+		J9JITExceptionTable *exceptionTable = NULL;
+		TR_jit_artifact_search_cache *cacheEntry = NULL;
 		if (NULL == artifactSearchCache) {
-			return jit_artifact_search(vmThread->javaVM->jitConfig->translationArtifacts, maskedPC);
+			TR_jit_artifact_search_cache *existingCache = NULL;
+			PORT_ACCESS_FROM_JAVAVM(vmThread->javaVM);
+			artifactSearchCache = j9mem_allocate_memory(JIT_ARTIFACT_SEARCH_CACHE_SIZE * sizeof (TR_jit_artifact_search_cache), OMRMEM_CATEGORY_JIT);
+			if (NULL == artifactSearchCache) {
+				goto noCache;
+			}
+			memset(artifactSearchCache, 0, JIT_ARTIFACT_SEARCH_CACHE_SIZE * sizeof(TR_jit_artifact_search_cache));
+			/* The vmThread parameter to this function may not be the current thread, so ensure that only a single
+			 * instance of the cache is allocated for the thread, and make sure the empty cache entries for a new
+			 * cache are visible to other threads before the cache pointer is visible.
+			 */
+			issueWriteBarrier();
+			existingCache = (TR_jit_artifact_search_cache*)compareAndSwapUDATA((uintptr_t*)&vmThread->jitArtifactSearchCache, (uintptr_t)existingCache, (uintptr_t)artifactSearchCache);
+			if (NULL != existingCache) {
+				j9mem_free_memory(artifactSearchCache);
+				artifactSearchCache = existingCache;
+			}
 		}
-		memset(artifactSearchCache, 0, JIT_ARTIFACT_SEARCH_CACHE_SIZE * sizeof(TR_jit_artifact_search_cache));
-		/* The vmThread parameter to this function may not be the current thread, so ensure that only a single
-		 * instance of the cache is allocated for the thread, and make sure the empty cache entries for a new
-		 * cache are visible to other threads before the cache pointer is visible.
-		 */
-		issueWriteBarrier();
-		existingCache = (TR_jit_artifact_search_cache*)compareAndSwapUDATA((uintptr_t*)&vmThread->jitArtifactSearchCache, (uintptr_t)existingCache, (uintptr_t)artifactSearchCache);
-		if (NULL != existingCache) {
-			j9mem_free_memory(artifactSearchCache);
-			artifactSearchCache = existingCache;
-		}
-	}
-	cacheEntry = &(artifactSearchCache[JIT_ARTIFACT_SEARCH_CACHE_HASH_RESULT(maskedPC)]);
-	if (cacheEntry->searchValue == maskedPC) {
-		exceptionTable = cacheEntry->exceptionTable;
-		/* The cache is not thread-safe - it's possible to view an inconsistent pc/metadata pair from one
-		 * thread while another thread is updating the cache entry. To counteract this, verify that the
-		 * found metadata is valid for the input PC. If not, ignore the cache and go to the underlying
-		 * hash table.
-		 */
-		if ((NULL == exceptionTable)
-		|| !(((maskedPC >= exceptionTable->startPC) && (maskedPC < exceptionTable->endWarmPC))
-			|| ((0 != exceptionTable->startColdPC) && (maskedPC >= exceptionTable->startColdPC) && (maskedPC < exceptionTable->endPC)))
-		) {
+		cacheEntry = &(artifactSearchCache[JIT_ARTIFACT_SEARCH_CACHE_HASH_RESULT(maskedPC)]);
+		if (cacheEntry->searchValue == maskedPC) {
+			exceptionTable = cacheEntry->exceptionTable;
+			/* The cache is not thread-safe - it's possible to view an inconsistent pc/metadata pair from one
+			 * thread while another thread is updating the cache entry. To counteract this, verify that the
+			 * found metadata is valid for the input PC. If not, ignore the cache and go to the underlying
+			 * hash table.
+			 */
+			if ((NULL == exceptionTable)
+			|| !(((maskedPC >= exceptionTable->startPC) && (maskedPC < exceptionTable->endWarmPC))
+				|| ((0 != exceptionTable->startColdPC) && (maskedPC >= exceptionTable->startColdPC) && (maskedPC < exceptionTable->endPC)))
+			) {
+				exceptionTable = jit_artifact_search(vmThread->javaVM->jitConfig->translationArtifacts, maskedPC);
+			}
+	 	} else {
 			exceptionTable = jit_artifact_search(vmThread->javaVM->jitConfig->translationArtifacts, maskedPC);
+			if (NULL != exceptionTable) {
+				cacheEntry->searchValue = maskedPC;
+				cacheEntry->exceptionTable = exceptionTable;
+			}
 		}
- 	} else {
-		exceptionTable = jit_artifact_search(vmThread->javaVM->jitConfig->translationArtifacts, maskedPC);
-		if (NULL != exceptionTable) {
-			cacheEntry->searchValue = maskedPC;
-			cacheEntry->exceptionTable = exceptionTable;
-		}
+		return exceptionTable;
 	}
-	return exceptionTable;
-#else
-	return jit_artifact_search(vmThread->javaVM->jitConfig->translationArtifacts, maskedPC);
+noCache:
 #endif /* J9JIT_ARTIFACT_SEARCH_CACHE_ENABLE */
+	return jit_artifact_search(vmThread->javaVM->jitConfig->translationArtifacts, maskedPC);
 }
 
 
@@ -1603,13 +1617,8 @@ jitWalkStackAllocatedObject(J9StackWalkState * walkState, j9object_t object)
 {
 	J9JavaVM* vm = walkState->walkThread->javaVM;
 	J9MM_IterateObjectDescriptor descriptor;
-	UDATA iterateObjectSlotsFlags = 0;
 	J9MemoryManagerFunctions *mmFuncs = vm->memoryManagerFunctions;
 
-	if (J9_STACKWALK_INCLUDE_ARRAYLET_LEAVES == (walkState->flags & J9_STACKWALK_INCLUDE_ARRAYLET_LEAVES)) {
-		iterateObjectSlotsFlags |= j9mm_iterator_flag_include_arraylet_leaves;
-	}
-	
 #if defined (J9VM_INTERP_STACKWALK_TRACING)
 	swPrintf(walkState, 4, "\t\tSA-Obj[%p]\n", object);
 
@@ -1621,7 +1630,7 @@ jitWalkStackAllocatedObject(J9StackWalkState * walkState, j9object_t object)
 		vm,
 		vm->portLibrary,
 		&descriptor,
-		iterateObjectSlotsFlags,
+		0,
 		stackAllocatedObjectSlotWalkFunction,
 		walkState);
 }
@@ -1666,13 +1675,16 @@ jitGetOwnedObjectMonitors(J9StackWalkState *walkState)
 	void *inlineMap;
 	U_8 *liveMonitorMap;
 	U_16 numberOfMapBits;
+	UDATA rc = J9_STACKWALK_KEEP_ITERATING;
+	/* If -XX:+ShowHiddenFrames option has not been set, skip hidden method frames */
+	UDATA skipHiddenFrames = J9_ARE_NO_BITS_SET(walkState->javaVM->runtimeFlags, J9_RUNTIME_SHOW_HIDDEN_FRAMES);
 
 	if (NULL == walkState->userData1) {
 		return countOwnedObjectMonitors(walkState);
 	}
 
 	/* get the stackmap and inline map for the given pc (this is a single walk of jit metadata) */
-	jitGetMapsFromPC(walkState->walkThread->javaVM, walkState->jitInfo, (UDATA)walkState->pc, &stackMap, &inlineMap);
+	jitGetMapsFromPC(walkState->currentThread, walkState->javaVM, walkState->jitInfo, (UDATA)walkState->pc, &stackMap, &inlineMap);
 
 	/* get a slot map of all live monitors on the JIT frame.  May include slots from inlined methods */
 	liveMonitorMap = getJitLiveMonitors(walkState->jitInfo, stackMap);
@@ -1692,23 +1704,36 @@ jitGetOwnedObjectMonitors(J9StackWalkState *walkState)
 			inlinedCallSite = getNextInlinedCallSite(walkState->jitInfo, inlinedCallSite)
 			) {
 
-			if (liveMonitorMap) {
-				U_8 *inlineMonitorMask = getMonitorMask(gcStackAtlas, inlinedCallSite);
-				if (NULL != inlineMonitorMask) {
-					walkLiveMonitorSlots(walkState, gcStackAtlas, liveMonitorMap, inlineMonitorMask, numberOfMapBits);
+			J9Method *ramMethod = getInlinedMethod(inlinedCallSite);
+			/* if skipHiddenFrames flag set, skip checking monitors from hidden method frames */
+			if (!(skipHiddenFrames && J9_IS_HIDDEN_METHOD(ramMethod))) {
+				if (liveMonitorMap) {
+					U_8 *inlineMonitorMask = getMonitorMask(gcStackAtlas, inlinedCallSite);
+					if (NULL != inlineMonitorMask) {
+						rc = walkLiveMonitorSlots(walkState, gcStackAtlas, liveMonitorMap, inlineMonitorMask, numberOfMapBits);
+						if (J9_STACKWALK_STOP_ITERATING == rc) {
+							return rc;
+						}
+					}
 				}
+				/* increment stack depth */
+				walkState->userData4 = (void *)(((UDATA)walkState->userData4) + 1);
 			}
-			/* increment stack depth */
-			walkState->userData4 = (void *)(((UDATA)walkState->userData4) + 1);
 		}
 	}
 
-	/* Get the live monitors for the outer frame */
-	if (liveMonitorMap) {
-		walkLiveMonitorSlots(walkState, gcStackAtlas, liveMonitorMap, getMonitorMask(gcStackAtlas, NULL), numberOfMapBits);
+	/* Check if outer frame should be skipped */
+	if (skipHiddenFrames && J9_IS_HIDDEN_METHOD(walkState->method)) {
+		/* Decrease the stack depth when skipping hidden frame */
+		walkState->userData4 = (void *)(((UDATA)walkState->userData4) - 1);
+	} else {
+		/* Get the live monitors for the outer frame */
+		if (liveMonitorMap) {
+			rc = walkLiveMonitorSlots(walkState, gcStackAtlas, liveMonitorMap, getMonitorMask(gcStackAtlas, NULL), numberOfMapBits);
+		}
 	}
 
-	return J9_STACKWALK_KEEP_ITERATING;
+	return rc;
 }
 
 /*
@@ -1722,9 +1747,11 @@ countOwnedObjectMonitors(J9StackWalkState *walkState)
 	void *inlineMap;
 	U_8 *liveMonitorMap;
 	U_16 numberOfMapBits;
+	/* If -XX:+ShowHiddenFrames option has not been set, skip hidden method frames */
+	UDATA skipHiddenFrames = J9_ARE_NO_BITS_SET(walkState->javaVM->runtimeFlags, J9_RUNTIME_SHOW_HIDDEN_FRAMES);
 
 	/* get the stackmap and inline map for the given pc (this is a single walk of jit metadata) */
-	jitGetMapsFromPC(walkState->walkThread->javaVM, walkState->jitInfo, (UDATA)walkState->pc, &stackMap, &inlineMap);
+	jitGetMapsFromPC(walkState->currentThread, walkState->javaVM, walkState->jitInfo, (UDATA)walkState->pc, &stackMap, &inlineMap);
 
 	/* get a slot map of all live monitors on the JIT frame.  May include slots from inlined methods */
 	liveMonitorMap = getJitLiveMonitors(walkState->jitInfo, stackMap);
@@ -1744,18 +1771,25 @@ countOwnedObjectMonitors(J9StackWalkState *walkState)
 			inlinedCallSite = getNextInlinedCallSite(walkState->jitInfo, inlinedCallSite)
 			) {
 
-			if (liveMonitorMap) {
-				U_8 *inlineMonitorMask = getMonitorMask(gcStackAtlas, inlinedCallSite);
-				if (NULL != inlineMonitorMask) {
-					countLiveMonitorSlots(walkState, gcStackAtlas, liveMonitorMap, inlineMonitorMask, numberOfMapBits);
+			J9Method *ramMethod = getInlinedMethod(inlinedCallSite);
+			/* if skipHiddenFrames flag set, skip checking monitors from hidden method frames */
+			if (!(skipHiddenFrames && J9_IS_HIDDEN_METHOD(ramMethod))) {
+				if (liveMonitorMap) {
+					U_8 *inlineMonitorMask = getMonitorMask(gcStackAtlas, inlinedCallSite);
+					if (NULL != inlineMonitorMask) {
+						countLiveMonitorSlots(walkState, gcStackAtlas, liveMonitorMap, inlineMonitorMask, numberOfMapBits);
+					}
 				}
 			}
 		}
 	}
 
-	/* Get the live monitors for the outer frame */
-	if (liveMonitorMap) {
-		countLiveMonitorSlots(walkState, gcStackAtlas, liveMonitorMap, getMonitorMask(gcStackAtlas, 0), numberOfMapBits);
+	/* Check if outer frame should be skipped */
+	if (!(skipHiddenFrames && J9_IS_HIDDEN_METHOD(walkState->method))) {
+		/* Get the live monitors for the outer frame */
+		if (liveMonitorMap) {
+			countLiveMonitorSlots(walkState, gcStackAtlas, liveMonitorMap, getMonitorMask(gcStackAtlas, 0), numberOfMapBits);
+		}
 	}
 	return J9_STACKWALK_KEEP_ITERATING;
 }
@@ -1769,6 +1803,9 @@ walkLiveMonitorSlots(J9StackWalkState *walkState, J9JITStackAtlas *gcStackAtlas,
 	j9object_t *objAddress;
 	U_16 i;
 	U_8 bit;
+	J9VMThread *currentThread = walkState->currentThread;
+	J9VMThread *targetThread = walkState->walkThread;
+	J9InternalVMFunctions const * const vmFuncs = walkState->javaVM->internalVMFunctions;
 
 	for (i = 0; i < numberOfMapBits; ++i) {
 		bit = liveMonitorMap[i >> 3] & monitorMask[i >> 3] & (1 << (i & 7));
@@ -1786,7 +1823,7 @@ walkLiveMonitorSlots(J9StackWalkState *walkState, J9JITStackAtlas *gcStackAtlas,
 			if (NULL != objAddress) {
 				j9object_t obj = *objAddress;
 
-				if (NULL != obj) {
+				if ((NULL != obj) && !vmFuncs->objectIsBeingWaitedOn(currentThread, targetThread, obj)) {
 					info->object = obj;
 					info->count = 1;
 					info->depth = (UDATA)walkState->userData4;
@@ -1806,6 +1843,9 @@ countLiveMonitorSlots(J9StackWalkState *walkState, J9JITStackAtlas *gcStackAtlas
 	IDATA monitorCount = (IDATA)walkState->userData2;
 	U_16 i;
 	U_8 bit;
+	J9VMThread *currentThread = walkState->currentThread;
+	J9VMThread *targetThread = walkState->walkThread;
+	J9InternalVMFunctions const * const vmFuncs = walkState->javaVM->internalVMFunctions;
 
 	for (i = 0; i < numberOfMapBits; ++i) {
 		bit = liveMonitorMap[i >> 3] & monitorMask[i >> 3];
@@ -1816,8 +1856,12 @@ countLiveMonitorSlots(J9StackWalkState *walkState, J9JITStackAtlas *gcStackAtlas
 			/* CMVC 188386 : if the object is stack allocates and the object is discontiguous on stack,
 			 * the jit stores a null in the slot. Skip this slot.
 			 */
-			if ((NULL != objAddress) && (NULL != *objAddress)) {
-				monitorCount += 1;
+			if (NULL != objAddress) {
+				j9object_t obj = *objAddress;
+
+				if ((NULL != obj) && !vmFuncs->objectIsBeingWaitedOn(currentThread, targetThread, obj)) {
+					monitorCount += 1;
+				}
 			}
 		}
 	}

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2020 IBM Corp. and others
+ * Copyright (c) 2001, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -31,6 +31,7 @@
 #include "ClassFileOracle.hpp"
 #include "ROMClassCreationContext.hpp"
 #include "ROMClassVerbosePhase.hpp"
+#include "VMHelpers.hpp"
 
 #include "ut_j9bcu.h"
 
@@ -47,9 +48,13 @@ ConstantPoolMap::ConstantPoolMap(BufferManager *bufferManager, ROMClassCreationC
 	_romConstantPoolTypes(NULL),
 	_staticSplitEntries(NULL),
 	_specialSplitEntries(NULL),
+#if defined(J9VM_OPT_OPENJDK_METHODHANDLE)
+	_invokeCacheCount(0),
+#else /* defined(J9VM_OPT_OPENJDK_METHODHANDLE) */
 	_methodTypeCount(0),
 	_varHandleMethodTypeCount(0),
 	_varHandleMethodTypeLookupTable(NULL),
+#endif /* defined(J9VM_OPT_OPENJDK_METHODHANDLE) */
 	_callSiteCount(0),
 	_ramConstantPoolCount(0),
 	_romConstantPoolCount(0),
@@ -65,7 +70,9 @@ ConstantPoolMap::~ConstantPoolMap()
 	_bufferManager->free(_constantPoolEntries);
 	_bufferManager->free(_romConstantPoolEntries);
 	_bufferManager->free(_romConstantPoolTypes);
+#if defined(J9VM_OPT_METHOD_HANDLE)
 	j9mem_free_memory(_varHandleMethodTypeLookupTable);
+#endif /* defined(J9VM_OPT_METHOD_HANDLE) */
 }
 
 void
@@ -318,106 +325,7 @@ ConstantPoolMap::computeConstantPoolMapAndSizes()
 	}
 }
 
-bool
-ConstantPoolMap::isVarHandleMethod(U_32 classIndex, U_32 nasIndex) {
-	bool result = false;
-	U_16 classNameLength = _classFileOracle->getUTF8Length(getCPSlot1(classIndex));
-
-	if ((sizeof(VARHANDLE_CLASS_NAME) - 1) == classNameLength) {
-		const char *classNameData = (const char *)_classFileOracle->getUTF8Data(getCPSlot1(classIndex));
-		if (0 == strcmp(classNameData, VARHANDLE_CLASS_NAME)) {
-			U_32 methodNameIndex = getCPSlot1(nasIndex);
-			U_16 methodNameLength = _classFileOracle->getUTF8Length(methodNameIndex);
-			const char *methodNameData = (const char *)_classFileOracle->getUTF8Data(methodNameIndex);
-
-			switch (methodNameLength) {
-			case 3:
-				if ((0 == strcmp(methodNameData, "get"))
-				 || (0 == strcmp(methodNameData, "set"))
-				) {
-					result = true;
-				}
-				break;
-			case 9:
-				if ((0 == strcmp(methodNameData, "getOpaque"))
-				 || (0 == strcmp(methodNameData, "setOpaque"))
-				 || (0 == strcmp(methodNameData, "getAndSet"))
-				 || (0 == strcmp(methodNameData, "getAndAdd"))
-				) {
-					result = true;
-				}
-				break;
-			case 10:
-				if ((0 == strcmp(methodNameData, "getAcquire"))
-				 || (0 == strcmp(methodNameData, "setRelease"))
-				) {
-					result = true;
-				}
-				break;
-			case 11:
-				if ((0 == strcmp(methodNameData, "getVolatile"))
-				 || (0 == strcmp(methodNameData, "setVolatile"))
-				) {
-					result = true;
-				}
-				break;
-			case 16:
-				if ((0 == strcmp(methodNameData, "getAndSetAcquire"))
-				 || (0 == strcmp(methodNameData, "getAndSetRelease"))
-				 || (0 == strcmp(methodNameData, "getAndAddAcquire"))
-				 || (0 == strcmp(methodNameData, "getAndAddRelease"))
-				 || (0 == strcmp(methodNameData, "getAndBitwiseAnd"))
-				 || (0 == strcmp(methodNameData, "getAndBitwiseXor"))
-				) {
-					result = TRUE;
-				}
-				break;
-			case 22:
-				if ((0 == strcmp(methodNameData, "getAndBitwiseOrAcquire"))
-				 || (0 == strcmp(methodNameData, "getAndBitwiseOrRelease"))
-				 || (0 == strcmp(methodNameData, "weakCompareAndSetPlain"))
-				) {
-					result = TRUE;
-				}
-				break;
-			case 23:
-				if ((0 == strcmp(methodNameData, "getAndBitwiseAndAcquire"))
-				 || (0 == strcmp(methodNameData, "getAndBitwiseAndRelease"))
-				 || (0 == strcmp(methodNameData, "getAndBitwiseXorAcquire"))
-				 || (0 == strcmp(methodNameData, "getAndBitwiseXorRelease"))
-				) {
-					result = TRUE;
-				}
-				break;
-			case 24:
-				if ((0 == strcmp(methodNameData, "weakCompareAndSetAcquire"))
-				 || (0 == strcmp(methodNameData, "weakCompareAndSetRelease"))
-				) {
-					result = true;
-				}
-				break;
-			case 25:
-				if ((0 == strcmp(methodNameData, "compareAndExchangeAcquire"))
-				 || (0 == strcmp(methodNameData, "compareAndExchangeRelease"))
-				) {
-					result = true;
-				}
-				break;
-			default:
-				if ((0 == strcmp(methodNameData, "compareAndSet"))
-				 || (0 == strcmp(methodNameData, "getAndBitwiseOr"))
-				 || (0 == strcmp(methodNameData, "weakCompareAndSet"))
-				 || (0 == strcmp(methodNameData, "compareAndExchange"))
-				) {
-					result = true;
-				}
-				break;
-			}
-		}
-	}
-	return result;
-}
-
+#if defined(J9VM_OPT_METHOD_HANDLE)
 void
 ConstantPoolMap::findVarHandleMethodRefs()
 {
@@ -429,20 +337,31 @@ ConstantPoolMap::findVarHandleMethodRefs()
 		|| (J9CPTYPE_INTERFACE_INSTANCE_METHOD == _romConstantPoolTypes[i])
 		) {
 			U_16 cfrCPIndex = _romConstantPoolEntries[i];
-			U_32 slot1 = getCPSlot1(cfrCPIndex);
-			U_32 slot2 = getCPSlot2(cfrCPIndex);
+			U_32 classIndex = getCPSlot1(cfrCPIndex);
+			U_32 classNameIndex = getCPSlot1(classIndex);
+			U_16 classNameLength = _classFileOracle->getUTF8Length(classNameIndex);
 
-			if (isVarHandleMethod(slot1, slot2)) {
-				if (NULL == varHandleMethodTable) {
-					/* Allocate a temporary array for storing indices of VarHandle methodrefs */
-					varHandleMethodTable = (U_16*) j9mem_allocate_memory(_romConstantPoolCount * sizeof(U_16), OMRMEM_CATEGORY_VM);
-					if (NULL == varHandleMethodTable) {
-						_buildResult = OutOfMemory;
-						break;
+			if ((sizeof(VARHANDLE_CLASS_NAME) - 1) == classNameLength) {
+				const U_8 *classNameData = _classFileOracle->getUTF8Data(classNameIndex);
+				if (0 == memcmp(classNameData, VARHANDLE_CLASS_NAME, classNameLength)) {
+					U_32 nasIndex = getCPSlot2(cfrCPIndex);
+					U_32 methodNameIndex = getCPSlot1(nasIndex);
+					U_16 methodNameLength = _classFileOracle->getUTF8Length(methodNameIndex);
+					const U_8 *methodNameData = _classFileOracle->getUTF8Data(methodNameIndex);
+
+					if (VM_VMHelpers::isPolymorphicVarHandleMethod(methodNameData, methodNameLength)) {
+						if (NULL == varHandleMethodTable) {
+							/* Allocate a temporary array for storing indices of VarHandle methodrefs. */
+							varHandleMethodTable = (U_16*) j9mem_allocate_memory(_romConstantPoolCount * sizeof(U_16), OMRMEM_CATEGORY_VM);
+							if (NULL == varHandleMethodTable) {
+								_buildResult = OutOfMemory;
+								break;
+							}
+						}
+						varHandleMethodTable[_varHandleMethodTypeCount] = i;
+						_varHandleMethodTypeCount++;
 					}
 				}
-				varHandleMethodTable[_varHandleMethodTypeCount] = i;
-				_varHandleMethodTypeCount++;
 			}
 		}
 	}
@@ -458,7 +377,7 @@ ConstantPoolMap::findVarHandleMethodRefs()
 		j9mem_free_memory(varHandleMethodTable);
 	}
 }
-
+#endif /* defined(J9VM_OPT_METHOD_HANDLE) */
 
 void
 ConstantPoolMap::constantPoolDo(ConstantPoolVisitor *visitor)

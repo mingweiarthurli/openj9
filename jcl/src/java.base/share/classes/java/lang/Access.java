@@ -1,6 +1,6 @@
-/*[INCLUDE-IF Sidecar17]*/
-/*******************************************************************************
- * Copyright (c) 2007, 2020 IBM Corp. and others
+/*[INCLUDE-IF JAVA_SPEC_VERSION >= 8]*/
+/*
+ * Copyright (c) 2007, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,19 +16,19 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
- *******************************************************************************/
+ */
 package java.lang;
 
 import java.lang.annotation.Annotation;
-/*[IF Java15]*/
+/*[IF JAVA_SPEC_VERSION >= 15]*/
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodType;
 import jdk.internal.misc.Unsafe;
 import java.lang.StringConcatHelper;
-/*[ENDIF] Java15 */
+/*[ENDIF] JAVA_SPEC_VERSION >= 15 */
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Executable;
 import java.lang.reflect.Method;
@@ -46,22 +46,33 @@ import java.net.URI;
 import java.security.ProtectionDomain;
 import java.util.Iterator;
 import java.util.List;
-/*[IF Java15]*/
+/*[IF JAVA_SPEC_VERSION >= 15]*/
 import java.util.Set;
-/*[ENDIF] Java15 */
+/*[ENDIF] JAVA_SPEC_VERSION >= 15 */
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
-/*[IF Java11]*/
+/*[IF JAVA_SPEC_VERSION >= 11]*/
 import java.nio.charset.Charset;
 import java.nio.charset.CharacterCodingException;
-/*[ENDIF] Java11 */
-/*[IF Java12]*/
+/*[ENDIF] JAVA_SPEC_VERSION >= 11 */
+/*[IF JAVA_SPEC_VERSION >= 12]*/
 import jdk.internal.access.JavaLangAccess;
-/*[ELSE] Java12 */
+/*[ELSE] JAVA_SPEC_VERSION >= 12 */
 import jdk.internal.misc.JavaLangAccess;
-/*[ENDIF] Java12 */
+/*[ENDIF] JAVA_SPEC_VERSION >= 12 */
 import jdk.internal.module.ServicesCatalog;
 import jdk.internal.reflect.ConstantPool;
+/*[IF JAVA_SPEC_VERSION >= 19]*/
+import java.util.concurrent.Callable;
+import jdk.internal.misc.CarrierThreadLocal;
+import jdk.internal.vm.Continuation;
+import jdk.internal.vm.ContinuationScope;
+import jdk.internal.vm.StackableScope;
+import jdk.internal.vm.ThreadContainer;
+/*[ENDIF] JAVA_SPEC_VERSION >= 19 */
+/*[IF JAVA_SPEC_VERSION >= 20]*/
+import jdk.internal.misc.CarrierThreadLocal;
+/*[ENDIF] JAVA_SPEC_VERSION >= 20 */
 /*[ELSE] Sidecar19-SE */
 import sun.misc.JavaLangAccess;
 import sun.reflect.ConstantPool;
@@ -78,11 +89,11 @@ final class Access implements JavaLangAccess {
 
 	/** Set thread's blocker field. */
 	public void blockedOn(java.lang.Thread thread, Interruptible interruptable) {
-		/*[IF Java11]*/
+		/*[IF JAVA_SPEC_VERSION >= 11]*/
 		Thread.blockedOn(interruptable);
-		/*[ELSE] Java11 */
+		/*[ELSE] JAVA_SPEC_VERSION >= 11 */
 		thread.blockedOn(interruptable);
-		/*[ENDIF] Java11 */
+		/*[ENDIF] JAVA_SPEC_VERSION >= 11 */
 	}
 
 	/**
@@ -193,7 +204,7 @@ final class Access implements JavaLangAccess {
 		return result;
 	}
 
-	/*[IF !Java10]*/
+	/*[IF JAVA_SPEC_VERSION < 10]*/
 	/**
 	 * Return a newly created String that uses the passed in char[]
 	 * without copying. The array must not be modified after creating
@@ -207,7 +218,7 @@ final class Access implements JavaLangAccess {
 	public java.lang.String newStringUnsafe(char[] data) {
 		return new String(data, true /*ignored*/);
 	}
-	/*[ENDIF] !Java10 */
+	/*[ENDIF] JAVA_SPEC_VERSION < 10 */
 
 	@Override
 	public void invokeFinalize(java.lang.Object arg0)
@@ -231,12 +242,12 @@ final class Access implements JavaLangAccess {
 		return classLoader.createOrGetServicesCatalog();
 	}
 
-/*[IF !Java10]*/
+/*[IF JAVA_SPEC_VERSION < 10]*/
 	@Deprecated
 	public ServicesCatalog getServicesCatalog(ClassLoader classLoader) {
 		return classLoader.getServicesCatalog();
 	}
-/*[ENDIF] !Java10 */
+/*[ENDIF] JAVA_SPEC_VERSION < 10 */
 
 	public String fastUUID(long param1, long param2) {
 		return Long.fastUUID(param1, param2);
@@ -277,11 +288,11 @@ final class Access implements JavaLangAccess {
 	}
 
 	public void invalidatePackageAccessCache() {
-/*[IF Java10]*/
+/*[IF JAVA_SPEC_VERSION >= 10]*/
 		java.lang.SecurityManager.invalidatePackageAccessCache();
-/*[ELSE] Java10 */
+/*[ELSE] JAVA_SPEC_VERSION >= 10 */
 		return;
-/*[ENDIF] Java10 */
+/*[ENDIF] JAVA_SPEC_VERSION >= 10 */
 	}
 
 	public Class<?> defineClass(ClassLoader classLoader, String className, byte[] classRep, ProtectionDomain protectionDomain, String str) {
@@ -345,15 +356,15 @@ final class Access implements JavaLangAccess {
 		return clz.getDeclaredPublicMethods(name, types);
 	}
 
-	/*[IF Java15]*/
+	/*[IF JAVA_SPEC_VERSION >= 15]*/
 	public void addOpensToAllUnnamed(Module fromModule, Set<String> concealedPackages, Set<String> exportedPackages) {
 		fromModule.implAddOpensToAllUnnamed(concealedPackages, exportedPackages);
 	}
-	/*[ELSE] Java15 */
+	/*[ELSE] JAVA_SPEC_VERSION >= 15 */
 	public void addOpensToAllUnnamed(Module fromModule, Iterator<String> packages) {
 		fromModule.implAddOpensToAllUnnamed(packages);
 	}
-	/*[ENDIF] Java15 */
+	/*[ENDIF] JAVA_SPEC_VERSION >= 15 */
 
 	public boolean isReflectivelyOpened(Module fromModule, String pkg, Module toModule) {
 		return fromModule.isReflectivelyOpened(pkg, toModule);
@@ -364,57 +375,74 @@ final class Access implements JavaLangAccess {
 	}
 /*[ENDIF] Sidecar19-SE-OpenJ9 */
 
-/*[IF Java10]*/
+/*[IF JAVA_SPEC_VERSION >= 10]*/
 	public String newStringUTF8NoRepl(byte[] bytes, int offset, int length) {
+		/*[IF JAVA_SPEC_VERSION < 17]*/
 		return StringCoding.newStringUTF8NoRepl(bytes, offset, length);
+		/*[ELSE] JAVA_SPEC_VERSION < 17 */
+		return String.newStringUTF8NoRepl(bytes, offset, length);
+		/*[ENDIF] JAVA_SPEC_VERSION < 17 */
 	}
 	public byte[] getBytesUTF8NoRepl(String str) {
+		/*[IF JAVA_SPEC_VERSION < 17]*/
 		return StringCoding.getBytesUTF8NoRepl(str);
+		/*[ELSE] JAVA_SPEC_VERSION < 17 */
+		return String.getBytesUTF8NoRepl(str);
+		/*[ENDIF] JAVA_SPEC_VERSION < 17 */
 	}
-/*[ENDIF] Java10 */
+/*[ENDIF] JAVA_SPEC_VERSION >= 10 */
 
-/*[IF Java11]*/
+/*[IF JAVA_SPEC_VERSION >= 11]*/
 	public void blockedOn(Interruptible interruptible) {
 		Thread.blockedOn(interruptible);
 	}
 	public byte[] getBytesNoRepl(String str, Charset charset) throws CharacterCodingException {
+		/*[IF JAVA_SPEC_VERSION < 17]*/
 		return StringCoding.getBytesNoRepl(str, charset);
+		/*[ELSE] JAVA_SPEC_VERSION < 17 */
+		return String.getBytesNoRepl(str, charset);
+		/*[ENDIF] JAVA_SPEC_VERSION < 17 */
 	}
 	public String newStringNoRepl(byte[] bytes, Charset charset) throws CharacterCodingException {
+		/*[IF JAVA_SPEC_VERSION < 17]*/
 		return StringCoding.newStringNoRepl(bytes, charset);
+		/*[ELSE] JAVA_SPEC_VERSION < 17 */
+		return String.newStringNoRepl(bytes, charset);
+		/*[ENDIF] JAVA_SPEC_VERSION < 17 */
 	}
-/*[ENDIF] Java11 */
+/*[ENDIF] JAVA_SPEC_VERSION >= 11 */
 
-/*[IF Java12]*/
+/*[IF JAVA_SPEC_VERSION >= 12]*/
 	public void setCause(Throwable throwable, Throwable cause) {
 		throwable.setCause(cause);
 	}
-/*[ENDIF] Java12 */
+/*[ENDIF] JAVA_SPEC_VERSION >= 12 */
 
-/*[IF Java14]*/
+/*[IF JAVA_SPEC_VERSION >= 14]*/
 	public void loadLibrary(Class<?> caller, String library) {
 		System.loadLibrary(library);
 	}
-/*[ENDIF] Java14 */
+/*[ENDIF] JAVA_SPEC_VERSION >= 14 */
 
-/*[IF Java15]*/
-	// TODO: implement support for hidden classes.
+/*[IF JAVA_SPEC_VERSION >= 15]*/
+	public Class<?> defineClass(ClassLoader classLoader, Class<?> clazz, String className, byte[] classRep, ProtectionDomain protectionDomain, boolean init, int flags, Object classData) {
+		ClassLoader targetClassLoader = (null == classLoader) ? ClassLoader.bootstrapClassLoader : classLoader;
+		return targetClassLoader.defineClassInternal(clazz, className, classRep, protectionDomain, init, flags, classData);
+	}
 
-	public Class<?> defineClass(ClassLoader classLoader, Class<?> clazz, String className, byte[] classRep, ProtectionDomain protectionDomain, boolean init, int flags, Object obj) {
-		Unsafe theUnsafe = Unsafe.getUnsafe();
-		Class <?> ret = theUnsafe.defineAnonymousClass(clazz, classRep, null);
-		if (init) {
-			theUnsafe.ensureClassInitialized(ret);
-		}
-		return ret;
+	/**
+	 * Returns the classData stored in the class.
+	 *
+	 * @param the class from where to retrieve the classData.
+	 *
+	 * @return the classData (Object).
+	 */
+	public Object classData(Class<?> clazz) {
+		return clazz.getClassData();
 	}
 
 	public ProtectionDomain protectionDomain(Class<?> clazz) {
-		return clazz.getProtectionDomain();
-	}
-
-	public Object classData(Class<?> clazz) {
-		return null;
+		return clazz.getProtectionDomainInternal();
 	}
 
 	public MethodHandle stringConcatHelper(String arg0, MethodType type) {
@@ -428,7 +456,212 @@ final class Access implements JavaLangAccess {
 	public long stringConcatMix(long arg0, String string) {
 		return StringConcatHelper.mix(arg0, string);
 	}
-/*[ENDIF] Java15 */
+/*[ENDIF] JAVA_SPEC_VERSION >= 15 */
+
+/*[IF JAVA_SPEC_VERSION >= 16]*/
+	public void bindToLoader(ModuleLayer ml, ClassLoader cl) {
+		ml.bindToLoader(cl);
+	}
+
+	public void addExports(Module fromModule, String pkg) {
+		fromModule.implAddExports(pkg);
+	}
+/*[ENDIF] JAVA_SPEC_VERSION >= 16 */
+
+/*[IF JAVA_SPEC_VERSION >= 17]*/
+	public int decodeASCII(byte[] srcBytes, int srcPos, char[] dstChars, int dstPos, int length) {
+		return String.decodeASCII(srcBytes, srcPos, dstChars, dstPos, length);
+	}
+
+	public void inflateBytesToChars(byte[] srcBytes, int srcOffset, char[] dstChars, int dstOffset, int length) {
+		StringLatin1.inflate(srcBytes, srcOffset, dstChars, dstOffset, length);
+	}
+
+	// The method findBootstrapClassOrNull(ClassLoader classLoader, String name) can be removed
+	// after following API change is promoted into extension repo openj9 branch.
+	public Class<?> findBootstrapClassOrNull(String name) {
+		return VMAccess.findClassOrNull(name, ClassLoader.bootstrapClassLoader);
+	}
+
+	public String join(String prefix, String suffix, String delimiter, String[] elements, int size) {
+		return String.join(prefix, suffix, delimiter, elements, size);
+	}
+
+	public boolean isEnableNativeAccess(Module mod) {
+		return mod.implIsEnableNativeAccess();
+	}
+
+	public void addEnableNativeAccessAllUnnamed() {
+		Module.implAddEnableNativeAccessAllUnnamed();
+	}
+
+	public Module addEnableNativeAccess(Module mod) {
+		return mod.implAddEnableNativeAccess();
+	}
+
+	public long findNative(ClassLoader loader, String entryName) {
+		return ClassLoader.findNative(loader, entryName);
+	}
+
+	@Override
+	public void exit(int status) {
+		Shutdown.exit(status);
+	}
+
+	public int encodeASCII(char[] sa, int sp, byte[] da, int dp, int len) {
+		return StringCoding.implEncodeAsciiArray(sa, sp, da, dp, len);
+	}
+/*[ENDIF] JAVA_SPEC_VERSION >= 17 */
+
+/*[IF JAVA_SPEC_VERSION >= 19]*/
+	public Thread currentCarrierThread() {
+		return Thread.currentCarrierThread();
+	}
+
+	public <V> V executeOnCarrierThread(Callable<V> task) throws Exception {
+		V result;
+		Thread currentThread = Thread.currentThread();
+		if (currentThread.isVirtual()) {
+			Thread carrierThread = Thread.currentCarrierThread();
+			carrierThread.setCurrentThread(carrierThread);
+			try {
+				result = task.call();
+			} finally {
+				carrierThread.setCurrentThread(currentThread);
+			}
+		} else {
+			result = task.call();
+		}
+		return result;
+	}
+
+	public Continuation getContinuation(Thread thread) {
+		return thread.getContinuation();
+	}
+
+	public void setContinuation(Thread thread, Continuation c) {
+		thread.setContinuation(c);
+	}
+
+	public Object[] extentLocalCache() {
+		return Thread.extentLocalCache();
+	}
+
+	public void setExtentLocalCache(Object[] cache) {
+		Thread.setExtentLocalCache(cache);
+	}
+
+	public Object extentLocalBindings() {
+		return Thread.extentLocalBindings();
+	}
+
+	public void setExtentLocalBindings(Object bindings) {
+		Thread.setExtentLocalBindings(bindings);
+	}
+
+	public StackableScope headStackableScope(Thread thread) {
+		return thread.headStackableScopes();
+	}
+
+	public void setHeadStackableScope(StackableScope scope) {
+		Thread.setHeadStackableScope(scope);
+	}
+
+	public ThreadContainer threadContainer(Thread thread) {
+		return thread.threadContainer();
+	}
+
+	public void start(Thread thread, ThreadContainer container) {
+		thread.start(container);
+	}
+
+	public Thread[] getAllThreads() {
+		return Thread.getAllThreads();
+	}
+
+	public ContinuationScope virtualThreadContinuationScope() {
+		return VirtualThread.continuationScope();
+	}
+
+	public void parkVirtualThread() {
+		if (Thread.currentThread() instanceof BaseVirtualThread bvt) {
+			bvt.park();
+		} else {
+			throw new WrongThreadException();
+		}
+	}
+
+	public void parkVirtualThread(long nanos) {
+		if (Thread.currentThread() instanceof BaseVirtualThread bvt) {
+			bvt.parkNanos(nanos);
+		} else {
+			throw new WrongThreadException();
+		}
+	}
+
+	public void unparkVirtualThread(Thread thread) {
+		if (thread instanceof BaseVirtualThread bvt) {
+			bvt.unpark();
+		} else {
+			throw new WrongThreadException();
+		}
+	}
+
+	public StackWalker newStackWalkerInstance(Set<StackWalker.Option> options, ContinuationScope contScope, Continuation continuation) {
+		return StackWalker.newInstance(options, null, contScope, continuation);
+	}
+
+	/*
+	 * To access package-private methods in ThreadLocal, an
+	 * (implicit) cast from CarrierThreadLocal is required.
+	 */
+	private static <T> ThreadLocal<T> asThreadLocal(CarrierThreadLocal<T> local) {
+		return local;
+	}
+
+	public boolean isCarrierThreadLocalPresent(CarrierThreadLocal<?> carrierThreadlocal) {
+		return asThreadLocal(carrierThreadlocal).isCarrierThreadLocalPresent();
+	}
+
+	public <T> T getCarrierThreadLocal(CarrierThreadLocal<T> carrierThreadlocal) {
+		return asThreadLocal(carrierThreadlocal).getCarrierThreadLocal();
+	}
+
+	public void removeCarrierThreadLocal(CarrierThreadLocal<?> carrierThreadlocal) {
+		asThreadLocal(carrierThreadlocal).removeCarrierThreadLocal();
+	}
+
+	public <T> void setCarrierThreadLocal(CarrierThreadLocal<T> carrierThreadlocal, T carrierThreadLocalvalue) {
+		asThreadLocal(carrierThreadlocal).setCarrierThreadLocal(carrierThreadLocalvalue);
+	}
+/*[ENDIF] JAVA_SPEC_VERSION >= 19 */
+
+/*[IF INLINE-TYPES]*/
+	@Override
+	public boolean isPrimitiveClass(Class<?> c) {
+		return c.isPrimitiveClass();
+	}
+
+	@Override
+	public Class<?> asPrimaryType(Class<?> c) {
+		return c.asPrimaryType();
+	}
+
+	@Override
+	public Class<?> asValueType(Class<?> c) {
+		return c.asValueType();
+	}
+
+	@Override
+	public boolean isPrimaryType(Class<?> c) {
+		return c.isPrimaryType();
+	}
+
+	@Override
+	public boolean isPrimitiveValueType(Class<?> c) {
+		return c.isPrimitiveValueType();
+	}
+/*[ENDIF] INLINE-TYPES */
 
 /*[ENDIF] Sidecar19-SE */
 }

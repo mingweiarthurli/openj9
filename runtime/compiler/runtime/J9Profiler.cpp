@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -41,6 +41,7 @@
 #include "env/StackMemoryRegion.hpp"
 #include "env/jittypes.h"
 #include "env/VMJ9.h"
+#include "env/VerboseLog.hpp"
 #include "il/Block.hpp"
 #include "il/DataTypes.hpp"
 #include "il/ILOpCodes.hpp"
@@ -223,8 +224,8 @@ TR_GlobalRecompilationCounters::examineStructure(
 TR_CatchBlockProfiler::TR_CatchBlockProfiler(
       TR::Compilation  * c,
       TR::Recompilation * r,
-      bool initialCompilation)
-   : TR_RecompilationProfiler(c, r, initialCompilation),
+      bool forInitialCompilation)
+   : TR_RecompilationProfiler(c, r, forInitialCompilation ? initialCompilation : 0),
       _profileInfo(0),
       _throwCounterSymRef(0),
       _catchCounterSymRef(0)
@@ -352,6 +353,8 @@ void TR_BlockFrequencyProfiler::modifyTrees()
          //
          TR::Node *storeNode;
          TR::SymbolReference *symRef = comp()->getSymRefTab()->createKnownStaticDataSymbolRef(blockFrequencyInfo->getFrequencyForBlock(node->getBlock()->getNumber()), TR::Int32);
+         symRef->getSymbol()->setIsBlockFrequency();
+         symRef->getSymbol()->setNotDataAddress();
          treeTop = TR::TreeTop::createIncTree(comp(), node, symRef, 1, treeTop);
          storeNode = treeTop->getNode();
 
@@ -400,7 +403,7 @@ void TR_ValueProfiler::modifyTrees()
              !(arrayCopyLen->getOpCode().isCallIndirect() &&
                !arrayCopyLen->isTheVirtualCallNodeForAGuardedInlinedCall()))
              {
-             addProfilingTrees(arrayCopyLen, tt, 0, LastValueInfo, LastProfiler, true, &firstChild->getByteCodeInfo());
+             addProfilingTrees(arrayCopyLen, tt, firstChild->getByteCodeInfo(), 0, LastValueInfo, LastProfiler, true);
              }
          }
       else if (firstChild && firstChild->getOpCode().isCall() &&
@@ -446,7 +449,7 @@ void TR_ValueProfiler::modifyTrees()
                TR::Method *interfaceMethod = methodSymbol->getMethod();
                int32_t         cpIndex      = methodSymRef->getCPIndex();
                int32_t len = interfaceMethod->classNameLength();
-               char * s = classNameToSignature(interfaceMethod->classNameChars(), len, comp());
+               char * s = TR::Compiler->cls.classNameToSignature(interfaceMethod->classNameChars(), len, comp());
                TR_OpaqueClassBlock *thisClass = comp()->fe()->getClassFromSignature(s, len, methodSymRef->getOwningMethod(comp()));
                if (thisClass)
                   {
@@ -539,9 +542,9 @@ void TR_ValueProfiler::modifyTrees()
              !methodSymRef->isUnresolved() && !methodSymbol->isHelper() /* && !firstChild->getByteCodeInfo().doNotProfile() */)
             {
             TR::ResolvedMethodSymbol *method = firstChild->getSymbol()->getResolvedMethodSymbol();
-            if ((method->getRecognizedMethod() == TR::java_math_BigDecimal_add) ||
+            if (method && ((method->getRecognizedMethod() == TR::java_math_BigDecimal_add) ||
                 (method->getRecognizedMethod() == TR::java_math_BigDecimal_subtract) ||
-                (method->getRecognizedMethod() == TR::java_math_BigDecimal_multiply))
+                (method->getRecognizedMethod() == TR::java_math_BigDecimal_multiply)))
                {
                if (!firstChild->getByteCodeInfo().doNotProfile())
                   addProfilingTrees(firstChild, tt, 0, BigDecimalInfo);
@@ -566,21 +569,6 @@ void TR_ValueProfiler::modifyTrees()
                child->setByteCodeInfo(bcInfo);
                }
             }
-
-         static bool doStringOpt = feGetEnv("TR_EnableStringOpt") ? true : false;
-
-         if (doStringOpt && !methodSymRef->isUnresolved() && !methodSymbol->isHelper())
-            {
-            TR::ResolvedMethodSymbol *method = firstChild->getSymbolReference()->getSymbol()->castToResolvedMethodSymbol();
-            TR_ResolvedMethod *m = method->getResolvedMethod();
-            char *sig = "java/lang/String.<init>(";
-            if ((strncmp(m->signature(trMemory()), sig, strlen(sig)) == 0) &&
-                (strncmp(m->signatureChars(), "([CII)", 6)==0))
-               {
-               if (!firstChild->getFirstChild()->getByteCodeInfo().doNotProfile())
-                  addProfilingTrees(firstChild->getFirstChild(), tt, 20, StringInfo);
-               }
-            }
          }
       else if ((node->getOpCodeValue() == TR::ificmpne) ||
                (node->getOpCodeValue() == TR::ificmpeq))
@@ -601,44 +589,7 @@ void TR_ValueProfiler::modifyTrees()
                addProfilingTrees(firstChild, tt->getPrevTreeTop(), 10);
             }
          }
-
-
-      if (!getInitialCompilation())
-         visitNode(node, tt, visitCount);
       }
-   }
-
-void
-TR_ValueProfiler::visitNode(
-      TR::Node *node,
-      TR::TreeTop *tt,
-      vcount_t visitCount)
-   {
-   if (node->getVisitCount() == visitCount)
-      return;
-
-   node->setVisitCount(visitCount);
-
-   static char *profileLongParms = feGetEnv("TR_ProfileLongParms");
-   if (profileLongParms &&
-       (node->getType().isInt64()) &&
-       node->getOpCode().isLoadVar() &&
-       !node->getByteCodeInfo().doNotProfile())
-      {
-      TR::Node *intNode = TR::Node::create(TR::l2i, 1, TR::Node::create(TR::lushr, 2, node, TR::Node::create(node, TR::iconst, 0, 32)));
-      TR::ILOpCode &placeHolderOpCode = tt->getNode()->getOpCode();
-      if (placeHolderOpCode.isBranch() ||
-          placeHolderOpCode.isJumpWithMultipleTargets() ||
-          placeHolderOpCode.isReturn() ||
-          placeHolderOpCode.getOpCodeValue() == TR::athrow)
-        addProfilingTrees(intNode, tt->getPrevTreeTop());
-      else
-        addProfilingTrees(intNode, tt);
-      }
-
-   int32_t i;
-   for (i = 0; i < node->getNumChildren(); i++)
-     visitNode(node->getChild(i), tt, visitCount);
    }
 
 bool
@@ -775,7 +726,7 @@ TR_ValueProfiler::addListOrArrayProfilingTrees(
       if (!_bdClass)
          {
          TR_ResolvedMethod *owningMethod = comp()->getCurrentMethod();
-         _bdClass = comp()->fe()->getClassFromSignature("Ljava/math/BigDecimal;\0", 22, owningMethod);
+         _bdClass = comp()->fe()->getClassFromSignature("Ljava/math/BigDecimal;", 22, owningMethod);
          }
       TR_OpaqueClassBlock * bdClass = _bdClass;
       char *fieldName = "scale";
@@ -860,6 +811,9 @@ TR_ValueProfiler::addListOrArrayProfilingTrees(
          break;
       case ValueInfo:
          helper = TR_jitProfileValue;
+         break;
+
+      default:
          break;
       }
    TR::SymbolReference *profiler = comp()->getSymRefTab()->findOrCreateRuntimeHelper(helper, false, false, true);
@@ -1660,7 +1614,7 @@ TR_BlockFrequencyInfo::TR_BlockFrequencyInfo(
    _frequencies(
       _numBlocks ?
       /*
-       * The explicit parens value initialize the array,
+       * The explicit parens value initializes the array,
        * which in turn value initializes each array member,
        * which for ints is zero initialization.
        */
@@ -1761,9 +1715,32 @@ TR_BlockFrequencyInfo::getFrequencyInfo(
       bool normalizeForCallers,
       bool trace)
    {
-   int64_t maxCount = normalizeForCallers ? getMaxRawCount() : getMaxRawCount(bci.getCallerIndex());
    int32_t callerIndex = bci.getCallerIndex();
-   int32_t frequency = getRawCount(callerIndex < 0 ? comp->getMethodSymbol() : comp->getInlinedResolvedMethodSymbol(callerIndex), bci, _callSiteInfo, maxCount, comp);
+   int32_t queriedCallerIndex = callerIndex;
+   // Check if the callchain associated with bci matches the call chain from
+   // the persistent call site info stored in block frequency info.
+   bool isMatchingBCI = true;
+   if (callerIndex > -1)
+      {
+      // To make sure we are looking into the correct frequency data,
+      // Compute the effective caller index by preparing the callStack using the callSiteInfo from
+      // current compilation and see if we have a same callchain in the blockfrequnecy information.
+      TR_ByteCodeInfo bciCheck = bci;
+      TR::list<std::pair<TR_OpaqueMethodBlock*, TR_ByteCodeInfo> > callStackInfo(comp->allocator());
+      while (bciCheck.getCallerIndex() > -1)
+         {
+         TR_InlinedCallSite *callSite = &comp->getInlinedCallSite(bciCheck.getCallerIndex());
+         callStackInfo.push_back(std::make_pair(comp->fe()->getInlinedCallSiteMethod(callSite), bciCheck));
+         bciCheck = callSite->_byteCodeInfo;
+         }
+      isMatchingBCI = _callSiteInfo->computeEffectiveCallerIndex(comp, callStackInfo, queriedCallerIndex);
+      }
+   TR_ByteCodeInfo bciCheck(bci);
+   bciCheck.setCallerIndex(queriedCallerIndex);
+
+   int64_t maxCount = normalizeForCallers ? getMaxRawCount() : getMaxRawCount(queriedCallerIndex);
+
+   int32_t frequency = isMatchingBCI ? getRawCount(callerIndex < 0 ? comp->getMethodSymbol() : comp->getInlinedResolvedMethodSymbol(callerIndex), bciCheck, _callSiteInfo, maxCount, comp) : -1;
    if (trace)
       traceMsg(comp,"raw frequency on outter level was %d for bci %d:%d\n", frequency, bci.getCallerIndex(), bci.getByteCodeIndex());
    if (frequency > -1 || _counterDerivationInfo == NULL)
@@ -1944,7 +1921,7 @@ TR_BlockFrequencyInfo::getRawCount(TR::ResolvedMethodSymbol *resolvedMethod, TR_
  *    \param bci TR_ByteCodeInfo for which original block number is searched for
  *    \param comp Current compilation object
  *    \return block number of the original block bci belongs to.
- *            WARNING: If consumer of this API uses this to to get the profiled data in later compilation and
+ *            WARNING: If consumer of this API uses this to get the profiled data in later compilation and
  *            requested BCI was not inlined before, it returns -1.
  */
 int32_t
@@ -1958,7 +1935,7 @@ TR_BlockFrequencyInfo::getOriginalBlockNumberToGetRawCount(TR_ByteCodeInfo &bci,
    bool currentCallSiteInfo = TR_CallSiteInfo::getCurrent(comp) == _callSiteInfo;
    for (auto i=0; i < _numBlocks; ++i)
       {
-      if (currentCallSiteInfo && _callSiteInfo->hasSameBytecodeInfo(_blocks[i], searchBCI, comp) ||
+      if ((currentCallSiteInfo && _callSiteInfo->hasSameBytecodeInfo(_blocks[i], searchBCI, comp)) ||
             (!currentCallSiteInfo && _blocks[i].getCallerIndex() == searchBCI.getCallerIndex() && _blocks[i].getByteCodeIndex() == searchBCI.getByteCodeIndex()))
          {
          if (trace)
@@ -1987,13 +1964,15 @@ TR_BlockFrequencyInfo::generateBlockRawCountCalculationSubTree(TR::Compilation *
    {
    TR::Node *root = NULL;
    if (blockNumber > -1 && (_counterDerivationInfo[blockNumber * 2]
-      && ((((uintptr_t)_counterDerivationInfo[blockNumber * 2]) & 0x1 == 1)
+      && (((((uintptr_t)_counterDerivationInfo[blockNumber * 2]) & 0x1) == 1)
       || !_counterDerivationInfo[blockNumber * 2]->isEmpty())))
       {
       TR::Node *addRoot = NULL;
-      if (((uintptr_t)_counterDerivationInfo[blockNumber * 2]) & 0x1 == 1)
+      if ((((uintptr_t)_counterDerivationInfo[blockNumber * 2]) & 0x1) == 1)
          {
          TR::SymbolReference *symRef = comp->getSymRefTab()->createKnownStaticDataSymbolRef(getFrequencyForBlock(((uintptr_t)_counterDerivationInfo[blockNumber * 2]) >> 1), TR::Int32);
+         symRef->getSymbol()->setIsBlockFrequency();
+         symRef->getSymbol()->setNotDataAddress();
          addRoot = TR::Node::createWithSymRef(node, TR::iload, 0, symRef);
          }
       else
@@ -2002,6 +1981,8 @@ TR_BlockFrequencyInfo::generateBlockRawCountCalculationSubTree(TR::Compilation *
          while (addBVI.hasMoreElements())
             {
             TR::SymbolReference *symRef = comp->getSymRefTab()->createKnownStaticDataSymbolRef(getFrequencyForBlock(addBVI.getNextElement()), TR::Int32);
+            symRef->getSymbol()->setIsBlockFrequency();
+            symRef->getSymbol()->setNotDataAddress();
             TR::Node *counterLoad = TR::Node::createWithSymRef(node, TR::iload, 0, symRef);
             if (addRoot)
                addRoot = TR::Node::create(node, TR::iadd, 2, addRoot, counterLoad);
@@ -2012,9 +1993,11 @@ TR_BlockFrequencyInfo::generateBlockRawCountCalculationSubTree(TR::Compilation *
       TR::Node *subRoot = NULL;
       if (_counterDerivationInfo[blockNumber * 2 +1] != NULL)
          {
-         if (((uintptr_t)_counterDerivationInfo[blockNumber *2 + 1]) & 0x1 == 1)
+         if ((((uintptr_t)_counterDerivationInfo[blockNumber *2 + 1]) & 0x1) == 1)
             {
             TR::SymbolReference *symRef = comp->getSymRefTab()->createKnownStaticDataSymbolRef(getFrequencyForBlock(((uintptr_t)_counterDerivationInfo[blockNumber * 2 + 1]) >> 1), TR::Int32);
+            symRef->getSymbol()->setIsBlockFrequency();
+            symRef->getSymbol()->setNotDataAddress();
             subRoot = TR::Node::createWithSymRef(node, TR::iload, 0, symRef);
             }
          else
@@ -2023,6 +2006,8 @@ TR_BlockFrequencyInfo::generateBlockRawCountCalculationSubTree(TR::Compilation *
             while (subBVI.hasMoreElements())
                {
                TR::SymbolReference *symRef = comp->getSymRefTab()->createKnownStaticDataSymbolRef(getFrequencyForBlock(subBVI.getNextElement()), TR::Int32);
+               symRef->getSymbol()->setIsBlockFrequency();
+               symRef->getSymbol()->setNotDataAddress();
                TR::Node *counterLoad = TR::Node::createWithSymRef(node, TR::iload, 0, symRef);
                if (subRoot)
                   {
@@ -2101,8 +2086,8 @@ TR_BlockFrequencyInfo::getRawCount(TR_ByteCodeInfo &bci, TR_CallSiteInfo *callSi
             if (comp->getOption(TR_TraceBFGeneration))
                traceMsg(comp, "   Slot %d has raw frequency %d\n", i, rawCount);
 
-            if (maxCount > 0)
-               rawCount = ((10000 * (uintptr_t)rawCount) / maxCount);
+            if (maxCount > 0 && rawCount > 0)
+               rawCount = ((10000 * rawCount) / maxCount);
             else
                rawCount = 0;
             }
@@ -2274,9 +2259,112 @@ int32_t TR_BlockFrequencyInfo::getMaxRawCount()
    return maxCount;
    }
 
+uint32_t TR_BlockFrequencyInfo::getSizeForSerialization() const
+   {
+   uint32_t size = sizeof(SerializedBFI);
+   if (_numBlocks > 0)
+      {
+      size += (_numBlocks * sizeof(*_blocks));
+      size += (_numBlocks * sizeof(*_frequencies));
+      size += (_numBlocks * 2 * sizeof(*_counterDerivationInfo));
+      for (int32_t i = 0; i < (_numBlocks * 2); i++)
+         {
+         if (TR_BlockFrequencyInfo::isCounterDerivationInfoValidBitVector(_counterDerivationInfo[i]))
+            {
+            size += _counterDerivationInfo[i]->getSizeForSerialization();
+            }
+         }
+      }
+   return size;
+   }
+
+void TR_BlockFrequencyInfo::serialize(uint8_t * &buffer) const
+   {
+   SerializedBFI *serializedData = reinterpret_cast<SerializedBFI *>(buffer);
+   serializedData->numBlocks = _numBlocks;
+   buffer += sizeof(SerializedBFI);
+   if (_numBlocks > 0)
+      {
+      size_t blocksSize = _numBlocks * sizeof(*_blocks);
+      memcpy(buffer, _blocks, blocksSize);
+      buffer += blocksSize;
+
+      size_t frequenciesSize = _numBlocks * sizeof(*_frequencies);
+      memcpy(buffer, _frequencies, frequenciesSize);
+      buffer += frequenciesSize;
+
+      size_t counterSize = _numBlocks * 2 * sizeof(*_counterDerivationInfo);
+      memcpy(buffer, _counterDerivationInfo, counterSize);
+      buffer += counterSize;
+      for (int32_t i = 0; i < (_numBlocks * 2); i++)
+         {
+         if (TR_BlockFrequencyInfo::isCounterDerivationInfoValidBitVector(_counterDerivationInfo[i]))
+            {
+            // write the bit vector
+            _counterDerivationInfo[i]->serialize(buffer);
+            }
+         }
+      }
+   }
+
+TR_BlockFrequencyInfo::TR_BlockFrequencyInfo(const SerializedBFI *serializedData, uint8_t * &buffer, TR_PersistentProfileInfo *currentProfile) :
+   _callSiteInfo(currentProfile->getCallSiteInfo()),
+   _numBlocks(serializedData->numBlocks),
+   _blocks(
+      _numBlocks ?
+      new (PERSISTENT_NEW) TR_ByteCodeInfo[_numBlocks] :
+      0
+      ),
+   _frequencies(
+      _numBlocks ?
+      /*
+       * The explicit parens value initializes the array,
+       * which in turn value initializes each array member,
+       * which for ints is zero initialization.
+       */
+      new (PERSISTENT_NEW) int32_t[_numBlocks]() :
+      NULL
+      ),
+   _counterDerivationInfo(
+      _numBlocks ?
+      (TR_BitVector**) new (PERSISTENT_NEW) void**[_numBlocks*2]() :
+      NULL),
+   _entryBlockNumber(-1),
+   _isQueuedForRecompilation(0)
+   {
+   if (_numBlocks > 0)
+      {
+      size_t blocksSize = _numBlocks * sizeof(*_blocks);
+      memcpy(_blocks, buffer, blocksSize);
+      buffer += blocksSize;
+
+      size_t frequenciesSize = _numBlocks * sizeof(*_frequencies);
+      memcpy(_frequencies, buffer, frequenciesSize);
+      buffer += frequenciesSize;
+
+      size_t counterSize = _numBlocks * 2 * sizeof(*_counterDerivationInfo);
+      memcpy(_counterDerivationInfo, buffer, counterSize);
+      buffer += counterSize;
+
+      // Now read the bit vectors if there is any
+      for (int32_t i = 0; i < (_numBlocks * 2); i++)
+         {
+         if (TR_BlockFrequencyInfo::isCounterDerivationInfoValidBitVector(_counterDerivationInfo[i]))
+            {
+            _counterDerivationInfo[i] = new (PERSISTENT_NEW) TR_BitVector(buffer);
+            }
+         }
+      }
+   }
+
+TR_BlockFrequencyInfo * TR_BlockFrequencyInfo::deserialize(uint8_t * &buffer, TR_PersistentProfileInfo *currentProfileInfo)
+   {
+   SerializedBFI *serializedData = reinterpret_cast<SerializedBFI *>(buffer);
+   buffer += sizeof(SerializedBFI);
+   return new (PERSISTENT_NEW) TR_BlockFrequencyInfo(serializedData, buffer, currentProfileInfo);
+   }
 
 const uint32_t TR_CatchBlockProfileInfo::EDOThreshold = 50;
-
 
 TR_CallSiteInfo::TR_CallSiteInfo(TR::Compilation * comp, TR_AllocationKind allocKind) :
    _numCallSites(comp->getNumInlinedCallSites()),
@@ -2406,11 +2494,7 @@ TR_CallSiteInfo::hasSamePartialBytecodeInfo(
       if (callSiteInfo1._byteCodeInfo.getByteCodeIndex() != callSiteInfo2._byteCodeInfo.getByteCodeIndex())
          break;
       TR_OpaqueMethodBlock *method1 = callSiteInfo1._methodInfo;
-      if (comp->fej9()->isAOT_DEPRECATED_DO_NOT_USE())
-         method1 = ((TR_AOTMethodInfo *)method1)->resolvedMethod->getPersistentIdentifier();
       TR_OpaqueMethodBlock *method2 = callSiteInfo2._methodInfo;
-      if (comp->fej9()->isAOT_DEPRECATED_DO_NOT_USE())
-         method2 = ((TR_AOTMethodInfo *)method2)->resolvedMethod->getPersistentIdentifier();
       if (method1 != method2)
          break;
       callSite1 = callSiteInfo1._byteCodeInfo.getCallerIndex();
@@ -2534,7 +2618,7 @@ void
 TR_PersistentProfileInfo::incRefCount(TR_PersistentProfileInfo *info)
    {
    TR_ASSERT_FATAL(info->_refCount > 0, "Increment called on profile info with no references");
-   VM_AtomicSupport::add((uintptr_t*) &(info->_refCount), 1);
+   VM_AtomicSupport::add(reinterpret_cast<volatile uintptr_t*>(&(info->_refCount)), 1);
    TR_ASSERT_FATAL(info->_refCount >= 0, "Increment resulted in negative reference count");
    }
 
@@ -2547,7 +2631,7 @@ TR_PersistentProfileInfo::incRefCount(TR_PersistentProfileInfo *info)
 void
 TR_PersistentProfileInfo::decRefCount(TR_PersistentProfileInfo *info)
    {
-   VM_AtomicSupport::subtract((uintptr_t*) &(info->_refCount), 1);
+   VM_AtomicSupport::subtract(reinterpret_cast<volatile uintptr_t*>(&(info->_refCount)), 1);
    TR_ASSERT_FATAL(info->_refCount >= 0, "Decrement resulted in negative reference count");
    if (!TR::Options::getCmdLineOptions()->getOption(TR_DisableJProfilerThread))
       {
@@ -2631,6 +2715,51 @@ void TR_CallSiteInfo::dumpInfo(TR::FILE *logFile)
       trfprintf(logFile, "   Call site index = %d, method = %p, parent = %d\n", _callSites[i]._byteCodeInfo.getByteCodeIndex(), _callSites[i]._methodInfo, _callSites[i]._byteCodeInfo.getCallerIndex());
    }
 
+uint32_t TR_CallSiteInfo::getSizeForSerialization() const
+   {
+   uint32_t size = sizeof(SerializedCSI);
+   if (_numCallSites > 0)
+      {
+      size += (_numCallSites * sizeof(TR_InlinedCallSite));
+      }
+   return size;
+   }
+
+void TR_CallSiteInfo::serialize(uint8_t * &buffer) const
+   {
+   SerializedCSI *serializedData = reinterpret_cast<SerializedCSI *>(buffer);
+   serializedData->numCallSites = _numCallSites;
+   buffer += sizeof(SerializedCSI);
+   if (_numCallSites > 0)
+      {
+      size_t callSitesSize = _numCallSites * sizeof(TR_InlinedCallSite);
+      memcpy(buffer, _callSites, callSitesSize);
+      buffer += callSitesSize;
+      }
+   }
+
+TR_CallSiteInfo::TR_CallSiteInfo(const SerializedCSI *data, uint8_t * &buffer) :
+   _numCallSites(data->numCallSites),
+   _callSites(
+      _numCallSites ?
+      new (PERSISTENT_NEW) TR_InlinedCallSite[_numCallSites] :
+      NULL
+      ),
+   _allocKind(persistentAlloc)
+   {
+   if (_numCallSites > 0)
+      {
+      memcpy(buffer, _callSites, _numCallSites * sizeof(TR_InlinedCallSite));
+      buffer += (_numCallSites * sizeof(TR_InlinedCallSite));
+      }
+   }
+
+TR_CallSiteInfo * TR_CallSiteInfo::deserialize(uint8_t * &buffer)
+   {
+   SerializedCSI *serializedData = reinterpret_cast<SerializedCSI *>(buffer);
+   buffer += sizeof(SerializedCSI);
+   return new (PERSISTENT_NEW) TR_CallSiteInfo(serializedData, buffer);
+   }
 
 void TR_PersistentProfileInfo::dumpInfo(TR::FILE *logFile)
    {
@@ -2646,6 +2775,55 @@ void TR_PersistentProfileInfo::dumpInfo(TR::FILE *logFile)
    if (_valueProfileInfo)
       _valueProfileInfo->dumpInfo(logFile);
    }
+
+uint32_t TR_PersistentProfileInfo::getSizeForSerialization() const
+   {
+   uint32_t size = sizeof(SerializedPPI);
+   if (_callSiteInfo)
+      {
+      size += _callSiteInfo->getSizeForSerialization();
+      }
+   if (_blockFrequencyInfo)
+      {
+      size += _blockFrequencyInfo->getSizeForSerialization();
+      }
+   return size;
+   }
+
+void TR_PersistentProfileInfo::serialize(uint8_t * &buffer) const
+   {
+   SerializedPPI *serializedData = reinterpret_cast<SerializedPPI *>(buffer);
+   serializedData->hasCallSiteInfo = (_callSiteInfo != NULL);
+   serializedData->hasBlockFrequencyInfo = (_blockFrequencyInfo != NULL);
+   serializedData->hasValueProfileInfo = false;
+   buffer += sizeof(SerializedPPI);
+   if (_callSiteInfo)
+      {
+      _callSiteInfo->serialize(buffer);
+      }
+   if (_blockFrequencyInfo)
+      {
+      _blockFrequencyInfo->serialize(buffer);
+      }
+   }
+
+TR_PersistentProfileInfo::TR_PersistentProfileInfo(uint8_t * &buffer) :
+   _next(NULL),
+   _active(true),
+   _refCount(1)
+   {
+   SerializedPPI *serializedData = reinterpret_cast<SerializedPPI *>(buffer);
+   buffer += sizeof(SerializedPPI);
+   _callSiteInfo = serializedData->hasCallSiteInfo ? TR_CallSiteInfo::deserialize(buffer) : NULL;
+   _blockFrequencyInfo = serializedData->hasBlockFrequencyInfo ? TR_BlockFrequencyInfo::deserialize(buffer, this) : NULL;
+   TR_ASSERT_FATAL(!serializedData->hasValueProfileInfo, "hasValueProfileInfo should be false\n");
+   _valueProfileInfo = NULL;
+
+   // these two are not required
+   memset(_profilingFrequency, 0, sizeof(_profilingFrequency));
+   memset(_profilingCount, 0, sizeof(_profilingCount));
+   }
+
 
 TR_AccessedProfileInfo::TR_AccessedProfileInfo(TR::Region &region) :
     _usedInfo((InfoMapComparator()), (InfoMapAllocator(region))),
@@ -2899,7 +3077,17 @@ TR_JProfilerThread::processWorkingQueue()
 
       _jProfilerMonitor->exit();
 
-      TR_PersistentProfileInfo **prevPtr = &_listHead;
+      /*
+       * prevPtr has a type of "TR_PersistentProfileInfo * volatile *"
+       * This mix of pointers and volatile can be hard to make sense of. To break it down:
+       *
+       * _listHead has the type "TR_PersistentProfileInfo * volatile" which is a volatile pointer to a non-volatile TR_PersistentProfileInfo.
+       * It is the pointer value itself that is volatile not the data it is pointing to.
+       *
+       * prevPtr is a pointer to _listHead. prevPtr itself is non-volatile.
+       * When put together, prevPtr is a non-volatile pointer to a volatile pointer to a non-volatile TR_PersistentProfileInfo.
+       */
+      TR_PersistentProfileInfo * volatile *prevPtr = &_listHead;
       TR_PersistentProfileInfo *cur = _listHead;
 
       size_t index = 0;
@@ -2938,10 +3126,10 @@ TR_JProfilerThread::addProfileInfo(TR_PersistentProfileInfo *newHead)
    // Atomic update for list head
    do {
       oldHead = _listHead;
-      oldPtr = (uintptr_t)oldHead;
+      oldPtr = reinterpret_cast<uintptr_t>(oldHead);
       newHead->_next = oldHead;
       }
-   while (oldPtr != VM_AtomicSupport::lockCompareExchange((uintptr_t*)&_listHead, oldPtr, (uintptr_t)newHead));
+   while (oldPtr != VM_AtomicSupport::lockCompareExchange(reinterpret_cast<volatile uintptr_t*>(&_listHead), oldPtr, reinterpret_cast<uintptr_t>(newHead)));
 
    VM_AtomicSupport::add(&_footprint, 1);
    }
@@ -2950,17 +3138,17 @@ TR_JProfilerThread::addProfileInfo(TR_PersistentProfileInfo *newHead)
  * Remove an arbitrary entry from the linked list.
  * Should only be called by the thread, as it does not support concurrent removals.
  *
- * \param prevNext Pointer to previous info's next pointer.
+ * \param prevNext Pointer to previous info's next pointer. This is a non-volatile pointer to a volatile pointer to a non-volatile TR_PersistentProfileInfo.
  * \param info Info to remove.
  * \return The next TR_PersistentProfileInfo after the removed info.
  */
 TR_PersistentProfileInfo *
-TR_JProfilerThread::deleteProfileInfo(TR_PersistentProfileInfo **prevNext, TR_PersistentProfileInfo *info)
+TR_JProfilerThread::deleteProfileInfo(TR_PersistentProfileInfo * volatile *prevNext, TR_PersistentProfileInfo *info)
    {
    TR_PersistentProfileInfo *next = info->_next;
-   uintptr_t oldPtr = (uintptr_t)info;
+   uintptr_t oldPtr = reinterpret_cast<uintptr_t>(info);
 
-   if (oldPtr != VM_AtomicSupport::lockCompareExchange((uintptr_t*)prevNext, oldPtr, (uintptr_t)next))
+   if (oldPtr != VM_AtomicSupport::lockCompareExchange(reinterpret_cast<volatile uintptr_t*>(prevNext), oldPtr, reinterpret_cast<uintptr_t>(next)))
       return next;
 
    if (!TR::Options::getCmdLineOptions()->getOption(TR_DisableProfilingDataReclamation))

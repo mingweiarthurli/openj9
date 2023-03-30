@@ -1,6 +1,6 @@
 /*[INCLUDE-IF Sidecar19-SE]*/
 /*******************************************************************************
- * Copyright (c) 2017, 2020 IBM Corp. and others
+ * Copyright (c) 2017, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -28,11 +28,11 @@ import com.ibm.oti.vm.VMLangAccess;
 import java.lang.reflect.Field;
 import java.security.ProtectionDomain;
 import java.util.Objects;
-/*[IF Java12]*/
+/*[IF JAVA_SPEC_VERSION >= 12]*/
 import java.nio.ByteBuffer;
 import sun.nio.ch.DirectBuffer;
 import jdk.internal.ref.Cleaner;
-/*[ENDIF] Java12 */
+/*[ENDIF] JAVA_SPEC_VERSION >= 12 */
 
 public final class Unsafe {
 
@@ -185,6 +185,11 @@ public final class Unsafe {
 
 	/* Mask byte offset of an int. */
 	private static final long BYTE_OFFSET_MASK = 0b11L;
+
+	/*[IF INLINE-TYPES]*/
+	private static final class InlineTypesLock { InlineTypesLock() {} }
+	private static final InlineTypesLock inlineTypesLock = new InlineTypesLock();
+	/*[ENDIF] INLINE-TYPES */
 
 	static {
 		registerNatives();
@@ -407,7 +412,7 @@ public final class Unsafe {
 	 */
 	public native void putObject(Object obj, long offset, Object value);
 
-/*[IF Java12]*/
+/*[IF JAVA_SPEC_VERSION >= 12]*/
 	/**
 	 * Gets the value of the Object in the obj parameter referenced by offset.
 	 * This is a non-volatile operation.
@@ -427,8 +432,8 @@ public final class Unsafe {
 	 * @param value Object to store in obj
 	 */
 	public native void putReference(Object obj, long offset, Object value);
-/*[ENDIF] Java12 */
-	
+/*[ENDIF] JAVA_SPEC_VERSION >= 12 */
+
 	/**
 	 * Gets the value of the Object in memory referenced by address.
 	 * This is a non-volatile operation.
@@ -523,7 +528,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param setValue value that will be set in obj at offset if compare is successful
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
 	 * @return boolean value indicating whether the field was updated
 	 */
 	public final native boolean compareAndSetInt(Object obj, long offset, int compareValue, int setValue);
@@ -537,7 +542,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param exchangeValue value that will be set in obj at offset if compare is successful
+	 * @param exchangeValue value that will be set in obj at offset if the comparison is successful
 	 * @return value in obj at offset before this operation. This will be compareValue if the exchange was successful
 	 */
 	public final native int compareAndExchangeInt(Object obj, long offset, int compareValue, int exchangeValue);
@@ -551,7 +556,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param setValue value that will be set in obj at offset if compare is successful
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
 	 * @return boolean value indicating whether the field was updated
 	 */
 	public final native boolean compareAndSetLong(Object obj, long offset, long compareValue, long setValue);
@@ -565,7 +570,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param exchangeValue value that will be set in obj at offset if compare is successful
+	 * @param exchangeValue value that will be set in obj at offset if the comparison is successful
 	 * @return value in obj at offset before this operation. This will be compareValue if the exchange was successful
 	 */
 	public final native long compareAndExchangeLong(Object obj, long offset, long compareValue, long exchangeVale);
@@ -579,7 +584,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param setValue value that will be set in obj at offset if compare is successful
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
 	 * @return boolean value indicating whether the field was updated
 	 */
 	public final native boolean compareAndSetObject(Object obj, long offset, Object compareValue, Object setValue);
@@ -593,13 +598,13 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param exchangeValue value that will be set in obj at offset if compare is successful
+	 * @param exchangeValue value that will be set in obj at offset if the comparison is successful
 	 * @return value in obj at offset before this operation. This will be compareValue if the exchange was successful
 	 */
 	public final native Object compareAndExchangeObject(Object obj, long offset, Object compareValue,
 			Object exchangeValue);
 
-/*[IF Java12]*/
+/*[IF JAVA_SPEC_VERSION >= 12]*/
 	/**
 	 * Atomically sets the parameter value at offset in obj if the compare value 
 	 * matches the existing value in the object.
@@ -609,7 +614,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param setValue value that will be set in obj at offset if compare is successful
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
 	 * @return boolean value indicating whether the field was updated
 	 */
 	public final native boolean compareAndSetReference(Object obj, long offset, Object compareValue, Object setValue);
@@ -623,12 +628,12 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param exchangeValue value that will be set in obj at offset if compare is successful
+	 * @param exchangeValue value that will be set in obj at offset if the comparison is successful
 	 * @return value in obj at offset before this operation. This will be compareValue if the exchange was successful
 	 */
 	public final native Object compareAndExchangeReference(Object obj, long offset, Object compareValue,
 			Object exchangeValue);
-/*[ENDIF] Java12 */
+/*[ENDIF] JAVA_SPEC_VERSION >= 12 */
 
 	/**
 	 * Atomically gets the value of the byte in the obj parameter referenced by offset.
@@ -792,7 +797,7 @@ public final class Unsafe {
 	 */
 	public native void putObjectVolatile(Object obj, long offset, Object value);
 
-/*[IF Java12]*/
+/*[IF JAVA_SPEC_VERSION >= 12]*/
 	/**
 	 * Atomically gets the value of the Object in the obj parameter referenced by offset.
 	 * 
@@ -810,7 +815,7 @@ public final class Unsafe {
 	 * @param value Object to store in obj
 	 */
 	public native void putReferenceVolatile(Object obj, long offset, Object value);
-/*[ENDIF] Java12 */
+/*[ENDIF] JAVA_SPEC_VERSION >= 12 */
 
 	/**
 	 * Makes permit available for thread parameter.
@@ -935,8 +940,8 @@ public final class Unsafe {
 	 * @throws IllegalArgumentException if field is static
 	 */
 	private native long objectFieldOffset0(Field field);
-	
-/*[IF Java10]*/
+
+/*[IF JAVA_SPEC_VERSION >= 10]*/
 	/*
 	 * Returns byte offset to field.
 	 * 
@@ -947,7 +952,7 @@ public final class Unsafe {
 	 * @throws IllegalArgumentException if field is static
 	 */
 	private native long objectFieldOffset1(Class<?> c, String fieldName);
-/*[ENDIF]*/
+/*[ENDIF] JAVA_SPEC_VERSION >= 10 */
 
 	/* 
 	 * Returns byte offset to start of static class or interface.
@@ -1013,6 +1018,7 @@ public final class Unsafe {
 	/* @return size of address on machine in use */
 	private native int addressSize0();
 
+	/*[IF JAVA_SPEC_VERSION < 17]*/
 	/* 
 	 * Define a class without making it known to the class loader.
 	 * 
@@ -1024,6 +1030,7 @@ public final class Unsafe {
 	 * @return class created from bytecodes and constPatches
 	 */
 	private native Class<?> defineAnonymousClass0(Class<?> hostingClass, byte[] bytecodes, Object[] constPatches);
+	/*[ENDIF] JAVA_SPEC_VERSION < 17 */
 
 	/* 
 	 * Get the load average in the system.
@@ -1042,7 +1049,7 @@ public final class Unsafe {
 	/* @return true if machine is big endian, false otherwise */
 	private native boolean isBigEndian0();
 
-/*[IF Java14]*/
+/*[IF JAVA_SPEC_VERSION >= 14]*/
 	/**
 	 * Make sure that the virtual memory at address "addr" for length "len" has
 	 * been written back from the cache to physical memory.
@@ -1061,8 +1068,8 @@ public final class Unsafe {
 	 * @return true if cache writeback is possible, else false
 	 */
 	public static native boolean isWritebackEnabled();
-/*[ENDIF] Java14 */
-	
+/*[ENDIF] JAVA_SPEC_VERSION >= 14 */
+
 	/**
 	 * Getter for unsafe instance.
 	 * 
@@ -1477,8 +1484,8 @@ public final class Unsafe {
 		Objects.requireNonNull(field);
 		return objectFieldOffset0(field);
 	}
-	
-/*[IF Java10]*/
+
+/*[IF JAVA_SPEC_VERSION >= 10]*/
 	/**
 	 * Returns byte offset to field.
 	 * 
@@ -1494,7 +1501,7 @@ public final class Unsafe {
 		Objects.requireNonNull(fieldName);
 		return objectFieldOffset1(c, fieldName);
 	}
-/*[ENDIF]*/
+/*[ENDIF] JAVA_SPEC_VERSION >= 10 */
 
 	/**
 	 * Returns byte offset to start of static class or interface.
@@ -1571,10 +1578,15 @@ public final class Unsafe {
 	 * 
 	 * @throws NullPointerException if class is null
 	 * @throws IllegalArgumentException if class is not an array
+	 * @throws RuntimeException if index scale is not a power of 2
 	 */
 	public int arrayIndexScale(Class<?> c) {
 		Objects.requireNonNull(c);
-		return arrayIndexScale0(c);
+		int indexScale = arrayIndexScale0(c);
+		if (indexScale == 0 || (indexScale & (indexScale - 1)) != 0) {
+			throw new RuntimeException("The class array index scale is not a power of two");
+		}
+		return indexScale;
 	}
 
 	/**
@@ -1615,6 +1627,7 @@ public final class Unsafe {
 		return result;
 	}
 
+	/*[IF JAVA_SPEC_VERSION < 17]*/
 	/**
 	 * Define a class without making it known to the class loader.
 	 * 
@@ -1638,6 +1651,7 @@ public final class Unsafe {
 
 		return defineAnonymousClass0(hostingClass, bytecodes, constPatches);
 	}
+	/*[ENDIF] JAVA_SPEC_VERSION < 17 */
 
 	/**
 	 * Allocate new array of same type as class parameter and 
@@ -1679,7 +1693,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param exchangeValue value that will be set in obj at offset if compare is successful
+	 * @param exchangeValue value that will be set in obj at offset if the comparison is successful
 	 * @return value in obj at offset before this operation. This will be compareValue if the exchange was successful
 	 */
 	public final byte compareAndExchangeByte(Object obj, long offset, byte compareValue, byte exchangeValue) {
@@ -1695,7 +1709,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param setValue value that will be set in obj at offset if compare is successful
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
 	 * @return boolean value indicating whether the field was updated
 	 */
 	public final boolean compareAndSetByte(Object obj, long offset, byte compareValue, byte setValue) {
@@ -1712,7 +1726,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param setValue value that will be set in obj at offset if compare is successful
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
 	 * @return boolean value indicating whether the field was updated
 	 */
 	public final boolean weakCompareAndSetByte(Object obj, long offset, byte compareValue, byte setValue) {
@@ -1728,7 +1742,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param setValue value that will be set in obj at offset if compare is successful
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
 	 * @return boolean value indicating whether the field was updated
 	 */
 	public final boolean weakCompareAndSetByteAcquire(Object obj, long offset, byte compareValue, byte setValue) {
@@ -1744,7 +1758,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param setValue value that will be set in obj at offset if compare is successful
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
 	 * @return boolean value indicating whether the field was updated
 	 */
 	public final boolean weakCompareAndSetByteRelease(Object obj, long offset, byte compareValue, byte setValue) {
@@ -1760,7 +1774,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param setValue value that will be set in obj at offset if compare is successful
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
 	 * @return boolean value indicating whether the field was updated
 	 */
 	public final boolean weakCompareAndSetBytePlain(Object obj, long offset, byte compareValue, byte setValue) {
@@ -1776,7 +1790,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param exchangeValue value that will be set in obj at offset if compare is successful
+	 * @param exchangeValue value that will be set in obj at offset if the comparison is successful
 	 * @return value in obj at offset before this operation. This will be compareValue if the exchange was successful
 	 */
 	public final byte compareAndExchangeByteAcquire(Object obj, long offset, byte compareValue, byte exchangeValue) {
@@ -1792,7 +1806,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param exchangeValue value that will be set in obj at offset if compare is successful
+	 * @param exchangeValue value that will be set in obj at offset if the comparison is successful
 	 * @return value in obj at offset before this operation. This will be compareValue if the exchange was successful
 	 */
 	public final byte compareAndExchangeByteRelease(Object obj, long offset, byte compareValue, byte exchangeValue) {
@@ -1808,7 +1822,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param exchangeValue value that will be set in obj at offset if compare is successful
+	 * @param exchangeValue value that will be set in obj at offset if the comparison is successful
 	 * @return value in obj at offset before this operation. This will be compareValue if the exchange was successful
 	 */
 	public final int compareAndExchangeIntAcquire(Object obj, long offset, int compareValue, int exchangeValue) {
@@ -1824,7 +1838,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param exchangeValue value that will be set in obj at offset if compare is successful
+	 * @param exchangeValue value that will be set in obj at offset if the comparison is successful
 	 * @return value in obj at offset before this operation. This will be compareValue if the exchange was successful
 	 */
 	public final int compareAndExchangeIntRelease(Object obj, long offset, int compareValue, int exchangeValue) {
@@ -1840,7 +1854,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param setValue value that will be set in obj at offset if compare is successful
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
 	 * @return boolean value indicating whether the field was updated
 	 */
 	public final boolean weakCompareAndSetIntPlain(Object obj, long offset, int compareValue, int setValue) {
@@ -1856,7 +1870,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param setValue value that will be set in obj at offset if compare is successful
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
 	 * @return boolean value indicating whether the field was updated
 	 */
 	public final boolean weakCompareAndSetIntAcquire(Object obj, long offset, int compareValue, int setValue) {
@@ -1872,7 +1886,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param setValue value that will be set in obj at offset if compare is successful
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
 	 * @return boolean value indicating whether the field was updated
 	 */
 	public final boolean weakCompareAndSetIntRelease(Object obj, long offset, int compareValue, int setValue) {
@@ -1888,7 +1902,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param setValue value that will be set in obj at offset if compare is successful
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
 	 * @return boolean value indicating whether the field was updated
 	 */
 	public final boolean weakCompareAndSetInt(Object obj, long offset, int compareValue, int setValue) {
@@ -1904,7 +1918,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param exchangeValue value that will be set in obj at offset if compare is successful
+	 * @param exchangeValue value that will be set in obj at offset if the comparison is successful
 	 * @return value in obj at offset before this operation. This will be compareValue if the exchange was successful
 	 */
 	public final long compareAndExchangeLongAcquire(Object obj, long offset, long compareValue, long exchangeValue) {
@@ -1920,7 +1934,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param exchangeValue value that will be set in obj at offset if compare is successful
+	 * @param exchangeValue value that will be set in obj at offset if the comparison is successful
 	 * @return value in obj at offset before this operation. This will be compareValue if the exchange was successful
 	 */
 	public final long compareAndExchangeLongRelease(Object obj, long offset, long compareValue, long exchangeValue) {
@@ -1936,7 +1950,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param setValue value that will be set in obj at offset if compare is successful
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
 	 * @return boolean value indicating whether the field was updated
 	 */
 	public final boolean weakCompareAndSetLongPlain(Object obj, long offset, long compareValue, long setValue) {
@@ -1952,7 +1966,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param setValue value that will be set in obj at offset if compare is successful
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
 	 * @return boolean value indicating whether the field was updated
 	 */
 	public final boolean weakCompareAndSetLongAcquire(Object obj, long offset, long compareValue, long setValue) {
@@ -1968,7 +1982,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param setValue value that will be set in obj at offset if compare is successful
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
 	 * @return boolean value indicating whether the field was updated
 	 */
 	public final boolean weakCompareAndSetLongRelease(Object obj, long offset, long compareValue, long setValue) {
@@ -1984,7 +1998,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param setValue value that will be set in obj at offset if compare is successful
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
 	 * @return boolean value indicating whether the field was updated
 	 */
 	public final boolean weakCompareAndSetLong(Object obj, long offset, long compareValue, long setValue) {
@@ -2000,7 +2014,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param setValue value that will be set in obj at offset if compare is successful
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
 	 * @return boolean value indicating whether the field was updated
 	 */
 	public final boolean compareAndSetFloat(Object obj, long offset, float compareValue, float setValue) {
@@ -2016,7 +2030,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param exchangeValue value that will be set in obj at offset if compare is successful
+	 * @param exchangeValue value that will be set in obj at offset if the comparison is successful
 	 * @return value in obj at offset before this operation. This will be compareValue if the exchange was successful
 	 */
 	public final float compareAndExchangeFloat(Object obj, long offset, float compareValue, float exchangeValue) {
@@ -2034,7 +2048,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param exchangeValue value that will be set in obj at offset if compare is successful
+	 * @param exchangeValue value that will be set in obj at offset if the comparison is successful
 	 * @return value in obj at offset before this operation. This will be compareValue if the exchange was successful
 	 */
 	public final float compareAndExchangeFloatAcquire(Object obj, long offset, float compareValue,
@@ -2053,7 +2067,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param exchangeValue value that will be set in obj at offset if compare is successful
+	 * @param exchangeValue value that will be set in obj at offset if the comparison is successful
 	 * @return value in obj at offset before this operation. This will be compareValue if the exchange was successful
 	 */
 	public final float compareAndExchangeFloatRelease(Object obj, long offset, float compareValue,
@@ -2072,7 +2086,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param setValue value that will be set in obj at offset if compare is successful
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
 	 * @return boolean value indicating whether the field was updated
 	 */
 	public final boolean weakCompareAndSetFloatPlain(Object obj, long offset, float compareValue, float setValue) {
@@ -2089,7 +2103,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param setValue value that will be set in obj at offset if compare is successful
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
 	 * @return boolean value indicating whether the field was updated
 	 */
 	public final boolean weakCompareAndSetFloatAcquire(Object obj, long offset, float compareValue, float setValue) {
@@ -2106,7 +2120,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param setValue value that will be set in obj at offset if compare is successful
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
 	 * @return boolean value indicating whether the field was updated
 	 */
 	public final boolean weakCompareAndSetFloatRelease(Object obj, long offset, float compareValue, float setValue) {
@@ -2123,7 +2137,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param setValue value that will be set in obj at offset if compare is successful
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
 	 * @return boolean value indicating whether the field was updated
 	 */
 	public final boolean weakCompareAndSetFloat(Object obj, long offset, float compareValue, float setValue) {
@@ -2140,7 +2154,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param setValue value that will be set in obj at offset if compare is successful
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
 	 * @return boolean value indicating whether the field was updated
 	 */
 	public final boolean compareAndSetDouble(Object obj, long offset, double compareValue, double setValue) {
@@ -2157,7 +2171,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param exchangeValue value that will be set in obj at offset if compare is successful
+	 * @param exchangeValue value that will be set in obj at offset if the comparison is successful
 	 * @return value in obj at offset before this operation. This will be compareValue if the exchange was successful
 	 */
 	public final double compareAndExchangeDouble(Object obj, long offset, double compareValue, double exchangeValue) {
@@ -2175,7 +2189,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param exchangeValue value that will be set in obj at offset if compare is successful
+	 * @param exchangeValue value that will be set in obj at offset if the comparison is successful
 	 * @return value in obj at offset before this operation. This will be compareValue if the exchange was successful
 	 */
 	public final double compareAndExchangeDoubleAcquire(Object obj, long offset, double compareValue,
@@ -2194,7 +2208,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param exchangeValue value that will be set in obj at offset if compare is successful
+	 * @param exchangeValue value that will be set in obj at offset if the comparison is successful
 	 * @return value in obj at offset before this operation. This will be compareValue if the exchange was successful
 	 */
 	public final double compareAndExchangeDoubleRelease(Object obj, long offset, double compareValue,
@@ -2213,7 +2227,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param setValue value that will be set in obj at offset if compare is successful
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
 	 * @return boolean value indicating whether the field was updated
 	 */
 	public final boolean weakCompareAndSetDoublePlain(Object obj, long offset, double compareValue, double swapValue) {
@@ -2230,7 +2244,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param setValue value that will be set in obj at offset if compare is successful
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
 	 * @return boolean value indicating whether the field was updated
 	 */
 	public final boolean weakCompareAndSetDoubleAcquire(Object obj, long offset, double compareValue,
@@ -2248,7 +2262,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param setValue value that will be set in obj at offset if compare is successful
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
 	 * @return boolean value indicating whether the field was updated
 	 */
 	public final boolean weakCompareAndSetDoubleRelease(Object obj, long offset, double compareValue,
@@ -2266,7 +2280,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param setValue value that will be set in obj at offset if compare is successful
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
 	 * @return boolean value indicating whether the field was updated
 	 */
 	public final boolean weakCompareAndSetDouble(Object obj, long offset, double compareValue, double swapValue) {
@@ -2283,7 +2297,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param exchangeValue value that will be set in obj at offset if compare is successful
+	 * @param exchangeValue value that will be set in obj at offset if the comparison is successful
 	 * @return value in obj at offset before this operation. This will be compareValue if the exchange was successful
 	 * 
 	 * @throws IllegalArgumentException if value at offset spans over multiple aligned words (4 bytes) in memory
@@ -2302,7 +2316,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param setValue value that will be set in obj at offset if compare is successful
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
 	 * @return boolean value indicating whether the field was updated
 	 * 
 	 * @throws IllegalArgumentException if value at offset spans over multiple aligned words (4 bytes) in memory
@@ -2321,7 +2335,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param setValue value that will be set in obj at offset if compare is successful
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
 	 * @return boolean value indicating whether the field was updated
 	 * 
 	 * @throws IllegalArgumentException if value at offset spans over multiple aligned words (4 bytes) in memory
@@ -2339,7 +2353,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param setValue value that will be set in obj at offset if compare is successful
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
 	 * @return boolean value indicating whether the field was updated
 	 * 
 	 * @throws IllegalArgumentException if value at offset spans over multiple aligned words (4 bytes) in memory
@@ -2357,7 +2371,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param setValue value that will be set in obj at offset if compare is successful
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
 	 * @return boolean value indicating whether the field was updated
 	 * 
 	 * @throws IllegalArgumentException if value at offset spans over multiple aligned words (4 bytes) in memory
@@ -2375,7 +2389,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param setValue value that will be set in obj at offset if compare is successful
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
 	 * @return boolean value indicating whether the field was updated
 	 * 
 	 * @throws IllegalArgumentException if value at offset spans over multiple aligned words (4 bytes) in memory
@@ -2393,7 +2407,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param exchangeValue value that will be set in obj at offset if compare is successful
+	 * @param exchangeValue value that will be set in obj at offset if the comparison is successful
 	 * @return value in obj at offset before this operation. This will be compareValue if the exchange was successful
 	 * 
 	 * @throws IllegalArgumentException if value at offset spans over multiple aligned words (4 bytes) in memory
@@ -2412,7 +2426,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param exchangeValue value that will be set in obj at offset if compare is successful
+	 * @param exchangeValue value that will be set in obj at offset if the comparison is successful
 	 * @return value in obj at offset before this operation. This will be compareValue if the exchange was successful
 	 * 
 	 * @throws IllegalArgumentException if value at offset spans over multiple aligned words (4 bytes) in memory
@@ -2431,7 +2445,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param setValue value that will be set in obj at offset if compare is successful
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
 	 * @return boolean value indicating whether the field was updated
 	 * 
 	 * @throws IllegalArgumentException if value at offset spans over multiple aligned words (4 bytes) in memory
@@ -2450,7 +2464,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param exchangeValue value that will be set in obj at offset if compare is successful
+	 * @param exchangeValue value that will be set in obj at offset if the comparison is successful
 	 * @return value in obj at offset before this operation. This will be compareValue if the exchange was successful
 	 * 
 	 * @throws IllegalArgumentException if value at offset spans over multiple aligned words (4 bytes) in memory
@@ -2470,7 +2484,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param exchangeValue value that will be set in obj at offset if compare is successful
+	 * @param exchangeValue value that will be set in obj at offset if the comparison is successful
 	 * @return value in obj at offset before this operation. This will be compareValue if the exchange was successful
 	 * 
 	 * @throws IllegalArgumentException if value at offset spans over multiple aligned words (4 bytes) in memory
@@ -2488,7 +2502,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param exchangeValue value that will be set in obj at offset if compare is successful
+	 * @param exchangeValue value that will be set in obj at offset if the comparison is successful
 	 * @return value in obj at offset before this operation. This will be compareValue if the exchange was successful
 	 * 
 	 * @throws IllegalArgumentException if value at offset spans over multiple aligned words (4 bytes) in memory
@@ -2506,7 +2520,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param setValue value that will be set in obj at offset if compare is successful
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
 	 * @return boolean value indicating whether the field was updated
 	 * 
 	 * @throws IllegalArgumentException if value at offset spans over multiple aligned words (4 bytes) in memory
@@ -2524,7 +2538,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param setValue value that will be set in obj at offset if compare is successful
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
 	 * @return boolean value indicating whether the field was updated
 	 * 
 	 * @throws IllegalArgumentException if value at offset spans over multiple aligned words (4 bytes) in memory
@@ -2542,7 +2556,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param setValue value that will be set in obj at offset if compare is successful
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
 	 * @return boolean value indicating whether the field was updated
 	 * 
 	 * @throws IllegalArgumentException if value at offset spans over multiple aligned words (4 bytes) in memory
@@ -2560,7 +2574,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param setValue value that will be set in obj at offset if compare is successful
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
 	 * @return boolean value indicating whether the field was updated
 	 * 
 	 * @throws IllegalArgumentException if value at offset spans over multiple aligned words (4 bytes) in memory
@@ -2578,7 +2592,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param setValue value that will be set in obj at offset if compare is successful
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
 	 * @return boolean value indicating whether the field was updated
 	 */
 	public final boolean compareAndSetBoolean(Object obj, long offset, boolean compareValue, boolean setValue) {
@@ -2594,7 +2608,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param exchangeValue value that will be set in obj at offset if compare is successful
+	 * @param exchangeValue value that will be set in obj at offset if the comparison is successful
 	 * @return value in obj at offset before this operation. This will be compareValue if the exchange was successful
 	 */
 	public final boolean compareAndExchangeBoolean(Object obj, long offset, boolean compareValue,
@@ -2612,7 +2626,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param exchangeValue value that will be set in obj at offset if compare is successful
+	 * @param exchangeValue value that will be set in obj at offset if the comparison is successful
 	 * @return value in obj at offset before this operation. This will be compareValue if the exchange was successful
 	 */
 	public final boolean compareAndExchangeBooleanAcquire(Object obj, long offset, boolean compareValue,
@@ -2630,7 +2644,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param exchangeValue value that will be set in obj at offset if compare is successful
+	 * @param exchangeValue value that will be set in obj at offset if the comparison is successful
 	 * @return value in obj at offset before this operation. This will be compareValue if the exchange was successful
 	 */
 	public final boolean compareAndExchangeBooleanRelease(Object obj, long offset, boolean compareValue,
@@ -2648,7 +2662,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param setValue value that will be set in obj at offset if compare is successful
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
 	 * @return boolean value indicating whether the field was updated
 	 */
 	public final boolean weakCompareAndSetBoolean(Object obj, long offset, boolean compareValue, boolean setValue) {
@@ -2664,7 +2678,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param setValue value that will be set in obj at offset if compare is successful
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
 	 * @return boolean value indicating whether the field was updated
 	 */
 	public final boolean weakCompareAndSetBooleanAcquire(Object obj, long offset, boolean compareValue,
@@ -2681,7 +2695,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param setValue value that will be set in obj at offset if compare is successful
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
 	 * @return boolean value indicating whether the field was updated
 	 */
 	public final boolean weakCompareAndSetBooleanRelease(Object obj, long offset, boolean compareValue,
@@ -2698,7 +2712,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param setValue value that will be set in obj at offset if compare is successful
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
 	 * @return boolean value indicating whether the field was updated
 	 */
 	public final boolean weakCompareAndSetBooleanPlain(Object obj, long offset, boolean compareValue,
@@ -2715,7 +2729,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param exchangeValue value that will be set in obj at offset if compare is successful
+	 * @param exchangeValue value that will be set in obj at offset if the comparison is successful
 	 * @return value in obj at offset before this operation. This will be compareValue if the exchange was successful
 	 */
 	public final Object compareAndExchangeObjectAcquire(Object obj, long offset, Object compareValue,
@@ -2732,7 +2746,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param exchangeValue value that will be set in obj at offset if compare is successful
+	 * @param exchangeValue value that will be set in obj at offset if the comparison is successful
 	 * @return value in obj at offset before this operation. This will be compareValue if the exchange was successful
 	 */
 	public final Object compareAndExchangeObjectRelease(Object obj, long offset, Object compareValue,
@@ -2749,7 +2763,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param setValue value that will be set in obj at offset if compare is successful
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
 	 * @return boolean value indicating whether the field was updated
 	 */
 	public final boolean weakCompareAndSetObjectPlain(Object obj, long offset, Object compareValue, Object setValue) {
@@ -2765,7 +2779,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param setValue value that will be set in obj at offset if compare is successful
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
 	 * @return boolean value indicating whether the field was updated
 	 */
 	public final boolean weakCompareAndSetObjectAcquire(Object obj, long offset, Object compareValue, Object setValue) {
@@ -2781,7 +2795,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param setValue value that will be set in obj at offset if compare is successful
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
 	 * @return boolean value indicating whether the field was updated
 	 */
 	public final boolean weakCompareAndSetObjectRelease(Object obj, long offset, Object compareValue, Object setValue) {
@@ -2797,14 +2811,14 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param setValue value that will be set in obj at offset if compare is successful
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
 	 * @return boolean value indicating whether the field was updated
 	 */
 	public final boolean weakCompareAndSetObject(Object obj, long offset, Object compareValue, Object setValue) {
 		return compareAndSetObject(obj, offset, compareValue, setValue);
 	}
 
-/*[IF Java12]*/
+/*[IF JAVA_SPEC_VERSION >= 12]*/
 	/**
 	 * Atomically sets the parameter value at offset in obj if the compare value 
 	 * matches the existing value in the object.
@@ -2814,7 +2828,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param exchangeValue value that will be set in obj at offset if compare is successful
+	 * @param exchangeValue value that will be set in obj at offset if the comparison is successful
 	 * @return value in obj at offset before this operation. This will be compareValue if the exchange was successful
 	 */
 	public final Object compareAndExchangeReferenceAcquire(Object obj, long offset, Object compareValue,
@@ -2831,7 +2845,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param exchangeValue value that will be set in obj at offset if compare is successful
+	 * @param exchangeValue value that will be set in obj at offset if the comparison is successful
 	 * @return value in obj at offset before this operation. This will be compareValue if the exchange was successful
 	 */
 	public final Object compareAndExchangeReferenceRelease(Object obj, long offset, Object compareValue,
@@ -2848,7 +2862,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param setValue value that will be set in obj at offset if compare is successful
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
 	 * @return boolean value indicating whether the field was updated
 	 */
 	public final boolean weakCompareAndSetReferencePlain(Object obj, long offset, Object compareValue, Object setValue) {
@@ -2864,7 +2878,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param setValue value that will be set in obj at offset if compare is successful
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
 	 * @return boolean value indicating whether the field was updated
 	 */
 	public final boolean weakCompareAndSetReferenceAcquire(Object obj, long offset, Object compareValue, Object setValue) {
@@ -2880,7 +2894,7 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param setValue value that will be set in obj at offset if compare is successful
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
 	 * @return boolean value indicating whether the field was updated
 	 */
 	public final boolean weakCompareAndSetReferenceRelease(Object obj, long offset, Object compareValue, Object setValue) {
@@ -2896,13 +2910,13 @@ public final class Unsafe {
 	 * @param obj object into which to store the value
 	 * @param offset location to compare and store value in obj
 	 * @param compareValue value that is expected to be in obj at offset
-	 * @param setValue value that will be set in obj at offset if compare is successful
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
 	 * @return boolean value indicating whether the field was updated
 	 */
 	public final boolean weakCompareAndSetReference(Object obj, long offset, Object compareValue, Object setValue) {
 		return compareAndSetReference(obj, offset, compareValue, setValue);
 	}
-/*[ENDIF] Java12 */
+/*[ENDIF] JAVA_SPEC_VERSION >= 12 */
 
 	/**
 	 * Gets the value of the byte in the obj parameter referenced by offset using acquire semantics.
@@ -3012,7 +3026,7 @@ public final class Unsafe {
 		return getObjectVolatile(obj, offset);
 	}
 
-	/*[IF Java12]*/
+	/*[IF JAVA_SPEC_VERSION >= 12]*/
 	/**
 	 * Gets the value of the Object in the obj parameter referenced by offset using acquire semantics.
 	 * Preceding loads will not be reordered with subsequent loads/stores.
@@ -3024,7 +3038,7 @@ public final class Unsafe {
 	public final Object getReferenceAcquire(Object obj, long offset) {
 		return getReferenceVolatile(obj, offset);
 	}
-	/*[ENDIF] Java12 */
+	/*[ENDIF] JAVA_SPEC_VERSION >= 12 */
 
 	/**
 	 * Sets the value of the byte in the obj parameter at memory offset using acquire semantics.
@@ -3134,7 +3148,7 @@ public final class Unsafe {
 		putObjectVolatile(obj, offset, value);
 	}
 
-/*[IF Java12]*/
+/*[IF JAVA_SPEC_VERSION >= 12]*/
 	/**
 	 * Sets the value of the Object in the obj parameter at memory offset using acquire semantics.
 	 * Preceding stores will not be reordered with subsequent loads/stores.
@@ -3146,8 +3160,8 @@ public final class Unsafe {
 	public final void putReferenceRelease(Object obj, long offset, Object value) {
 		putReferenceVolatile(obj, offset, value);
 	}
-/*[ENDIF] Java12 */
-	
+/*[ENDIF] JAVA_SPEC_VERSION >= 12 */
+
 	/**
 	 * Gets the value of the byte in the obj parameter referenced by offset.
 	 * The operation is in program order, but does enforce ordering with respect to other threads.
@@ -3256,7 +3270,7 @@ public final class Unsafe {
 		return getObjectVolatile(obj, offset);
 	}
 
-/*[IF Java12]*/
+/*[IF JAVA_SPEC_VERSION >= 12]*/
 	/**
 	 * Gets the value of the Object in the obj parameter referenced by offset.
 	 * The operation is in program order, but does enforce ordering with respect to other threads.
@@ -3268,7 +3282,7 @@ public final class Unsafe {
 	public final Object getReferenceOpaque(Object obj, long offset) {
 		return getReferenceVolatile(obj, offset);
 	}
-/*[ENDIF] Java12 */
+/*[ENDIF] JAVA_SPEC_VERSION >= 12 */
 
 	/**
 	 * Sets the value of the byte in the obj parameter at memory offset.
@@ -3378,7 +3392,7 @@ public final class Unsafe {
 		putObjectVolatile(obj, offset, value);
 	}
 
-/*[IF Java12]*/
+/*[IF JAVA_SPEC_VERSION >= 12]*/
 	/**
 	 * Sets the value of the Object in the obj parameter at memory offset.
 	 * The operation is in program order, but does enforce ordering with respect to other threads.
@@ -3390,7 +3404,7 @@ public final class Unsafe {
 	public final void putReferenceOpaque(Object obj, long offset, Object value) {
 		putReferenceVolatile(obj, offset, value);
 	}
-/*[ENDIF] Java12 */
+/*[ENDIF] JAVA_SPEC_VERSION >= 12 */
 
 	/**
 	 * Get the load average in the system.
@@ -4348,7 +4362,7 @@ public final class Unsafe {
 		}
 	}
 
-/*[IF Java12]*/
+/*[IF JAVA_SPEC_VERSION >= 12]*/
 	/**
 	 * Atomically sets value at offset in obj
 	 * and returns the value of the field prior to the update.
@@ -4408,7 +4422,7 @@ public final class Unsafe {
 			}
 		}
 	}
-/*[ENDIF] Java12 */
+/*[ENDIF] JAVA_SPEC_VERSION >= 12 */
 
 	/**
 	 * Atomically OR's the given value to the current value of the 
@@ -5854,7 +5868,7 @@ public final class Unsafe {
 		putCharUnaligned(obj, offset, endianValue);
 	}
 
-/*[IF Java12]*/
+/*[IF JAVA_SPEC_VERSION >= 12]*/
 	/**
 	 * If incoming ByteBuffer is an instance of sun.nio.ch.DirectBuffer,
 	 * and it is direct, and not a slice or duplicate,
@@ -5886,7 +5900,7 @@ public final class Unsafe {
 			throw new IllegalArgumentException(com.ibm.oti.util.Msg.getString("K0704")); //$NON-NLS-1$
 		}
 	}
-/*[ENDIF] Java12 */
+/*[ENDIF] JAVA_SPEC_VERSION >= 12 */
 
 	/* 
 	 * Private methods 
@@ -5930,7 +5944,7 @@ public final class Unsafe {
 	 * @param compareValue value extended to the size of an int that is 
 	 * expected to be in obj at offset
 	 * @param exchangeValue value extended to the size of an int that will 
-	 * be set in obj at offset if compare is successful
+	 * be set in obj at offset if the comparison is successful
 	 * @return value in obj at offset before this operation. This will be compareValue 
 	 * if the exchange was successful
 	 */
@@ -5977,7 +5991,7 @@ public final class Unsafe {
 	 * @param compareValue value extended to the size of an int that is 
 	 * expected to be in obj at offset
 	 * @param exchangeValue value extended to the size of an int that will 
-	 * be set in obj at offset if compare is successful
+	 * be set in obj at offset if the comparison is successful
 	 * @return value in obj at offset before this operation. This will be compareValue 
 	 * if the exchange was successful
 	 * 
@@ -6016,7 +6030,7 @@ public final class Unsafe {
 	 * @param compareValue value extended to the size of an int that is 
 	 * expected to be in obj at offset
 	 * @param exchangeValue value extended to the size of an int that will 
-	 * be set in obj at offset if compare is successful
+	 * be set in obj at offset if the comparison is successful
 	 * @return value of the field before this operation extended to the size of 
 	 * an int. This will be compareValue if the exchange was successful
 	 */
@@ -6034,7 +6048,7 @@ public final class Unsafe {
 	 * @param compareValue value extended to the size of an int that is 
 	 * expected to be in obj at offset
 	 * @param exchangeValue value extended to the size of an int that will 
-	 * be set in obj at offset if compare is successful
+	 * be set in obj at offset if the comparison is successful
 	 * @param bitOffset offset within aligned int to exchanged primitive
 	 * @param primitiveMask masks bits of exchange value in int
 	 * @return value of the field before this operation extended to the size of an int. 
@@ -6076,7 +6090,7 @@ public final class Unsafe {
 	}
 
 	/* 
-	 * Verify that that no bits are set in long past the least
+	 * Verify that no bits are set in long past the least
 	 * significant 32.
 	 * 
 	 * @return true if no bits past 32 are set, false otherwise
@@ -6542,4 +6556,538 @@ public final class Unsafe {
 	private static char convEndian(boolean isBigEndian, char value) {
 		return (IS_BIG_ENDIAN == isBigEndian) ? value : Character.reverseBytes(value);
 	}
+
+	/*[IF INLINE-TYPES]*/
+	/**
+	 * Retrieves the value of the primitive type in the obj parameter referenced by offset.
+	 * The primitive type in obj at the given offset must be flattened.
+	 * This is a non-volatile operation.
+	 *
+	 * @param obj object from which to retrieve the primitive type
+	 * @param offset position of the primitive type in obj
+	 * @param clz the class of primitive type to return
+	 * @return the value of the primitive type stored in obj at the given offset
+	 */
+	public native <V> V getValue(Object obj, long offset, Class<?> clz);
+
+	/**
+	 * Sets the value of the primitive type in the obj parameter at memory offset.
+	 * Both the new value and the primitive type in obj at the given offset must be flattened.
+	 * This is a non-volatile operation.
+	 *
+	 * @param obj object into which to store the primitive type
+	 * @param offset position of the primitive type in obj
+	 * @param clz the class of the primitive type to store in obj
+	 * @param value primitive type to store in obj
+	 */
+	public native <V> void putValue(Object obj, long offset, Class<?> clz, V value);
+
+	/**
+	 * Returns the uninitialized default instance of the specified primitive class
+	 *
+	 * @param clz the specificed primitive class
+	 * @return the uninitialized default instance of clz
+	 */
+	public native <V> V uninitializedDefaultValue(Class<?> clz);
+
+	/**
+	 * Determines the size of the header for a specified primitive class
+	 *
+	 * @param clz the specified primitive class
+	 * @return the size of the header for clz
+	 */
+	public native <V> long valueHeaderSize(Class<V> clz);
+
+	/**
+	 * Determines whether a class is a flattened array
+	 *
+	 * @param clz the class to check
+	 * @return boolean value indicating whether the class is a flattened array
+	 */
+	public native boolean isFlattenedArray(Class<?> clz);
+
+	/**
+	 * Determines whether a field is flattened
+	 *
+	 * @param field the field to check
+	 * @return boolean value indicating whether the field is flattened
+	 */
+	public native boolean isFlattened(Field field);
+
+	/**
+	 * Determines the size of an object in bytes
+	 *
+	 * @param o the object to determine the size of
+	 */
+	public native long getObjectSize(Object o);
+
+	/**
+	 * Determines whether a field at a given offset in a given class is flattened
+	 * Returns false if clz is an array class
+	 *
+	 * @param clz the the class to check
+	 * @param offset offset in bytes of the field in clz
+	 * @return a boolean indicating whether a flattened field exists at the given offset
+	 */
+	private native boolean isFieldAtOffsetFlattened(Class<?> clz, long offset);
+
+	/**
+	 * Atomically sets the primitive type at offset in obj if the parameter v1
+	 * matches the existing value in the object.
+	 * The get operation has memory semantics of getVolatile.
+	 * The set operation has the memory semantics of setVolatile.
+	 *
+	 * @param obj object into which to store the value
+	 * @param offset location to compare and store value in obj
+	 * @param clz the class of the parameters v1 and v2
+	 * @param v1 value that is expected to be in obj at offset
+	 * @param v2 value that will be set in obj at offset if the comparison is successful
+	 * @return boolean value indicating whether the field was updated
+	 */
+	public final <V> boolean compareAndSetValue(Object obj, long offset, Class<?> clz, V v1, V v2) {
+		boolean result = false;
+		if (isFlattenedArray(obj.getClass()) || isFieldAtOffsetFlattened(obj.getClass(), offset)) {
+			synchronized (inlineTypesLock) {
+				if (getValue(obj, offset, clz) == v1) {
+					putValue(obj, offset, clz, v2);
+					result = true;
+				}
+			}
+		} else {
+			result = compareAndSetReference(obj, offset, v1, v2);
+		}
+		return result;
+	}
+
+	/**
+	 * Atomically sets the primitive type at offset in obj if the parameter v1
+	 * matches the existing value in the object.
+	 * The get operation has memory semantics of getVolatile.
+	 * The set operation has the memory semantics of setVolatile.
+	 *
+	 * @param obj object into which to store the value
+	 * @param offset location to compare and store value in obj
+	 * @param clz the class of the parameters v1 and v2
+	 * @param v1 value that is expected to be in obj at offset
+	 * @param v2 value that will be set in obj at offset if the comparison is successful
+	 * @return value in obj at offset before this operation. This will be v1 if the exchange was successful
+	 */
+	public final <V> Object compareAndExchangeValue(Object obj, long offset, Class<?> clz, V v1, V v2) {
+		Object result = null;
+		if (isFlattenedArray(obj.getClass()) || isFieldAtOffsetFlattened(obj.getClass(), offset)) {
+			synchronized (inlineTypesLock) {
+				result = getValue(obj, offset, clz);
+				if (result == v1) {
+					putValue(obj, offset, clz, v2);
+				}
+			}
+		} else {
+			result = compareAndExchangeReference(obj, offset, v1, v2);
+		}
+		return result;
+	}
+
+	/**
+	 * Atomically sets the primitive type at offset in obj if the parameter v1
+	 * matches the existing value in the object.
+	 * The get operation has memory semantics of getAcquire.
+	 * The set operation has the memory semantics of set.
+	 *
+	 * @param obj object into which to store the value
+	 * @param offset location to compare and store value in obj
+	 * @param clz the class of the parameters v1 and v2
+	 * @param v1 value that is expected to be in obj at offset
+	 * @param v2 value that will be set in obj at offset if the comparison is successful
+	 * @return value in obj at offset before this operation. This will be v1 if the exchange was successful
+	 */
+	public final <V> Object compareAndExchangeValueAcquire(Object obj, long offset, Class<?> clz, V v1, V v2) {
+		return compareAndExchangeValue(obj, offset, clz, v1, v2);
+	}
+
+	/**
+	 * Atomically sets the primitive type at offset in obj if the parameter v1
+	 * matches the existing value in the object.
+	 * The get operation has memory semantics of get.
+	 * The set operation has the memory semantics of setRelease.
+	 *
+	 * @param obj object into which to store the value
+	 * @param offset location to compare and store value in obj
+	 * @param clz the class of the parameters v1 and v2
+	 * @param v1 value that is expected to be in obj at offset
+	 * @param v2 value that will be set in obj at offset if the comparison is successful
+	 * @return value in obj at offset before this operation. This will be v1 if the exchange was successful
+	 */
+	public final <V> Object compareAndExchangeValueRelease(Object obj, long offset, Class<?> clz, V v1, V v2) {
+		return compareAndExchangeValue(obj, offset, clz, v1, v2);
+	}
+
+	/**
+	 * Sets the primitive type at offset in obj if the parameter v1
+	 * matches the existing value in the object.
+	 * The get operation has memory semantics of get.
+	 * The set operation has the memory semantics of set.
+	 *
+	 * @param obj object into which to store the value
+	 * @param offset location to compare and store value in obj
+	 * @param clz the class of the parameters v1 and v2
+	 * @param v1 value that is expected to be in obj at offset
+	 * @param v2 value that will be set in obj at offset if the comparison is successful
+	 * @return boolean value indicating whether the field was updated
+	 */
+	public final <V> boolean weakCompareAndSetValuePlain(Object obj, long offset, Class<?> clz, V v1, V v2) {
+		return compareAndSetValue(obj, offset, clz, v1, v2);
+	}
+
+	/**
+	 * Sets the primitive type at offset in obj if the parameter v1
+	 * matches the existing value in the object.
+	 * The get operation has memory semantics of getAcquire.
+	 * The set operation has the memory semantics of set.
+	 *
+	 * @param obj object into which to store the value
+	 * @param offset location to compare and store value in obj
+	 * @param clz the class of the parameters v1 and v2
+	 * @param v1 value that is expected to be in obj at offset
+	 * @param v2 value that will be set in obj at offset if the comparison is successful
+	 * @return boolean value indicating whether the field was updated
+	 */
+	public final <V> boolean weakCompareAndSetValueAcquire(Object obj, long offset, Class<?> clz, V v1, V v2) {
+		return compareAndSetValue(obj, offset, clz, v1, v2);
+	}
+
+	/**
+	 * Sets the primitive type at offset in obj if the parameter v1
+	 * matches the existing value in the object.
+	 * The get operation has memory semantics of get.
+	 * The set operation has the memory semantics of setRelease.
+	 *
+	 * @param obj object into which to store the value
+	 * @param offset location to compare and store value in obj
+	 * @param clz the class of the parameters v1 and v2
+	 * @param v1 value that is expected to be in obj at offset
+	 * @param v2 value that will be set in obj at offset if the comparison is successful
+	 * @return boolean value indicating whether the field was updated
+	 */
+	public final <V> boolean weakCompareAndSetValueRelease(Object obj, long offset, Class<?> clz, V v1, V v2) {
+		return compareAndSetValue(obj, offset, clz, v1, v2);
+	}
+
+	/**
+	 * Sets the primitive type at offset in obj if the parameter v1
+	 * matches the existing value in the object.
+	 * The get operation has memory semantics of get.
+	 * The set operation has the memory semantics of set.
+	 *
+	 * @param obj object into which to store the value
+	 * @param offset location to compare and store value in obj
+	 * @param clz the class of the parameters v1 and v2
+	 * @param v1 value that is expected to be in obj at offset
+	 * @param v2 value that will be set in obj at offset if the comparison is successful
+	 * @return boolean value indicating whether the field was updated
+	 */
+	public final <V> boolean weakCompareAndSetValue(Object obj, long offset, Class<?> clz, V v1, V v2) {
+		return compareAndSetValue(obj, offset, clz, v1, v2);
+	}
+
+	/**
+	 * Atomically retrieves the primitive type in the obj parameter referenced by offset.
+	 *
+	 * @param obj object from which to retrieve the primitive type
+	 * @param offset position of the primitive type in obj
+	 * @param clz the class of primitive type to return
+	 * @return primitive type stored in obj
+	 */
+	public final <V> Object getValueVolatile(Object obj, long offset, Class<?> clz) {
+		synchronized (inlineTypesLock) {
+			return getValue(obj, offset, clz);
+		}
+	}
+
+	/**
+	 * Atomically sets the value of the primitive type in the obj parameter at memory offset.
+	 * This is a non-volatile operation.
+	 *
+	 * @param obj object into which to store the primitive type
+	 * @param offset position of the primitive type in obj
+	 * @param clz the class of the primitive type to store in obj
+	 * @param v primitive type to store in obj
+	 */
+	public final <V> void putValueVolatile(Object obj, long offset, Class<?> clz, V v) {
+		synchronized (inlineTypesLock) {
+			putValue(obj, offset, clz, v);
+		}
+	}
+
+	/**
+	 * Retrieves the primitive type in the obj parameter referenced by offset using acquire semantics.
+	 * Preceding loads will not be reordered with subsequent loads/stores.
+	 *
+	 * @param obj object from which to retrieve the primitive type
+	 * @param offset position of the primitive type in obj
+	 * @param clz the class of primitive type to return
+	 * @return primitive type stored in obj
+	 */
+	public final <V> Object getValueAcquire(Object obj, long offset, Class<?> clz) {
+		return getValueVolatile(obj, offset, clz);
+	}
+
+	/**
+	 * Sets the value of primitive type in the obj parameter at memory offset using acquire semantics.
+	 * Preceding stores will not be reordered with subsequent loads/stores.
+	 *
+	 * @param obj object into which to store the primitive type
+	 * @param offset position of the primitive type in obj
+	 * @param clz the class of the primitive type to store in obj
+	 * @param v primitive type to store in obj
+	 */
+	public final <V> void putValueRelease(Object obj, long offset, Class<?> clz, V v) {
+		putValueVolatile(obj, offset, clz, v);
+	}
+
+	/**
+	 * Retrieves the primitive type in the obj parameter referenced by offset.
+	 * The operation is in program order, but does enforce ordering with respect to other threads.
+	 *
+	 * @param obj object from which to retrieve the primitive type
+	 * @param offset position of the primitive type in obj
+	 * @param clz the class of primitive type to return
+	 * @return primitive type stored in obj
+	 */
+	public final <V> Object getValueOpaque(Object obj, long offset, Class<?> clz) {
+		return getValueVolatile(obj, offset, clz);
+	}
+
+	/**
+	 * Sets the value of primitive type in the obj parameter at memory offset.
+	 * The operation is in program order, but does enforce ordering with respect to other threads.
+	 *
+	 * @param obj object into which to store the primitive type
+	 * @param offset position of the primitive type in obj
+	 * @param clz the class of the primitive type to store in obj
+	 * @param v primitive type to store in obj
+	 */
+	public final <V> void putValueOpaque(Object obj, long offset, Class<?> clz, V v) {
+		putValueVolatile(obj, offset, clz, v);
+	}
+
+	/**
+	 * Atomically sets the primitive type at offset in obj
+	 * and returns the value of the field prior to the update.
+	 * The get operation has the memory semantics of getVolatile.
+	 * The set operation has the memory semantics of setVolatile.
+	 *
+	 * @param obj object into which to store the primitive type
+	 * @param offset position of the primitive type in obj
+	 * @param clz the class of the primitive type to store in obj
+	 * @param v primitive type to store in obj
+	 * @return primitive type in obj at offset before update
+	 */
+	public final <V> Object getAndSetValue(Object obj, long offset, Class<?> clz, V v) {
+		Object valueAtOffset = null;
+
+		if (isFlattenedArray(obj.getClass()) || isFieldAtOffsetFlattened(obj.getClass(), offset)) {
+			synchronized (inlineTypesLock) {
+				valueAtOffset = getValue(obj, offset, clz);
+				putValue(obj, offset, clz, v);
+			}
+		} else {
+			valueAtOffset = getAndSetReference(obj, offset, v);
+		}
+
+		return valueAtOffset;
+	}
+
+	/**
+	 * Atomically sets the primitive type at offset in obj
+	 * and returns the value of the field prior to the update.
+	 * The get operation has the memory semantics of get.
+	 * The set operation has the memory semantics of setRelease.
+	 *
+	 * @param obj object into which to store the primitive type
+	 * @param offset position of the primitive type in obj
+	 * @param clz the class of the primitive type to store in obj
+	 * @param v primitive type to store in obj
+	 * @return primitive type in obj at offset before update
+	 */
+	public final <V> Object getAndSetValueRelease(Object obj, long offset, Class<?> clz, V v) {
+		return getAndSetValue(obj, offset, clz, v);
+	}
+
+	/**
+	 * Atomically sets the primitive type at offset in obj
+	 * and returns the value of the field prior to the update.
+	 * The get operation has the memory semantics of getAcquire.
+	 * The set operation has the memory semantics of set.
+	 *
+	 * @param obj object into which to store the primitive type
+	 * @param offset position of the primitive type in obj
+	 * @param clz the class of the primitive type to store in obj
+	 * @param v primitive type to store in obj
+	 * @return primitive type in obj at offset before update
+	 */
+	public final <V> Object getAndSetValueAcquire(Object obj, long offset, Class<?> clz, V v) {
+		return getAndSetValue(obj, offset, clz, v);
+	}
+
+	/**
+	 * Atomically sets the reference at offset in obj if the compare value
+	 * matches the existing value in the object.
+	 * The get operation has memory semantics of get.
+	 * The set operation has the memory semantics of setRelease.
+	 *
+	 * @param obj object into which to store the value
+	 * @param offset location to compare and store value in obj
+	 * @param clz Class of the obj
+	 * @param compareValue value that is expected to be in obj at offset
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
+	 * @return boolean value indicating whether the field was updated
+	 */
+	public final <V> boolean compareAndSetReference(Object obj, long offset, Class<?> clz, V compareValue, V setValue) {
+		return compareAndSetReference(obj, offset, compareValue, setValue);
+	}
+
+	/**
+	 * Atomically sets the reference at offset in obj if the compare value
+	 * matches the existing value in the object.
+	 * The get operation has memory semantics of getAcquire.
+	 * The set operation has the memory semantics of set.
+	 *
+	 * @param obj object into which to store the value
+	 * @param offset location to compare and store value in obj
+	 * @param clz Class of the obj
+	 * @param compareValue value that is expected to be in obj at offset
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
+	 * @return boolean value indicating whether the field was updated
+	 */
+	public final <V> boolean weakCompareAndSetReferenceAcquire(Object obj, long offset, Class<?> clz, V compareValue, V setValue) {
+		return weakCompareAndSetReferenceAcquire(obj, offset, compareValue, setValue);
+	}
+
+	/**
+	 * Sets the reference at offset in obj if the compare value
+	 * matches the existing value in the object.
+	 * The get operation has memory semantics of get.
+	 * The set operation has the memory semantics of setRelease.
+	 *
+	 * @param obj object into which to store the value
+	 * @param offset location to compare and store value in obj
+	 * @param clz Class of the obj
+	 * @param compareValue value that is expected to be in obj at offset
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
+	 * @return boolean value indicating whether the field was updated
+	 */
+	public final <V> boolean weakCompareAndSetReferenceRelease(Object obj, long offset, Class<?> clz, V compareValue, V setValue) {
+		return weakCompareAndSetReferenceRelease(obj, offset, compareValue, setValue);
+	}
+
+	/**
+	 * Atomically sets the reference at offset in obj if the compare value
+	 * matches the existing value in the object.
+	 * The get operation has memory semantics of getVolatile.
+	 * The set operation has the memory semantics of setVolatile.
+	 *
+	 * @param obj object into which to store the value
+	 * @param offset location to compare and store value in obj
+	 * @param clz Class of the obj
+	 * @param compareValue value that is expected to be in obj at offset
+	 * @param exchangeValue value that will be set in obj at offset if the comparison is successful
+	 * @return value in obj at offset before this operation. This will be compareValue if the exchange was successful
+	 */
+	public final <V> Object compareAndExchangeReference(Object obj, long offset, Class<?> clz, V compareValue, V exchangeValue) {
+		return compareAndExchangeReference(obj, offset, compareValue, exchangeValue);
+	}
+
+	/**
+	 * Atomically sets the reference at offset in obj if the compare value
+	 * matches the existing value in the object.
+	 * The get operation has memory semantics of getAcquire.
+	 * The set operation has the memory semantics of set.
+	 *
+	 * @param obj object into which to store the value
+	 * @param offset location to compare and store value in obj
+	 * @param clz Class of the obj
+	 * @param compareValue value that is expected to be in obj at offset
+	 * @param exchangeValue value that will be set in obj at offset if the comparison is successful
+	 * @return value in obj at offset before this operation. This will be compareValue if the exchange was successful
+	 */
+	public final <V> Object compareAndExchangeReferenceAcquire(Object obj, long offset, Class<?> clz, V compareValue, V exchangeValue) {
+		return compareAndExchangeReferenceAcquire(obj, offset, compareValue, exchangeValue);
+	}
+
+	/**
+	 * Atomically sets the reference at offset in obj if the compare value
+	 * matches the existing value in the object.
+	 * The get operation has memory semantics of get.
+	 * The set operation has the memory semantics of setRelease.
+	 *
+	 * @param obj object into which to store the value
+	 * @param offset location to compare and store value in obj
+	 * @param clz Class of the obj
+	 * @param compareValue value that is expected to be in obj at offset
+	 * @param exchangeValue value that will be set in obj at offset if the comparison is successful
+	 * @return value in obj at offset before this operation. This will be compareValue if the exchange was successful
+	 */
+	public final <V> Object compareAndExchangeReferenceRelease(Object obj, long offset, Class<?> clz, V compareValue, V exchangeValue) {
+		return compareAndExchangeReferenceRelease(obj, offset, compareValue, exchangeValue);
+	}
+
+	/**
+	 * Sets the reference at offset in obj if the compare value
+	 * matches the existing value in the object.
+	 * The get operation has memory semantics of get.
+	 * The set operation has the memory semantics of set.
+	 *
+	 * @param obj object into which to store the value
+	 * @param offset location to compare and store value in obj
+	 * @param clz Class of the obj
+	 * @param compareValue value that is expected to be in obj at offset
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
+	 * @return boolean value indicating whether the field was updated
+	 */
+	public final <V> boolean weakCompareAndSetReferencePlain(Object obj, long offset, Class<?> clz, V compareValue, V setValue) {
+		return weakCompareAndSetReferencePlain(obj, offset, compareValue, setValue);
+	}
+
+	/**
+	 * Sets the reference at offset in obj if the compare value
+	 * matches the existing value in the object.
+	 * The get operation has memory semantics of get.
+	 * The set operation has the memory semantics of set.
+	 *
+	 * @param obj object into which to store the value
+	 * @param offset location to compare and store value in obj
+	 * @param clz Class of the obj
+	 * @param compareValue value that is expected to be in obj at offset
+	 * @param setValue value that will be set in obj at offset if the comparison is successful
+	 * @return boolean value indicating whether the field was updated
+	 */
+	public final <V> boolean weakCompareAndSetReference(Object obj, long offset, Class<?> clz, V compareValue, V setValue) {
+		return weakCompareAndSetReference(obj, offset, compareValue, setValue);
+	}
+
+	public Object getReferenceVolatile(Object obj, long offset, Class<?> clz) {
+		// ToDo: this is a temporary implementation - https://github.com/eclipse-openj9/openj9/issues/13614
+		return getReferenceVolatile(obj, offset);
+	}
+
+	public Object getReference(Object obj, long offset, Class<?> clz) {
+		// ToDo: this is a temporary implementation - https://github.com/eclipse-openj9/openj9/issues/13614
+		return getReference(obj, offset);
+	}
+
+	public <V> V makePrivateBuffer(V v) {
+		// ToDo: this is a temporary implementation - https://github.com/eclipse-openj9/openj9/issues/13614
+		return null;
+	}
+
+	public <V> V finishPrivateBuffer(V v) {
+		// ToDo: this is a temporary implementation - https://github.com/eclipse-openj9/openj9/issues/13614
+		return null;
+	}
+
+	private static InternalError OpenJDKCompileStubThrowError() {
+		// ToDo: https://github.com/eclipse-openj9/openj9/issues/13614
+		throw new InternalError("Compile stub invoked! Apart from deliberate reflective access, this should not happen. Please report this to the project so it can be addressed");	//$NON-NLS-1$
+	}
+	/*[ENDIF] INLINE-TYPES */
 }

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -141,10 +141,11 @@ j9bcutil_freeTranslationBuffers (J9PortLibrary * portLib, J9TranslationBufferSet
 * @param *dest
 * @param *source
 * @param length
+* @param mueAsciiStatus If any non-null ASCII characters are represented in modified UTF-8 2 byte format instead of in 1 byte
 * @return I_32
 */
 I_32 
-j9bcutil_verifyCanonisizeAndCopyUTF8  (U_8 *dest, U_8 *source, U_32 length);
+j9bcutil_verifyCanonisizeAndCopyUTF8  (U_8 *dest, U_8 *source, U_32 length, U_8 *mueAsciiStatus);
 
 
 /**
@@ -178,6 +179,21 @@ bcutil_J9VMDllMain (J9JavaVM* vm, IDATA stage, void* reserved);
 */
 I_32 
 j9bcutil_readClassFileBytes (J9PortLibrary *portLib, IDATA (*verifyFunction) (J9PortLibrary *aPortLib, J9CfrClassFile* classfile, U_8* segment, U_8* segmentLength, U_8* freePointer, U_32 vmVersionShifted, U_32 flags, I_32 *hasRET), U_8* data, UDATA dataLength, U_8* segment, UDATA segmentLength, U_32 flags, U_8** segmentFreePointer, void *verboseContext, UDATA findClassFlags, UDATA romClassSortingThreshold);
+
+#if JAVA_SPEC_VERSION >= 15
+/**
+ * check the class bytes that will be used to define a class.
+ * @param currentThread The current VM thread.
+ * @param classBytes Pointer to the class bytes that is to be checked.
+ * @param classBytesLength The length of class bytes.
+ * @param segment A memory segment that will be used to verify the class bytes.
+ * @param segmentLength The length of memory segment.
+ * 
+ * @param return 0 class bytes is legal or a negative value otherwise.
+ */
+I_32
+checkClassBytes(J9VMThread *currentThread, U_8* classBytes, UDATA classBytesLength, U_8* segment, U_32 segmentLength);
+#endif /* JAVA_SPEC_VERSION >= 15 */
 
 /* ---------------- defineclass.c ---------------- */
 
@@ -247,8 +263,6 @@ internalLoadROMClass(J9VMThread *vmThread, J9LoadROMClassData *loadData, J9Trans
 * @param className name of the class to be located
 * @param classNameLength length of className
 * @param classLoader pointer to J9ClassLoader loading the class
-* @param classPath pointer to class path entries
-* @param classPathEntryCount number of class path entries in classPath
 * @param options load options such as J9_FINDCLASS_FLAG_EXISTING_ONLY
 * @param flags flags such as BCU_BOOTSTRAP_ENTRIES_ONLY
 * @param [in/out] localBuffer contains values for entryIndex, loadLocationType and cpEntryUsed. This pointer can't be NULL.
@@ -256,7 +270,7 @@ internalLoadROMClass(J9VMThread *vmThread, J9LoadROMClassData *loadData, J9Trans
 * @return zero on success, -1 on failure.
 */
 IDATA 
-findLocallyDefinedClass(J9VMThread * vmThread, J9Module *j9module, U_8 * className, U_32 classNameLength, J9ClassLoader * classLoader, J9ClassPathEntry * classPath, UDATA classPathEntryCount, UDATA options, J9TranslationLocalBuffer *localBuffer);
+findLocallyDefinedClass(J9VMThread * vmThread, J9Module *j9module, U_8 * className, U_32 classNameLength, J9ClassLoader * classLoader, UDATA options, J9TranslationLocalBuffer *localBuffer);
 
 
 #endif /* J9VM_OPT_DYNAMIC_LOAD_SUPPORT */ /* End File Level Build Flags */

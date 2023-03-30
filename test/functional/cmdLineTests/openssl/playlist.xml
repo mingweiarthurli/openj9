@@ -1,7 +1,6 @@
-<?xml version="1.0" encoding="UTF-8"?>
-
+<?xml version='1.0' encoding='UTF-8'?>
 <!--
-  Copyright (c) 2019, 2019 IBM Corp. and others
+  Copyright (c) 2019, 2021 IBM Corp. and others
 
   This program and the accompanying materials are made available under
   the terms of the Eclipse Public License 2.0 which accompanies this
@@ -17,13 +16,11 @@
   OpenJDK Assembly Exception [2].
 
   [1] https://www.gnu.org/software/classpath/license.html
-  [2] http://openjdk.java.net/legal/assembly-exception.html
+  [2] https://openjdk.org/legal/assembly-exception.html
 
   SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 -->
-
-<playlist xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-	xsi:noNamespaceSchemaLocation="../../../TKG/playlist.xsd">
+<playlist xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../TKG/playlist.xsd">
 	<test>
 		<testCaseName>cmdLineTester_CryptoTest</testCaseName>
 		<variations>
@@ -32,7 +29,7 @@
 		<command>$(JAVA_COMMAND) $(JVM_OPTIONS) \
 		-DTEST_RESROOT=$(Q)$(TEST_RESROOT)$(D)$(Q) -DRESJAR=$(CMDLINETESTER_RESJAR) \
 		-DEXE=$(SQ)$(JAVA_COMMAND) $(JVM_OPTIONS)$(SQ) -jar $(CMDLINETESTER_JAR) -config $(Q)$(TEST_RESROOT)$(D)openssl.xml$(Q) \
-		-verbose -explainExcludes -nonZeroExitWhenError; \
+		-explainExcludes -nonZeroExitWhenError; \
 		$(TEST_STATUS)</command>
 		<levels>
 			<level>sanity</level>
@@ -42,6 +39,30 @@
 		</groups>
 		<impls>
 			<impl>openj9</impl>
+		</impls>
+	</test>
+	<test>
+		<testCaseName>cmdLineTester_CryptoTest_ibm</testCaseName>
+		<variations>
+			<variation>NoOptions</variation>
+		</variations>
+		<command>$(JAVA_COMMAND) $(JVM_OPTIONS) \
+		-DTEST_RESROOT=$(Q)$(TEST_RESROOT)$(D)$(Q) -DRESJAR=$(CMDLINETESTER_RESJAR) \
+		-DEXE=$(SQ)$(JAVA_COMMAND) $(JVM_OPTIONS)$(SQ) -jar $(CMDLINETESTER_JAR) -config $(Q)$(TEST_RESROOT)$(D)openssl.xml$(Q) \
+		-explainExcludes -nonZeroExitWhenError; \
+		$(TEST_STATUS)</command>
+		<platformRequirements>^os.zos</platformRequirements>
+		<levels>
+			<level>sanity</level>
+		</levels>
+		<groups>
+			<group>functional</group>
+		</groups>
+		<versions>
+			<version>11+</version>
+		</versions>
+		<impls>
+			<impl>ibm</impl>
 		</impls>
 	</test>
 </playlist>

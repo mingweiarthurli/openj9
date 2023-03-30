@@ -1,4 +1,4 @@
-# Copyright (c) 2000, 2020 IBM Corp. and others
+# Copyright (c) 2000, 2021 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@
 # OpenJDK Assembly Exception [2].
 #
 # [1] https://www.gnu.org/software/classpath/license.html
-# [2] http://openjdk.java.net/legal/assembly-exception.html
+# [2] https://openjdk.org/legal/assembly-exception.html
 #
 # SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 
@@ -34,6 +34,7 @@ JIT_PRODUCT_BACKEND_SOURCES+=\
     omr/compiler/z/codegen/OMRLinkage.cpp \
     omr/compiler/z/codegen/OMRMachine.cpp \
     omr/compiler/z/codegen/OMRMemoryReference.cpp \
+    omr/compiler/z/codegen/OMRPeephole.cpp \
     omr/compiler/z/codegen/OMRRealRegister.cpp \
     omr/compiler/z/codegen/OMRRegister.cpp \
     omr/compiler/z/codegen/OMRRegisterDependency.cpp \
@@ -46,19 +47,16 @@ JIT_PRODUCT_BACKEND_SOURCES+=\
     omr/compiler/z/codegen/S390HelperCallSnippet.cpp \
     omr/compiler/z/codegen/S390Instruction.cpp \
     omr/compiler/z/codegen/S390OutOfLineCodeSection.cpp \
-    omr/compiler/z/codegen/S390Peephole.cpp \
     omr/compiler/z/codegen/S390Snippets.cpp \
     omr/compiler/z/codegen/SystemLinkage.cpp \
     omr/compiler/z/codegen/SystemLinkageLinux.cpp \
     omr/compiler/z/codegen/SystemLinkagezOS.cpp \
-    omr/compiler/z/codegen/TranslateEvaluator.cpp \
     omr/compiler/z/codegen/UnaryEvaluator.cpp \
     omr/compiler/z/codegen/snippet/PPA1Snippet.cpp \
     omr/compiler/z/codegen/snippet/PPA2Snippet.cpp \
     omr/compiler/z/env/OMRCPU.cpp
 
 JIT_PRODUCT_SOURCE_FILES+=\
-    compiler/z/codegen/DFPTreeEvaluator.cpp \
     compiler/z/codegen/ForceRecompilationSnippet.cpp \
     compiler/z/codegen/InMemoryLoadStoreMarking.cpp \
     compiler/z/codegen/J9AheadOfTimeCompile.cpp \
@@ -67,6 +65,7 @@ JIT_PRODUCT_SOURCE_FILES+=\
     compiler/z/codegen/J9Instruction.cpp \
     compiler/z/codegen/J9Linkage.cpp \
     compiler/z/codegen/J9MemoryReference.cpp \
+    compiler/z/codegen/J9Peephole.cpp \
     compiler/z/codegen/J9S390Snippet.cpp \
     compiler/z/codegen/J9SystemLinkageLinux.cpp \
     compiler/z/codegen/J9SystemLinkagezOS.cpp \

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -222,10 +222,8 @@ TR::S390StackCheckFailureSnippet::emitSnippetBody()
          }
       }
 
-#if !defined(PUBLIC_BUILD)
    // Generate RIOFF if RI is supported.
    cursor = generateRuntimeInstrumentationOnOffInstruction(cg(), cursor, TR::InstOpCode::RIOFF);
-#endif
 
    // Now we generate a BRASL to target
    *(int16_t *) cursor = 0xC0E5;                                                      // BRASL     r14, <Helper Addr>
@@ -242,7 +240,7 @@ TR::S390StackCheckFailureSnippet::emitSnippetBody()
    if (comp->getOption(TR_EnableRMODE64))
 #endif
       {
-      if (NEEDS_TRAMPOLINE(destAddr, cursor, cg()))
+      if (cg()->directCallRequiresTrampoline(destAddr, reinterpret_cast<intptr_t>(cursor)))
          {
          // Destination is beyond our reachable jump distance, we'll find the
          // trampoline.
@@ -255,19 +253,15 @@ TR::S390StackCheckFailureSnippet::emitSnippetBody()
    this->setSnippetDestAddr(destAddr);
 
    *(int32_t *) cursor = (int32_t)((destAddr - (intptr_t)(cursor - 2)) / 2);
-   AOTcgDiag5(comp, "cursor=%x destAddr=%x TR_HelperAddress=%x cg=%x %x\n",
-   cursor, getDestination()->getSymbol(), TR_HelperAddress, cg(), *((int*) cursor) );
    cg()->addProjectSpecializedRelocation(cursor, (uint8_t*) getDestination(), NULL, TR_HelperAddress,
                              __FILE__, __LINE__, getNode());
 
    cursor += sizeof(int32_t);
    returnLocationInSnippet = cursor;
 
-#if !defined(PUBLIC_BUILD)
    // Generate RION if RI is supported.
    //temporary disable to allow RI on zlinux
    //cursor = generateRuntimeInstrumentationOnOffInstruction(cg(), cursor, TR::InstOpCode::RION);
-#endif
 
    // If non-Trex, we need to reload the RA from the stack.
    if (requireRALoad)                                                                 // -->non-Trex<--  L/LG     r14, 0(r5)
@@ -403,12 +397,10 @@ TR::S390StackCheckFailureSnippet::getLength(int32_t)
       size += (is64BitTarget)?34:28;
       }
 
-#if !defined(PUBLIC_BUILD)
    // RI Hooks
    //temporary only RIOFF to allow RI on zlinux
    size += getRuntimeInstrumentationOnOffInstructionLength(cg());
    //size += 2 * getRuntimeInstrumentationOnOffInstructionLength(cg());
-#endif
 
    return size;
    }

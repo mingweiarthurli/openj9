@@ -1,4 +1,4 @@
-//Copyright (c) 2006, 2019 IBM Corp. and others
+//Copyright (c) 2006, 2022 IBM Corp. and others
 //	
 //This program and the accompanying materials are made available under
 //the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@
 //OpenJDK Assembly Exception [2].
 //
 //[1] https://www.gnu.org/software/classpath/license.html
-//[2] http://openjdk.java.net/legal/assembly-exception.html
+//[2] https://openjdk.org/legal/assembly-exception.html
 //
 //SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 
@@ -624,3 +624,25 @@ TraceEntry=Trc_JVMTI_jvmtiHookSampledObjectAlloc_Entry Overhead=1 Level=5 Noenv 
 TraceExit=Trc_JVMTI_jvmtiHookSampledObjectAlloc_Exit Overhead=1 Level=5 Noenv Template="HookSampledObjectAlloc"
 
 TraceException=Trc_JVMTI_issueAgentOnLoadAttach_strConvertFailed Overhead=1 Level=1 Noenv Template="issueAgentOnLoadAttach: j9str_convert (%s) failed"
+
+TraceEntry=Trc_JVMTI_lookupNativeAddressHelper_Entry Overhead=1 Level=3 Template="lookupNativeAddressHelper - nativeMethod (%p) methodName (%.*s) methodSignature (%.*s) prefixOffset (%zu) retransformFlag (%zu) functionArgCount (%zu) callback (%p)"
+TraceEvent=Trc_JVMTI_lookupNativeAddressHelper_Bound_ClassLoader_Library Overhead=1 Level=3 Template="lookupNativeAddressHelper (bound with classloader library) - nativeMethod (%p) nativeLibrary (%p) longJNI (%s) shortJNI (%s) functionArgCount (%zu)"
+TraceEvent=Trc_JVMTI_lookupNativeAddressHelper_Bound_Null_Library Overhead=1 Level=3 Template="lookupNativeAddressHelper (bound without classloader library) - nativeMethod (%p) longJNI (%s) shortJNI (%s) functionArgCount (%zu)"
+TraceEvent=Trc_JVMTI_lookupNativeAddressHelper_Bound_Agent_Library Overhead=1 Level=3 Template="lookupNativeAddressHelper (bound with agent library) - nativeMethod (%p) nativeLibrary (%p) longJNI (%s) shortJNI (%s) functionArgCount (%zu)"
+TraceExit=Trc_JVMTI_lookupNativeAddressHelper_Exit Overhead=1 Level=3 Template="lookupNativeAddressHelper - prefixOffset (%zu)"
+
+TraceEntry=Trc_JVMTI_jvmtiHookVirtualThreadEnd_Entry Overhead=1 Level=5 Noenv Template="HookVirtualThreadEnd"
+TraceExit=Trc_JVMTI_jvmtiHookVirtualThreadEnd_Exit Overhead=1 Level=5 Noenv Template="HookVirtualThreadEnd"
+TraceEntry=Trc_JVMTI_jvmtiHookVirtualThreadStarted_Entry Overhead=1 Level=5 Noenv Template="HookVirtualThreadStarted"
+TraceExit=Trc_JVMTI_jvmtiHookVirtualThreadStarted_Exit Overhead=1 Level=5 Noenv Template="HookVirtualThreadStarted"
+
+TraceEntry=Trc_JVMTI_jvmtiHookVirtualThreadDestroy_Entry Overhead=1 Level=5 Noenv Template="HookVirtualThreadDestroy"
+TraceExit=Trc_JVMTI_jvmtiHookVirtualThreadDestroy_Exit Overhead=1 Level=5 Noenv Template="HookVirtualThreadDestroy"
+
+TraceAssert=Assert_JVMTI_unreachable noEnv Overhead=1 Level=1 Assert="0"
+
+TraceEntry=Trc_JVMTI_jvmtiResumeAllVirtualThreads_Entry Overhead=1 Level=5 Noenv Template="ResumeAllVirtualThreads env=%p"
+TraceExit=Trc_JVMTI_jvmtiResumeAllVirtualThreads_Exit Overhead=1 Level=5 Noenv Template="ResumeAllVirtualThreads returning %d"
+
+TraceEntry=Trc_JVMTI_jvmtiSuspendAllVirtualThreads_Entry Overhead=1 Level=5 Noenv Template="SuspendAllVirtualThreads env=%p"
+TraceExit=Trc_JVMTI_jvmtiSuspendAllVirtualThreads_Exit Overhead=1 Level=5 Noenv Template="SuspendAllVirtualThreads returning %d"

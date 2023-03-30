@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2020 IBM Corp. and others
+ * Copyright (c) 2001, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -49,7 +49,7 @@ typedef struct SCAbstractAPI
 	BOOLEAN (*stringTransaction_IsOK)(void * tobj);
 
 	/*Functions for SCStoreTransaction*/
-	IDATA (*classStoreTransaction_start)(void * tobj, J9VMThread* currentThread, J9ClassLoader* classloader, J9ClassPathEntry* classPathEntries, UDATA cpEntryCount, UDATA entryIndex, UDATA loadType, const J9UTF8* partition, U_16 classnameLength, U_8 * classnameData, BOOLEAN isModifiedClassfile, BOOLEAN takeReadWriteLock);
+	IDATA (*classStoreTransaction_start)(void * tobj, J9VMThread* currentThread, J9ClassLoader* classloader, J9ClassPathEntry** classPathEntries, UDATA cpEntryCount, UDATA entryIndex, UDATA loadType, const J9UTF8* partition, U_16 classnameLength, U_8 * classnameData, BOOLEAN isModifiedClassfile, BOOLEAN takeReadWriteLock, BOOLEAN useLoaderCpEntries);
 	IDATA (*classStoreTransaction_stop)(void * tobj);
 	J9ROMClass * (*classStoreTransaction_nextSharedClassForCompare)(void * tobj);
 	IDATA (*classStoreTransaction_createSharedClass)(void * tobj, const J9RomClassRequirements * sizes, J9SharedRomClassPieces * pieces);
@@ -59,7 +59,7 @@ typedef struct SCAbstractAPI
 	void (*classStoreTransaction_updateUnstoredBytes) (U_32 romClassSizeFullSize, void * tobj);
 
 	/*Function for JCL to update cache metadata for an existing shared class*/
-	J9ROMClass * (*jclUpdateROMClassMetaData)(J9VMThread* currentThread, J9ClassLoader* classloader, J9ClassPathEntry* classPathEntries, UDATA cpEntryCount, UDATA entryIndex, const J9UTF8* partition, const J9ROMClass * existingClass);
+	J9ROMClass * (*jclUpdateROMClassMetaData)(J9VMThread* currentThread, J9ClassLoader* classloader, J9ClassPathEntry** classPathEntries, UDATA cpEntryCount, UDATA entryIndex, const J9UTF8* partition, const J9ROMClass * existingClass);
 
 	/* Functions for finishing initialization of shared classes. Called between
 	 * AGENTS_STARTED & ABOUT_TO_BOOTSTRAP by jvminit.c

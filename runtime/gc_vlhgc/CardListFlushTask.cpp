@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -31,24 +31,24 @@
 
 #include "CardTable.hpp"
 #include "CycleState.hpp"
-#include "Dispatcher.hpp"
 #include "EnvironmentVLHGC.hpp"
 #include "HeapRegionIteratorVLHGC.hpp"
 #include "HeapRegionManager.hpp"
 #include "InterRegionRememberedSet.hpp"
+#include "ParallelDispatcher.hpp"
 #include "RememberedSetCardListBufferIterator.hpp"
 #include "RememberedSetCardListCardIterator.hpp"
 #include "MarkMap.hpp"
 #include "SchedulingDelegate.hpp"
 
 void
-MM_CardListFlushTask::masterSetup(MM_EnvironmentBase *env)
+MM_CardListFlushTask::mainSetup(MM_EnvironmentBase *env)
 {
 	Assert_MM_true(MM_CycleState::CT_PARTIAL_GARBAGE_COLLECTION == env->_cycleState->_collectionType);
 }
 
 void
-MM_CardListFlushTask::masterCleanup(MM_EnvironmentBase *env)
+MM_CardListFlushTask::mainCleanup(MM_EnvironmentBase *env)
 {
 }
 
@@ -172,7 +172,7 @@ MM_CardListFlushTask::run(MM_EnvironmentBase *envBase)
 void
 MM_CardListFlushTask::setup(MM_EnvironmentBase *env)
 {
-	if (env->isMasterThread()) {
+	if (env->isMainThread()) {
 		Assert_MM_true(_cycleState == env->_cycleState);
 	} else {
 		Assert_MM_true(NULL == env->_cycleState);
@@ -183,7 +183,7 @@ MM_CardListFlushTask::setup(MM_EnvironmentBase *env)
 void
 MM_CardListFlushTask::cleanup(MM_EnvironmentBase *env)
 {
-	if (env->isMasterThread()) {
+	if (env->isMainThread()) {
 		Assert_MM_true(_cycleState == env->_cycleState);
 	} else {
 		env->_cycleState = NULL;
@@ -199,7 +199,7 @@ MM_CardListFlushTask::synchronizeGCThreads(MM_EnvironmentBase *env, const char *
 }
 
 bool
-MM_CardListFlushTask::synchronizeGCThreadsAndReleaseMaster(MM_EnvironmentBase *env, const char *id)
+MM_CardListFlushTask::synchronizeGCThreadsAndReleaseMain(MM_EnvironmentBase *env, const char *id)
 {
 	/* unused in this task */
 	Assert_MM_unreachable();

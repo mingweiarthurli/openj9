@@ -1,6 +1,6 @@
 
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -55,7 +55,7 @@ public:
 	void setup(MM_EnvironmentBase *envBase)
 	{
 		MM_EnvironmentVLHGC *env = MM_EnvironmentVLHGC::getEnvironment(envBase);
-		if (env->isMasterThread()) {
+		if (env->isMainThread()) {
 			Assert_MM_true(_cycleState == env->_cycleState);
 		} else {
 			Assert_MM_true(NULL == env->_cycleState);
@@ -74,7 +74,7 @@ public:
 	{
 		MM_EnvironmentVLHGC *env = MM_EnvironmentVLHGC::getEnvironment(envBase);
 
-		if (env->isMasterThread()) {
+		if (env->isMainThread()) {
 			Assert_MM_true(_cycleState == env->_cycleState);
 		} else {
 			env->_cycleState = NULL;
@@ -83,7 +83,7 @@ public:
 		env->_lastOverflowedRsclWithReleasedBuffers = NULL;
 	}
 
-	void masterCleanup(MM_EnvironmentBase *envBase)
+	void mainCleanup(MM_EnvironmentBase *envBase)
 	{
 		MM_EnvironmentVLHGC *env = MM_EnvironmentVLHGC::getEnvironment(envBase);
 
@@ -92,19 +92,19 @@ public:
 
 #if defined(J9MODRON_TGC_PARALLEL_STATISTICS)
 	void synchronizeGCThreads(MM_EnvironmentBase *env, const char *id);
-	bool synchronizeGCThreadsAndReleaseMaster(MM_EnvironmentBase *env, const char *id);
+	bool synchronizeGCThreadsAndReleaseMain(MM_EnvironmentBase *env, const char *id);
 	bool synchronizeGCThreadsAndReleaseSingleThread(MM_EnvironmentBase *env, const char *id);
 	
-	bool synchronizeGCThreadsAndReleaseMasterForAbort(MM_EnvironmentBase *env, const char *id);
+	bool synchronizeGCThreadsAndReleaseMainForAbort(MM_EnvironmentBase *env, const char *id);
 	void synchronizeGCThreadsForMark(MM_EnvironmentBase *env, const char *id);
-	bool synchronizeGCThreadsAndReleaseMasterForMark(MM_EnvironmentBase *env, const char *id);
+	bool synchronizeGCThreadsAndReleaseMainForMark(MM_EnvironmentBase *env, const char *id);
 	void synchronizeGCThreadsForInterRegionRememberedSet(MM_EnvironmentBase *env, const char *id);
 #endif /* J9MODRON_TGC_PARALLEL_STATISTICS */
 
 	/**
 	 * Create a CopyForwardSchemeTask object.
 	 */
-	MM_CopyForwardSchemeTask(MM_EnvironmentVLHGC *env, MM_Dispatcher *dispatcher, MM_CopyForwardScheme *copyForwardScheme, MM_CycleState *cycleState) :
+	MM_CopyForwardSchemeTask(MM_EnvironmentVLHGC *env, MM_ParallelDispatcher *dispatcher, MM_CopyForwardScheme *copyForwardScheme, MM_CycleState *cycleState) :
 		MM_ParallelTask((MM_EnvironmentBase *)env, dispatcher)
 		, _copyForwardScheme(copyForwardScheme)
 		, _cycleState(cycleState)

@@ -1,6 +1,6 @@
-/*[INCLUDE-IF Sidecar19-SE]*/
+/*[INCLUDE-IF Sidecar19-SE & !OPENJDK_METHODHANDLES]*/
 /*******************************************************************************
- * Copyright (c) 2016, 2020 IBM Corp. and others
+ * Copyright (c) 2016, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -25,10 +25,10 @@ package java.lang.invoke;
 import static java.lang.invoke.MethodType.methodType;
 import static java.lang.invoke.ArrayVarHandle.ArrayVarHandleOperations.*;
 
-/*[IF Java12]*/
+/*[IF JAVA_SPEC_VERSION >= 12]*/
 import java.lang.constant.ClassDesc;
 import java.util.Optional;
-/*[ENDIF] Java12 */
+/*[ENDIF] JAVA_SPEC_VERSION >= 12 */
 
 /**
  * {@link VarHandle} subclass for array element {@link VarHandle} instances.
@@ -106,7 +106,7 @@ final class ArrayVarHandle extends VarHandle {
 		super(arrayType.getComponentType(), new Class<?>[] {arrayType, int.class}, populateMHs(arrayType), 0);
 	}
 
-/*[IF Java12]*/
+/*[IF JAVA_SPEC_VERSION >= 12]*/
 	@Override
 	public Optional<VarHandleDesc> describeConstable() {
 		VarHandleDesc result = null;
@@ -117,11 +117,17 @@ final class ArrayVarHandle extends VarHandle {
 		}
 		return Optional.ofNullable(result);
 	}
-/*[ENDIF] Java12 */
+/*[ENDIF] JAVA_SPEC_VERSION >= 12 */
 
-	public MethodType accessModeTypeUncached(AccessMode accessMode) {
+/*[IF JAVA_SPEC_VERSION >= 16]*/
+	public VarHandle withInvokeExactBehavior() {
 		throw OpenJDKCompileStub.OpenJDKCompileStubThrowError();
 	}
+
+	public VarHandle withInvokeBehavior() {
+		throw OpenJDKCompileStub.OpenJDKCompileStubThrowError();
+	}
+/*[ENDIF] JAVA_SPEC_VERSION >= 16 */
 
 	/**
 	 * Type specific methods used by array element VarHandle methods.

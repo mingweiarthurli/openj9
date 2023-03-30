@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -60,7 +60,8 @@ extern "C" {
 #define SCAN_REMEBERED_SET 0x08000
 #define SCAN_JVMTI_OBJECT_TAG_TABLE	0x10000
 #define SCAN_OWNABLE_SYNCHRONIZER 0x20000
-#define SCAN_ALL 0x3FFFF
+#define SCAN_CONTINUATION 0x40000
+#define SCAN_ALL 0x7FFFF
 
 #define HEAP_ROOT_SLOT_DESCRIPTOR_OBJECT 0
 #define HEAP_ROOT_SLOT_DESCRIPTOR_CLASS 1
@@ -271,6 +272,16 @@ j9mm_iterate_all_objects(J9JavaVM *vn, J9PortLibrary *portLibrary, UDATA flags, 
  */
 jvmtiIterationControl
 j9mm_iterate_all_ownable_synchronizer_objects(J9VMThread *vmThread, J9PortLibrary *portLibrary, UDATA flags, jvmtiIterationControl (*func)(J9VMThread *vmThread, J9MM_IterateObjectDescriptor *object, void *userData), void *userData);
+
+/**
+ * Walk all continuation object, call user provided function.
+ * @param flags The flags describing the walk (unused currently)
+ * @param func The function to call on each object descriptor.
+ * @param userData Pointer to storage for userData.
+ * @return return 0 on successfully iterating entire list, return user provided function call if it did not return JVMTI_ITERATION_CONTINUE
+ */
+jvmtiIterationControl
+j9mm_iterate_all_continuation_objects(J9VMThread *vmThread, J9PortLibrary *portLibrary, UDATA flags, jvmtiIterationControl (*func)(J9VMThread *vmThread, J9MM_IterateObjectDescriptor *object, void *userData), void *userData);
 
 /**
  * Shortcut specific for Segregated heap to find the page the pointer belongs to

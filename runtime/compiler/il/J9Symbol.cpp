@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -78,8 +78,6 @@
 
       {r(TR::Symbol::Com_ibm_jit_JITHelpers_IS_32_BIT, "com/ibm/jit/JITHelpers", "IS_32_BIT", "Z")}, //22
       {r(TR::Symbol::Com_ibm_jit_JITHelpers_J9OBJECT_J9CLASS_OFFSET, "com/ibm/jit/JITHelpers", "J9OBJECT_J9CLASS_OFFSET", "I")}, //22
-      {r(TR::Symbol::Com_ibm_jit_JITHelpers_OBJECT_HEADER_HAS_BEEN_MOVED_IN_CLASS, "com/ibm/jit/JITHelpers", "OBJECT_HEADER_HAS_BEEN_MOVED_IN_CLASS", "I")}, //22
-      {r(TR::Symbol::Com_ibm_jit_JITHelpers_OBJECT_HEADER_HAS_BEEN_HASHED_IN_CLASS, "com/ibm/jit/JITHelpers", "OBJECT_HEADER_HAS_BEEN_HASHED_IN_CLASS", "I")}, //22
       {r(TR::Symbol::Com_ibm_jit_JITHelpers_J9OBJECT_FLAGS_MASK32, "com/ibm/jit/JITHelpers", "J9OBJECT_FLAGS_MASK32", "I")}, //22
       {r(TR::Symbol::Com_ibm_jit_JITHelpers_J9OBJECT_FLAGS_MASK64, "com/ibm/jit/JITHelpers", "J9OBJECT_FLAGS_MASK64", "I")}, //22
       {r(TR::Symbol::Com_ibm_jit_JITHelpers_JLTHREAD_J9THREAD_OFFSET, "com/ibm/jit/JITHelpers", "JLTHREAD_J9THREAD_OFFSET", "I")}, //22
@@ -125,8 +123,8 @@
        {r(TR::Symbol::Java_io_ByteArrayOutputStream_count,            "java/io/ByteArrayOutputStream", "count", "I")},
        {r(TR::Symbol::Java_lang_J9VMInternals_jitHelpers,             "java/lang/J9VMInternals", "jitHelpers", "Lcom/ibm/jit/JITHelpers;")},
        {r(TR::Symbol::Java_lang_String_count,                         "java/lang/String", "count", "I")},
-       {r(TR::Symbol::Java_lang_String_enableCompression,             "java/lang/String", "enableCompression", "Z") },
-       {r(TR::Symbol::Java_lang_String_hashCode,                      "java/lang/String", "hashCode", "I")},
+       {r(TR::Symbol::Java_lang_String_enableCompression,             "java/lang/String", "COMPACT_STRINGS", "Z") },
+       {r(TR::Symbol::Java_lang_String_hashCode,                      "java/lang/String", "hash", "I")},
        {r(TR::Symbol::Java_lang_String_value,                         "java/lang/String", "value", "[B")},
        {r(TR::Symbol::Java_lang_String_value,                         "java/lang/String", "value", "[C")},
        {r(TR::Symbol::Java_lang_StringBuffer_count,                   "java/lang/StringBuffer", "count", "I")},
@@ -138,11 +136,16 @@
        {r(TR::Symbol::Java_lang_Throwable_stackTrace,                 "java/lang/Throwable", "stackTrace", "[Ljava/lang/StackTraceElement;")},
        {r(TR::Symbol::Java_lang_invoke_BruteArgumentMoverHandle_extra,"java/lang/invoke/BruteArgumentMoverHandle", "extra", "[Ljava/lang/Object;")},
        {r(TR::Symbol::Java_lang_invoke_DynamicInvokerHandle_site,     "java/lang/invoke/DynamicInvokerHandle", "site", "Ljava/lang/invoke/CallSite;")},
+       {r(TR::Symbol::Java_lang_invoke_CallSite_target,               "java/lang/invoke/CallSite", "target", "Ljava/lang/invoke/MethodHandle;")},
+       {r(TR::Symbol::Java_lang_invoke_LambdaForm_vmentry,            "java/lang/invoke/LambdaForm", "vmentry", "Ljava/lang/invoke/MemberName;")},
        {r(TR::Symbol::Java_lang_invoke_MutableCallSite_target,        "java/lang/invoke/MutableCallSite", "target", "Ljava/lang/invoke/MethodHandle;")},
        {r(TR::Symbol::Java_lang_invoke_MutableCallSiteDynamicInvokerHandle_mutableSite,"java/lang/invoke/MutableCallSiteDynamicInvokerHandle", "mutableSite", "Ljava/lang/invoke/MutableCallSite;")},
+       {r(TR::Symbol::Java_lang_invoke_MemberName_vmtarget,           "java/lang/invoke/MemberName", "vmtarget", "J")},
+       {r(TR::Symbol::Java_lang_invoke_MemberName_vmindex,            "java/lang/invoke/MemberName", "vmindex", "J")},
+       {r(TR::Symbol::Java_lang_invoke_MethodHandle_form,             "java/lang/invoke/MethodHandle", "form", "Ljava/lang/invoke/LambdaForm;")},
        {r(TR::Symbol::Java_lang_invoke_MethodHandle_thunks,           "java/lang/invoke/MethodHandle", "thunks", "Ljava/lang/invoke/ThunkTuple;")},
        {r(TR::Symbol::Java_lang_invoke_MethodHandle_type,             "java/lang/invoke/MethodHandle", "type", "Ljava/lang/invoke/MethodType;")},
-       {r(TR::Symbol::Java_lang_invoke_MethodType_arguments,          "java/lang/invoke/MethodType", "arguments", "[Ljava/lang/Class;")},
+       {r(TR::Symbol::Java_lang_invoke_MethodType_ptypes,             "java/lang/invoke/MethodType", "ptypes", "[Ljava/lang/Class;")},
        {r(TR::Symbol::Java_lang_invoke_PrimitiveHandle_rawModifiers,  "java/lang/invoke/PrimitiveHandle", "rawModifiers", "I")},
        {r(TR::Symbol::Java_lang_invoke_PrimitiveHandle_defc,          "java/lang/invoke/PrimitiveHandle", "defc", "Ljava/lang/Class;")},
        {r(TR::Symbol::Java_lang_invoke_ThunkTuple_invokeExactThunk,   "java/lang/invoke/ThunkTuple", "invokeExactThunk", "J")},
@@ -151,6 +154,7 @@
        {r(TR::Symbol::Java_math_BigInteger_useLongRepresentation,     "java/math/BigInteger", "useLongRepresentation", "Z")},
        {r(TR::Symbol::Java_lang_ref_SoftReference_age,                "java/lang/ref/SoftReference", "age", "I")},
        {r(TR::Symbol::Java_lang_invoke_VarHandle_handleTable,         "java/lang/invoke/VarHandle", "handleTable", "[Ljava/lang/invoke/MethodHandle;")},
+       {r(TR::Symbol::Java_lang_invoke_MethodHandleImpl_LoopClauses_clauses,         "java/lang/invoke/MethodHandleImpl$LoopClauses", "clauses", "[[Ljava/lang/invoke/MethodHandle;")},
        {r(TR::Symbol::Java_lang_Integer_value,                        "java/lang/Integer", "value", "I")},
        {r(TR::Symbol::Java_lang_Long_value,                           "java/lang/Long", "value", "J")},
        {r(TR::Symbol::Java_lang_Float_value,                          "java/lang/Float", "value", "F")},
@@ -369,15 +373,86 @@ J9::Symbol::createRecognizedShadow(AllocatorType m, TR::DataType d, uint32_t s, 
    return sym;
    }
 
+template <typename AllocatorType>
+TR::Symbol *
+J9::Symbol::createPossiblyRecognizedShadowWithFlags(
+   AllocatorType m,
+   TR::DataType type,
+   bool isVolatile,
+   bool isFinal,
+   bool isPrivate,
+   RecognizedField recognizedField)
+   {
+   TR::Symbol *fieldSymbol = NULL;
+   if (recognizedField != TR::Symbol::UnknownField)
+      fieldSymbol = TR::Symbol::createRecognizedShadow(m, type, recognizedField);
+   else
+      fieldSymbol = TR::Symbol::createShadow(m, type);
+
+   if (isVolatile)
+      fieldSymbol->setVolatile();
+
+   if (isFinal)
+      fieldSymbol->setFinal();
+
+   if (isPrivate)
+      fieldSymbol->setPrivate();
+
+   return fieldSymbol;
+   }
+
+template <typename AllocatorType>
+TR::Symbol *
+J9::Symbol::createPossiblyRecognizedShadowFromCP(
+   TR::Compilation *comp,
+   AllocatorType m,
+   TR_ResolvedMethod *owningMethod,
+   int32_t cpIndex,
+   TR::DataType *type, // can be determined accurately even for unresolved field refs
+   uint32_t *offset, // typically stored for some reason on symref (not Symbol)
+   bool needsAOTValidation)
+   {
+   *type = TR::NoType;
+   *offset = 0;
+
+   const bool isStatic = false;
+   RecognizedField recognizedField =
+      TR::Symbol::searchRecognizedField(comp, owningMethod, cpIndex, isStatic);
+
+   bool isVolatile, isFinal, isPrivate, isUnresolvedInCP;
+
+   const bool isStore = false;
+   bool resolved = owningMethod->fieldAttributes(
+      comp,
+      cpIndex,
+      offset,
+      type,
+      &isVolatile,
+      &isFinal,
+      &isPrivate,
+      isStore,
+      &isUnresolvedInCP,
+      needsAOTValidation);
+
+   if (!resolved)
+      return NULL;
+
+   return createPossiblyRecognizedShadowWithFlags(
+      m, *type, isVolatile, isFinal, isPrivate, recognizedField);
+   }
+
 /*
  * Explicit instantiation of factories for each TR_Memory type.
  */
 
 template TR::Symbol * J9::Symbol::createRecognizedShadow(TR_StackMemory,         TR::DataType, RecognizedField);
 template TR::Symbol * J9::Symbol::createRecognizedShadow(TR_HeapMemory,          TR::DataType, RecognizedField);
-template TR::Symbol * J9::Symbol::createRecognizedShadow(PERSISTENT_NEW_DECLARE, TR::DataType, RecognizedField);
 
 template TR::Symbol * J9::Symbol::createRecognizedShadow(TR_StackMemory,         TR::DataType, uint32_t, RecognizedField);
 template TR::Symbol * J9::Symbol::createRecognizedShadow(TR_HeapMemory,          TR::DataType, uint32_t, RecognizedField);
-template TR::Symbol * J9::Symbol::createRecognizedShadow(PERSISTENT_NEW_DECLARE, TR::DataType, uint32_t, RecognizedField);
 
+template TR::Symbol * J9::Symbol::createPossiblyRecognizedShadowWithFlags(TR_StackMemory,         TR::DataType, bool, bool, bool, RecognizedField);
+template TR::Symbol * J9::Symbol::createPossiblyRecognizedShadowWithFlags(TR_HeapMemory,          TR::DataType, bool, bool, bool, RecognizedField);
+
+template TR::Symbol * J9::Symbol::createPossiblyRecognizedShadowFromCP(TR::Compilation*, TR_StackMemory,         TR_ResolvedMethod*, int32_t, TR::DataType*, uint32_t*, bool);
+template TR::Symbol * J9::Symbol::createPossiblyRecognizedShadowFromCP(TR::Compilation*, TR_HeapMemory,          TR_ResolvedMethod*, int32_t, TR::DataType*, uint32_t*, bool);

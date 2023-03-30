@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -139,7 +139,9 @@ acquireExclusiveVMAccess(J9VMThread * vmThread)
 	 */
 	if ( ++(vmThread->omrVMThread->exclusiveCount) == 1 ) {
 		omrthread_monitor_enter(vmThread->publicFlagsMutex);
-		VM_VMAccess::setPublicFlags(vmThread, J9_PUBLIC_FLAGS_NOT_AT_SAFE_POINT);
+		if (J9_ARE_NO_BITS_SET(vmThread->publicFlags, J9_PUBLIC_FLAGS_NOT_AT_SAFE_POINT)) {
+			VM_VMAccess::setPublicFlags(vmThread, J9_PUBLIC_FLAGS_NOT_AT_SAFE_POINT | J9_PUBLIC_FLAGS_EXCLUSIVE_SET_NOT_SAFE);
+		}
 		omrthread_monitor_enter(vm->exclusiveAccessMutex);
 		if ( J9_XACCESS_NONE != vm->exclusiveAccessState ) {
 			UDATA reacquireJNICriticalAccess = FALSE;
@@ -503,7 +505,9 @@ void releaseExclusiveVMAccess(J9VMThread * vmThread)
 
 		/* Check the exclusive access queue */
 		omrthread_monitor_enter(vmThread->publicFlagsMutex);
-		VM_VMAccess::clearPublicFlags(vmThread, J9_PUBLIC_FLAGS_NOT_AT_SAFE_POINT);
+		if (J9_ARE_ANY_BITS_SET(vmThread->publicFlags, J9_PUBLIC_FLAGS_EXCLUSIVE_SET_NOT_SAFE)) {
+			VM_VMAccess::clearPublicFlags(vmThread, J9_PUBLIC_FLAGS_NOT_AT_SAFE_POINT | J9_PUBLIC_FLAGS_EXCLUSIVE_SET_NOT_SAFE);
+		}
 		omrthread_monitor_enter(vm->exclusiveAccessMutex);
 
 		if ( !J9_LINEAR_LINKED_LIST_IS_EMPTY(vm->exclusiveVMAccessQueueHead) ) {
@@ -594,13 +598,23 @@ void releaseExclusiveVMAccess(J9VMThread * vmThread)
 			/* Make sure stale thread pointers don't exist in the stats */
 			vm->omrVM->exclusiveVMAccessStats.requester = NULL;
 			vm->omrVM->exclusiveVMAccessStats.lastResponder = NULL;
-			/* Free any cached decompilation records */
+			/* Free any cached decompilation records and empty the UTF cache */
 			PORT_ACCESS_FROM_JAVAVM(vm);
 			j9mem_free_memory(currentThread->lastDecompilation);
 			currentThread->lastDecompilation = NULL;
+			J9HashTable *utfCache = currentThread->utfCache;
+			if (NULL != utfCache) {
+				currentThread->utfCache = NULL;
+				hashTableFree(utfCache);
+			}
 			while ((currentThread = currentThread->linkNext) != vmThread) {
 				j9mem_free_memory(currentThread->lastDecompilation);
 				currentThread->lastDecompilation = NULL;
+				J9HashTable *utfCache = currentThread->utfCache;
+				if (NULL != utfCache) {
+					currentThread->utfCache = NULL;
+					hashTableFree(utfCache);
+				}
 				VM_VMAccess::clearPublicFlags(currentThread, J9_PUBLIC_FLAGS_HALT_THREAD_EXCLUSIVE | J9_PUBLIC_FLAGS_NOT_COUNTED_BY_EXCLUSIVE);
 			}
 			omrthread_monitor_notify_all(vm->exclusiveAccessMutex);
@@ -845,6 +859,15 @@ releaseExclusiveVMAccessFromExternalThread(J9JavaVM * vm)
 		vm->exclusiveAccessState = J9_XACCESS_NONE;
 		currentThread = vm->mainThread;
 		do {
+			/* Free any cached decompilation records and empty the UTF cache */
+			PORT_ACCESS_FROM_JAVAVM(vm);
+			j9mem_free_memory(currentThread->lastDecompilation);
+			currentThread->lastDecompilation = NULL;
+			J9HashTable *utfCache = currentThread->utfCache;
+			if (NULL != utfCache) {
+				currentThread->utfCache = NULL;
+				hashTableFree(utfCache);
+			}
 			VM_VMAccess::clearPublicFlags(currentThread, J9_PUBLIC_FLAGS_HALT_THREAD_EXCLUSIVE | J9_PUBLIC_FLAGS_NOT_COUNTED_BY_EXCLUSIVE);
 		} while ((currentThread = currentThread->linkNext) != vm->mainThread);
 		omrthread_monitor_notify_all(vm->exclusiveAccessMutex);
@@ -896,7 +919,7 @@ requestExclusiveVMAccessMetronomeTemp(J9JavaVM *vm, UDATA block, UDATA *vmRespon
 
 #if defined(J9VM_INTERP_TWO_PASS_EXCLUSIVE)
 	do {
-		if (!(thread->privateFlags & J9_PRIVATE_FLAGS_GC_MASTER_THREAD)) {
+		if (!(thread->privateFlags & J9_PRIVATE_FLAGS_GC_MAIN_THREAD)) {
 			omrthread_monitor_enter(thread->publicFlagsMutex);
 			VM_VMAccess::setPublicFlags(thread,J9_PUBLIC_FLAGS_HALT_THREAD_EXCLUSIVE | J9_PUBLIC_FLAGS_NOT_COUNTED_BY_EXCLUSIVE, true);
 			/* Because the previous line writes atomically to the same field read below, there is likely
@@ -922,7 +945,7 @@ requestExclusiveVMAccessMetronomeTemp(J9JavaVM *vm, UDATA block, UDATA *vmRespon
 #endif /* J9VM_INTERP_TWO_PASS_EXCLUSIVE */
 
 	do {
-		if (!(thread->privateFlags & J9_PRIVATE_FLAGS_GC_MASTER_THREAD)) {
+		if (!(thread->privateFlags & J9_PRIVATE_FLAGS_GC_MAIN_THREAD)) {
 			omrthread_monitor_enter(thread->publicFlagsMutex);
 #if !defined(J9VM_INTERP_TWO_PASS_EXCLUSIVE)
 			VM_VMAccess::setPublicFlags(thread, J9_PUBLIC_FLAGS_HALT_THREAD_EXCLUSIVE, true);
@@ -1224,7 +1247,7 @@ releaseSafePointVMAccess(J9VMThread * vmThread)
  *
  * Note: While the current thread has another thread halted, it must not do anything to modify
  * it's own stack, including the creation of JNI local refs, pushObjectInSpecialFrame, or the
- * running of any java code.
+ * running of any java code or allocating of any java objects.
  */
 
 void
@@ -1237,6 +1260,8 @@ _tryAgain:
 
 	/* Inspecting the current thread does not require any halting */
 	if (currentThread != vmThread) {
+		VM_VMAccess::setPublicFlags(currentThread, J9_PUBLIC_FLAGS_NOT_AT_SAFE_POINT);
+
 		omrthread_monitor_enter(vmThread->publicFlagsMutex);
 
 		/* increment the inspection count but don't try to short circuit -- the thread might not actually be halted yet */
@@ -1294,6 +1319,8 @@ resumeThreadForInspection(J9VMThread * currentThread, J9VMThread * vmThread)
 	/* Inspecting the current thread does not require any halting */
 
 	if (currentThread != vmThread) {
+		VM_VMAccess::clearPublicFlags(currentThread, J9_PUBLIC_FLAGS_NOT_AT_SAFE_POINT);
+
 		/* Ignore resumes for threads which have not been suspended for inspection */
 
 		omrthread_monitor_enter(vmThread->publicFlagsMutex);

@@ -1,7 +1,7 @@
 package org.openj9.test.java.lang.ref;
 
 /*******************************************************************************
- * Copyright (c) 1998, 2018 IBM Corp. and others
+ * Copyright (c) 1998, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -17,7 +17,7 @@ package org.openj9.test.java.lang.ref;
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -42,7 +42,7 @@ public class Test_SoftReference {
 	public void test_Constructor() {
 		//SM.
 		ReferenceQueue rq = new ReferenceQueue();
-		bool = new Boolean(true);
+		bool = Boolean.valueOf(true);
 		try {
 			SoftReference sr = new SoftReference(bool, rq);
 			AssertJUnit.assertTrue("Initialization failed.", ((Boolean)sr.get()).booleanValue());
@@ -65,7 +65,7 @@ public class Test_SoftReference {
 	@Test
 	public void test_Constructor2() {
 		//SM.
-		bool = new Boolean(true);
+		bool = Boolean.valueOf(true);
 		try {
 			SoftReference sr = new SoftReference(bool);
 			AssertJUnit.assertTrue("Initialization failed.", ((Boolean)sr.get()).booleanValue());
@@ -80,7 +80,7 @@ public class Test_SoftReference {
 	@Test
 	public void test_get() {
 		//SM.
-		bool = new Boolean(false);
+		bool = Boolean.valueOf(false);
 		SoftReference sr = new SoftReference(bool);
 		AssertJUnit.assertTrue("Same object not returned.", bool == sr.get());
 	}

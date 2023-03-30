@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2015, 2019 IBM Corp. and others
+ * Copyright (c) 2015, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -26,7 +26,6 @@
 #if defined(OMR_GC_MODRON_SCAVENGER)
 #include "CollectorLanguageInterfaceImpl.hpp"
 #include "ConfigurationDelegate.hpp"
-#include "Dispatcher.hpp"
 #include "FinalizableObjectBuffer.hpp"
 #include "FinalizableReferenceBuffer.hpp"
 #include "FinalizeListManager.hpp"
@@ -35,14 +34,39 @@
 #include "HeapRegionDescriptorStandard.hpp"
 #include "HeapRegionIteratorStandard.hpp"
 #include "ObjectAccessBarrier.hpp"
+#include "ParallelDispatcher.hpp"
 #include "ReferenceObjectBuffer.hpp"
 #include "ReferenceObjectList.hpp"
 #include "ReferenceStats.hpp"
 #include "SlotObject.hpp"
 #include "UnfinalizedObjectBuffer.hpp"
 #include "UnfinalizedObjectList.hpp"
-
+#include "ContinuationObjectBuffer.hpp"
+#include "ContinuationObjectList.hpp"
 #include "ScavengerRootScanner.hpp"
+
+void
+MM_ScavengerRootScanner::startContinuationProcessing(MM_EnvironmentBase *env)
+{
+	if(J9MODRON_HANDLE_NEXT_WORK_UNIT(env)) {
+		_scavengerDelegate->setShouldScavengeContinuationObjects(false);
+
+		MM_HeapRegionDescriptorStandard *region = NULL;
+		GC_HeapRegionIteratorStandard regionIterator(env->getExtensions()->getHeap()->getHeapRegionManager());
+		while(NULL != (region = regionIterator.nextRegion())) {
+			if ((MEMORY_TYPE_NEW == (region->getTypeFlags() & MEMORY_TYPE_NEW))) {
+				MM_HeapRegionDescriptorStandardExtension *regionExtension = MM_ConfigurationDelegate::getHeapRegionDescriptorStandardExtension(env, region);
+				for (UDATA i = 0; i < regionExtension->_maxListIndex; i++) {
+					MM_ContinuationObjectList *list = &regionExtension->_continuationObjectLists[i];
+					list->startProcessing();
+					if (!list->wasEmpty()) {
+						_scavengerDelegate->setShouldScavengeContinuationObjects(true);
+					}
+				}
+			}
+		}
+	}
+}
 
 #if defined(J9VM_GC_FINALIZATION)
 void

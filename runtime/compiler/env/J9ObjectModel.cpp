@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,11 +15,12 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
 
+#if defined(J9ZOS390)
 //On zOS XLC linker can't handle files with same name at link time
 //This workaround with pragma is needed. What this does is essentially
 //give a different name to the codesection (csect) for this file. So it
@@ -27,6 +28,7 @@
 #pragma csect(CODE,"J9ObjectModel#C")
 #pragma csect(STATIC,"J9ObjectModel#S")
 #pragma csect(TEST,"J9ObjectModel#T")
+#endif
 
 #include <algorithm>
 #include <limits.h>
@@ -97,6 +99,8 @@ J9::ObjectModel::initialize()
       // JIT treats satb_and_oldcheck same as satb
       _writeBarrierType = gc_modron_wrtbar_satb;
       }
+
+   _objectAlignmentInBytes = objectAlignmentInBytes();
    }
 
 
@@ -106,13 +110,32 @@ J9::ObjectModel::areValueTypesEnabled()
 #if defined(J9VM_OPT_JITSERVER)
    if (auto stream = TR::CompilationInfo::getStream())
       {
-      auto *vmInfo = TR::compInfoPT->getClientData()->getOrCacheVMInfo(stream);
-      return J9_ARE_ALL_BITS_SET(vmInfo->_extendedRuntimeFlags2, J9_EXTENDED_RUNTIME2_ENABLE_VALHALLA);
+#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+      return true;
+#else /* defined(J9VM_OPT_VALHALLA_VALUE_TYPES) */
+      return false;
+#endif /* defined(J9VM_OPT_VALHALLA_VALUE_TYPES) */
       }
 #endif /* defined(J9VM_OPT_JITSERVER) */
 
    J9JavaVM * javaVM = TR::Compiler->javaVM;
    return javaVM->internalVMFunctions->areValueTypesEnabled(javaVM);
+   }
+
+
+bool
+J9::ObjectModel::areValueBasedMonitorChecksEnabled()
+   {
+#if defined(J9VM_OPT_JITSERVER)
+   if (auto stream = TR::CompilationInfo::getStream())
+      {
+      auto *vmInfo = TR::compInfoPT->getClientData()->getOrCacheVMInfo(stream);
+	   return J9_ARE_ANY_BITS_SET(vmInfo->_extendedRuntimeFlags2, J9_EXTENDED_RUNTIME2_VALUE_BASED_EXCEPTION | J9_EXTENDED_RUNTIME2_VALUE_BASED_WARNING);
+      }
+#endif /* defined(J9VM_OPT_JITSERVER) */
+
+   J9JavaVM * javaVM = TR::Compiler->javaVM;
+   return javaVM->internalVMFunctions->areValueBasedMonitorChecksEnabled(javaVM);
    }
 
 
@@ -122,6 +145,20 @@ J9::ObjectModel::sizeofReferenceField()
    if (compressObjectReferences())
       return sizeof(uint32_t);
    return sizeof(uintptr_t);
+   }
+
+
+bool
+J9::ObjectModel::isHotReferenceFieldRequired()
+   {
+#if defined(J9VM_OPT_JITSERVER)
+   if (auto stream = TR::CompilationInfo::getStream())
+      {
+      auto *vmInfo = TR::compInfoPT->getClientData()->getOrCacheVMInfo(stream);
+      return vmInfo->_isHotReferenceFieldRequired;
+      }
+#endif /* defined(J9VM_OPT_JITSERVER) */
+   return TR::Compiler->javaVM->memoryManagerFunctions->j9gc_hot_reference_field_required(TR::Compiler->javaVM);
    }
 
 
@@ -453,6 +490,14 @@ J9::ObjectModel::objectAlignmentInBytes()
    if (!javaVM)
       return 0;
 
+#if defined(J9VM_OPT_JITSERVER)
+   if (auto stream = TR::CompilationInfo::getStream())
+      {
+      auto *vmInfo = TR::compInfoPT->getClientData()->getOrCacheVMInfo(stream);
+      return vmInfo->_objectAlignmentInBytes;
+      }
+#endif /* defined(J9VM_OPT_JITSERVER) */
+
    J9MemoryManagerFunctions * mmf = javaVM->memoryManagerFunctions;
    uintptr_t result = 0;
    result = mmf->j9gc_modron_getConfigurationValueForKey(javaVM, j9gc_modron_configuration_objectAlignment, &result) ? result : 0;
@@ -471,6 +516,24 @@ J9::ObjectModel::offsetOfDiscontiguousArraySizeField()
    {
    return compressObjectReferences() ? offsetof(J9IndexableObjectDiscontiguousCompressed, size) : offsetof(J9IndexableObjectDiscontiguousFull, size);
    }
+
+#if defined(TR_TARGET_64BIT)
+uintptr_t
+J9::ObjectModel::offsetOfContiguousDataAddrField()
+   {
+   return compressObjectReferences()
+		? offsetof(J9IndexableObjectContiguousCompressed, dataAddr)
+		: offsetof(J9IndexableObjectContiguousFull, dataAddr);
+   }
+
+uintptr_t
+J9::ObjectModel::offsetOfDiscontiguousDataAddrField()
+   {
+   return compressObjectReferences()
+		? offsetof(J9IndexableObjectDiscontiguousCompressed, dataAddr)
+		: offsetof(J9IndexableObjectDiscontiguousFull, dataAddr);
+   }
+#endif /* TR_TARGET_64BIT */
 
 
 uintptr_t
@@ -588,7 +651,7 @@ J9::ObjectModel::getArrayLengthInElements(TR::Compilation* comp, uintptr_t objec
 uintptr_t
 J9::ObjectModel::decompressReference(TR::Compilation* comp, uintptr_t compressedReference)
    {
-   return (compressedReference << TR::Compiler->om.compressedReferenceShift()) + TR::Compiler->vm.heapBaseAddress();
+   return (compressedReference << TR::Compiler->om.compressedReferenceShift());
    }
 
 bool
@@ -668,3 +731,16 @@ J9::ObjectModel::compressObjectReferences()
 #endif /* defined(J9VM_OPT_JITSERVER) */
    return _compressObjectReferences;
    }
+
+int32_t
+J9::ObjectModel::getObjectAlignmentInBytes()
+{
+#if defined(J9VM_OPT_JITSERVER)
+   if (auto stream = TR::CompilationInfo::getStream())
+      {
+      auto *vmInfo = TR::compInfoPT->getClientData()->getOrCacheVMInfo(stream);
+      return vmInfo->_objectAlignmentInBytes;
+      }
+#endif /* defined(J9VM_OPT_JITSERVER) */
+   return _objectAlignmentInBytes;
+}

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -64,12 +64,12 @@ MM_ConfigurationRealtime::initialize(MM_EnvironmentBase *env)
 	if (MM_Configuration::initialize(env)) {
 		/*
 		 * The split available lists are populated during sweep by GC threads,
-		 * each slave inserts into its corresponding split list as it finishes sweeping a region,
+		 * each worker inserts into its corresponding split list as it finishes sweeping a region,
 		 * which also removes the contention when inserting to a global list.
 		 * So the split count equals the number of gc threads.
-		 * NOTE: The split available list mechanism assumes the slave IDs are in the range of [0, gcThreadCount-1].
-		 * This is currently the case, as _statusTable in ParallelDispatcher also replies on slave IDs be in this range
-		 * as it uses the slave ID as index into the status array. If slave IDs ever fall out of the above range,
+		 * NOTE: The split available list mechanism assumes the worker IDs are in the range of [0, gcThreadCount-1].
+		 * This is currently the case, as _statusTable in ParallelDispatcher also replies on worker IDs be in this range
+		 * as it uses the worker ID as index into the status array. If worker IDs ever fall out of the above range,
 		 * split available list would likely loose the performance advantage.
 		 */
 		extensions->splitAvailableListSplitAmount = extensions->gcThreadCount;
@@ -207,8 +207,8 @@ MM_ConfigurationRealtime::createHeapRegionManager(MM_EnvironmentBase *env)
 	return heapRegionManager;
 }
 
-MM_Dispatcher *
-MM_ConfigurationRealtime::createDispatcher(MM_EnvironmentBase *env, omrsig_handler_fn handler, void* handler_arg, uintptr_t defaultOSStackSize)
+MM_ParallelDispatcher *
+MM_ConfigurationRealtime::createParallelDispatcher(MM_EnvironmentBase *env, omrsig_handler_fn handler, void* handler_arg, uintptr_t defaultOSStackSize)
 {
 	return MM_Scheduler::newInstance(env, handler, handler_arg, defaultOSStackSize);
 }

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -28,6 +28,7 @@
 #include "jitprotos.h"
 #include "j9protos.h"
 #include "omrcomp.h"
+#include "omrformatconsts.h"
 #include "rommeth.h"
 #include "env/jittypes.h"
 
@@ -223,21 +224,26 @@ static VMINLINE TR_StackMapTable * initializeMapTable(J9JavaVM * javaVM, J9TR_Me
    return mapTable;
    }
 
-static VMINLINE TR_StackMapTable * findOrCreateMapTable(J9JavaVM * javaVM, J9TR_MethodMetaData * metaData, UDATA fourByteOffsets)
+static VMINLINE TR_StackMapTable * findOrCreateMapTable(J9VMThread * currentThread, J9JavaVM * javaVM, J9TR_MethodMetaData * metaData, UDATA fourByteOffsets)
    {
    TR_StackMapTable * mapTablePtr = 0;
    assert(metaData);
 
-   if (metaData->bodyInfo &&
-       (javaVM->phase == J9VM_PHASE_NOT_STARTUP || 0 == (javaVM->jitConfig->runtimeFlags & J9JIT_QUICKSTART))) // save footprint during startup in Xquickstart mode
+   // In a signal handler, do not use or create the map tables. The tables may be in an inconsistent
+   // state when interrupted by the signal, and malloc must not be called from a signal handler.
+   if ((NULL != currentThread) && J9_ARE_NO_BITS_SET(currentThread->privateFlags2, J9_PRIVATE_FLAGS2_ASYNC_GET_CALL_TRACE))
       {
-      mapTablePtr = ((TR_PersistentJittedBodyInfo *)metaData->bodyInfo)->_mapTable; /* cache it */
-      if (mapTablePtr == (TR_StackMapTable *)-1) /* if nobody wrote to it yet */
-        { mapTablePtr = initializeMapTable(javaVM, metaData, fourByteOffsets); }
+      if (metaData->bodyInfo &&
+          (javaVM->phase == J9VM_PHASE_NOT_STARTUP || 0 == (javaVM->jitConfig->runtimeFlags & J9JIT_QUICKSTART))) // save footprint during startup in Xquickstart mode
+         {
+         mapTablePtr = ((TR_PersistentJittedBodyInfo *)metaData->bodyInfo)->_mapTable; /* cache it */
+         if (mapTablePtr == (TR_StackMapTable *)-1) /* if nobody wrote to it yet */
+           { mapTablePtr = initializeMapTable(javaVM, metaData, fourByteOffsets); }
 #if defined(TR_HOST_64BIT)
-      if (((U_32)((UDATA)mapTablePtr) == (U_32)-1) || ((U_32)((UDATA)mapTablePtr >> 32) == (U_32)-1)) /* check upper and lower word */
-         { mapTablePtr = 0; } /* give up the optimization */
+         if (((U_32)((UDATA)mapTablePtr) == (U_32)-1) || ((U_32)((UDATA)mapTablePtr >> 32) == (U_32)-1)) /* check upper and lower word */
+            { mapTablePtr = 0; } /* give up the optimization */
 #endif
+         }
       }
 
    return mapTablePtr;
@@ -333,7 +339,9 @@ static void printMetaData(J9TR_MethodMetaData * methodMetaData)
    for (index = 0; index < iter._stackAtlas->numberOfMaps; ++index)
       {
       getNextMap(&iter, fourByteOffsets);
-      printf("index: %d map address: %p rangeStartOffset: %x rangeEndOffset: %x is inlineMap? %s\n", index, iter._currentMap, iter._rangeStartOffset, iter._rangeEndOffset, IS_BYTECODEINFO_MAP(fourByteOffsets, iter._currentMap) ? "yes" : "no");
+      printf("index: %d map address: %p rangeStartOffset: %" OMR_PRIxPTR " rangeEndOffset: %" OMR_PRIxPTR " is inlineMap? %s\n",
+             index, iter._currentMap, iter._rangeStartOffset, iter._rangeEndOffset,
+             IS_BYTECODEINFO_MAP(fourByteOffsets, iter._currentMap) ? "yes" : "no");
       }
    }
 
@@ -342,10 +350,13 @@ static void printMapTable(TR_StackMapTable * stackMapTable, U_8 * addressOfFirst
    int index = 0;
 
    printf("\nMapTable dump:\n");
-   printf("MapTable size is: %lu\n", stackMapTable->_tableSize);
+   printf("MapTable size is: %u\n", stackMapTable->_tableSize);
    for (index = 0; index <= stackMapTable->_tableSize; ++index)
       {
-      printf("index: %d map address: %p lowCodeOffset: %x stackMapOffset: %x mapCount: %u\n", index, stackMapTable->_table[index]._stackMapOffset + addressOfFirstMap, stackMapTable->_table[index]._lowCodeOffset, stackMapTable->_table[index]._stackMapOffset, stackMapTable->_table[index]._mapCount);
+      printf("index: %d map address: %p lowCodeOffset: %" OMR_PRIxPTR " stackMapOffset: %" OMR_PRIxPTR " mapCount: %u\n",
+             index, stackMapTable->_table[index]._stackMapOffset + addressOfFirstMap,
+             stackMapTable->_table[index]._lowCodeOffset, stackMapTable->_table[index]._stackMapOffset,
+             stackMapTable->_table[index]._mapCount);
       }
    }
 
@@ -392,7 +403,7 @@ static void fastwalkDebug(J9TR_MethodMetaData * methodMetaData, UDATA offsetPC, 
    }
 #endif /* defined(DEBUG) */
 
-void jitGetMapsFromPC(J9JavaVM * javaVM, J9TR_MethodMetaData * methodMetaData, UDATA jitPC, void * * stackMap, void * * inlineMap)
+void jitGetMapsFromPC(J9VMThread * currentThread, J9JavaVM * vm, J9TR_MethodMetaData * methodMetaData, UDATA jitPC, void * * stackMap, void * * inlineMap)
    {
    TR_MapIterator i;
    TR_StackMapTable * stackMapTable = 0;
@@ -423,7 +434,7 @@ void jitGetMapsFromPC(J9JavaVM * javaVM, J9TR_MethodMetaData * methodMetaData, U
 
 #ifdef FASTWALK
 
-   stackMapTable = findOrCreateMapTable(javaVM, methodMetaData, fourByteOffsets);
+   stackMapTable = findOrCreateMapTable(currentThread, vm, methodMetaData, fourByteOffsets);
 
    if (stackMapTable)
       {
@@ -497,7 +508,7 @@ void jitGetMapsFromPC(J9JavaVM * javaVM, J9TR_MethodMetaData * methodMetaData, U
       initializeIterator(&i, methodMetaData);
       }
 
-   /* try to speed the loop up by by versioning it based on the value of 'fourByteOffsets'. Assume that the compiler
+   /* try to speed the loop up by versioning it based on the value of 'fourByteOffsets'. Assume that the compiler
     * will inline the call and do constant propagation
     */
 
@@ -513,23 +524,23 @@ void jitGetMapsFromPC(J9JavaVM * javaVM, J9TR_MethodMetaData * methodMetaData, U
       }
    }
 
-void * jitGetInlinerMapFromPC(J9JavaVM * javaVM, J9TR_MethodMetaData * methodMetaData, UDATA jitPC)
+void * jitGetInlinerMapFromPC(J9VMThread * currentThread, J9JavaVM * vm, J9TR_MethodMetaData * methodMetaData, UDATA jitPC)
    {
    void * stackMap, * inlineMap;
-   jitGetMapsFromPC(javaVM, methodMetaData, jitPC, &stackMap, &inlineMap);
+   jitGetMapsFromPC(currentThread, vm, methodMetaData, jitPC, &stackMap, &inlineMap);
    return inlineMap;
    }
 
-void * getStackMapFromJitPC(J9JavaVM * javaVM, J9TR_MethodMetaData * methodMetaData, UDATA jitPC)
+void * getStackMapFromJitPC(J9VMThread * currentThread, J9JavaVM * vm, J9TR_MethodMetaData * methodMetaData, UDATA jitPC)
    {
    void * stackMap, * inlineMap;
-   jitGetMapsFromPC(javaVM, methodMetaData, jitPC, &stackMap, &inlineMap);
+   jitGetMapsFromPC(currentThread, vm, methodMetaData, jitPC, &stackMap, &inlineMap);
    return stackMap;
    }
 
 
 
-void * getStackAllocMapFromJitPC(J9JavaVM * javaVM, J9TR_MethodMetaData * methodMetaData, UDATA jitPC, void *curStackMap)
+void * getStackAllocMapFromJitPC(J9VMThread * currentThread, J9TR_MethodMetaData * methodMetaData, UDATA jitPC, void *curStackMap)
    {
    void * stackMap, ** stackAllocMap;
 
@@ -539,7 +550,7 @@ void * getStackAllocMapFromJitPC(J9JavaVM * javaVM, J9TR_MethodMetaData * method
    if (curStackMap)
       stackMap = curStackMap;
    else
-      stackMap = getStackMapFromJitPC(javaVM, methodMetaData, jitPC);
+      stackMap = getStackMapFromJitPC(currentThread, currentThread->javaVM, methodMetaData, jitPC);
 
    stackAllocMap = (void **)((J9JITStackAtlas *) methodMetaData->gcStackAtlas)->stackAllocMap;
    if (stackAllocMap)
@@ -2435,7 +2446,7 @@ void* preOSR(J9VMThread* currentThread, J9JITExceptionTable *metaData, void *pc)
    assert(metaData);
    assert(metaData->osrInfo);
 
-   jitGetMapsFromPC(currentThread->javaVM, metaData, (UDATA) pc, &stackMap, &inlineMap);
+   jitGetMapsFromPC(currentThread, currentThread->javaVM, metaData, (UDATA) pc, &stackMap, &inlineMap);
    bcInfo = (TR_ByteCodeInfo*) getByteCodeInfoFromStackMap(metaData, inlineMap);
 /*
    printf("offset=%08X bytecode.caller=%d bytecode.index=%x\n",

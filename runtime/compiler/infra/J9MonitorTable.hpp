@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -35,7 +35,6 @@ namespace J9 { typedef MonitorTable MonitorTableConnector; }
 #include "infra/Monitor.hpp"
 #include "infra/RWMonitor.hpp"
 
-class TR_DebugExt;
 struct J9PortLibrary;
 struct J9JavaVM;
 struct J9VMThread;
@@ -46,8 +45,6 @@ namespace J9
 
 class OMR_EXTENSIBLE MonitorTable : public OMR::MonitorTableConnector
    {
-   friend class ::TR_DebugExt;
-
    public:
 
    void *operator new(size_t size, void *p) {return p;}
@@ -83,7 +80,6 @@ class OMR_EXTENSIBLE MonitorTable : public OMR::MonitorTableConnector
    TR_LinkHead0<TR::Monitor> _monitors;
 
    TR::Monitor _tableMonitor;
-   TR::Monitor _j9MemoryAllocMonitor;
    TR::Monitor _j9ScratchMemoryPoolMonitor;
    J9::RWMonitor _classUnloadMonitor;
    TR::Monitor _classTableMutex;  // JavaVM's class table mutex

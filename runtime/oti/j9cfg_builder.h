@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1998, 2019 IBM Corp. and others
+ * Copyright (c) 1998, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -92,14 +92,32 @@
 #define J9_JIT_DATA_CACHE_SIZE (8 * 1024 * 1024)
 #endif /* J9VM_ARCH_X86 && !J9VM_ENV_DATA64 */
 
-#if defined(J9ZOS390) && defined(J9VM_ENV_DATA64)
+/*
+ * J9_OS_STACK_GUARD needs to be large enough such that we can run
+ * the initializer for StackOverflow and construct a new instance. On
+ * some platforms this can use up more than 16kb from an overflow check.
+ */
+#define J9_OS_STACK_GUARD (32 * 1024)
+
+#if defined(J9VM_ENV_DATA64) && defined(J9ZOS390)
 /* Use a 1MB OS stack on z/OS 64-bit as this is what the OS
  * allocates anyway, using IARV64 GETSTOR to allocate a segment.
  */
 #define J9_OS_STACK_SIZE (1024 * 1024)
-#else /* J9ZOS390 && J9VM_ENV_DATA64 */
+#elif defined(J9VM_ENV_DATA64) && defined(J9VM_ARCH_POWER)
+/* increase stack space on PPC64 (AIX & Linux) since we are now preserving the
+ * 32 128-bit Vector (VSCR) registers.
+ */
+#define J9_OS_STACK_SIZE (512 * 1024)
+#elif defined(J9HAMMER) && (JAVA_SPEC_VERSION >= 17)
+/* Increase default stack space on JDK17 as ymm/zmm registers are being preserved
+ * for vector API support
+ */
+#define J9_OS_STACK_SIZE (512 * 1024)
+#else /* defined(J9VM_ENV_DATA64) && defined(J9ZOS390) */
 #define J9_OS_STACK_SIZE (256 * 1024)
-#endif
+#endif /* defined(J9VM_ENV_DATA64) && defined(J9ZOS390) */
+
 
 /* Unused constants, kept here in case the JCL compiles use them */
 

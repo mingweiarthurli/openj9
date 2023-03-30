@@ -1,6 +1,6 @@
-/*[INCLUDE-IF Sidecar17]*/
+/*[INCLUDE-IF Sidecar17 & !OPENJDK_METHODHANDLES]*/
 /*******************************************************************************
- * Copyright (c) 2009, 2019 IBM Corp. and others
+ * Copyright (c) 2009, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -24,6 +24,9 @@ package java.lang.invoke;
 
 import com.ibm.oti.util.Msg;
 import java.lang.reflect.Array;
+/*[IF JAVA_SPEC_VERSION >= 15]*/
+import java.util.List;
+/*[ENDIF] JAVA_SPEC_VERSION >= 15 */
 
 /* CollectHandle is a MethodHandle subclass used to call another MethodHandle.  
  * It accepts the incoming arguments and collects the requested number
@@ -50,7 +53,7 @@ final class CollectHandle extends MethodHandle {
 		this.collectArraySize = collectArraySize;
 		this.next = next;
 		if (collectArraySize == 0) {
-			emptyArray = Array.newInstance(next.type.arguments[collectPosition].getComponentType(), 0);
+			emptyArray = Array.newInstance(next.type.parameterType(collectPosition).getComponentType(), 0);
 		} else {
 			emptyArray = null;
 		}
@@ -98,6 +101,14 @@ final class CollectHandle extends MethodHandle {
 		return new CollectHandle(this, newType);
 	}
 
+/*[IF JAVA_SPEC_VERSION >= 15]*/
+	@Override
+	boolean addRelatedMHs(List<MethodHandle> relatedMHs) {
+		relatedMHs.add(next);
+		return true;
+	}
+/*[ENDIF] JAVA_SPEC_VERSION >= 15 */
+
 	// {{{ JIT support
 
 	private static final ThunkTable _thunkTable = new ThunkTable();
@@ -109,7 +120,7 @@ final class CollectHandle extends MethodHandle {
 
 	private static final Object allocateArray(CollectHandle mh) {
 		return Array.newInstance(
-			mh.next.type.arguments[mh.collectPosition].getComponentType(),
+			mh.next.type.parameterType(mh.collectPosition).getComponentType(),
 			mh.collectArraySize);
 	}
 
@@ -152,4 +163,3 @@ final class CollectHandle extends MethodHandle {
 		c.compareChildHandle(left.next, this.next);
 	}
 }
-

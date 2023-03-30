@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -27,9 +27,7 @@
 extern "C" {
 #endif
 
-
 #include "jcl.h"
-
 
 jint initializeJCLSystemProperties(J9JavaVM * vm);
 
@@ -41,58 +39,62 @@ void JNICALL Java_com_ibm_oti_vm_VM_releasePointerToNativeResourceImpl(JNIEnv *e
 jlong JNICALL Java_com_ibm_oti_vm_VM_getPointerToNativeResourceJarImpl(JNIEnv *env, jobject recv, jstring jarPath, jstring resName, jintArray size);
 
 /* BBjclNativesCommonShared*/
-jint JNICALL 
-Java_com_ibm_oti_shared_SharedClassAbstractHelper_initializeShareableClassloaderImpl (JNIEnv* env, jobject thisObj, jobject classloader);
-jobject JNICALL
-Java_com_ibm_oti_shared_SharedDataHelperImpl_storeSharedDataImpl (JNIEnv* env, jobject thisObj, jobject loaderObj, jint helperID, jstring tokenObj, jobject byteBufferInput);
-jlong JNICALL 
-Java_com_ibm_oti_shared_SharedClassStatistics_freeSpaceBytesImpl (JNIEnv* env, jobject thisObj);
-jobject JNICALL
-Java_com_ibm_oti_shared_SharedDataHelperImpl_findSharedDataImpl (JNIEnv* env, jobject thisObj, jint helperID, jstring tokenObj);
-jlong JNICALL 
-Java_com_ibm_oti_shared_SharedClassStatistics_maxSizeBytesImpl (JNIEnv* env, jobject thisObj);
+jboolean JNICALL
+Java_com_ibm_oti_shared_Shared_isNonBootSharingEnabledImpl(JNIEnv* env, jclass clazz);
+jboolean JNICALL
+Java_com_ibm_oti_shared_SharedAbstractHelper_getIsVerboseImpl(JNIEnv* env, jobject thisObj);
+jint JNICALL
+Java_com_ibm_oti_shared_SharedClassAbstractHelper_initializeShareableClassloaderImpl(JNIEnv* env, jobject thisObj, jobject classloader);
+jstring JNICALL
+Java_com_ibm_oti_shared_SharedClassStatistics_cachePathImpl(JNIEnv* env, jobject thisObj);
 jlong JNICALL
-Java_com_ibm_oti_shared_SharedClassStatistics_softmxBytesImpl(JNIEnv* env, jobject thisObj);
-jlong JNICALL
-Java_com_ibm_oti_shared_SharedClassStatistics_minAotBytesImpl(JNIEnv* env, jobject thisObj);
+Java_com_ibm_oti_shared_SharedClassStatistics_freeSpaceBytesImpl(JNIEnv* env, jobject thisObj);
 jlong JNICALL
 Java_com_ibm_oti_shared_SharedClassStatistics_maxAotBytesImpl(JNIEnv* env, jobject thisObj);
 jlong JNICALL
+Java_com_ibm_oti_shared_SharedClassStatistics_maxJitDataBytesImpl(JNIEnv* env, jobject thisObj);
+jlong JNICALL
+Java_com_ibm_oti_shared_SharedClassStatistics_maxSizeBytesImpl(JNIEnv* env, jobject thisObj);
+jlong JNICALL
+Java_com_ibm_oti_shared_SharedClassStatistics_minAotBytesImpl(JNIEnv* env, jobject thisObj);
+jlong JNICALL
 Java_com_ibm_oti_shared_SharedClassStatistics_minJitDataBytesImpl(JNIEnv* env, jobject thisObj);
 jlong JNICALL
-Java_com_ibm_oti_shared_SharedClassStatistics_maxJitDataBytesImpl(JNIEnv* env, jobject thisObj);
-jboolean JNICALL 
-Java_com_ibm_oti_shared_SharedAbstractHelper_getIsVerboseImpl (JNIEnv* env, jobject thisObj);
-void JNICALL 
-Java_com_ibm_oti_shared_SharedClassURLClasspathHelperImpl_notifyClasspathChange2 (JNIEnv* env, jobject thisObj, jobject classLoaderObj);
-void JNICALL
-Java_com_ibm_oti_shared_SharedClassURLClasspathHelperImpl_notifyClasspathChange3 (JNIEnv* env, jobject thisObj, jint helperID, jobject classLoaderObj, jobjectArray urlArrayObj, jint urlIndex, jint urlCount, jboolean isOpen);
-jboolean JNICALL 
+Java_com_ibm_oti_shared_SharedClassStatistics_numberAttachedImpl(JNIEnv* env, jobject thisObj);
+jlong JNICALL
+Java_com_ibm_oti_shared_SharedClassStatistics_softMaxBytesImpl(JNIEnv* env, jobject thisObj);
+jlong JNICALL
+Java_com_ibm_oti_shared_SharedClassStatistics_softmxBytesImpl(JNIEnv* env, jobject thisObj);
+jboolean JNICALL
 Java_com_ibm_oti_shared_SharedClassTokenHelperImpl_findSharedClassImpl2(JNIEnv* env, jobject thisObj, jint helperID, jstring classNameObj, jobject loaderObj, jstring tokenObj, jboolean doFind, jboolean doStore, jbyteArray romClassCookie);
-jint JNICALL 
+jint JNICALL
 Java_com_ibm_oti_shared_SharedClassTokenHelperImpl_storeSharedClassImpl2(JNIEnv* env, jobject thisObj, jint helperID, jobject loaderObj, jstring tokenObj, jclass clazzObj, jbyteArray nativeFlags);
-jint JNICALL 
+jint JNICALL
 Java_com_ibm_oti_shared_SharedClassURLClasspathHelperImpl_findSharedClassImpl2(JNIEnv* env, jobject thisObj, jint helperID, jstring partitionObj, jstring classNameObj, jobject loaderObj, jobjectArray urlArrayObj, jboolean doFind, jboolean doStore, jint urlCount, jint confirmedCount, jbyteArray romClassCookie);
-jint JNICALL 
-Java_com_ibm_oti_shared_SharedClassURLClasspathHelperImpl_storeSharedClassImpl2(JNIEnv* env, jobject thisObj, jint helperID, jstring partitionObj, jobject loaderObj, jobjectArray urlArrayObj, jint urlCount, jint cpLoadIndex, jclass clazzObj, jbyteArray nativeFlags);
-jboolean JNICALL 
-Java_com_ibm_oti_shared_SharedClassURLHelperImpl_findSharedClassImpl3(JNIEnv* env, jobject thisObj, jint helperID, jstring partitionObj, jstring classNameObj, jobject loaderObj, jobject urlObj, jboolean doFind, jboolean doStore, jbyteArray romClassCookie, jboolean newJarFile, jboolean minimizeUpdateChecks);
-jint JNICALL 
-Java_com_ibm_oti_shared_SharedClassURLHelperImpl_storeSharedClassImpl3(JNIEnv* env, jobject thisObj, jint helperID, jstring partitionObj, jobject loaderObj, jobject urlObj, jclass clazzObj, jboolean newJarFile, jboolean minimizeUpdateChecks, jbyteArray nativeFlags);
-void JNICALL
-Java_com_ibm_oti_shared_SharedClassUtilities_init(JNIEnv *env, jclass clazz);
-jint JNICALL
-Java_com_ibm_oti_shared_SharedClassUtilities_getSharedCacheInfoImpl(JNIEnv *env, jclass clazz, jstring cacheDir, jint flag, jboolean useCommandLineValue, jobject arrayList);
-jint JNICALL
-Java_com_ibm_oti_shared_SharedClassUtilities_destroySharedCacheImpl(JNIEnv *env, jclass clazz, jstring cacheDir, jint cacheType, jstring cacheName, jboolean useCommandLineValue);
-void JNICALL
-Java_com_ibm_oti_shared_SharedClassURLHelperImpl_init(JNIEnv *env, jclass clazz);
 void JNICALL
 Java_com_ibm_oti_shared_SharedClassURLClasspathHelperImpl_init(JNIEnv *env, jclass clazz);
+void JNICALL
+Java_com_ibm_oti_shared_SharedClassURLClasspathHelperImpl_notifyClasspathChange2(JNIEnv* env, jobject thisObj, jobject classLoaderObj);
+void JNICALL
+Java_com_ibm_oti_shared_SharedClassURLClasspathHelperImpl_notifyClasspathChange3(JNIEnv* env, jobject thisObj, jint helperID, jobject classLoaderObj, jobjectArray urlArrayObj, jint urlIndex, jint urlCount, jboolean isOpen);
+jint JNICALL
+Java_com_ibm_oti_shared_SharedClassURLClasspathHelperImpl_storeSharedClassImpl2(JNIEnv* env, jobject thisObj, jint helperID, jstring partitionObj, jobject loaderObj, jobjectArray urlArrayObj, jint urlCount, jint cpLoadIndex, jclass clazzObj, jbyteArray nativeFlags);
 jboolean JNICALL
-Java_com_ibm_oti_shared_Shared_isNonBootSharingEnabledImpl(JNIEnv* env, jclass clazz);
-jlong JNICALL
-Java_com_ibm_oti_shared_SharedClassStatistics_softMaxBytesImpl (JNIEnv* env, jobject thisObj);
+Java_com_ibm_oti_shared_SharedClassURLHelperImpl_findSharedClassImpl3(JNIEnv* env, jobject thisObj, jint helperID, jstring partitionObj, jstring classNameObj, jobject loaderObj, jobject urlObj, jboolean doFind, jboolean doStore, jbyteArray romClassCookie, jboolean newJarFile, jboolean minimizeUpdateChecks);
+void JNICALL
+Java_com_ibm_oti_shared_SharedClassURLHelperImpl_init(JNIEnv *env, jclass clazz);
+jint JNICALL
+Java_com_ibm_oti_shared_SharedClassURLHelperImpl_storeSharedClassImpl3(JNIEnv* env, jobject thisObj, jint helperID, jstring partitionObj, jobject loaderObj, jobject urlObj, jclass clazzObj, jboolean newJarFile, jboolean minimizeUpdateChecks, jbyteArray nativeFlags);
+jint JNICALL
+Java_com_ibm_oti_shared_SharedClassUtilities_destroySharedCacheImpl(JNIEnv *env, jclass clazz, jstring cacheDir, jint cacheType, jstring cacheName, jboolean useCommandLineValue);
+jint JNICALL
+Java_com_ibm_oti_shared_SharedClassUtilities_getSharedCacheInfoImpl(JNIEnv *env, jclass clazz, jstring cacheDir, jint flag, jboolean useCommandLineValue, jobject arrayList);
+void JNICALL
+Java_com_ibm_oti_shared_SharedClassUtilities_init(JNIEnv *env, jclass clazz);
+jobject JNICALL
+Java_com_ibm_oti_shared_SharedDataHelperImpl_findSharedDataImpl(JNIEnv* env, jobject thisObj, jint helperID, jstring tokenObj);
+jobject JNICALL
+Java_com_ibm_oti_shared_SharedDataHelperImpl_storeSharedDataImpl(JNIEnv* env, jobject thisObj, jobject loaderObj, jint helperID, jstring tokenObj, jobject byteBufferInput);
 /* J9SourceJclExtremeInit*/
 extern J9_CFUNC jint JNICALL JVM_OnLoad ( JavaVM *jvm, char* options, void *reserved );
 extern J9_CFUNC IDATA J9VMDllMain (J9JavaVM* vm, IDATA stage, void* reserved);
@@ -112,8 +114,12 @@ extern J9_CFUNC jboolean JNICALL
 Java_com_ibm_java_lang_management_internal_RuntimeMXBeanImpl_isBootClassPathSupportedImpl (JNIEnv *env, jobject beanInstance);
 extern J9_CFUNC jobject JNICALL
 Java_com_ibm_java_lang_management_internal_RuntimeMXBeanImpl_getNameImpl (JNIEnv *env, jobject beanInstance);
+
+#if JAVA_SPEC_VERSION < 19
 extern J9_CFUNC jlong JNICALL
 Java_com_ibm_lang_management_internal_ExtendedRuntimeMXBeanImpl_getProcessIDImpl(JNIEnv *env, jclass clazz);
+#endif /* JAVA_SPEC_VERSION < 19 */
+
 extern J9_CFUNC jint JNICALL
 Java_com_ibm_lang_management_internal_ExtendedRuntimeMXBeanImpl_getVMIdleStateImpl(JNIEnv *env, jclass clazz);
 
@@ -164,7 +170,7 @@ void JNICALL Java_com_ibm_oti_vm_MemorySpace_setMemorySpaceForClassLoaderImpl (J
 jlong JNICALL Java_com_ibm_oti_vm_MemorySpace_getJ9MemorySpaceFor (JNIEnv * env, jclass memorySpaceClass, jobject anObject);
 
 /* BBjclNativesCommonThread*/
-jint JNICALL 
+jint JNICALL
 Java_java_lang_Thread_getStateImpl (JNIEnv *env, jobject recv, jlong threadRef);
 void JNICALL
 Java_java_lang_Thread_setPriorityNoVMAccessImpl(JNIEnv *env, jobject thread, jlong threadRef, jint priority);
@@ -184,7 +190,10 @@ Java_com_ibm_java_lang_management_internal_MemoryManagerMXBeanImpl_isManagedPool
 /* BBjclNativesCommonSystem*/
 void JNICALL Java_java_lang_System_setFieldImpl (JNIEnv * env, jclass cls, jstring name, jobject stream);
 jobject createSystemPropertyList (JNIEnv *env, const char *defaultValues[], int defaultCount);
-jstring JNICALL Java_java_lang_System_getEncoding (JNIEnv *env, jclass clazz, jint encodingType);
+#if JAVA_SPEC_VERSION >= 11
+void JNICALL Java_java_lang_System_initJCLPlatformEncoding (JNIEnv *env, jclass clazz);
+#endif /* JAVA_SPEC_VERSION >= 11 */
+jstring JNICALL Java_java_lang_System_getSysPropBeforePropertiesInitialized(JNIEnv *env, jclass clazz, jint sysPropID);
 jobject JNICALL Java_java_lang_System_getPropertyList (JNIEnv *env, jclass clazz);
 jstring JNICALL Java_java_lang_System_mapLibraryName (JNIEnv * env, jclass unusedClass, jstring inName);
 void JNICALL Java_java_lang_System_initLocale (JNIEnv *env, jclass clazz);
@@ -272,7 +281,7 @@ Java_com_ibm_java_lang_management_internal_ThreadMXBeanImpl_isThreadContentionMo
 extern J9_CFUNC jobject JNICALL
 Java_com_ibm_java_lang_management_internal_ThreadMXBeanImpl_getThreadInfoImpl(JNIEnv *env, jobject beanInstance,
 	jlong id, jint maxStackDepth);
-extern J9_CFUNC jboolean JNICALL 
+extern J9_CFUNC jboolean JNICALL
 Java_com_ibm_java_lang_management_internal_ThreadMXBeanImpl_isObjectMonitorUsageSupportedImpl(JNIEnv *env, jobject beanInstance);
 extern J9_CFUNC jboolean JNICALL
 Java_com_ibm_java_lang_management_internal_ThreadMXBeanImpl_isSynchronizerUsageSupportedImpl(JNIEnv *env, jobject beanInstance);
@@ -300,6 +309,13 @@ extern J9_CFUNC jint
 J9SigQuitStartup (J9JavaVM * vm);
 #endif /* J9VM_INTERP_SIG_QUIT_THREAD (autogen) */
 
+/* sigusr2.c */
+#if defined(J9VM_INTERP_SIG_USR2)
+extern J9_CFUNC void
+J9SigUsr2Shutdown(J9JavaVM *vm);
+extern J9_CFUNC jint
+J9SigUsr2Startup(J9JavaVM *vm);
+#endif /* defined(J9VM_INTERP_SIG_USR2) */
 
 /* BBjclNativesCommonExceptionHelpers*/
 void
@@ -362,6 +378,9 @@ Java_com_ibm_lang_management_internal_ExtendedGarbageCollectorMXBeanImpl_getLast
 /* BBjclNativesCommonClassLoader*/
 jboolean JNICALL Java_java_lang_ClassLoader_isVerboseImpl (JNIEnv *env, jclass clazz);
 jclass JNICALL Java_java_lang_ClassLoader_defineClassImpl (JNIEnv *env, jobject receiver, jstring className, jbyteArray classRep, jint offset, jint length, jobject protectionDomain);
+#if JAVA_SPEC_VERSION >= 15
+jclass JNICALL Java_java_lang_ClassLoader_defineClassImpl1(JNIEnv *env, jobject receiver, jclass hostClass, jstring className, jbyteArray classRep, jobject protectionDomain, jboolean init, jint flags, jobject classData);
+#endif /* JAVA_SPEC_VERSION >= 15 */
 jboolean JNICALL Java_java_lang_ClassLoader_foundJavaAssertOption (JNIEnv *env, jclass ignored);
 jint JNICALL Java_com_ibm_oti_vm_BootstrapClassLoader_addJar(JNIEnv *env, jobject receiver, jbyteArray jarPath);
 
@@ -412,12 +431,12 @@ Java_com_ibm_java_lang_management_internal_MemoryMXBeanImpl_getMaxHeapSizeLimitI
 extern J9_CFUNC jlong JNICALL
 Java_com_ibm_java_lang_management_internal_MemoryMXBeanImpl_getMinHeapSizeImpl (JNIEnv *env, jobject beanInstance);
 extern J9_CFUNC jlong JNICALL
-Java_com_ibm_java_lang_management_internal_MemoryMXBeanImpl_getGCMasterThreadCpuUsedImpl(JNIEnv *env, jobject beanInstance);
+Java_com_ibm_java_lang_management_internal_MemoryMXBeanImpl_getGCMainThreadCpuUsedImpl(JNIEnv *env, jobject beanInstance);
 extern J9_CFUNC jlong JNICALL
-Java_com_ibm_java_lang_management_internal_MemoryMXBeanImpl_getGCSlaveThreadsCpuUsedImpl(JNIEnv *env, jobject beanInstance);
-extern J9_CFUNC jint JNICALL 
+Java_com_ibm_java_lang_management_internal_MemoryMXBeanImpl_getGCWorkerThreadsCpuUsedImpl(JNIEnv *env, jobject beanInstance);
+extern J9_CFUNC jint JNICALL
 Java_com_ibm_java_lang_management_internal_MemoryMXBeanImpl_getMaximumGCThreadsImpl(JNIEnv *env, jobject beanInstance);
-extern J9_CFUNC jint JNICALL 
+extern J9_CFUNC jint JNICALL
 Java_com_ibm_java_lang_management_internal_MemoryMXBeanImpl_getCurrentGCThreadsImpl(JNIEnv *env, jobject beanInstance);
 
 
@@ -426,11 +445,11 @@ extern J9_CFUNC IDATA J9VMDllMain (J9JavaVM* vm, IDATA stage, void* reserved);
 extern J9_CFUNC jint JNICALL JVM_OnLoad (JavaVM * jvm, char *options, void *reserved);
 
 /* dump.c */
-jint JNICALL 
+jint JNICALL
 Java_com_ibm_jvm_Dump_JavaDumpImpl (JNIEnv *env, jclass clazz);
-jint JNICALL 
+jint JNICALL
 Java_com_ibm_jvm_Dump_HeapDumpImpl (JNIEnv *env, jclass clazz);
-jint JNICALL 
+jint JNICALL
 Java_com_ibm_jvm_Dump_SystemDumpImpl (JNIEnv *env, jclass clazz);
 jint JNICALL
 Java_com_ibm_jvm_Dump_SnapDumpImpl (JNIEnv *env, jclass clazz);
@@ -613,7 +632,7 @@ void JNICALL
 Java_openj9_internal_tools_attach_target_IPC_tracepoint(JNIEnv *env, jclass clazz, jint statusCode, jstring message);
 
 /* J9SourceJclExceptionSupport*/
-extern J9_CFUNC j9array_t  
+extern J9_CFUNC j9array_t
 getStackTrace (J9VMThread * vmThread, j9object_t* exceptionAddr, UDATA pruneConstructors);
 
 /* J9SourceJclClearInit*/
@@ -637,7 +656,7 @@ extern J9_CFUNC char* catPaths (J9PortLibrary* portLib, char* path1, char* path2
 
 /* BBjclNativesCommonUnsafe*/
 
-
+#if JAVA_SPEC_VERSION < 17
 /**
  * Unsafe method used to create anonClasses
  *
@@ -654,6 +673,7 @@ extern J9_CFUNC char* catPaths (J9PortLibrary* portLib, char* path1, char* path2
  */
 jclass JNICALL
 Java_sun_misc_Unsafe_defineAnonymousClass(JNIEnv *env, jobject receiver, jclass hostClass, jbyteArray bytecodes, jobjectArray constPatches);
+#endif /* JAVA_SPEC_VERSION < 17 */
 jclass JNICALL
 Java_sun_misc_Unsafe_defineClass__Ljava_lang_String_2_3BIILjava_lang_ClassLoader_2Ljava_security_ProtectionDomain_2 (
 	JNIEnv *env, jobject receiver, jstring className, jbyteArray classRep, jint offset, jint length, jobject classLoader, jobject protectionDomain);
@@ -661,7 +681,7 @@ void JNICALL
 Java_sun_misc_Unsafe_setMemory__Ljava_lang_Object_2JJB(JNIEnv *env, jobject receiver, jobject obj, jlong offset, jlong size, jbyte value);
 void JNICALL Java_sun_misc_Unsafe_registerNatives(JNIEnv *env, jclass clazz);
 void JNICALL Java_jdk_internal_misc_Unsafe_registerNatives(JNIEnv *env, jclass clazz);
-jboolean JNICALL Java_jdk_internal_misc_Unsafe_shouldBeInitialized(JNIEnv *env, jobject receiver, jclass clazz);
+jboolean JNICALL Java_sun_misc_Unsafe_shouldBeInitialized(JNIEnv *env, jobject receiver, jclass clazz);
 jint JNICALL Java_sun_misc_Unsafe_pageSize(JNIEnv *env, jobject receiver);
 jint JNICALL Java_sun_misc_Unsafe_getLoadAverage(JNIEnv *env, jobject receiver, jdoubleArray loadavg, jint nelems);
 jboolean JNICALL Java_sun_misc_Unsafe_unalignedAccess0(JNIEnv *env, jobject receiver);
@@ -678,17 +698,24 @@ jobject JNICALL Java_jdk_internal_misc_Unsafe_compareAndExchangeObjectVolatile(J
 jint JNICALL Java_jdk_internal_misc_Unsafe_compareAndExchangeIntVolatile(JNIEnv *env, jobject receiver, jobject obj1, jlong size1, jint size2, jint size3);
 jlong JNICALL Java_jdk_internal_misc_Unsafe_compareAndExchangeLongVolatile(JNIEnv *env, jobject receiver, jobject obj1, jlong size1, jlong size2, jlong size3);
 
+/* vector natives */
+jint JNICALL
+Java_jdk_internal_vm_vector_VectorSupport_registerNatives(JNIEnv *env, jclass clazz);
+jint JNICALL
+Java_jdk_internal_vm_vector_VectorSupport_getMaxLaneCount(JNIEnv *env, jclass clazz, jclass elementType);
+
+
 /* BBjclNativesCommonVM*/
 jint JNICALL Java_com_ibm_oti_vm_VM_getBootClassPathCount (JNIEnv * env, jclass clazz);
-jint JNICALL 
+jint JNICALL
 Java_com_ibm_oti_vm_VM_allInstances (JNIEnv * env, jclass unused, jclass clazz, jobjectArray target );
 jint JNICALL Java_com_ibm_oti_vm_VM_getClassPathCount (JNIEnv * env, jclass clazz);
 jint JNICALL Java_com_ibm_oti_vm_VM_processorsImpl (JNIEnv * env, jclass clazz);
-jobject JNICALL 
+jobject JNICALL
 Java_com_ibm_oti_vm_VM_getHttpProxyImpl (JNIEnv *env, jobject recv);
 jstring JNICALL
 Java_com_ibm_oti_vm_VM_setProperty (JNIEnv *env, jobject recv, jstring prop, jstring value);
-jint JNICALL 
+jint JNICALL
 Java_com_ibm_oti_vm_VM_setCommonData (JNIEnv * env, jclass unused, jobject string1, jobject string2 );
 jboolean JNICALL
 Java_com_ibm_oti_vm_VM_setDaemonThreadImpl (JNIEnv *env, jobject recv, jobject aThread);
@@ -706,18 +733,18 @@ jint initializeKnownClasses (J9JavaVM* vm, U_32 runtimeFlags);
 UDATA initializeRequiredClasses(J9VMThread *vmThread, char* libName);
 
 /* J9SourceJclDefineClass*/
-extern J9_CFUNC jclass 
+extern J9_CFUNC jclass
 defineClassCommon (JNIEnv *env, jobject classLoaderObject,
-	jstring className, jbyteArray classRep, jint offset, jint length, jobject protectionDomain, UDATA options, J9Class *hostClass, J9ClassPatchMap *patchMap);
+	jstring className, jbyteArray classRep, jint offset, jint length, jobject protectionDomain, UDATA *options, J9Class *hostClass, J9ClassPatchMap *patchMap, BOOLEAN validateName);
 
 /* BBjclNativesCommonAccessController*/
 jboolean JNICALL Java_java_security_AccessController_initializeInternal (JNIEnv *env, jclass thisClz);
 
 /* BBjclNativesCommonProxy*/
 jclass JNICALL Java_java_lang_reflect_Proxy_defineClassImpl (JNIEnv * env, jclass recvClass, jobject classLoader, jstring className, jbyteArray classBytes);
-jclass JNICALL 
+jclass JNICALL
 Java_java_lang_reflect_Proxy_defineClass0__Ljava_lang_ClassLoader_2Ljava_lang_String_2_3BIILjava_lang_Object_2_3Ljava_lang_Object_2Ljava_lang_Object_2 (JNIEnv * env, jclass recvClass, jobject classLoader, jstring className, jbyteArray classBytes, jint offset, jint length, jobject pd, jobject signers, jobject source);
-jclass JNICALL 
+jclass JNICALL
 Java_java_lang_reflect_Proxy_defineClass0__Ljava_lang_ClassLoader_2Ljava_lang_String_2_3BII (JNIEnv * env, jclass recvClass, jobject classLoader, jstring className, jbyteArray classBytes, jint offset, jint length);
 
 /* BBjclNativesCommonGlobals*/
@@ -728,7 +755,7 @@ jint JNICALL JCL_OnLoad (JavaVM * vm, void *reserved);
 extern J9_CFUNC j9object_t
 createStackTraceThrowable (J9VMThread *currentThread,  const UDATA *frames, UDATA maxFrames);
 extern J9_CFUNC j9object_t
-getStackTraceForThread (J9VMThread * vmThread, J9VMThread *targetThread, UDATA skipCount);
+getStackTraceForThread (J9VMThread *vmThread, J9VMThread *targetThread, UDATA skipCount, j9object_t threadObject);
 
 /* J9SourceJclStandardInit*/
 jint JCL_OnUnload (J9JavaVM* vm, void* reserved);
@@ -892,7 +919,7 @@ jobject JNICALL Java_java_lang_Class_getDeclaredAnnotationsData(JNIEnv *env, job
 jobject JNICALL Java_java_lang_Class_getStackClasses(JNIEnv *env, jclass jlHeapClass, jint maxDepth, jboolean stopAtPrivileged);
 jobject JNICALL Java_java_security_AccessController_getAccSnapshot(JNIEnv* env, jclass jsAccessController, jint startingFrame, jboolean forDoPrivilegedWithCombiner);
 jobject JNICALL Java_java_security_AccessController_getCallerPD(JNIEnv* env, jclass jsAccessController, jint startingFrame);
-jobject JNICALL Java_com_ibm_oti_vm_VM_getClassNameImpl(JNIEnv *env, jclass recv, jclass jlClass);
+jobject JNICALL Java_com_ibm_oti_vm_VM_getClassNameImpl(JNIEnv *env, jclass recv, jclass jlClass, jboolean internAndAssign);
 jobject JNICALL Java_java_lang_Class_getDeclaredFieldImpl(JNIEnv *env, jobject recv, jstring jname);
 jarray JNICALL Java_java_lang_Class_getDeclaredFieldsImpl(JNIEnv *env, jobject recv);
 #if JAVA_SPEC_VERSION >= 11
@@ -908,39 +935,93 @@ jobject JNICALL Java_sun_misc_Perf_createLong(JNIEnv *env, jobject perf, jstring
 jobject JNICALL Java_sun_misc_Perf_createByteArray(JNIEnv *env, jobject perf, jstring name, jint variability, jint units, jarray value, jint maxLength);
 jlong JNICALL Java_sun_misc_Perf_highResCounter(JNIEnv *env, jobject perf);
 jlong JNICALL Java_sun_misc_Perf_highResFrequency(JNIEnv *env, jobject perf);
+#if JAVA_SPEC_VERSION >= 19
+jobject JNICALL Java_jdk_internal_perf_Perf_attach0(JNIEnv *env, jobject perf, jint lvmid);
+#endif /* JAVA_SPEC_VERSION >= 19 */
 void JNICALL Java_jdk_internal_perf_Perf_registerNatives(JNIEnv *env, jclass clazz);
 
-/* java_dyn_methodhandle.c */
-jclass JNICALL Java_java_lang_invoke_PrimitiveHandle_lookupMethod(JNIEnv *env, jobject handle, jclass lookupClass, jstring name, jstring signature, jbyte kind, jclass specialCaller);
-void JNICALL Java_java_lang_invoke_MethodHandle_requestCustomThunkFromJit(JNIEnv* env, jobject handle, jobject thunk);
-jclass JNICALL Java_java_lang_invoke_PrimitiveHandle_lookupField(JNIEnv *env, jobject handle, jclass lookupClass, jstring name, jstring signature, jboolean isStatic, jclass accessClass);
-UDATA lookupField(JNIEnv *env, jboolean isStatic, J9Class *j9LookupClass, jstring name, J9UTF8 *sigUTF, J9Class **definingClass, UDATA *romField, jclass accessClass);
-jboolean JNICALL Java_java_lang_invoke_PrimitiveHandle_setVMSlotAndRawModifiersFromField(JNIEnv *env, jclass clazz, jobject handle, jobject reflectField);
-jboolean JNICALL Java_java_lang_invoke_PrimitiveHandle_setVMSlotAndRawModifiersFromMethod(JNIEnv *env, jclass clazz, jobject handle, jclass declaringClass, jobject method, jbyte kind, jclass specialToken);
-jboolean JNICALL Java_java_lang_invoke_PrimitiveHandle_setVMSlotAndRawModifiersFromConstructor(JNIEnv *env, jclass clazz, jobject handle, jobject ctor);
-jlong JNICALL Java_java_lang_invoke_MethodHandle_findVMDispatchTarget(JNIEnv *env, jclass clazz, jint kind);
-jboolean JNICALL Java_java_lang_invoke_PrimitiveHandle_setVMSlotAndRawModifiersFromSpecialHandle(JNIEnv *env, jclass clazz, jobject handle, jobject specialHandle);
-jint JNICALL Java_java_lang_invoke_MethodHandle_vmRefFieldOffset(JNIEnv *env, jclass clazz, jclass ignored);
-jint JNICALL Java_java_lang_invoke_MethodHandle_addressSize(JNIEnv *env, jclass clazz);
-jobject JNICALL Java_java_lang_invoke_MethodHandle_invokeExact(JNIEnv *env, jclass ignored, jobject handle, jobject args);
-jobject JNICALL Java_java_lang_invoke_MethodHandle_invokeGeneric(JNIEnv *env, jclass ignored, jobject handle, jobject args);
+/* Used by both OpenJ9 & OJDK MH impl */
+#if defined (J9VM_OPT_METHOD_HANDLE) || defined(J9VM_OPT_OPENJDK_METHODHANDLE)
 jobject JNICALL Java_java_lang_invoke_MethodHandle_invoke(JNIEnv *env, jclass ignored, jobject handle, jobject args);
-void JNICALL Java_java_lang_invoke_ThunkTuple_registerNatives(JNIEnv *env, jclass nativeClass);
-void JNICALL Java_java_lang_invoke_InterfaceHandle_registerNatives(JNIEnv *env, jclass nativeClass);
-jlong JNICALL Java_java_lang_invoke_MethodHandle_vtableOffset(JNIEnv *env, jclass ignored);
-void JNICALL Java_java_lang_invoke_MutableCallSite_freeGlobalRef(JNIEnv *env, jclass mutableCallSite, jlong bypassOffset);
+jobject JNICALL Java_java_lang_invoke_MethodHandle_invokeExact(JNIEnv *env, jclass ignored, jobject handle, jobject args);
+#endif
+
+/* java_dyn_methodhandle.c */
+#if defined(J9VM_OPT_METHOD_HANDLE)
+void		JNICALL Java_java_lang_invoke_InterfaceHandle_registerNatives(JNIEnv *env, jclass nativeClass);
+void		JNICALL Java_java_lang_invoke_MethodHandle_requestCustomThunkFromJit(JNIEnv* env, jobject handle, jobject thunk);
+jint		JNICALL Java_java_lang_invoke_MethodHandle_vmRefFieldOffset(JNIEnv *env, jclass clazz, jclass ignored);
+void		JNICALL Java_java_lang_invoke_MutableCallSite_freeGlobalRef(JNIEnv *env, jclass mutableCallSite, jlong bypassOffset);
+void		JNICALL Java_java_lang_invoke_MutableCallSite_registerNatives(JNIEnv *env, jclass nativeClass);
+jclass		JNICALL Java_java_lang_invoke_PrimitiveHandle_lookupField(JNIEnv *env, jobject handle, jclass lookupClass, jstring name, jstring signature, jboolean isStatic, jclass accessClass);
+jclass		JNICALL Java_java_lang_invoke_PrimitiveHandle_lookupMethod(JNIEnv *env, jobject handle, jclass lookupClass, jstring name, jstring signature, jbyte kind, jclass specialCaller);
+jboolean	JNICALL Java_java_lang_invoke_PrimitiveHandle_setVMSlotAndRawModifiersFromConstructor(JNIEnv *env, jclass clazz, jobject handle, jobject ctor);
+jboolean	JNICALL Java_java_lang_invoke_PrimitiveHandle_setVMSlotAndRawModifiersFromField(JNIEnv *env, jclass clazz, jobject handle, jobject reflectField);
+jboolean	JNICALL Java_java_lang_invoke_PrimitiveHandle_setVMSlotAndRawModifiersFromMethod(JNIEnv *env, jclass clazz, jobject handle, jclass declaringClass, jobject method, jbyte kind, jclass specialToken);
+jboolean	JNICALL Java_java_lang_invoke_PrimitiveHandle_setVMSlotAndRawModifiersFromSpecialHandle(JNIEnv *env, jclass clazz, jobject handle, jobject specialHandle);
+void		JNICALL Java_java_lang_invoke_ThunkTuple_registerNatives(JNIEnv *env, jclass nativeClass);
+
+UDATA lookupField(JNIEnv *env, jboolean isStatic, J9Class *j9LookupClass, jstring name, J9UTF8 *sigUTF, J9Class **definingClass, UDATA *romField, jclass accessClass);
 void setClassLoadingConstraintLinkageError(J9VMThread *vmThread, J9Class *methodOrFieldClass, J9UTF8 *signatureUTF8);
 #ifdef J9VM_OPT_PANAMA
 extern J9_CFUNC jlong JNICALL
 Java_java_lang_invoke_MethodHandles_findNativeAddress(JNIEnv *env, jclass jlClass, jstring methodName);
 #endif
+#if JAVA_SPEC_VERSION >= 15
+extern J9_CFUNC void JNICALL
+Java_java_lang_invoke_MethodHandleNatives_checkClassBytes(JNIEnv *env, jclass jlClass, jbyteArray classRep);
+#endif /* JAVA_SPEC_VERSION >= 15 */
+#endif /* defined(J9VM_OPT_METHOD_HANDLE) */
 
 /* java_dyn_methodtype.c */
+#if defined(J9VM_OPT_METHOD_HANDLE)
 jobject JNICALL Java_java_lang_invoke_MethodType_makeTenured(JNIEnv *env, jclass clazz, jobject receiverObject);
+#endif /* defined(J9VM_OPT_METHOD_HANDLE) */
+
+/* java_lang_invoke_MethodHandleNatives.cpp */
+#if defined(J9VM_OPT_OPENJDK_METHODHANDLE)
+void JNICALL Java_java_lang_invoke_MethodHandleNatives_init(JNIEnv *env, jclass clazz, jobject self, jobject ref);
+void JNICALL Java_java_lang_invoke_MethodHandleNatives_expand(JNIEnv *env, jclass clazz, jobject self);
+jobject JNICALL Java_java_lang_invoke_MethodHandleNatives_resolve(
+#if JAVA_SPEC_VERSION == 8
+                                                                  JNIEnv *env, jclass clazz, jobject self, jclass caller);
+#elif JAVA_SPEC_VERSION == 11 /* JAVA_SPEC_VERSION == 8 */
+                                                                  JNIEnv *env, jclass clazz, jobject self, jclass caller,
+                                                                  jboolean speculativeResolve);
+#elif JAVA_SPEC_VERSION >= 16 /* JAVA_SPEC_VERSION == 11 */
+                                                                  JNIEnv *env, jclass clazz, jobject self, jclass caller,
+                                                                  jint lookupMode, jboolean speculativeResolve);
+#endif /* JAVA_SPEC_VERSION == 8 */
+jint JNICALL Java_java_lang_invoke_MethodHandleNatives_getMembers(
+                                                                  JNIEnv *env, jclass clazz, jclass defc, jstring matchName,
+                                                                  jstring matchSig, jint matchFlags, jclass caller, jint skip,
+                                                                  jobjectArray results);
+jlong JNICALL Java_java_lang_invoke_MethodHandleNatives_objectFieldOffset(JNIEnv *env, jclass clazz, jobject self);
+jlong JNICALL Java_java_lang_invoke_MethodHandleNatives_staticFieldOffset(JNIEnv *env, jclass clazz, jobject self);
+jobject JNICALL Java_java_lang_invoke_MethodHandleNatives_staticFieldBase(JNIEnv *env, jclass clazz, jobject self);
+jobject JNICALL Java_java_lang_invoke_MethodHandleNatives_getMemberVMInfo(JNIEnv *env, jclass clazz, jobject self);
+void JNICALL Java_java_lang_invoke_MethodHandleNatives_setCallSiteTargetNormal(JNIEnv *env, jclass clazz, jobject callsite, jobject target);
+void JNICALL Java_java_lang_invoke_MethodHandleNatives_setCallSiteTargetVolatile(JNIEnv *env, jclass clazz, jobject callsite, jobject target);
+#if JAVA_SPEC_VERSION >= 11
+void JNICALL Java_java_lang_invoke_MethodHandleNatives_copyOutBootstrapArguments(
+                                                                                 JNIEnv *env, jclass clazz, jclass caller,
+                                                                                 jintArray indexInfo, jint start, jint end,
+                                                                                 jobjectArray buf, jint pos, jboolean resolve,
+                                                                                 jobject ifNotAvailable);
+void JNICALL Java_java_lang_invoke_MethodHandleNatives_clearCallSiteContext(JNIEnv *env, jclass clazz, jobject context);
+#endif /* JAVA_SPEC_VERSION >= 11 */
+jint JNICALL Java_java_lang_invoke_MethodHandleNatives_getNamedCon(JNIEnv *env, jclass clazz, jint which, jobjectArray name);
+void JNICALL Java_java_lang_invoke_MethodHandleNatives_registerNatives(JNIEnv *env, jclass clazz);
+#if JAVA_SPEC_VERSION == 8
+jint JNICALL Java_java_lang_invoke_MethodHandleNatives_getConstant(JNIEnv *env, jclass clazz, jint kind);
+#endif /* JAVA_SPEC_VERSION == 8 */
+#endif /* defined(J9VM_OPT_OPENJDK_METHODHANDLE) */
 
 /* java_lang_invoke_VarHandle.c */
+#if defined(J9VM_OPT_METHOD_HANDLE)
 jlong JNICALL Java_java_lang_invoke_FieldVarHandle_lookupField(JNIEnv *env, jobject handle, jclass lookupClass, jstring name, jstring signature, jclass type, jboolean isStatic, jclass accessClass);
 jlong JNICALL Java_java_lang_invoke_FieldVarHandle_unreflectField(JNIEnv *env, jobject handle, jobject reflectField, jboolean isStatic);
+#endif /* defined(J9VM_OPT_METHOD_HANDLE) */
 jobject JNICALL Java_java_lang_invoke_VarHandle_get(JNIEnv *env, jobject handle, jobject args);
 void JNICALL Java_java_lang_invoke_VarHandle_set(JNIEnv *env, jobject handle, jobject args);
 jobject JNICALL Java_java_lang_invoke_VarHandle_getVolatile(JNIEnv *env, jobject handle, jobject args);
@@ -1002,11 +1083,11 @@ jfloat JNICALL Java_sun_reflect_ConstantPool_getFloatAt0(JNIEnv *env, jobject un
 jdouble JNICALL Java_sun_reflect_ConstantPool_getDoubleAt0(JNIEnv *env, jobject unusedObject, jobject constantPoolOop, jint cpIndex);
 jobject JNICALL Java_sun_reflect_ConstantPool_getStringAt0(JNIEnv *env, jobject unusedObject, jobject constantPoolOop, jint cpIndex);
 jobject JNICALL Java_sun_reflect_ConstantPool_getUTF8At0(JNIEnv *env, jobject unusedObject, jobject constantPoolOop, jint cpIndex);
-jint JNICALL Java_java_lang_invoke_MethodHandle_getCPTypeAt(JNIEnv *env, jclass unusedClass, jobject constantPoolOop, jint cpIndex);
-jobject JNICALL Java_java_lang_invoke_MethodHandle_getCPMethodTypeAt(JNIEnv *env, jclass unusedClass, jobject constantPoolOop, jint cpIndex);
-jobject JNICALL Java_java_lang_invoke_MethodHandle_getCPMethodHandleAt(JNIEnv *env, jclass unusedClass, jobject constantPoolOop, jint cpIndex);
-jobject JNICALL Java_java_lang_invoke_MethodHandle_getCPClassNameAt(JNIEnv *env, jobject unusedObject, jobject constantPoolOop, jint cpIndex);
-jobject JNICALL Java_java_lang_invoke_MethodHandle_getCPConstantDynamicAt(JNIEnv *env, jclass unusedClass, jobject constantPoolOop, jint cpIndex);
+jint JNICALL Java_java_lang_invoke_MethodHandleResolver_getCPTypeAt(JNIEnv *env, jclass unusedClass, jobject constantPoolOop, jint cpIndex);
+jobject JNICALL Java_java_lang_invoke_MethodHandleResolver_getCPMethodTypeAt(JNIEnv *env, jclass unusedClass, jobject constantPoolOop, jint cpIndex);
+jobject JNICALL Java_java_lang_invoke_MethodHandleResolver_getCPMethodHandleAt(JNIEnv *env, jclass unusedClass, jobject constantPoolOop, jint cpIndex);
+jobject JNICALL Java_java_lang_invoke_MethodHandleResolver_getCPClassNameAt(JNIEnv *env, jobject unusedObject, jobject constantPoolOop, jint cpIndex);
+jobject JNICALL Java_java_lang_invoke_MethodHandleResolver_getCPConstantDynamicAt(JNIEnv *env, jclass unusedClass, jobject constantPoolOop, jint cpIndex);
 jint JNICALL Java_jdk_internal_reflect_ConstantPool_getClassRefIndexAt0(JNIEnv *env, jobject unusedObject, jobject constantPoolOop, jint cpIndex);
 jint JNICALL Java_jdk_internal_reflect_ConstantPool_getNameAndTypeRefIndexAt0(JNIEnv *env, jobject unusedObject, jobject constantPoolOop, jint cpIndex);
 jobject JNICALL Java_jdk_internal_reflect_ConstantPool_getNameAndTypeRefInfoAt0(JNIEnv *env, jobject unusedObject, jobject constantPoolOop, jint cpIndex);
@@ -1043,12 +1124,22 @@ jobjectArray JNICALL Java_com_ibm_oti_vm_VM_getVMArgsImpl(JNIEnv *env, jobject r
 jlong JNICALL Java_javax_rcm_CPUThrottlingRunnable_requestToken(JNIEnv *env, jobject runnable, jlong tokenNumber);
 jlong JNICALL Java_javax_rcm_CPUThrottlingRunnable_getTokenBucketLimit(JNIEnv *env, jclass clazz, jlong resourceHandle);
 jlong JNICALL Java_javax_rcm_CPUThrottlingRunnable_getTokenBucketInterval(JNIEnv *env, jclass clazz, jlong resourceHandle);
-/* thread.c */
+
+/* thread.cpp */
 void JNICALL Java_java_lang_Thread_yield(JNIEnv *env, jclass threadClass);
+#if JAVA_SPEC_VERSION < 20
+void JNICALL Java_java_lang_Thread_resumeImpl(JNIEnv *env, jobject rcv);
+void JNICALL Java_java_lang_Thread_stopImpl(JNIEnv *env, jobject rcv, jobject stopThrowable);
+void JNICALL Java_java_lang_Thread_suspendImpl(JNIEnv *env, jobject rcv);
+#endif /* JAVA_SPEC_VERSION < 20 */
 
 /* java_lang_Class.c */
 jboolean JNICALL
 Java_java_lang_Class_isClassADeclaredClass(JNIEnv *env, jobject jlClass, jobject aClass);
+#if JAVA_SPEC_VERSION >= 15
+jboolean JNICALL
+Java_java_lang_Class_isHiddenImpl(JNIEnv *env, jobject recv);
+#endif /* JAVA_SPEC_VERSION >= 15 */
 
 /* Virtualization_management_HypervisorMXBean */
 extern J9_CFUNC jint JNICALL
@@ -1074,7 +1165,7 @@ Java_com_ibm_lang_management_internal_ExtendedOperatingSystemMXBeanImpl_getHardw
 
 /**
  * Returns the maximum number of file descriptors that can be opened in a process.
- * 
+ *
  * Class: com_ibm_lang_management_UnixOperatingSystemMXBean
  * Method: getMaxFileDescriptorCountImpl
  *
@@ -1082,7 +1173,7 @@ Java_com_ibm_lang_management_internal_ExtendedOperatingSystemMXBeanImpl_getHardw
  * @param[in] theClass The bean class.
  *
  * @return The maximum number of file descriptors that can be opened in a process;
- * -1 on failure.  If this is set to unlimited on the OS, simply return the signed 
+ * -1 on failure.  If this is set to unlimited on the OS, simply return the signed
  * integer (long long) limit.
  */
 jlong JNICALL
@@ -1160,9 +1251,57 @@ Java_com_ibm_lang_management_internal_JvmCpuMonitor_getThreadCategoryImpl(JNIEnv
  */
 jint JNICALL
 Java_com_ibm_oti_vm_VM_markCurrentThreadAsSystemImpl(JNIEnv *env);
+/**
+ * Gets the J9ConstantPool address from a J9Class address
+ * @param j9clazz J9Class address
+ * @return Address of J9ConstantPool
+ */
+jlong JNICALL
+Java_com_ibm_oti_vm_VM_getJ9ConstantPoolFromJ9Class(JNIEnv *env, jclass unused, jlong j9clazz);
+
+#if JAVA_SPEC_VERSION >= 16
+jboolean JNICALL
+Java_java_lang_ref_Reference_refersTo(JNIEnv *env, jobject reference, jobject target);
+
+void JNICALL
+Java_jdk_internal_foreign_abi_UpcallStubs_registerNatives(JNIEnv *env, jclass clazz);
+
+jboolean JNICALL
+Java_jdk_internal_foreign_abi_UpcallStubs_freeUpcallStub0(JNIEnv *env, jclass clazz, jlong address);
+
+void JNICALL
+Java_jdk_internal_misc_ScopedMemoryAccess_registerNatives(JNIEnv *env, jclass clazz);
+
+jboolean JNICALL
+#if JAVA_SPEC_VERSION >= 19
+Java_jdk_internal_misc_ScopedMemoryAccess_closeScope0(JNIEnv *env, jobject instance, jobject scope);
+#else /* JAVA_SPEC_VERSION >= 19 */
+Java_jdk_internal_misc_ScopedMemoryAccess_closeScope0(JNIEnv *env, jobject instance, jobject scope, jobject exception);
+#endif /* JAVA_SPEC_VERSION >= 19 */
+#endif /* JAVA_SPEC_VERSION >= 16 */
+
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+/* criu.cpp */
+jlong JNICALL
+Java_openj9_internal_criu_InternalCRIUSupport_getCheckpointRestoreNanoTimeDeltaImpl(JNIEnv *env, jclass unused);
+
+jboolean JNICALL
+Java_openj9_internal_criu_InternalCRIUSupport_isCheckpointAllowedImpl(JNIEnv *env, jclass unused);
+
+jboolean JNICALL
+Java_openj9_internal_criu_InternalCRIUSupport_isCRIUSupportEnabledImpl(JNIEnv *env, jclass unused);
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
+
+#if JAVA_SPEC_VERSION >= 19
+void JNICALL
+Java_jdk_internal_vm_Continuation_pin(JNIEnv *env, jclass unused);
+
+void JNICALL
+Java_jdk_internal_vm_Continuation_unpin(JNIEnv *env, jclass unused);
+#endif /* JAVA_SPEC_VERSION >= 19 */
 
 #ifdef __cplusplus
-}
+} /* extern "C" */
 #endif
 
 #endif /* JCLPROTS_H */

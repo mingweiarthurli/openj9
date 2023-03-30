@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -52,13 +52,13 @@ public:
 private:
 	/**
 	 * Updates the contents of _extensions->compactGroupPersistentStats before a PGC copy-forward operation.
-	 * @param env[in] The master GC thread
+	 * @param env[in] The main GC thread
 	 */
 	void updatePersistentStatsBeforeCopyForward(MM_EnvironmentVLHGC *env);
 
 	/**
 	 * Updates the contents of _extensions->compactGroupPersistentStats before a PGC copy-forward operation.
-	 * @param env[in] The master GC thread
+	 * @param env[in] The main GC thread
 	 */
 	void updatePersistentStatsAfterCopyForward(MM_EnvironmentVLHGC *env);
 
@@ -80,21 +80,19 @@ public:
 
 	/**
 	 * Runs a PGC collect using the copy forward mechanism. This call does report events, before and after the collection, but does not collect statistics.
-	 * @param env[in] The master GC thread
-	 * @param allocDescription[in] The allocation request which triggered the collect
-	 * @return flag indicating if the copy forward collection was successful or not.
+	 * @param env[in] The main GC thread
 	 */
-	bool performCopyForwardForPartialGC(MM_EnvironmentVLHGC *env);
+	void performCopyForwardForPartialGC(MM_EnvironmentVLHGC *env);
 
 	/**
 	 * Infrastructure and state setup pre-copyForward.
-	 * @param env[in] Master GC thread.
+	 * @param env[in] Main GC thread.
 	 */
 	void preCopyForwardSetup(MM_EnvironmentVLHGC *env);
 
 	/**
 	 * Infrastructure and state cleanup post-copyForward.
-	 * @param env[in] Master GC thread.
+	 * @param env[in] Main GC thread.
 	 */
 	void postCopyForwardCleanup(MM_EnvironmentVLHGC *env);
 	
@@ -125,6 +123,11 @@ public:
 		if (NULL != _breadthFirstCopyForwardScheme) {
 			_breadthFirstCopyForwardScheme->setReservedNonEvacuatedRegions(regionCount);
 		}
+	}
+
+	MMINLINE bool isConcurrentCycleInProgress()
+	{
+		return _breadthFirstCopyForwardScheme->isConcurrentCycleInProgress();
 	}
 };
 

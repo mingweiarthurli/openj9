@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -46,7 +46,6 @@
 
 #define RAS_NETWORK_WARNING_TIME 60000
 
-#if (defined(J9VM_RAS_DUMP_AGENTS)) 
 static omr_error_t primordialTriggerDumpAgents (struct J9JavaVM *vm, struct J9VMThread *self, UDATA eventFlags, struct J9RASdumpEventData *eventData);
 static omr_error_t primordialSeekDumpAgent (struct J9JavaVM *vm, struct J9RASdumpAgent **agentPtr, J9RASdumpFn dumpFn);
 static omr_error_t primordialInsertDumpAgent (struct J9JavaVM *vm, struct J9RASdumpAgent *agent);
@@ -55,9 +54,7 @@ static omr_error_t primordialSetDumpOption (struct J9JavaVM *vm, char *optionStr
 static omr_error_t primordialResetDumpOption (struct J9JavaVM *vm);
 static omr_error_t primordialRemoveDumpAgent (struct J9JavaVM *vm, struct J9RASdumpAgent *agent);
 static omr_error_t primordialQueryVmDump(struct J9JavaVM *vm, int buffer_size, void* options_buffer, int* data_size);
-#endif /* J9VM_RAS_DUMP_AGENTS */
 
-#if defined(J9VM_RAS_EYECATCHERS)
 void J9RASInitialize (J9JavaVM* javaVM);
 void J9RASShutdown (J9JavaVM* javaVM);
 void J9RASCheckDump(J9JavaVM* javaVM);
@@ -76,10 +73,6 @@ typedef struct J9AllocatedRAS {
 	struct J9PortVmemIdentifier vmemid;
 } J9AllocatedRAS;
 
-#endif /* J9VM_RAS_EYECATCHERS */
-
-#ifdef J9VM_RAS_DUMP_AGENTS
-
 /* Basic dump facade */
 static const J9RASdumpFunctions
 primordialDumpFacade = {
@@ -94,9 +87,6 @@ primordialDumpFacade = {
 	primordialQueryVmDump
 };
 
-#endif /* J9VM_RAS_DUMP_AGENTS */
-
-#if (defined(J9VM_RAS_DUMP_AGENTS)) 
 static omr_error_t
 primordialTriggerOneOffDump(struct J9JavaVM *vm, char *optionString, char *caller, char *fileName, size_t fileNameLength)
 {
@@ -110,10 +100,7 @@ primordialTriggerOneOffDump(struct J9JavaVM *vm, char *optionString, char *calle
 
 	return OMR_ERROR_INTERNAL;
 }
-#endif /* J9VM_RAS_DUMP_AGENTS */
 
-
-#if (defined(J9VM_RAS_DUMP_AGENTS)) 
 static omr_error_t
 primordialInsertDumpAgent(struct J9JavaVM *vm, struct J9RASdumpAgent *agent)
 {
@@ -123,10 +110,7 @@ primordialInsertDumpAgent(struct J9JavaVM *vm, struct J9RASdumpAgent *agent)
 
 	return OMR_ERROR_INTERNAL;
 }
-#endif /* J9VM_RAS_DUMP_AGENTS */
 
-
-#if (defined(J9VM_RAS_DUMP_AGENTS)) 
 static omr_error_t
 primordialRemoveDumpAgent(struct J9JavaVM *vm, struct J9RASdumpAgent *agent)
 {
@@ -136,10 +120,7 @@ primordialRemoveDumpAgent(struct J9JavaVM *vm, struct J9RASdumpAgent *agent)
 
 	return OMR_ERROR_INTERNAL;
 }
-#endif /* J9VM_RAS_DUMP_AGENTS */
 
-
-#if (defined(J9VM_RAS_DUMP_AGENTS)) 
 static omr_error_t
 primordialSeekDumpAgent(struct J9JavaVM *vm, struct J9RASdumpAgent **agentPtr, J9RASdumpFn dumpFn)
 {
@@ -149,10 +130,7 @@ primordialSeekDumpAgent(struct J9JavaVM *vm, struct J9RASdumpAgent **agentPtr, J
 
 	return OMR_ERROR_INTERNAL;
 }
-#endif /* J9VM_RAS_DUMP_AGENTS */
 
-
-#if (defined(J9VM_RAS_DUMP_AGENTS)) 
 static omr_error_t
 primordialTriggerDumpAgents(struct J9JavaVM *vm, struct J9VMThread *self, UDATA eventFlags, struct J9RASdumpEventData *eventData)
 {
@@ -183,10 +161,7 @@ primordialTriggerDumpAgents(struct J9JavaVM *vm, struct J9VMThread *self, UDATA 
 
 	return OMR_ERROR_NONE;
 }
-#endif /* J9VM_RAS_DUMP_AGENTS */
 
-
-#if (defined(J9VM_RAS_DUMP_AGENTS)) 
 static omr_error_t
 primordialSetDumpOption(struct J9JavaVM *vm, char *optionString)
 {
@@ -222,10 +197,6 @@ primordialQueryVmDump(struct J9JavaVM *vm, int buffer_size, void* options_buffer
 	return OMR_ERROR_NONE;
 }
 
-#endif /* J9VM_RAS_DUMP_AGENTS */
-
-
-
 IDATA 
 gpThreadDump(struct J9JavaVM *vm, struct J9VMThread *currentThread)
 {
@@ -252,8 +223,18 @@ gpThreadDump(struct J9JavaVM *vm, struct J9VMThread *currentThread)
 		do {
 			if (currentThread->threadObject) {
 				j9object_t threadObject = currentThread->threadObject;
+#if JAVA_SPEC_VERSION >= 19
+				UDATA priority = 0;
+				UDATA isDaemon = 0;
+				j9object_t threadHolder = J9VMJAVALANGTHREAD_HOLDER(currentThread, threadObject);
+				if (NULL != threadHolder) {
+					priority = J9VMJAVALANGTHREADFIELDHOLDER_PRIORITY(currentThread, threadHolder);
+					isDaemon = J9VMJAVALANGTHREADFIELDHOLDER_DAEMON(currentThread, threadHolder);
+				}
+#else /* JAVA_SPEC_VERSION >= 19 */
 				UDATA priority = vm->internalVMFunctions->getJavaThreadPriority(vm, currentThread);
 				UDATA isDaemon = J9VMJAVALANGTHREAD_ISDAEMON(currentThread, threadObject);
+#endif /* JAVA_SPEC_VERSION >= 19 */
 				char* name = getOMRVMThreadName(currentThread->omrVMThread);
 
 				j9tty_printf(
@@ -278,8 +259,7 @@ gpThreadDump(struct J9JavaVM *vm, struct J9VMThread *currentThread)
 	return JNI_OK;
 }
 
-#if (defined(J9VM_RAS_DUMP_AGENTS)) 
-IDATA 
+IDATA
 configureRasDump(J9JavaVM *vm)
 {
 	/* Setup initial dump facade */
@@ -287,9 +267,7 @@ configureRasDump(J9JavaVM *vm)
 
 	return JNI_OK;
 }
-#endif /* J9VM_RAS_DUMP_AGENTS */
 
-#if defined(J9VM_RAS_EYECATCHERS)
 void
 J9RASInitialize(J9JavaVM* javaVM)
 {
@@ -435,9 +413,9 @@ j9rasSetServiceLevel(J9JavaVM *vm, const char *runtimeVersion) {
 #define ALLOCATE_RAS_DATA_IN_SUBALLOCATOR FALSE
 #endif /* !defined(J9ZOS390) && !defined(J9ZTPF) */
 
-#if defined(J9ZOS390) || (defined (AIXPPC) && !defined (J9VM_ENV_DATA64))
+#if defined(J9ZOS390) || (defined(AIXPPC) && !defined(J9VM_ENV_DATA64))
 #define USE_STATIC_RAS_STRUCT
-#endif /* defined(J9ZOS390) || (defined (AIXPPC) && !defined (J9VM_ENV_DATA64)) */
+#endif /* defined(J9ZOS390) || (defined(AIXPPC) && !defined(J9VM_ENV_DATA64)) */
 
 static J9RAS*
 allocateRASStruct(J9JavaVM *javaVM)
@@ -471,12 +449,12 @@ allocateRASStruct(J9JavaVM *javaVM)
 			return candidate;
 		}
 		j9vmem_vmem_params_init(&params);
-#if defined (AIXPPC)
+#if defined(AIXPPC)
 		/* the low 768MB is out of bounds on AIX. Don't even bother trying */
 		params.startAddress = (void *)0x30000000;
-#else /* defined (AIXPPC) */
+#else /* defined(AIXPPC) */
 		params.startAddress = (void *)pageSize;
-#endif /* defined (AIXPPC) */
+#endif /* defined(AIXPPC) */
 		params.endAddress = OMR_MIN((void *) candidate, (void *) (UDATA) 0xffffffff); /* don't bother allocating after the static */
 		params.byteAmount = sizeof(J9AllocatedRAS);
 		params.pageSize = pageSize;
@@ -513,7 +491,7 @@ void J9RelocateRASData(J9JavaVM* javaVM) {
 			memset((J9RAS*)GLOBAL_DATA(_j9ras_), 0, sizeof(J9RAS));
 		}
 	}
-#endif /* defined(USE_STATIC_RAS_STRUCT) */
+#endif /* !defined(USE_STATIC_RAS_STRUCT) */
 	return;
 }
 
@@ -540,7 +518,7 @@ freeRASStruct(J9JavaVM *javaVM, J9RAS* rasStruct)
 			j9vmem_free_memory(allocatedStruct, sizeof(J9AllocatedRAS), &identifier);
 		}
 	}
-#endif /* defined(USE_STATIC_RAS_STRUCT) */
+#endif /* !defined(USE_STATIC_RAS_STRUCT) */
 }
 
 void
@@ -719,5 +697,3 @@ J9RASCheckDump(J9JavaVM* javaVM)
 #endif
 #endif
 }
-
-#endif /* J9VM_RAS_EYECATCHERS */

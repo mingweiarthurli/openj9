@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2023 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -82,21 +82,22 @@ static jvmtiError jvmtiGetConstantPool_addInvokeDynamic(jvmtiGcp_translation *tr
 static jint
 jvmtiGetLoadedClassesCount(J9JavaVM * vm)
 {
+	J9InternalVMFunctions const * const vmfuncs = vm->internalVMFunctions;
 	J9ClassWalkState classWalkState;
 	jint classCount = 0;
-	J9Class *clazz;
+	J9Class *clazz = NULL;
 
 	/* Count classes (ignore primitive types and old versions of redefined classes) */
-	clazz = vm->internalVMFunctions->allLiveClassesStartDo(&classWalkState, vm, NULL);
+	clazz = vmfuncs->allLiveClassesStartDo(&classWalkState, vm, NULL);
 	while (clazz) {
 		if (J9ROMCLASS_IS_PRIMITIVE_TYPE(clazz->romClass) == 0) {
 			if ((J9CLASS_FLAGS(clazz) & J9AccClassHotSwappedOut) == 0) {
 				classCount++;
 			}
 		}
-		clazz = vm->internalVMFunctions->allLiveClassesNextDo(&classWalkState);
+		clazz = vmfuncs->allLiveClassesNextDo(&classWalkState);
 	}
-	vm->internalVMFunctions->allLiveClassesEndDo(&classWalkState);
+	vmfuncs->allLiveClassesEndDo(&classWalkState);
 
 	return classCount;
 }
@@ -114,6 +115,7 @@ jvmtiGetLoadedClasses(jvmtiEnv* env,
 	PORT_ACCESS_FROM_JAVAVM(vm);
 	jclass *rv_classes = NULL;
 	jint rv_class_count = 0;
+	J9InternalVMFunctions const * const vmfuncs = vm->internalVMFunctions;
 
 	Trc_JVMTI_jvmtiGetLoadedClasses_Entry(env);
 
@@ -123,7 +125,7 @@ jvmtiGetLoadedClasses(jvmtiEnv* env,
 		jint lastClassCount;
 		J9Class *clazz;
 
-		vm->internalVMFunctions->internalEnterVMFromJNI(currentThread);
+		vmfuncs->internalEnterVMFromJNI(currentThread);
 
 		ENSURE_PHASE_LIVE(env);
 
@@ -144,7 +146,7 @@ jvmtiGetLoadedClasses(jvmtiEnv* env,
 			jint i = 0;
 
 			/* Copy class references (ignore primitive types and old versions of redefined classes) */
-			clazz = vm->internalVMFunctions->allLiveClassesStartDo(&classWalkState, vm, NULL);
+			clazz = vmfuncs->allLiveClassesStartDo(&classWalkState, vm, NULL);
 			while (clazz) {
 				/* Check if we need more memory */
 				if (i == lastClassCount) {
@@ -156,7 +158,7 @@ jvmtiGetLoadedClasses(jvmtiEnv* env,
 						/* realloc failed - need to free the original allocation */
 						j9mem_free_memory(classRefs);
 						classRefs = NULL;
-						vm->internalVMFunctions->allLiveClassesEndDo(&classWalkState);
+						vmfuncs->allLiveClassesEndDo(&classWalkState);
 						omrthread_monitor_exit(vm->classTableMutex);
 						rc = JVMTI_ERROR_OUT_OF_MEMORY;
 						goto done;
@@ -166,13 +168,13 @@ jvmtiGetLoadedClasses(jvmtiEnv* env,
 
 				if (J9ROMCLASS_IS_PRIMITIVE_TYPE(clazz->romClass) == 0) {
 					if ((J9CLASS_FLAGS(clazz) & J9AccClassHotSwappedOut) == 0) {
-						classRefs[i++] = (jclass)vm->internalVMFunctions->j9jni_createLocalRef((JNIEnv *) currentThread, J9VM_J9CLASS_TO_HEAPCLASS(clazz));
+						classRefs[i++] = (jclass)vmfuncs->j9jni_createLocalRef((JNIEnv *) currentThread, J9VM_J9CLASS_TO_HEAPCLASS(clazz));
 					}
 				}
 
-				clazz = vm->internalVMFunctions->allLiveClassesNextDo(&classWalkState);
+				clazz = vmfuncs->allLiveClassesNextDo(&classWalkState);
 			}
-			vm->internalVMFunctions->allLiveClassesEndDo(&classWalkState);
+			vmfuncs->allLiveClassesEndDo(&classWalkState);
 
 			jvmtiData->lastClassCount = (UDATA) i;
 			rv_class_count = i;
@@ -182,7 +184,7 @@ jvmtiGetLoadedClasses(jvmtiEnv* env,
 		omrthread_monitor_exit(vm->classTableMutex);
 
 done:
-		vm->internalVMFunctions->internalExitVMToJNI(currentThread);
+		vmfuncs->internalExitVMToJNI(currentThread);
 	}
 
 	if (NULL != class_count_ptr) {
@@ -241,9 +243,8 @@ jvmtiGetClassLoaderClasses(jvmtiEnv* env,
 
 		stats.vm = vm;
 		stats.currentThread = currentThread;
-
 		/* Search for classes who have this class loader as the initiating loader (wind up count) */
-		clazz = vmFuncs->hashClassTableStartDo(loader, &hashWalkState);
+		clazz = vmFuncs->hashClassTableStartDo(loader, &hashWalkState, J9_HASH_TABLE_STATE_FLAG_SKIP_HIDDEN);
 		while (clazz != NULL) {
 			countInitiatedClass(clazz, &stats);
 			clazz = vmFuncs->hashClassTableNextDo(&hashWalkState);
@@ -265,7 +266,7 @@ jvmtiGetClassLoaderClasses(jvmtiEnv* env,
 			rv_classes = stats.classRefs;
 
 			/* Record classes who have this class loader as the initiating loader (wind down count) */
-			clazz = vmFuncs->hashClassTableStartDo(loader, &hashWalkState);
+			clazz = vmFuncs->hashClassTableStartDo(loader, &hashWalkState, J9_HASH_TABLE_STATE_FLAG_SKIP_HIDDEN);
 			while (clazz != NULL) {
 				copyInitiatedClass(clazz, &stats);
 				clazz = vmFuncs->hashClassTableNextDo(&hashWalkState);
@@ -293,6 +294,23 @@ done:
 	}
 	TRACE_JVMTI_RETURN(jvmtiGetClassLoaderClasses);
 }
+
+
+#if JAVA_SPEC_VERSION >= 17
+void fixHiddenOrAnonSignature(char* signature, UDATA signatureLength) {
+	if (signatureLength >= (ROM_ADDRESS_LENGTH + 2)) {
+		IDATA lastSeparatorIndex = signatureLength - (ROM_ADDRESS_LENGTH + 2);
+
+		/* hidden/anon class names are generated from ROMClassBuilder::handleAnonClassName() and have 0x<romaddress> appended at the end */
+		if ((ANON_CLASSNAME_CHARACTER_SEPARATOR == signature[lastSeparatorIndex])
+			&& ('0' == signature[lastSeparatorIndex+1])
+			&& ('x' == signature[lastSeparatorIndex+2])
+		) {
+			signature[lastSeparatorIndex] = '.';
+		}
+	}
+}
+#endif /* JAVA_SPEC_VERSION >= 17 */
 
 
 jvmtiError JNICALL
@@ -365,6 +383,12 @@ jvmtiGetClassSignature(jvmtiEnv* env,
 					signature[arity] = 'L';
 					memcpy(signature + arity + 1, J9UTF8_DATA(utf), utfLength);
 					signature[allocSize - 1] = ';';
+
+#if JAVA_SPEC_VERSION >= 17
+					if (J9ROMCLASS_IS_ANON_OR_HIDDEN(leafType->romClass)) {
+						fixHiddenOrAnonSignature(signature, allocSize);
+					}
+#endif /* JAVA_SPEC_VERSION >= 17 */
 				}
 				signature[allocSize] = '\0';
 			} else {
@@ -380,6 +404,12 @@ jvmtiGetClassSignature(jvmtiEnv* env,
 				memcpy(signature + 1, J9UTF8_DATA(utf), utfLength);
 				signature[utfLength + 1] = ';';
 				signature[utfLength + 2] = '\0';
+
+#if JAVA_SPEC_VERSION >= 17
+				if (J9ROMCLASS_IS_ANON_OR_HIDDEN(clazz->romClass)) {
+					fixHiddenOrAnonSignature(signature, utfLength + 2);
+				}
+#endif /* JAVA_SPEC_VERSION >= 17 */
 			}
 		}
 
@@ -1119,14 +1149,15 @@ redefineClassesCommon(jvmtiEnv* env,
 
 	rc = verifyClassesCanBeReplaced(currentThread, class_count, class_definitions);
 	if (rc != JVMTI_ERROR_NONE) {
-		return rc;
+		goto failed;
 	}
 
 	/* Allocate a buffer to hold the new versions of the classes */
 
 	specifiedClasses = j9mem_allocate_memory(class_count * sizeof(J9JVMTIClassPair), J9MEM_CATEGORY_JVMTI);
 	if (specifiedClasses == NULL) {
-		return JVMTI_ERROR_OUT_OF_MEMORY;
+		rc = JVMTI_ERROR_OUT_OF_MEMORY;
+		goto failed;
 	}
 	memset(specifiedClasses, 0, class_count * sizeof(J9JVMTIClassPair));
 	
@@ -1164,6 +1195,16 @@ redefineClassesCommon(jvmtiEnv* env,
 		vm->internalVMFunctions->acquireExclusiveVMAccess(currentThread);
 	}
 
+	if (J9_ARE_ANY_BITS_SET(vm->runtimeFlags, J9_RUNTIME_DYNAMIC_HEAPIFICATION)) {
+		/* Look for stack-allocated objects only if the JIT is enabled and not running in FSD mode */
+		if ((NULL != vm->jitConfig) && !J9_FSD_ENABLED(vm)) {
+			rc = heapifyStackAllocatedObjects(currentThread, safePoint);
+			if (JVMTI_ERROR_NONE != rc) {
+				goto failedWithVMAccess;
+			}
+		}
+	}
+
 	/* Determine all ROM classes which need a new RAM class, and pair them with their current RAM class */
 
 	rc = determineClassesToRecreate(currentThread, class_count, specifiedClasses, &classPairs,
@@ -1186,11 +1227,18 @@ redefineClassesCommon(jvmtiEnv* env,
 			/* Fix the vTables of all subclasses */
 			fixVTables_forNormalRedefine(currentThread, classPairs, methodPairs, TRUE, &methodEquivalences);
 
+#if defined(J9VM_OPT_METHOD_HANDLE)
 			/* Update method references in DirectHandles */
 			fixDirectHandles(currentThread, classPairs, methodPairs);
+#endif /* defined(J9VM_OPT_METHOD_HANDLE) */
 
 			/* Fix JNI */
 			fixJNIRefs(currentThread, classPairs, TRUE, extensionsUsed);
+
+#if defined(J9VM_OPT_OPENJDK_METHODHANDLE)
+			/* Fix MemberNames (vmtarget) */
+			fixMemberNames(currentThread, classPairs);
+#endif /* defined(J9VM_OPT_OPENJDK_METHODHANDLE) */
 
 			/* Fix resolved constant pool references to point to new methods. */
 			fixConstantPoolsForFastHCR(currentThread, classPairs, methodPairs);
@@ -1205,7 +1253,7 @@ redefineClassesCommon(jvmtiEnv* env,
 			vm->hotSwapCount += 1;
 
 			/* Notify the JIT about redefined classes */
-			jitClassRedefineEvent(currentThread, &jitEventData, FALSE);
+			jitClassRedefineEvent(currentThread, &jitEventData, FALSE, FALSE);
 
 		} else {
 
@@ -1218,8 +1266,10 @@ redefineClassesCommon(jvmtiEnv* env,
 			/* Update heap references */
 			fixHeapRefs(vm, classPairs);
 
+#if defined(J9VM_OPT_METHOD_HANDLE)
 			/* Update method references in DirectHandles */
 			fixDirectHandles(currentThread, classPairs, methodPairs);
+#endif /* defined(J9VM_OPT_METHOD_HANDLE) */
 
 			/* Copy preserved values */
 			copyPreservedValues(currentThread, classPairs, extensionsUsed);
@@ -1249,6 +1299,11 @@ redefineClassesCommon(jvmtiEnv* env,
 				fixVTables_forNormalRedefine(currentThread, classPairs, methodPairs, FALSE, &methodEquivalences);
 			}
 
+#if defined(J9VM_OPT_OPENJDK_METHODHANDLE)
+			/* Fix MemberNames (vmtarget) */
+			fixMemberNames(currentThread, classPairs);
+#endif /* defined(J9VM_OPT_OPENJDK_METHODHANDLE) */
+
 			/* Restore breakpoints in the implicitly replaced classes */
 			restoreBreakpointsInClasses(currentThread, classPairs);
 
@@ -1268,7 +1323,7 @@ redefineClassesCommon(jvmtiEnv* env,
 
 #ifdef J9VM_INTERP_NATIVE_SUPPORT
 			/* Notify the JIT about redefined classes */
-			jitClassRedefineEvent(currentThread, &jitEventData, extensionsEnabled);
+			jitClassRedefineEvent(currentThread, &jitEventData, extensionsEnabled, extensionsUsed);
 #endif
 		}
 		notifyGCOfClassReplacement(currentThread, classPairs, !extensionsEnabled);
@@ -1316,6 +1371,10 @@ failed:
 		jitEventFree(vm, &jitEventData);
 	}
 #endif
+
+	/* Clear any pending exception - any error is represented solely by the return code */
+	currentThread->currentException = NULL;
+	currentThread->privateFlags &= ~(UDATA)J9_PRIVATE_FLAGS_REPORT_EXCEPTION_THROW;
 
 	return rc;
 }
@@ -2624,12 +2683,12 @@ jvmtiGetConstantPool_addReference(jvmtiGcp_translation *translation, UDATA cpInd
 static jvmtiError
 jvmtiGetConstantPool_addMethodHandle(jvmtiGcp_translation *translation, UDATA cpIndex, U_8 cpType, J9ROMMethodHandleRef *ref, U_32 *sunCpIndex)
 {
-	jvmtiGcp_translationEntry entry;
-	jvmtiGcp_translationEntry *htEntry;
-	U_8 fieldOrMethodCpType;
+	jvmtiGcp_translationEntry entry = {0};
+	jvmtiGcp_translationEntry *htEntry = NULL;
+	U_8 fieldOrMethodCpType = 0;
 
 	/* Add the Reference item to the hashtable, use our CP index as key */
-	entry.key = (void *) cpIndex;
+	entry.key = (void *)cpIndex;
 	entry.cpType = cpType;
 	entry.sunCpIndex = *sunCpIndex;
 	entry.type.methodHandle.methodOrFieldRefIndex = (*sunCpIndex) + 1;
@@ -2649,27 +2708,27 @@ jvmtiGetConstantPool_addMethodHandle(jvmtiGcp_translation *translation, UDATA cp
 	case MH_REF_PUTSTATIC:
 		fieldOrMethodCpType = CFR_CONSTANT_Fieldref;
 		break;
-
 	case MH_REF_INVOKEVIRTUAL:
 	case MH_REF_INVOKESTATIC:
 	case MH_REF_INVOKESPECIAL:
 	case MH_REF_NEWINVOKESPECIAL:
 		fieldOrMethodCpType = CFR_CONSTANT_Methodref;
 		break;
-
 	case MH_REF_INVOKEINTERFACE:
 		fieldOrMethodCpType = CFR_CONSTANT_InterfaceMethodref;
 		break;
 	default:
-		Assert_JVMTI_true(0);
+		Assert_JVMTI_unreachable();
 		return JVMTI_ERROR_INTERNAL;
 	}
 
 	/* Ensure the field/method ref is also added */
-	return jvmtiGetConstantPool_addReference(translation, ref->methodOrFieldRefIndex,
-						fieldOrMethodCpType,
-						(J9ROMFieldRef *) &translation->romConstantPool[ref->methodOrFieldRefIndex],
-						sunCpIndex);
+	return jvmtiGetConstantPool_addReference(
+				translation,
+				ref->methodOrFieldRefIndex,
+				fieldOrMethodCpType,
+				(J9ROMFieldRef *)&translation->romConstantPool[ref->methodOrFieldRefIndex],
+				sunCpIndex);
 }
 
 

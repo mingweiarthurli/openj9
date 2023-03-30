@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2010, 2014 IBM Corp. and others
+ * Copyright (c) 2010, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -34,43 +34,49 @@ import com.ibm.j9ddr.vm29.pointer.PointerPointer;
 import com.ibm.j9ddr.vm29.pointer.U8Pointer;
 
 /**
- * Field formatter that adds the value of any char * string fields
- *
+ * Field formatter that adds the value of any char * string fields.
  */
-public class CStringFieldFormatter extends BaseFieldFormatter 
+public class CStringFieldFormatter extends BaseFieldFormatter
 {
+	public static final int MAXIMUM_LENGTH = 120;
 
-	public static final int MAXIMUM_LENGTH = 50;
-	
 	@Override
 	public FormatWalkResult postFormat(String name, String type,
 			String declaredType, int typeCode, long address, PrintStream out,
 			Context context, IStructureFormatter structureFormatter)
-			throws CorruptDataException 
 	{
 		if (typeCode == StructureTypeManager.TYPE_POINTER) {
 			CTypeParser parser = new CTypeParser(declaredType);
-			
-			if (parser.getCoreType().equals("char") && parser.getSuffix().equals("*")) {
-				U8Pointer ptr = U8Pointer.cast(PointerPointer.cast(address).at(0));
-				
-				if (ptr.isNull()) {
-					return FormatWalkResult.KEEP_WALKING;
-				}
-				
-				String str = ptr.getCStringAtOffset(0, MAXIMUM_LENGTH);
-				
-				if (str.length() > 0) {
-					out.print(" // \"");
-					out.print(str);
-					if (str.length() >= MAXIMUM_LENGTH) {
-						out.print("...");
+			String coreType = parser.getCoreType();
+
+			switch (coreType) {
+			case "char":
+			case "I8":
+			case "U8":
+				if (parser.getSuffix().equals("*")) {
+					try {
+						U8Pointer ptr = U8Pointer.cast(PointerPointer.cast(address).at(0));
+
+						if (ptr.notNull()) {
+							String str = ptr.getCStringAtOffset(0, MAXIMUM_LENGTH);
+
+							out.print(" // \"");
+							out.print(str);
+							if (str.length() >= MAXIMUM_LENGTH) {
+								out.print("...");
+							}
+							out.print("\"");
+						}
+					} catch (CorruptDataException e) {
+						/* ignore */
 					}
-					out.print("\"");
 				}
+				break;
+			default:
+				break;
 			}
 		}
-		
+
 		return FormatWalkResult.KEEP_WALKING;
 	}
 }

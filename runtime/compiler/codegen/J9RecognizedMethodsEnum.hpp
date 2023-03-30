@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -52,6 +52,7 @@
    java_lang_Character_isAlphabetic,
    java_lang_Character_isUpperCase,
    java_lang_Character_isLowerCase,
+   java_lang_Character_toLowerCase,
    java_lang_Class_newInstance,
    java_lang_Class_newInstanceImpl,
    java_lang_Class_newInstancePrototype,
@@ -63,6 +64,7 @@
    java_lang_Class_isAssignableFrom,
    java_lang_Class_isInstance,
    java_lang_Class_isInterface,
+   java_lang_Class_cast,
    java_lang_ClassLoader_callerClassLoader,
    java_lang_ClassLoader_getCallerClassLoader,
    java_lang_ClassLoader_getStackClassLoader,
@@ -166,6 +168,7 @@
    java_lang_String_decompressedArrayCopy_BICII,
    java_lang_String_decompressedArrayCopy_CIBII,
    java_lang_String_decompressedArrayCopy_CICII,
+   java_lang_StringLatin1_inflate,
    java_lang_String_concat,
    java_lang_String_length,
    java_lang_String_lengthInternal,
@@ -193,6 +196,7 @@
    java_lang_String_regionMatches_bool,
    java_lang_String_regionMatchesInternal,
    java_lang_String_equalsIgnoreCase,
+   java_lang_String_encodeASCII,
    java_lang_String_compareToIgnoreCase,
    java_lang_String_compress,
    java_lang_String_andOR,
@@ -202,12 +206,27 @@
    java_lang_String_getChars_charArray,
    java_lang_String_getChars_byteArray,
 
+   java_lang_String_checkIndex,
+   java_lang_String_coder,
+   java_lang_String_decodeUTF8_UTF16,
+   java_lang_String_isLatin1,
+   java_lang_String_startsWith,
+
    java_lang_StringLatin1_indexOf,
 
+   java_lang_StringUTF16_charAt,
+   java_lang_StringUTF16_checkIndex,
+   java_lang_StringUTF16_compareCodePointCI,
+   java_lang_StringUTF16_compareToCIImpl,
+   java_lang_StringUTF16_compareValues,
    java_lang_StringUTF16_getChar,
    java_lang_StringUTF16_indexOf,
+   java_lang_StringUTF16_length,
    java_lang_StringUTF16_newBytesFor,
+   java_lang_StringUTF16_putChar,
    java_lang_StringUTF16_toBytes,
+   java_lang_StringUTF16_getChars_Integer,
+   java_lang_StringUTF16_getChars_Long,
 
    java_lang_StringBuffer_append,
    java_lang_StringBuffer_capacityInternal,
@@ -241,7 +260,16 @@
    java_nio_Bits_copyFromByteArray,
    java_nio_Bits_keepAlive,
    java_nio_Bits_byteOrder,
+   java_nio_Bits_getCharB,
+   java_nio_Bits_getCharL,
+   java_nio_Bits_getShortB,
+   java_nio_Bits_getShortL,
+   java_nio_Bits_getIntB,
+   java_nio_Bits_getIntL,
+   java_nio_Bits_getLongB,
+   java_nio_Bits_getLongL,
 
+   java_nio_HeapByteBuffer__get,
    java_nio_HeapByteBuffer_put,
 
    java_nio_ByteOrder_nativeOrder,
@@ -294,15 +322,11 @@
    java_util_Vector_addElement,
    java_util_Vector_contains,
    java_util_Vector_subList,
-   java_util_TreeMap_rbInsert,
    java_util_TreeMap_all,
    java_util_EnumMap_put, // put and putAll
    java_util_EnumMap_typeCheck,
    java_util_EnumMap__init_, // <init> constructors
    java_util_EnumMap__nec_, // other methods
-   java_util_TreeMapUnboundedValueIterator_next,
-   java_util_TreeMapSubMap_setLastKey,
-   java_util_TreeMapSubMap_setFirstKey,
    java_util_HashMap_rehash,
    java_util_HashMap_analyzeMap,
    java_util_HashMap_calculateCapacity,
@@ -312,11 +336,18 @@
    java_util_HashMap_findNonNullKeyEntry,
    java_util_HashMap_putImpl,
    java_util_HashMap_resize,
+   java_util_HashMap_prepareArray,
+   java_util_HashMap_keysToArray,
+   java_util_HashMap_valuesToArray,
    java_util_HashMapHashIterator_nextNode,
    java_util_HashMapHashIterator_init,
    java_util_zip_CRC32_update,
    java_util_zip_CRC32_updateBytes,
+   java_util_zip_CRC32_updateBytes0,
    java_util_zip_CRC32_updateByteBuffer,
+   java_util_zip_CRC32_updateByteBuffer0,
+   java_util_zip_CRC32C_updateBytes,
+   java_util_zip_CRC32C_updateDirectByteBuffer,
    sun_misc_Unsafe_compareAndSwapInt_jlObjectJII_Z,
    sun_misc_Unsafe_compareAndSwapLong_jlObjectJJJ_Z,
    sun_misc_Unsafe_compareAndSwapObject_jlObjectJjlObjectjlObject_Z,
@@ -414,8 +445,29 @@
    sun_misc_Unsafe_fullFence,
 
    sun_misc_Unsafe_ensureClassInitialized,
+   sun_misc_Unsafe_allocateInstance,
+
+   jdk_internal_misc_Unsafe_copyMemory0,
+   jdk_internal_loader_NativeLibraries_load,
+   jdk_internal_util_Preconditions_checkIndex,
+
+   FirstVectorMethod,
+   jdk_internal_vm_vector_VectorSupport_load = FirstVectorMethod,
+   jdk_internal_vm_vector_VectorSupport_store,
+   jdk_internal_vm_vector_VectorSupport_binaryOp,
+   jdk_internal_vm_vector_VectorSupport_blend,
+   jdk_internal_vm_vector_VectorSupport_compare,
+   jdk_internal_vm_vector_VectorSupport_fromBitsCoerced,
+   jdk_internal_vm_vector_VectorSupport_maskReductionCoerced,
+   jdk_internal_vm_vector_VectorSupport_reductionCoerced,
+   jdk_internal_vm_vector_VectorSupport_ternaryOp,
+   jdk_internal_vm_vector_VectorSupport_test,
+   jdk_internal_vm_vector_VectorSupport_unaryOp,
+   LastVectorIntrinsicMethod = jdk_internal_vm_vector_VectorSupport_unaryOp,
+   LastVectorMethod = LastVectorIntrinsicMethod,
 
    java_lang_reflect_Array_getLength,
+   java_lang_reflect_Method_invoke,
    java_util_Arrays_fill,
    java_util_Arrays_equals,
    java_lang_String_equals,
@@ -433,7 +485,7 @@
    sun_nio_cs_UTF_8_Decoder_decodeUTF_8,
    sun_nio_cs_UTF_8_Encoder_encodeUTF_8,
    sun_nio_cs_ext_IBM1388_Encoder_encodeArrayLoop,
-   
+
    sun_nio_cs_UTF_16_Encoder_encodeUTF16Big,
    sun_nio_cs_UTF_16_Encoder_encodeUTF16Little,
    com_ibm_jit_JITHelpers_transformedEncodeUTF16Big,
@@ -449,6 +501,13 @@
    java_lang_Integer_rotateRight,
    java_lang_Integer_valueOf,
    java_lang_Integer_toUnsignedLong,
+   java_lang_Integer_stringSize,
+   java_lang_Integer_getChars,
+   java_lang_Integer_getChars_charBuffer,
+   java_lang_Integer_toString,
+
+   java_lang_Long_getChars,
+   java_lang_Long_getChars_charBuffer,
    java_lang_Long_bitCount,
    java_lang_Long_lowestOneBit,
    java_lang_Long_highestOneBit,
@@ -458,6 +517,8 @@
    java_lang_Long_rotateLeft,
    java_lang_Long_rotateRight,
    java_lang_Short_reverseBytes,
+   java_lang_Long_stringSize,
+   java_lang_Long_toString,
 
    java_math_BigDecimal_add,
    java_math_BigDecimal_clone,
@@ -484,30 +545,6 @@
    java_math_BigDecimal_noLLOverflowAdd,
    java_math_BigDecimal_noLLOverflowMul,
    java_math_BigDecimal_getLaside,
-   java_math_BigDecimal_DFPPerformHysteresis,
-   java_math_BigDecimal_DFPUseDFP,
-   java_math_BigDecimal_DFPHWAvailable,
-   java_math_BigDecimal_DFPIntConstructor,
-   java_math_BigDecimal_DFPLongConstructor,
-   java_math_BigDecimal_DFPLongExpConstructor,
-   java_math_BigDecimal_DFPAdd,
-   java_math_BigDecimal_DFPSubtract,
-   java_math_BigDecimal_DFPMultiply,
-   java_math_BigDecimal_DFPDivide,
-   java_math_BigDecimal_DFPScaledAdd,
-   java_math_BigDecimal_DFPScaledSubtract,
-   java_math_BigDecimal_DFPScaledMultiply,
-   java_math_BigDecimal_DFPScaledDivide,
-   java_math_BigDecimal_DFPRound,
-   java_math_BigDecimal_DFPSetScale,
-   java_math_BigDecimal_DFPCompareTo,
-   java_math_BigDecimal_DFPSignificance,
-   java_math_BigDecimal_DFPExponent,
-   java_math_BigDecimal_DFPBCDDigits,
-   java_math_BigDecimal_DFPUnscaledValue,
-   java_math_BigDecimal_DFPConvertPackedToDFP,
-   java_math_BigDecimal_DFPConvertDFPToPacked,
-   java_math_BigDecimal_DFPGetHWAvailable,
    java_math_BigDecimal_floatValue,
    java_math_BigDecimal_doubleValue,
    java_math_BigDecimal_possibleClone,
@@ -655,16 +692,6 @@
    com_ibm_dataaccess_PackedDecimal_movePackedDecimal_,
    com_ibm_dataaccess_PackedDecimal_checkPackedDecimal_,
 
-   com_ibm_dataaccess_DecimalData_DFPFacilityAvailable,
-   com_ibm_dataaccess_DecimalData_DFPUseDFP,
-   com_ibm_dataaccess_DecimalData_DFPConvertPackedToDFP,
-   com_ibm_dataaccess_DecimalData_DFPConvertDFPToPacked,
-   com_ibm_dataaccess_DecimalData_createZeroBigDecimal,
-   com_ibm_dataaccess_DecimalData_getlaside,
-   com_ibm_dataaccess_DecimalData_setlaside,
-   com_ibm_dataaccess_DecimalData_getflags,
-   com_ibm_dataaccess_DecimalData_setflags,
-
    com_ibm_Compiler_Internal__TR_Prefetch,
 
    com_ibm_Compiler_Internal_Quad_enableQuadOptimization,
@@ -766,6 +793,8 @@
    com_ibm_jit_JITHelpers_acmplt,
    com_ibm_jit_JITHelpers_jitHelpers,
    com_ibm_jit_JITHelpers_getClassInitializeStatus,
+   com_ibm_jit_JITHelpers_dispatchComputedStaticCall,
+   com_ibm_jit_JITHelpers_dispatchVirtual,
 
    com_ibm_jit_DecimalFormatHelper_formatAsDouble,
    com_ibm_jit_DecimalFormatHelper_formatAsFloat,
@@ -996,15 +1025,26 @@
    java_lang_invoke_InsertHandle_numPrefixArgs,
    java_lang_invoke_InsertHandle_numSuffixArgs,
    java_lang_invoke_InsertHandle_numValuesToInsert,
-   java_lang_invoke_InterfaceHandle_interfaceCall,
    java_lang_invoke_InterfaceHandle_invokeExact,
+   java_lang_invoke_Invokers_checkCustomized,
+   java_lang_invoke_Invokers_checkExactType,
+   java_lang_invoke_Invokers_getCallSiteTarget,
    java_lang_invoke_MethodHandle_doCustomizationLogic,
    java_lang_invoke_MethodHandle_asType,
    java_lang_invoke_MethodHandle_asType_instance,
    java_lang_invoke_MethodHandle_invoke,
    java_lang_invoke_MethodHandle_invokeExact,
+   java_lang_invoke_MethodHandle_invokeBasic,
    java_lang_invoke_MethodHandle_invokeExactTargetAddress,
-   java_lang_invoke_MethodHandle_invokeWithArgumentsHelper,
+   java_lang_invoke_MethodHandle_linkToStatic,
+   java_lang_invoke_MethodHandle_linkToSpecial,
+   java_lang_invoke_MethodHandle_linkToVirtual,
+   java_lang_invoke_MethodHandle_linkToInterface,
+   java_lang_invoke_MethodHandleImpl_CountingWrapper_getTarget,
+   java_lang_invoke_DelegatingMethodHandle_getTarget,
+   java_lang_invoke_DirectMethodHandle_internalMemberName,
+   java_lang_invoke_DirectMethodHandle_internalMemberNameEnsureInit,
+   java_lang_invoke_DirectMethodHandle_constructorMethod,
    java_lang_invoke_MethodHandles_getStackClass,
    java_lang_invoke_MethodHandle_type,
    java_lang_invoke_MethodHandle_undoCustomizationLogic,
@@ -1059,6 +1099,10 @@
    java_lang_invoke_VirtualHandle_virtualCall,
    java_lang_invoke_VirtualHandle_invokeExact,
 
+   // OpenJDK MethodHandles
+   java_lang_invoke_MethodHandleImpl_profileBoolean,
+   java_lang_invoke_MethodHandleImpl_isCompileConstant,
+
    // Clone and Deep Copy
    java_lang_J9VMInternals_is32Bit,
    java_lang_J9VMInternals_isClassModifierPublic,
@@ -1099,7 +1143,7 @@
    com_ibm_jit_crypto_JITFullHardwareDigest_z_kimd,
    com_ibm_jit_crypto_JITFullHardwareDigest_z_klmd,
    com_ibm_jit_crypto_JITFullHardwareDigest_z_kmac,
-   
+
    java_lang_StringCoding_decode,
    java_lang_StringCoding_encode,
    java_lang_StringCoding_StringDecoder_decode,
@@ -1189,6 +1233,6 @@
    com_ibm_crypto_provider_AEScryptInHardware_cbcDecrypt,
    com_ibm_crypto_provider_AEScryptInHardware_cbcEncrypt,
 
-   LastIBMMethod = com_ibm_crypto_provider_P384PrimeField_mod,
+   LastJ9Method = com_ibm_crypto_provider_P384PrimeField_mod,
 
-#endif
+#endif /* J9_RECOGNIZEDMETHODS_ENUM_INCL */

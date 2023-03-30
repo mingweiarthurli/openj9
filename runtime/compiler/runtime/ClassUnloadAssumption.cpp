@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -29,6 +29,7 @@
 #include "env/PersistentCHTable.hpp"
 #include "env/PersistentInfo.hpp"
 #include "env/jittypes.h"
+#include "env/VerboseLog.hpp"
 #include "infra/Monitor.hpp"
 #include "infra/CriticalSection.hpp"
 #include "runtime/J9RuntimeAssumptions.hpp"
@@ -36,6 +37,11 @@
 #if defined(J9VM_OPT_JITSERVER)
 #include "control/CompilationThread.hpp"
 #include "runtime/JITClientSession.hpp"
+#endif
+#include "omrformatconsts.h"
+
+#if defined(OSX) && defined(AARCH64)
+#include <pthread.h> // for pthread_jit_write_protect_np
 #endif
 
 extern TR::Monitor *assumptionTableMutex;
@@ -108,14 +114,14 @@ TR_PersistentClassInfo::removeASubClass(TR_PersistentClassInfo *subClassToRemove
 
 
 void
-TR_PersistentClassInfo::removeSubClasses()
+TR_PersistentClassInfo::removeSubClasses(TR_PersistentMemory *persistentMemory)
    {
    TR_SubClass *scl = _subClasses.getFirst();
    _subClasses.setFirst(0);
    while (scl)
       {
       TR_SubClass *nextScl = scl->getNext();
-      jitPersistentFree(scl);
+      persistentMemory->freePersistentMemory(scl);
       scl = nextScl;
       }
    }
@@ -198,11 +204,10 @@ OMR::RuntimeAssumption::addToRAT(TR_PersistentMemory * persistentMemory, TR_Runt
    bool reportDetails = TR::Options::getCmdLineOptions()->getVerboseOption(TR_VerboseRuntimeAssumptions);
    if (reportDetails)
       {
-      TR_VerboseLog::vlogAcquire();
+      TR_VerboseLog::CriticalSection vlogLock;
       TR_VerboseLog::write(TR_Vlog_RA,"Adding %s assumption: ", runtimeAssumptionKindNames[kind] );
       dumpInfo();
       TR_VerboseLog::writeLine("");
-      TR_VerboseLog::vlogRelease();
       }
    }
 
@@ -267,6 +272,15 @@ void OMR::RuntimeAssumption::dequeueFromListOfAssumptionsForJittedBody()
          OMR::RuntimeAssumption *next = crt->getNextAssumptionForSameJittedBodyEvenIfDead();
          prev->setNextAssumptionForSameJittedBody(next);
          crt->setNextAssumptionForSameJittedBody(NULL);
+
+         // Sentinel is not a part of RAT so it will not be deleted normally.
+         // Need to explicitly free it here
+         if (crt->getAssumptionKind() == RuntimeAssumptionSentinel)
+            {
+            crt->paint();
+            TR_PersistentMemory::jitPersistentFree(crt);
+            }
+
          crt = next;
          }
       else
@@ -282,11 +296,10 @@ void OMR::RuntimeAssumption::dequeueFromListOfAssumptionsForJittedBody()
 
    if (TR::Options::getCmdLineOptions()->getVerboseOption(TR_VerboseRuntimeAssumptions))
       {
-      TR_VerboseLog::vlogAcquire();
+      TR_VerboseLog::CriticalSection vlogLock;
       TR_VerboseLog::write(TR_Vlog_RA, "Deleting %s assumption: ", runtimeAssumptionKindNames[getAssumptionKind()] );
       dumpInfo();
       TR_VerboseLog::writeLine("");
-      TR_VerboseLog::vlogRelease();
       }
    }
 
@@ -321,7 +334,7 @@ void TR_RuntimeAssumptionTable::purgeAssumptionListHead(OMR::RuntimeAssumption *
    assumptionList->compensate(fe, 0, 0);
 
    OMR::RuntimeAssumption *next = assumptionList->getNextEvenIfDead();
-   printf("Freeing Assumption 0x%x and next assumption is 0x%x \n", assumptionList, next);
+   printf("Freeing Assumption 0x%" OMR_PRIxPTR " and next assumption is 0x%" OMR_PRIxPTR "\n", (uintptr_t)assumptionList, (uintptr_t)next);
 
    assumptionList->dequeueFromListOfAssumptionsForJittedBody();
    incReclaimedAssumptionCount(assumptionList->getAssumptionKind());
@@ -547,7 +560,7 @@ void TR_RuntimeAssumptionTable::reclaimAssumptions(OMR::RuntimeAssumption **sent
                 kind != RuntimeAssumptionOnClassRedefinitionNOP)
                {
                fprintf(stderr, "%d assumptions were left after metadata %p assumption reclaiming\n", numAssumptionsNotReclaimed, metaData);
-               fprintf(stderr, "RA=%p kind=%d key=%p assumingPC=%p\n", cursor, cursor->getAssumptionKind(), cursor->getKey(), cursor->getFirstAssumingPC());
+               fprintf(stderr, "RA=%p kind=%d key=%p assumingPC=%p\n", cursor, cursor->getAssumptionKind(), (void*) cursor->getKey(), cursor->getFirstAssumingPC());
                TR_ASSERT(false, "non redefinition assumptions left after metadata reclamation\n");
                }
             cursor = cursor->getNextAssumptionForSameJittedBody();
@@ -557,6 +570,15 @@ void TR_RuntimeAssumptionTable::reclaimAssumptions(OMR::RuntimeAssumption **sent
       else
          {
          sentry->markForDetach();
+         if (metaData)
+            {
+            reinterpret_cast<J9JITExceptionTable*>(metaData)->runtimeAssumptionList = NULL;
+            }
+         else if ((metaData = reinterpret_cast<TR::SentinelRuntimeAssumption *>(sentry)->getOwningMetadata()))
+            {
+            // metadata passed might be NULL, but it can still exist
+            reinterpret_cast<J9JITExceptionTable*>(metaData)->runtimeAssumptionList = NULL;
+            }
          *sentinel = NULL;
          }
       }
@@ -618,33 +640,24 @@ TR_RuntimeAssumptionTable::notifyIllegalStaticFinalFieldModificationEvent(TR_Fro
 
    while (cursor)
       {
+      TR_VerboseLog::CriticalSection vlogLock(reportDetails);
+
       OMR::RuntimeAssumption* next = cursor->getNext();
       if (reportDetails)
-         {
-         TR_VerboseLog::vlogAcquire();
          TR_VerboseLog::write(TR_Vlog_RA, "key=%p @ %p", cursor->getKey(), cursor->getFirstAssumingPC());
-         TR_VerboseLog::vlogRelease();
-         }
 
       if (cursor->matches((uintptr_t)key))
          {
          found = true;
          if (reportDetails)
-            {
-            TR_VerboseLog::vlogAcquire();
             TR_VerboseLog::write(" compensating key=%p", key);
-            TR_VerboseLog::vlogRelease();
-            }
+
          cursor->compensate(vm, 0, 0);
          markForDetachFromRAT(cursor);
          }
 
       if (reportDetails)
-         {
-         TR_VerboseLog::vlogAcquire();
          TR_VerboseLog::writeLine("");
-         TR_VerboseLog::vlogRelease();
-         }
 
       cursor = next;
       }
@@ -731,8 +744,14 @@ void TR_UnloadedClassPicSite::compensate(TR_FrontEnd *, bool isSMP, void *)
 #elif defined(TR_HOST_ARM64)
    // On aarch64, we use constant data snippet for class unloading pic site
    extern void arm64CodeSync(unsigned char *codeStart, unsigned int codeSize);
+#if defined(OSX)
+   pthread_jit_write_protect_np(0);
+#endif
    *(int64_t *)_picLocation = -1;
    arm64CodeSync(_picLocation, 8);
+#if defined(OSX)
+   pthread_jit_write_protect_np(1);
+#endif
 #else
    //   TR_ASSERT(0, "unloaded class PIC patching is not implemented on this platform yet");
 #endif
@@ -794,31 +813,24 @@ TR_RuntimeAssumptionTable::notifyClassRedefinitionEvent(TR_FrontEnd *vm, bool is
 
    if (reportDetails)
       {
-      TR_VerboseLog::vlogAcquire();
+      TR_VerboseLog::CriticalSection vlogLock;
       TR_VerboseLog::writeLine(TR_Vlog_RA,"Scanning for PIC assumptions for %p in array %p bucket %p", oldKey, raArray, oldHeadPtr);
       if (!pic_cursor)
          TR_VerboseLog::writeLine(TR_Vlog_RA,"oldKey %p not registered with PIC!", oldKey);
-      TR_VerboseLog::vlogRelease();
       }
 
    while (pic_cursor)
       {
       TR_RedefinedClassPicSite *pic_next = (TR_RedefinedClassPicSite*)pic_cursor->getNext();
+
+      TR_VerboseLog::CriticalSection vlogLock(reportDetails);
       if (reportDetails)
-         {
-         TR_VerboseLog::vlogAcquire();
          TR_VerboseLog::write(TR_Vlog_RA, "old=%p @ %p", pic_cursor->getKey(), pic_cursor->getPicLocation());
-         TR_VerboseLog::vlogRelease();
-         }
 
       if (pic_cursor->matches((uintptr_t)oldKey))
          {
          if (reportDetails)
-            {
-            TR_VerboseLog::vlogAcquire();
             TR_VerboseLog::write(" compensating new=%p (array %p bucket %p)", newKey, raArray, newHeadPtr);
-            TR_VerboseLog::vlogRelease();
-            }
 
          pic_cursor->compensate(vm, 0, newKey);
 
@@ -845,11 +857,7 @@ TR_RuntimeAssumptionTable::notifyClassRedefinitionEvent(TR_FrontEnd *vm, bool is
          }
 
       if (reportDetails)
-         {
-         TR_VerboseLog::vlogAcquire();
          TR_VerboseLog::writeLine("");
-         TR_VerboseLog::vlogRelease();
-         }
 
       pic_cursor = pic_next;
       }
@@ -859,31 +867,34 @@ TR_RuntimeAssumptionTable::notifyClassRedefinitionEvent(TR_FrontEnd *vm, bool is
    raArray = findAssumptionHashTable(RuntimeAssumptionOnClassRedefinitionNOP)->_htSpineArray;
    if (reportDetails)
       {
-      TR_VerboseLog::vlogAcquire();
+      TR_VerboseLog::CriticalSection vlogLock;
       TR_VerboseLog::writeLine(TR_Vlog_RA,"Scanning for NOP assumptions for %p in array %p bucket %p", oldKey, raArray, oldHeadPtr);
       if (!nop_cursor)
          TR_VerboseLog::writeLine(TR_Vlog_RA,"oldKey %p not registered with NOP!", oldKey);
-      TR_VerboseLog::vlogRelease();
       }
 
    while (nop_cursor)
       {
       OMR::RuntimeAssumption* nop_next = nop_cursor->getNext();
+
+      TR_VerboseLog::CriticalSection vlogLock(reportDetails);
       if (reportDetails)
-         TR_VerboseLog::writeLine(TR_Vlog_RA, "old=%p @ %p", nop_cursor->getKey(), nop_cursor->getFirstAssumingPC());
+         TR_VerboseLog::write(TR_Vlog_RA, "old=%p @ %p", nop_cursor->getKey(), nop_cursor->getFirstAssumingPC());
+
       if (nop_cursor->matches((uintptr_t)oldKey))
          {
          if (reportDetails)
-            {
-            TR_VerboseLog::vlogAcquire();
-            TR_VerboseLog::write(" compensating new=%p", newKey);
-            TR_VerboseLog::vlogRelease();
-            }
+            TR_VerboseLog::writeLine(" compensating new=%p", newKey);
+
          nop_cursor->compensate(vm, 0, 0);
          markForDetachFromRAT(nop_cursor);
          nop_cursor = nop_next;
          continue;
          }
+
+      if (reportDetails)
+         TR_VerboseLog::writeLine("");
+
       nop_cursor = nop_next;
       }
 
@@ -908,7 +919,14 @@ TR_RuntimeAssumptionTable::notifyClassRedefinitionEvent(TR_FrontEnd *vm, bool is
                {
                if (reportDetails)
                   TR_VerboseLog::writeLineLocked(TR_Vlog_RA, "old=%p resolved=%p @ %p patching new=%p", initialKey, resolvedKey, pic_cursor->getPicLocation(), *(uintptr_t *)(pic_cursor->getPicLocation()));
+
+#if defined(OSX) && defined(AARCH64)
+               pthread_jit_write_protect_np(0);
+#endif
                *(uintptr_t *)(pic_cursor->getPicLocation()) = (uintptr_t)newKey;
+#if defined(OSX) && defined(AARCH64)
+               pthread_jit_write_protect_np(1);
+#endif
                }
             }
          pic_cursor = pic_next;
@@ -1009,9 +1027,9 @@ TR_RuntimeAssumptionTable::notifyClassRedefinitionEvent(TR_FrontEnd *vm, bool is
 
                if (isAddressMaterialization)
                   {
+                  TR_VerboseLog::CriticalSection vlogLock(reportDetails);
                   if (reportDetails)
                      {
-                     TR_VerboseLog::vlogAcquire();
                      TR_VerboseLog::write(TR_Vlog_RA, "o=%p @ %p  r=%p %p %p %p",
                         initialKey, pic_cursor->getPicLocation(),
                         resolvedKey1, resolvedKey2, resolvedKey3, resolvedKey4);
@@ -1029,7 +1047,6 @@ TR_RuntimeAssumptionTable::notifyClassRedefinitionEvent(TR_FrontEnd *vm, bool is
                         *(uint32_t *)(pic_cursor->getPicLocation() + 4),
                         *(uint32_t *)(pic_cursor->getPicLocation() + 12),
                         *(uint32_t *)(pic_cursor->getPicLocation() + 16));
-                     TR_VerboseLog::vlogRelease();
                      }
                   }
                }
@@ -1045,20 +1062,15 @@ TR_RuntimeAssumptionTable::notifyClassRedefinitionEvent(TR_FrontEnd *vm, bool is
                   && ((resolvedKey2 >> 26) == 0x0e); //addi
                if (isAddressMaterialization)
                   {
+                  TR_VerboseLog::CriticalSection vlogLock(reportDetails);
                   if (reportDetails)
-                     {
-                     TR_VerboseLog::vlogAcquire();
                      TR_VerboseLog::write(TR_Vlog_RA, "o=%p r=%p %p @ %p", initialKey, resolvedKey1, resolvedKey2, pic_cursor->getPicLocation());
-                     }
 
                   *(uint32_t *)(pic_cursor->getPicLocation()) = resolvedKey1 & 0xffff0000 | HI_VALUE((uint32_t)newKey);
                   *(uint32_t *)(pic_cursor->getPicLocation() + 4) = resolvedKey2 & 0xffff0000 | LO_VALUE((uint32_t)newKey);
 
                   if (reportDetails)
-                     {
                      TR_VerboseLog::writeLine(" patched n=%p %p", *(uint32_t *)(pic_cursor->getPicLocation()), *(uint32_t *)(pic_cursor->getPicLocation() + 4));
-                     TR_VerboseLog::vlogRelease();
-                     }
                   }
                }
 #endif
@@ -1067,6 +1079,36 @@ TR_RuntimeAssumptionTable::notifyClassRedefinitionEvent(TR_FrontEnd *vm, bool is
          }
       }
 #endif
+   }
+
+void
+TR_RuntimeAssumptionTable::notifyMethodBreakpointed(TR_FrontEnd *fe, TR_OpaqueMethodBlock *method)
+   {
+   OMR::CriticalSection notifyMutableCallSiteChangeEvent(assumptionTableMutex);
+
+   bool reportDetails = TR::Options::getCmdLineOptions()->getVerboseOption(TR_VerboseRuntimeAssumptions);
+
+   OMR::RuntimeAssumption **headPtr = getBucketPtr(RuntimeAssumptionOnMethodBreakPoint, hashCode((uintptr_t)method));
+   TR_PatchNOPedGuardSiteOnMethodBreakPoint *cursor = (TR_PatchNOPedGuardSiteOnMethodBreakPoint *)(*headPtr);
+   while (cursor)
+      {
+      TR_PatchNOPedGuardSiteOnMethodBreakPoint *next = (TR_PatchNOPedGuardSiteOnMethodBreakPoint *)cursor->getNext();
+
+      if (cursor->matches((uintptr_t)method))
+         {
+         if (reportDetails)
+            {
+            TR_VerboseLog::CriticalSection vlogLock;
+            TR_VerboseLog::write(TR_Vlog_RA,"compensating key (breakpointed method) " UINT64_PRINTF_FORMAT_HEX " ", method);
+            cursor->dumpInfo();
+            TR_VerboseLog::writeLine("");
+            }
+         cursor->compensate(fe, 0, 0);
+         markForDetachFromRAT(cursor);
+         }
+
+      cursor = next;
+      }
    }
 
 void
@@ -1086,15 +1128,15 @@ TR_RuntimeAssumptionTable::notifyMutableCallSiteChangeEvent(TR_FrontEnd *fe, uin
          {
          if (reportDetails)
             {
-            TR_VerboseLog::vlogAcquire();
+            TR_VerboseLog::CriticalSection vlogLock;
             TR_VerboseLog::write(TR_Vlog_RA,"compensating cookie " UINT64_PRINTF_FORMAT_HEX " ", cookie);
             cursor->dumpInfo();
             TR_VerboseLog::writeLine("");
-            TR_VerboseLog::vlogRelease();
             }
          cursor->compensate(fe, 0, 0);
          markForDetachFromRAT(cursor);
          }
+
       cursor = next;
       }
    }
@@ -1147,7 +1189,13 @@ void TR_RedefinedClassPicSite::compensate(TR_FrontEnd *, bool isSMP, void *newKe
 #elif defined(TR_HOST_ARM)
    *(int32_t *)_picLocation = (uintptr_t)newKey;
 #elif defined(TR_HOST_ARM64)
+#if defined(OSX)
+   pthread_jit_write_protect_np(0);
+#endif
    *(int64_t *)_picLocation = (uintptr_t)newKey;
+#if defined(OSX)
+   pthread_jit_write_protect_np(1);
+#endif
 #else
    //   TR_ASSERT(0, "redefined class PIC patching is not implemented on this platform yet");
 #endif
@@ -1282,9 +1330,9 @@ J9::PersistentInfo::addUnloadedClass(
    }
 
 #if defined(J9VM_OPT_JITSERVER)
-void TR_AddressSet::destroy()
+void TR_AddressSet::destroy(TR_PersistentMemory *persistentMemory)
    {
-   jitPersistentFree(_addressRanges);
+   persistentMemory->freePersistentMemory(_addressRanges);
    }
 
 void TR_AddressSet::getRanges(std::vector<TR_AddressRange> &ranges)
@@ -1520,7 +1568,7 @@ void TR_AddressSet::add(uintptr_t start, uintptr_t end)
          {
          fprintf(stderr, "UAR:    ");
          for (int j = 0; (j < 4) && (i+j < _numAddressRanges); j++)
-            fprintf(stderr, " %4d [%p - %p]", i+j, _addressRanges[i+j].getStart(), _addressRanges[i+j].getEnd());
+            fprintf(stderr, " %4d [%#" OMR_PRIxPTR " - %#" OMR_PRIxPTR "]", i+j, _addressRanges[i+j].getStart(), _addressRanges[i+j].getEnd());
          fprintf(stderr, "\n");
          }
       }
@@ -1577,5 +1625,3 @@ int32_t TR_AddressSet::firstHigherAddressRangeIndex(uintptr_t address)
 
    return result;
    }
-
-

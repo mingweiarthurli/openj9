@@ -1,6 +1,6 @@
-/*[INCLUDE-IF Sidecar17]*/
+/*[INCLUDE-IF Sidecar17 & !OPENJDK_METHODHANDLES]*/
 /*******************************************************************************
- * Copyright (c) 2011, 2011 IBM Corp. and others
+ * Copyright (c) 2011, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,11 +16,16 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
 package java.lang.invoke;
+
+/*[IF JAVA_SPEC_VERSION >= 15]*/
+import java.util.Collections;
+import java.util.List;
+/*[ENDIF] JAVA_SPEC_VERSION >= 15 */
 
 final class FilterArgumentsHandle extends MethodHandle {
 	private final MethodHandle   next;
@@ -89,6 +94,15 @@ final class FilterArgumentsHandle extends MethodHandle {
 			ILGenMacros.lastN(numSuffixArgs(), argPlaceholder)));
 	}
 
+/*[IF JAVA_SPEC_VERSION >= 15]*/
+	@Override
+	boolean addRelatedMHs(List<MethodHandle> relatedMHs) {
+		relatedMHs.add(next);
+		Collections.addAll(relatedMHs, filters);
+		return true;
+	}
+/*[ENDIF] JAVA_SPEC_VERSION >= 15 */
+
 	// }}} JIT support
 
 	@Override
@@ -113,4 +127,3 @@ final class FilterArgumentsHandle extends MethodHandle {
 		}
 	}
 }
-

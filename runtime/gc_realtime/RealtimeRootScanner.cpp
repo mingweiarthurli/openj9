@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -29,7 +29,6 @@
 #include <string.h>
 
 #include "ClassModel.hpp"
-#include "Dispatcher.hpp"
 #include "EnvironmentBase.hpp"
 #if defined(J9VM_GC_FINALIZATION)
 #include "FinalizeListManager.hpp"
@@ -40,6 +39,7 @@
 #include "MemorySubSpace.hpp"
 #include "modronapi.hpp"
 #include "ObjectModel.hpp"
+#include "ParallelDispatcher.hpp"
 #include "RealtimeMarkingScheme.hpp"
 #include "RealtimeRootScanner.hpp"
 #include "RootScanner.hpp"
@@ -56,10 +56,10 @@ MM_RealtimeRootScanner::doClass(J9Class *clazz)
 		/* discard volatile since we must be in stop-the-world mode */
 		doSlot((j9object_t*)objectSlotPtr);
 	}
-	GC_ClassIteratorClassSlots classSlotIterator(clazz);
-	J9Class **classSlotPtr;
-	while((classSlotPtr = classSlotIterator.nextSlot()) != NULL) {
-		doClassSlot(classSlotPtr);
+	GC_ClassIteratorClassSlots classSlotIterator(static_cast<J9JavaVM*>(_omrVM->_language_vm), clazz);
+	J9Class *classPtr;
+	while (NULL != (classPtr = classSlotIterator.nextSlot())) {
+		doClassSlot(classPtr);
 	}
 }
 
@@ -67,9 +67,9 @@ MM_RealtimeRootScanner::doClass(J9Class *clazz)
  * 
  */
 void
-MM_RealtimeRootScanner::doClassSlot(J9Class **clazzPtr)
+MM_RealtimeRootScanner::doClassSlot(J9Class *classPtr)
 {
-	_realtimeGC->getRealtimeDelegate()->markClass(_env, *clazzPtr);
+	_realtimeGC->getRealtimeDelegate()->markClass(_env, classPtr);
 }
 
 MM_RootScanner::CompletePhaseCode
@@ -308,7 +308,7 @@ MM_RealtimeRootScanner::scanMonitorLookupCaches(MM_EnvironmentBase *env)
 void
 MM_RealtimeRootScanner::scanStringTable(MM_EnvironmentBase *env)
 {
-	if (env->_currentTask->synchronizeGCThreadsAndReleaseMaster(env, UNIQUE_ID)) {
+	if (env->_currentTask->synchronizeGCThreadsAndReleaseMain(env, UNIQUE_ID)) {
 		/* We can't rely on using _unmarkedImpliesCleared because clearable phase can mark more objects.
 		 * Only at this point can we assume unmarked strings are truly dead.
 		 */

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2019 IBM Corp. and others
+ * Copyright (c) 2001, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -543,7 +543,7 @@ public class TestSharedClassesExt extends DDRExtTesterBase {
 		for (int i = 0; i < lines.length; i++) {
 			if (lines[i].contains("java/lang/Object") || lines[i].matches("\\s<init>\\(.*\\).*j9rommethod .*")) {
 				// lines[i].matches: For the case that method does not contain java/lang/Object
-				// we can find find j9rommethod address from <init> method in openj9
+				// we can find j9rommethod address from <init> method in openj9
 				if (lines.length > 1) {
 					j9rommethodAddr = lines[i].split("j9rommethod")[1].trim();
 				} else {

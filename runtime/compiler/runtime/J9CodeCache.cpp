@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -52,6 +52,12 @@
 #include "runtime/ArtifactManager.hpp"
 #include "env/IO.hpp"
 #include "runtime/HookHelpers.hpp"
+#include "env/VerboseLog.hpp"
+#include "omrformatconsts.h"
+
+#if defined(OSX) && defined(AARCH64)
+#include <pthread.h> // for pthread_jit_write_protect_np
+#endif
 
 OMR::CodeCacheMethodHeader *getCodeCacheMethodHeader(char *p, int searchLimit, J9JITExceptionTable * metaData);
 
@@ -327,12 +333,26 @@ J9::CodeCache::addFreeBlock(OMR::FaintCacheBlock *block)
    realStartPC = (realStartPC + round) & ~round;
    size_t endPtr = (size_t) warmBlock+warmBlock->_size;
    if (endPtr > realStartPC+sizeof(OMR::CodeCacheFreeCacheBlock))
-       warmBlock->_size = realStartPC - (UDATA)warmBlock;
+      {
+#if defined(OSX) && defined(AARCH64)
+      pthread_jit_write_protect_np(0);
+#endif
+      warmBlock->_size = realStartPC - (UDATA)warmBlock;
+#if defined(OSX) && defined(AARCH64)
+      pthread_jit_write_protect_np(1);
+#endif
+      }
 
    if (self()->addFreeBlock2((uint8_t *) realStartPC, (uint8_t *)endPtr))
       {
       // Update the block size to reflect the remaining stub
+#if defined(OSX) && defined(AARCH64)
+      pthread_jit_write_protect_np(0);
+#endif
       warmBlock->_size = realStartPC - (UDATA)warmBlock;
+#if defined(OSX) && defined(AARCH64)
+      pthread_jit_write_protect_np(1);
+#endif
       }
    else
       {
@@ -469,8 +489,8 @@ J9::CodeCache::dumpCodeCache()
    {
    self()->OMR::CodeCache::dumpCodeCache();
    printf("  |-- segment                = 0x%p\n", _segment );
-   printf("  |-- segment->heapBase      = 0x%08x\n", _segment->segmentBase() );
-   printf("  |-- segment->heapTop       = 0x%08x\n", _segment->segmentTop() );
+   printf("  |-- segment->heapBase      = 0x%08" OMR_PRIxPTR "\n", (uintptr_t)_segment->segmentBase() );
+   printf("  |-- segment->heapTop       = 0x%08" OMR_PRIxPTR "\n", (uintptr_t)_segment->segmentTop() );
    }
 
 #define HELPER_TRAMPOLINE_AREA_NAME "JIT helper trampoline area"

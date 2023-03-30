@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2020 IBM Corp. and others
+ * Copyright (c) 2018, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -24,17 +24,18 @@
 #define VMJ9SERVER_H
 
 #include "env/VMJ9.h"
+#include "env/j9methodServer.hpp"
 
 /**
  * @class TR_J9ServerVM
- * @brief Class used by JITServer for querying client-side VM information 
+ * @brief Class used by JITServer for querying client-side VM information
  *
- * This class is an extension of the TR_J9VM class which overrides a number 
- * of TR_J9VM's APIs. TR_J9ServerVM is used by JITServer and the overridden 
- * APIs mostly send remote messages to JITClient to query information from 
- * the TR_J9VM on the client. The information is needed for JITServer to 
- * compile code that is compatible with the client-side VM. To minimize the 
- * number of remote messages as a way to optimize JITServer performance, a 
+ * This class is an extension of the TR_J9VM class which overrides a number
+ * of TR_J9VM's APIs. TR_J9ServerVM is used by JITServer and the overridden
+ * APIs mostly send remote messages to JITClient to query information from
+ * the TR_J9VM on the client. The information is needed for JITServer to
+ * compile code that is compatible with the client-side VM. To minimize the
+ * number of remote messages as a way to optimize JITServer performance, a
  * lot of client-side TR_J9VM information are cached on JITServer.
  */
 
@@ -47,7 +48,6 @@ public:
 
    virtual bool storeOffsetToArgumentsInVirtualIndirectThunks() override { return true; }
    virtual bool needsContiguousCodeAndDataCacheAllocation() override     { return true; }
-   virtual bool supportsEmbeddedHeapBounds() override                    { return false; }
    virtual bool supportsFastNanoTime() override                          { return false; }
    virtual bool needRelocationsForHelpers() override                     { return true; }
    virtual bool canDevirtualizeDispatch() override                       { return true; }
@@ -55,6 +55,7 @@ public:
    virtual bool needRelocationsForPersistentInfoData() override          { return true; }
    virtual bool needRelocationsForLookupEvaluationData() override        { return true; }
    virtual bool needRelocationsForCurrentMethodPC() override                     { return true; }
+   virtual bool isPortableSCCEnabled() override;
    virtual void markHotField(TR::Compilation *, TR::SymbolReference *, TR_OpaqueClassBlock *, bool) override { return; }
    virtual bool isClassLibraryMethod(TR_OpaqueMethodBlock *method, bool vettedForAOT) override;
    virtual bool isClassLibraryClass(TR_OpaqueClassBlock *clazz) override;
@@ -62,14 +63,17 @@ public:
    virtual bool isSameOrSuperClass(J9Class *superClass, J9Class *subClass) override;
    virtual TR::Method * createMethod(TR_Memory *, TR_OpaqueClassBlock *, int32_t) override;
    virtual TR_ResolvedMethod * createResolvedMethod(TR_Memory * trMemory, TR_OpaqueMethodBlock * aMethod, TR_ResolvedMethod * owningMethod, TR_OpaqueClassBlock *classForNewInstance) override;
+   TR_ResolvedMethod * createResolvedMethod(TR_Memory * trMemory, TR_OpaqueMethodBlock * aMethod, TR_ResolvedMethod * owningMethod, const TR_ResolvedJ9JITServerMethodInfo &methodInfo, TR_OpaqueClassBlock *classForNewInstance = NULL);
    virtual TR_ResolvedMethod * createResolvedMethodWithSignature(TR_Memory * trMemory, TR_OpaqueMethodBlock * aMethod, TR_OpaqueClassBlock *classForNewInstance,
-                                                                 char *signature, int32_t signatureLength, TR_ResolvedMethod * owningMethod) override;
+                                                                 char *signature, int32_t signatureLength, TR_ResolvedMethod * owningMethod, uint32_t = 0) override;
+   TR_ResolvedMethod * createResolvedMethodWithSignature(TR_Memory * trMemory, TR_OpaqueMethodBlock * aMethod, TR_OpaqueClassBlock *classForNewInstance, char *signature, int32_t signatureLength, TR_ResolvedMethod * owningMethod, const TR_ResolvedJ9JITServerMethodInfo &methodInfo);
    virtual TR_YesNoMaybe isInstanceOf(TR_OpaqueClassBlock * a, TR_OpaqueClassBlock *b, bool objectTypeIsFixed, bool castTypeIsFixed = true, bool optimizeForAOT = false) override;
    virtual TR_OpaqueClassBlock * getSystemClassFromClassName(const char * name, int32_t length, bool isVettedForAOT = false) override;
    virtual TR_OpaqueClassBlock * getByteArrayClass() override;
    virtual bool isMethodTracingEnabled(TR_OpaqueMethodBlock *method) override;
    virtual bool canMethodEnterEventBeHooked() override;
    virtual bool canMethodExitEventBeHooked() override;
+   virtual bool canExceptionEventBeHooked() override;
    virtual TR_OpaqueClassBlock * getClassClassPointer(TR_OpaqueClassBlock *objectClassPointer) override;
    virtual void * getClassLoader(TR_OpaqueClassBlock * classPointer) override;
    virtual TR_OpaqueClassBlock * getClassOfMethod(TR_OpaqueMethodBlock *method) override;
@@ -83,21 +87,29 @@ public:
    virtual TR_OpaqueClassBlock * getComponentClassFromArrayClass(TR_OpaqueClassBlock *arrayClass) override;
    virtual bool classHasBeenReplaced(TR_OpaqueClassBlock *) override;
    virtual bool classHasBeenExtended(TR_OpaqueClassBlock *) override;
+   virtual bool isGetImplInliningSupported() override;
    virtual bool compiledAsDLTBefore(TR_ResolvedMethod *) override;
+   virtual bool tlhHasBeenCleared() override;
+   virtual uint32_t getStaticObjectFlags() override;
    virtual uintptr_t getOverflowSafeAllocSize() override;
+   virtual void *getReferenceArrayCopyHelperAddress() override;
    virtual bool isThunkArchetype(J9Method * method) override;
    virtual int32_t printTruncatedSignature(char *sigBuf, int32_t bufLen, TR_OpaqueMethodBlock *method) override;
    virtual bool isClassInitialized(TR_OpaqueClassBlock * clazz) override;
    virtual UDATA getOSRFrameSizeInBytes(TR_OpaqueMethodBlock * method) override;
+   virtual bool ensureOSRBufferSize(TR::Compilation *comp, uintptr_t osrFrameSizeInBytes, uintptr_t osrScratchBufferSizeInBytes, uintptr_t osrStackFrameSizeInBytes) override;
    virtual int32_t getByteOffsetToLockword(TR_OpaqueClassBlock * clazz) override;
    virtual int32_t getInitialLockword(TR_OpaqueClassBlock* clazzPointer) override;
    virtual bool isEnableGlobalLockReservationSet() override;
    virtual bool isString(TR_OpaqueClassBlock * clazz) override;
+   virtual bool isJavaLangObject(TR_OpaqueClassBlock *clazz) override;
    virtual void * getMethods(TR_OpaqueClassBlock * clazz) override;
    virtual void getResolvedMethods(TR_Memory * trMemory, TR_OpaqueClassBlock * classPointer, List<TR_ResolvedMethod> * resolvedMethodsInClass) override;
    virtual bool isPrimitiveArray(TR_OpaqueClassBlock *clazz) override;
    virtual uint32_t getAllocationSize(TR::StaticSymbol *classSym, TR_OpaqueClassBlock *clazz) override;
    virtual TR_OpaqueClassBlock * getObjectClass(uintptr_t objectPointer) override;
+   virtual TR_OpaqueClassBlock * getObjectClassAt(uintptr_t objectAddress) override;
+   virtual TR_OpaqueClassBlock *getObjectClassFromKnownObjectIndex(TR::Compilation *comp, TR::KnownObjectTable::Index idx) override;
    virtual uintptr_t getStaticReferenceFieldAtAddress(uintptr_t fieldAddress) override;
 
    virtual bool stackWalkerMaySkipFrames(TR_OpaqueMethodBlock *method, TR_OpaqueClassBlock *clazz) override;
@@ -145,8 +157,12 @@ public:
    virtual uintptr_t getClassFlagsValue(TR_OpaqueClassBlock * clazz) override;
    virtual TR_OpaqueMethodBlock *getMethodFromName(char *className, char *methodName, char *signature) override;
    virtual TR_OpaqueMethodBlock *getMethodFromClass(TR_OpaqueClassBlock *methodClass, char *methodName, char *signature, TR_OpaqueClassBlock *callingClass) override;
+   virtual bool isStable(J9Class *fieldClass, int cpIndex) override;
+   virtual bool isForceInline(TR_ResolvedMethod *method) override;
+   virtual bool isDontInline(TR_ResolvedMethod *method) override;
    virtual bool isClassVisible(TR_OpaqueClassBlock *sourceClass, TR_OpaqueClassBlock *destClass) override;
    virtual void markClassForTenuredAlignment(TR::Compilation *comp, TR_OpaqueClassBlock *clazz, uint32_t alignFromStart) override;
+   virtual void reportHotField(int32_t reducedCpuUtil, J9Class* clazz, uint8_t fieldOffset,  uint32_t reducedFrequency) override;
    virtual int32_t * getReferenceSlotsInClass(TR::Compilation *comp, TR_OpaqueClassBlock *clazz) override;
    virtual uint32_t getMethodSize(TR_OpaqueMethodBlock *method) override;
    virtual void * addressOfFirstClassStatic(TR_OpaqueClassBlock *clazz) override;
@@ -155,6 +171,7 @@ public:
    virtual void revertToInterpreted(TR_OpaqueMethodBlock *method) override;
    virtual void * getLocationOfClassLoaderObjectPointer(TR_OpaqueClassBlock *clazz) override;
    virtual bool isOwnableSyncClass(TR_OpaqueClassBlock *clazz) override;
+   virtual bool isContinuationClass(TR_OpaqueClassBlock *clazz) override;
    virtual TR_OpaqueClassBlock * getClassFromMethodBlock(TR_OpaqueMethodBlock *method) override;
    virtual U_8 * fetchMethodExtendedFlagsPointer(J9Method *method) override;
    virtual void * getStaticHookAddress(int32_t event) override;
@@ -168,6 +185,11 @@ public:
    virtual bool needsInvokeExactJ2IThunk(TR::Node *node,  TR::Compilation *comp) override;
    virtual TR_ResolvedMethod *createMethodHandleArchetypeSpecimen(TR_Memory *trMemory, uintptr_t *methodHandleLocation, TR_ResolvedMethod *owningMethod = 0) override;
    virtual TR_ResolvedMethod *createMethodHandleArchetypeSpecimen(TR_Memory *trMemory, TR_OpaqueMethodBlock *archetype, uintptr_t *methodHandleLocation, TR_ResolvedMethod *owningMethod = 0) override;
+
+   // Is method generated for LambdaForm
+   virtual bool isLambdaFormGeneratedMethod(TR_OpaqueMethodBlock *method) override;
+   virtual bool isLambdaFormGeneratedMethod(TR_ResolvedMethod *method) override;
+
    virtual intptr_t getVFTEntry(TR_OpaqueClassBlock *clazz, int32_t offset) override;
    virtual bool isClassArray(TR_OpaqueClassBlock *klass) override;
    virtual uintptr_t getFieldOffset(TR::Compilation * comp, TR::SymbolReference* classRef, TR::SymbolReference* fieldRef) override { return 0; } // safe answer
@@ -191,8 +213,37 @@ public:
    virtual uintptr_t getCellSizeForSizeClass(uintptr_t) override;
    virtual uintptr_t getObjectSizeClass(uintptr_t) override;
 
+   virtual bool acquireClassTableMutex() override;
+   virtual void releaseClassTableMutex(bool) override;
+
    bool getCachedField(J9Class *ramClass, int32_t cpIndex, J9Class **declaringClass, UDATA *field);
    void cacheField(J9Class *ramClass, int32_t cpIndex, J9Class *declaringClass, UDATA field);
+
+   virtual bool getNurserySpaceBounds(uintptr_t *base, uintptr_t *top) override;
+   virtual UDATA getLowTenureAddress() override;
+   virtual UDATA getHighTenureAddress() override;
+
+   virtual MethodOfHandle methodOfDirectOrVirtualHandle(uintptr_t *mh, bool isVirtual);
+
+   // Openjdk implementation
+#if defined(J9VM_OPT_OPENJDK_METHODHANDLE)
+   virtual TR_OpaqueMethodBlock* targetMethodFromMemberName(uintptr_t memberName) override;
+   virtual TR_OpaqueMethodBlock* targetMethodFromMemberName(TR::Compilation* comp, TR::KnownObjectTable::Index objIndex) override;
+   virtual TR_OpaqueMethodBlock* targetMethodFromMethodHandle(TR::Compilation* comp, TR::KnownObjectTable::Index objIndex) override;
+   virtual TR_ResolvedMethod *targetMethodFromInvokeCacheArrayMemberNameObj(TR::Compilation *comp, TR_ResolvedMethod *owningMethod, uintptr_t *invokeCacheArray) override;
+   virtual TR::KnownObjectTable::Index getKnotIndexOfInvokeCacheArrayAppendixElement(TR::Compilation *comp, uintptr_t *invokeCacheArray) override;
+   virtual TR::SymbolReference* refineInvokeCacheElementSymRefWithKnownObjectIndex(TR::Compilation *comp, TR::SymbolReference *originalSymRef, uintptr_t *invokeCacheArray) override;
+
+   virtual J9JNIMethodID* jniMethodIdFromMemberName(uintptr_t memberName) override;
+   virtual J9JNIMethodID* jniMethodIdFromMemberName(TR::Compilation* comp, TR::KnownObjectTable::Index objIndex) override;
+   virtual uintptr_t vTableOrITableIndexFromMemberName(uintptr_t memberName) override;
+   virtual uintptr_t vTableOrITableIndexFromMemberName(TR::Compilation* comp, TR::KnownObjectTable::Index objIndex) override;
+   virtual TR::KnownObjectTable::Index delegatingMethodHandleTargetHelper( TR::Compilation *comp, TR::KnownObjectTable::Index dmhIndex, TR_OpaqueClassBlock *cwClass) override;
+   virtual UDATA getVMTargetOffset() override;
+   virtual UDATA getVMIndexOffset() override;
+#endif
+   virtual TR::KnownObjectTable::Index getMemberNameFieldKnotIndexFromMethodHandleKnotIndex(TR::Compilation *comp, TR::KnownObjectTable::Index mhIndex, char *fieldName) override;
+   virtual bool isMethodHandleExpectedType(TR::Compilation *comp, TR::KnownObjectTable::Index mhIndex, TR::KnownObjectTable::Index expectedTypeIndex) override;
 
 private:
    bool instanceOfOrCheckCastHelper(J9Class *instanceClass, J9Class* castClass, bool cacheUpdate);
@@ -209,7 +260,7 @@ protected:
  * additional handling for AOT compilation
  *
  * This class is an extension of the TR_J9ServerVM class. This class conceptually
- * does very similar things compared to TR_J9ServerVM except it's used for AOT 
+ * does very similar things compared to TR_J9ServerVM except it's used for AOT
  * compilation.
  */
 
@@ -226,7 +277,6 @@ public:
    // replacing calls to isAOT
    virtual bool       canUseSymbolValidationManager() override                 { return true; }
    virtual bool       supportsCodeCacheSnippets() override                     { return false; }
-   virtual bool       canRelocateDirectNativeCalls() override                  { return false; }
    virtual bool       needClassAndMethodPointerRelocations() override          { return true; }
    virtual bool       inlinedAllocationsMustBeVerified() override              { return true; }
    virtual bool       needRelocationsForHelpers() override                     { return true; }
@@ -237,7 +287,6 @@ public:
    virtual bool       needRelocationsForLookupEvaluationData() override        { return true; }
    virtual bool       needRelocationsForBodyInfoData() override                { return true; }
    virtual bool       needRelocationsForPersistentInfoData() override          { return true; }
-   virtual bool       forceUnresolvedDispatch() override                       { return true; }
    virtual bool       nopsAlsoProcessedByRelocations() override                { return true; }
    virtual bool       supportsGuardMerging() override                          { return false; }
    virtual bool       canDevirtualizeDispatch() override                       { return false; }
@@ -249,14 +298,18 @@ public:
    virtual bool       isBenefitInliningCheckIfFinalizeObject() override        { return true; }
    virtual bool       needsContiguousCodeAndDataCacheAllocation() override     { return true; }
 
+   virtual bool       isResolvedDirectDispatchGuaranteed(TR::Compilation *comp) override;
+   virtual bool       isResolvedVirtualDispatchGuaranteed(TR::Compilation *comp) override;
+
    virtual bool shouldDelayAotLoad() override                                  { return true; }
+   virtual bool isStable(int cpIndex, TR_ResolvedMethod *owningMethod, TR::Compilation *comp) override { return false; }
    virtual bool isClassVisible(TR_OpaqueClassBlock * sourceClass, TR_OpaqueClassBlock * destClass) override;
    virtual bool stackWalkerMaySkipFrames(TR_OpaqueMethodBlock *method, TR_OpaqueClassBlock *methodClass) override;
    virtual bool isMethodTracingEnabled(TR_OpaqueMethodBlock *method) override;
    virtual bool traceableMethodsCanBeInlined() override;
    virtual bool canMethodEnterEventBeHooked() override;
    virtual bool canMethodExitEventBeHooked() override;
-   virtual bool methodsCanBeInlinedEvenIfEventHooksEnabled() override;
+   virtual bool methodsCanBeInlinedEvenIfEventHooksEnabled(TR::Compilation *comp) override;
    virtual int32_t getJavaLangClassHashCode(TR::Compilation * comp, TR_OpaqueClassBlock * clazzPointer, bool &hashCodeComputed) override;
    virtual bool javaLangClassGetModifiersImpl(TR_OpaqueClassBlock * clazzPointer, int32_t &result) override;
    virtual uint32_t getInstanceFieldOffset(TR_OpaqueClassBlock * classPointer, char * fieldName, uint32_t fieldLen, char * sig, uint32_t sigLen, UDATA options) override;
@@ -297,13 +350,14 @@ public:
    virtual void * persistThunk(char *signatureChars, uint32_t signatureLength, uint8_t *thunkStart, uint32_t totalSize) { TR_ASSERT_FATAL(0, "persistThunk should not be called on the server"); return NULL; }
    virtual void *findPersistentThunk(char *signatureChars, uint32_t signatureLength) override { TR_ASSERT_FATAL(0, "findPersistentThunk should not be called on the server"); return NULL; }
    virtual J9Class * getClassForAllocationInlining(TR::Compilation *comp, TR::SymbolReference *classSymRef) override;
+   virtual bool ensureOSRBufferSize(TR::Compilation *comp, uintptr_t osrFrameSizeInBytes, uintptr_t osrScratchBufferSizeInBytes, uintptr_t osrStackFrameSizeInBytes) override;
    virtual TR_OpaqueMethodBlock *getMethodFromName(char *className, char *methodName, char *signature) override;
    virtual TR_OpaqueMethodBlock *getResolvedVirtualMethod(TR_OpaqueClassBlock * classObject, int32_t cpIndex, bool ignoreReResolve = true) override;
    virtual TR_OpaqueMethodBlock *getResolvedInterfaceMethod(TR_OpaqueMethodBlock *ownerMethod, TR_OpaqueClassBlock * classObject, int32_t cpIndex) override;
 
 protected :
    bool validateClass(TR_OpaqueMethodBlock * method, TR_OpaqueClassBlock* j9class, bool isVettedForAOT);
- 
+
    };
 
 #endif // VMJ9SERVER_H

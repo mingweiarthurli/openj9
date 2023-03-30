@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,14 +15,16 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
 
+#if defined(J9ZOS390)
 #pragma csect(CODE,"TRJ9CompBase#C")
 #pragma csect(STATIC,"TRJ9CompBase#S")
 #pragma csect(TEST,"TRJ9CompBase#T")
+#endif
 
 #include "compile/J9Compilation.hpp"
 
@@ -43,10 +45,12 @@
 #include "env/VMJ9.h"
 #include "env/VMAccessCriticalSection.hpp"
 #include "env/KnownObjectTable.hpp"
+#include "env/VerboseLog.hpp"
 #include "il/Node.hpp"
 #include "il/Node_inlines.hpp"
 #include "ilgen/IlGenRequest.hpp"
 #include "infra/List.hpp"
+#include "optimizer/Inliner.hpp"
 #include "optimizer/OptimizationManager.hpp"
 #include "optimizer/Optimizer.hpp"
 #include "optimizer/TransformUtil.hpp"
@@ -84,11 +88,16 @@ void *operator new(size_t size)
    return malloc(size);
    }
 
+// Avoid -Wimplicit-exception-spec-mismatch error on platforms that specify the global delete operator with throw()
+#ifndef _NOEXCEPT
+#define _NOEXCEPT
+#endif
+
 /**
  * Since we are using arena allocation, heap deletions must be a no-op, and
  * can't be used by JIT code, so we inject an assertion here.
  */
-void operator delete(void *)
+void operator delete(void *) _NOEXCEPT
    {
    TR_ASSERT(0, "Invalid use of global operator delete");
    }
@@ -136,7 +145,8 @@ J9::Compilation::Compilation(int32_t id,
       TR::Region &heapMemoryRegion,
       TR_Memory *m,
       TR_OptimizationPlan *optimizationPlan,
-      TR_RelocationRuntime *reloRuntime)
+      TR_RelocationRuntime *reloRuntime,
+      TR::Environment *target)
    : OMR::CompilationConnector(
       id,
       j9vmThread->omrVMThread,
@@ -146,7 +156,8 @@ J9::Compilation::Compilation(int32_t id,
       options,
       heapMemoryRegion,
       m,
-      optimizationPlan),
+      optimizationPlan,
+      target),
    _updateCompYieldStats(
       options.getOption(TR_EnableCompYieldStats) ||
       options.getVerboseOption(TR_VerboseCompYieldStats) ||
@@ -179,27 +190,19 @@ J9::Compilation::Compilation(int32_t id,
    _reloRuntime(reloRuntime),
 #if defined(J9VM_OPT_JITSERVER)
    _remoteCompilation(false),
-   _serializedRuntimeAssumptions(getTypedAllocator<SerializedRuntimeAssumption>(self()->allocator())),
+   _serializedRuntimeAssumptions(getTypedAllocator<SerializedRuntimeAssumption *>(self()->allocator())),
+   _clientData(NULL),
+   _stream(NULL),
+   _globalMemory(*::trPersistentMemory, heapMemoryRegion),
+   _perClientMemory(_trMemory),
+   _methodsRequiringTrampolines(getTypedAllocator<TR_OpaqueMethodBlock *>(self()->allocator())),
+   _deserializedAOTMethod(false),
+   _deserializedAOTMethodUsingSVM(false),
+   _aotCacheStore(false),
+   _serializationRecords(decltype(_serializationRecords)::allocator_type(heapMemoryRegion)),
 #endif /* defined(J9VM_OPT_JITSERVER) */
    _osrProhibitedOverRangeOfTrees(false)
    {
-#if defined(J9VM_OPT_JITSERVER)
-   // In JITServer, we would like to use JITClient's processor info for the compilation
-   // The following code effectively replaces the cpu with client's cpu through the getProcessorDescription() that has JITServer support
-   if (self()->getPersistentInfo()->getRemoteCompilationMode() == JITServer::SERVER)
-      {
-      OMRProcessorDesc JITClientProcessorDesc = TR::Compiler->target.cpu.getProcessorDescription();
-      _target.cpu = TR::CPU(JITClientProcessorDesc);
-      }
-   else
-#endif /* defined(J9VM_OPT_JITSERVER) */
-      {
-      if (((TR_J9VMBase *)fe)->isAOT_DEPRECATED_DO_NOT_USE() && TR::Compiler->target.cpu.isX86())
-         {
-         _target = TR::Compiler->relocatableTarget;
-         }
-      }
-
    _symbolValidationManager = new (self()->region()) TR::SymbolValidationManager(self()->region(), compilee);
 
    _aotClassClassPointer = NULL;
@@ -326,9 +329,12 @@ J9::Compilation::allocateCompYieldStatsMatrix()
 void
 J9::Compilation::printCompYieldStats()
    {
-   TR_VerboseLog::writeLine(TR_Vlog_PERF, "Max yield-to-yield time of %u usec for ", static_cast<uint32_t>(_maxYieldInterval));
-   TR_VerboseLog::write("%s -", J9::Compilation::getContextName(_sourceContextForMaxYieldInterval));
-   TR_VerboseLog::write("- %s", J9::Compilation::getContextName(_destinationContextForMaxYieldInterval));
+   TR_VerboseLog::writeLine(
+      TR_Vlog_PERF,
+      "Max yield-to-yield time of %u usec for %s -- %s",
+      static_cast<uint32_t>(_maxYieldInterval),
+      J9::Compilation::getContextName(_sourceContextForMaxYieldInterval),
+      J9::Compilation::getContextName(_destinationContextForMaxYieldInterval));
    }
 
 const char *
@@ -370,6 +376,13 @@ J9::Compilation::printCompYieldStatsMatrix()
       }
    }
 
+TR_AOTMethodHeader *
+J9::Compilation::getAotMethodHeaderEntry()
+   {
+   J9JITDataCacheHeader *aotMethodHeader = (J9JITDataCacheHeader *)self()->getAotMethodDataStart();
+   TR_AOTMethodHeader *aotMethodHeaderEntry =  (TR_AOTMethodHeader *)(aotMethodHeader + 1);
+   return aotMethodHeaderEntry;
+   }
 
 TR::Node *
 J9::Compilation::findNullChkInfo(TR::Node *node)
@@ -418,6 +431,7 @@ J9::Compilation::isConverterMethod(TR::RecognizedMethod rm)
       {
       case TR::sun_nio_cs_ISO_8859_1_Encoder_encodeISOArray:
       case TR::java_lang_StringCoding_implEncodeISOArray:
+      case TR::java_lang_String_decodeUTF8_UTF16:
       case TR::sun_nio_cs_ISO_8859_1_Decoder_decodeISO8859_1:
       case TR::sun_nio_cs_US_ASCII_Encoder_encodeASCII:
       case TR::sun_nio_cs_US_ASCII_Decoder_decodeASCII:
@@ -713,10 +727,10 @@ J9::Compilation::canAllocateInline(TR::Node* node, TR_OpaqueClassBlock* &classIn
       if (clazz == NULL)
          return -1;
 
-      // Arrays of value type classes must have all their elements initialized with the
+      // Arrays of primitive value type classes must have all their elements initialized with the
       // default value of the component type.  For now, prevent inline allocation of them.
       //
-      if (areValueTypesEnabled && TR::Compiler->cls.isValueTypeClass(reinterpret_cast<TR_OpaqueClassBlock*>(clazz)))
+      if (areValueTypesEnabled && TR::Compiler->cls.isPrimitiveValueTypeClass(reinterpret_cast<TR_OpaqueClassBlock*>(clazz)))
          {
          return -1;
          }
@@ -836,6 +850,14 @@ bool
 J9::Compilation::compileRelocatableCode()
    {
    return self()->fej9()->isAOT_DEPRECATED_DO_NOT_USE();
+   }
+
+bool
+J9::Compilation::compilePortableCode()
+   {
+   return (self()->fej9()->inSnapshotMode() ||
+             (self()->compileRelocatableCode() &&
+                self()->fej9()->isPortableSCCEnabled()));
    }
 
 
@@ -1063,8 +1085,8 @@ J9::Compilation::verifyCompressedRefsAnchors(TR::Node *parent, TR::Node *node,
 
    // process loads/stores that are references
    //
-   if ((node->getOpCode().isLoadIndirect() || node->getOpCode().isStoreIndirect()) &&
-         node->getSymbolReference()->getSymbol()->getDataType() == TR::Address ||
+   if (((node->getOpCode().isLoadIndirect() || node->getOpCode().isStoreIndirect()) &&
+         node->getSymbolReference()->getSymbol()->getDataType() == TR::Address) ||
             (node->getOpCodeValue() == TR::arrayset && node->getSecondChild()->getDataType() == TR::Address))
       {
       TR_Pair<TR::Node, TR::TreeTop> *info = findCPtrsInfo(nodesList, node);
@@ -1129,6 +1151,12 @@ J9::Compilation::addAOTNOPSite()
    return site;
    }
 
+bool
+J9::Compilation::incInlineDepth(TR::ResolvedMethodSymbol * method, TR_ByteCodeInfo & bcInfo, int32_t cpIndex, TR::SymbolReference *callSymRef, bool directCall, TR_PrexArgInfo *argInfo)
+   {
+   TR_ASSERT_FATAL(callSymRef == NULL, "Should not be calling this API for non-NULL symref!\n");
+   return OMR::CompilationConnector::incInlineDepth(method, bcInfo, cpIndex, callSymRef, directCall, argInfo);
+   }
 
 bool
 J9::Compilation::isGeneratedReflectionMethod(TR_ResolvedMethod * method)
@@ -1142,6 +1170,70 @@ J9::Compilation::isGeneratedReflectionMethod(TR_ResolvedMethod * method)
    return false;
    }
 
+TR_ExternalRelocationTargetKind
+J9::Compilation::getReloTypeForMethodToBeInlined(TR_VirtualGuardSelection *guard, TR::Node *callNode, TR_OpaqueClassBlock *receiverClass)
+   {
+   TR_ExternalRelocationTargetKind reloKind = OMR::Compilation::getReloTypeForMethodToBeInlined(guard, callNode, receiverClass);
+
+   if (callNode && self()->compileRelocatableCode())
+      {
+      if (guard && guard->_kind == TR_ProfiledGuard)
+         {
+         if (guard->_type == TR_MethodTest)
+            reloKind = TR_ProfiledMethodGuardRelocation;
+         else if (guard->_type == TR_VftTest)
+            reloKind = TR_ProfiledClassGuardRelocation;
+         }
+      else
+         {
+         TR::MethodSymbol *methodSymbol = callNode->getSymbolReference()->getSymbol()->castToMethodSymbol();
+
+         if (methodSymbol->isSpecial())
+            {
+            reloKind = TR_InlinedSpecialMethod;
+            }
+         else if (methodSymbol->isStatic())
+            {
+            reloKind = TR_InlinedStaticMethod;
+            }
+         else if (receiverClass
+                  && TR::Compiler->cls.isAbstractClass(self(), receiverClass)
+                  && methodSymbol->getResolvedMethodSymbol()->getResolvedMethod()->isAbstract())
+            {
+            reloKind = TR_InlinedAbstractMethod;
+            }
+         else if (methodSymbol->isVirtual())
+            {
+            reloKind = TR_InlinedVirtualMethod;
+            }
+         else if (methodSymbol->isInterface())
+            {
+            reloKind = TR_InlinedInterfaceMethod;
+            }
+         }
+
+      if (reloKind == TR_NoRelocation)
+         {
+         TR_InlinedCallSite *site = self()->getCurrentInlinedCallSite();
+         TR_OpaqueMethodBlock *caller;
+         if (site)
+            {
+            caller = site->_methodInfo;
+            }
+         else
+            {
+            caller = self()->getMethodBeingCompiled()->getNonPersistentIdentifier();
+            }
+
+         TR_ASSERT_FATAL(false, "Can't find relo kind for Caller %p Callee %p TR_ByteCodeInfo %p\n",
+                         caller,
+                         callNode->getSymbol()->castToResolvedMethodSymbol()->getResolvedMethod()->getNonPersistentIdentifier(),
+                         callNode->getByteCodeInfo());
+         }
+      }
+
+   return reloKind;
+   }
 
 bool
 J9::Compilation::compilationShouldBeInterrupted(TR_CallingContext callingContext)
@@ -1432,10 +1524,6 @@ J9::Compilation::notYetRunMeansCold()
                              self()->getOptions()->getInitialBCount() :
                              self()->getOptions()->getInitialCount();
 
-   if (currentMethod->convertToMethod()->isBigDecimalMethod() ||
-       currentMethod->convertToMethod()->isBigDecimalConvertersMethod())
-       initialCount = 0;
-
     switch (currentMethod->getRecognizedMethod())
        {
        case TR::com_ibm_jit_DecimalFormatHelper_formatAsDouble:
@@ -1483,3 +1571,14 @@ J9::Compilation::incompleteOptimizerSupportForReadWriteBarriers()
    return self()->getOption(TR_EnableFieldWatch);
    }
 
+#if defined(J9VM_OPT_JITSERVER)
+void
+J9::Compilation::addSerializationRecord(const AOTCacheRecord *record, uintptr_t reloDataOffset)
+   {
+   TR_ASSERT_FATAL(_aotCacheStore, "Trying to add serialization record for compilation that is not an AOT cache store");
+   if (record)
+      _serializationRecords.push_back({ record, reloDataOffset });
+   else
+      _aotCacheStore = false;// Serialization failed; method won't be stored in AOT cache
+   }
+#endif /* defined(J9VM_OPT_JITSERVER) */

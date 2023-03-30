@@ -1,5 +1,5 @@
 <!--
-Copyright (c) 2018, 2018 IBM Corp. and others
+Copyright (c) 2018, 2021 IBM Corp. and others
 
 This program and the accompanying materials are made available under
 the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@ Exception [1] and GNU General Public License, version 2 with the
 OpenJDK Assembly Exception [2].
 
 [1] https://www.gnu.org/software/classpath/license.html
-[2] http://openjdk.java.net/legal/assembly-exception.html
+[2] https://openjdk.org/legal/assembly-exception.html
 
 SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 -->
@@ -32,7 +32,7 @@ javacore dump (in which it is referred to as "VM flags"), and serves
 as a first-order indicator of the failing component during problem
 determination. 
 
-[1]: https://github.com/eclipse/openj9/blob/master/runtime/oti/j9nonbuilder.h
+[1]: https://github.com/eclipse-openj9/openj9/blob/master/runtime/oti/j9nonbuilder.h
 
 ## Decoding
 
@@ -57,7 +57,7 @@ leading zeros are required.
 
 ```
 > java -Xjit:vmstate=0x000501ff
-vmState [0x501ff]: {J9VMSTATE_JIT_CODEGEN} {inlining}
+vmState [0x501ff]: {J9VMSTATE_JIT} {inlining}
 ```
 
 ### JIT compiler
@@ -80,7 +80,7 @@ active component is likely to be in the compiler initialization or
 the IL generator.
 
 [2]: https://github.com/eclipse/omr/blob/master/compiler/optimizer/Optimizations.hpp
-[3]: https://github.com/eclipse/openj9/blob/master/runtime/compiler/codegen/J9CodeGenPhaseEnum.hpp
+[3]: https://github.com/eclipse-openj9/openj9/blob/master/runtime/compiler/codegen/J9CodeGenPhaseEnum.hpp
 
 ## Finding the VM state examples
 

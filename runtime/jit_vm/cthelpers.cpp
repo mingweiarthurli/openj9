@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -28,6 +28,20 @@
 #include "AtomicSupport.hpp"
 
 extern "C" {
+
+#if JAVA_SPEC_VERSION >= 16
+J9_DECLARE_CONSTANT_UTF8(ojdk_intrinsicCandidate, "Ljdk/internal/vm/annotation/IntrinsicCandidate;");
+#endif /* JAVA_SPEC_VERSION >= 16 */
+
+#if JAVA_SPEC_VERSION >= 11
+J9_DECLARE_CONSTANT_UTF8(ojdk_stable, "Ljdk/internal/vm/annotation/Stable;");
+J9_DECLARE_CONSTANT_UTF8(ojdk_forceInline, "Ljdk/internal/vm/annotation/ForceInline;");
+J9_DECLARE_CONSTANT_UTF8(ojdk_dontInline, "Ljdk/internal/vm/annotation/DontInline;");
+#else /* JAVA_SPEC_VERSION >= 11 */
+J9_DECLARE_CONSTANT_UTF8(ojdk_stable, "Ljava/lang/invoke/Stable;");
+J9_DECLARE_CONSTANT_UTF8(ojdk_forceInline, "Ljava/lang/invoke/ForceInline;");
+J9_DECLARE_CONSTANT_UTF8(ojdk_dontInline, "Ljava/lang/invoke/DontInline;");
+#endif /* JAVA_SPEC_VERSION >= 11 */
 
 void*
 jitGetCountingSendTarget(J9VMThread *vmThread, J9Method *ramMethod)
@@ -179,6 +193,63 @@ jitGetConstantDynamicTypeFromCP(J9VMThread *currentThread, J9ConstantPool *const
 	J9UTF8 *sigUTF = J9ROMNAMEANDSIGNATURE_SIGNATURE(NNSRP_GET(romConstantRef->nameAndSignature, struct J9ROMNameAndSignature*));
 
 	return sigUTF;
+}
+
+/**
+ * Queries if the fieldref at the specified cpIndex contains the @Stable annotation.
+ * Field ref must be resolved.
+ *
+ * @param clazz J9Class
+ * @param cpIndex fieldref cp index
+ * @return true if fieldref contains @Stable, false otherwise
+ */
+BOOLEAN
+jitIsFieldStable(J9VMThread *currentThread, J9Class *clazz, UDATA cpIndex)
+{
+	return fieldContainsRuntimeAnnotation(currentThread, clazz, cpIndex, (J9UTF8 *)&ojdk_stable);
+}
+
+/**
+ * Queries if the method contains the @ForceInline annotation
+ *
+ * @param currentThread currentThread
+ * @param method the queried method
+ * @return true if method contains @ForceInline, false otherwise
+ */
+BOOLEAN
+jitIsMethodTaggedWithForceInline(J9VMThread *currentThread, J9Method *method)
+{
+	return FALSE != methodContainsRuntimeAnnotation(currentThread, method, (J9UTF8 *)&ojdk_forceInline);
+}
+
+/**
+ * Queries if the method contains the @DontInline annotation
+ *
+ * @param currentThread currentThread
+ * @param method the queried method
+ * @return true if method contains @DontInline, false otherwise
+ */
+BOOLEAN
+jitIsMethodTaggedWithDontInline(J9VMThread *currentThread, J9Method *method)
+{
+	return FALSE != methodContainsRuntimeAnnotation(currentThread, method, (J9UTF8 *)&ojdk_dontInline);
+}
+
+/**
+ * Queries if the method contains the @IntrinsicCandidate annotation
+ *
+ * @param currentThread currentThread
+ * @param method the queried method
+ * @return true if method contains @IntrinsicCandidate, false otherwise
+ */
+BOOLEAN
+jitIsMethodTaggedWithIntrinsicCandidate(J9VMThread *currentThread, J9Method *method)
+{
+#if JAVA_SPEC_VERSION >= 16
+	return FALSE != methodContainsRuntimeAnnotation(currentThread, method, (J9UTF8 *)&ojdk_intrinsicCandidate);
+#else /* JAVA_SPEC_VERSION >= 16 */
+	return FALSE;
+#endif /* JAVA_SPEC_VERSION >= 16 */
 }
 
 }

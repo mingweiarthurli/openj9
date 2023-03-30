@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -69,6 +69,10 @@
 #include "optimizer/TransformUtil.hpp"
 #include "optimizer/UseDefInfo.hpp"
 #include "ras/Debug.hpp"
+#include "omrformatconsts.h"
+#if defined(J9VM_OPT_JITSERVER)
+#include "env/JITServerAllocationRegion.hpp"
+#endif
 
 #define OPT_DETAILS "O^O NEWLOOPREDUCER: "
 #define VERBOSE 0
@@ -129,15 +133,14 @@ TR_CISCNode::initializeMembers(uint32_t opc, uint16_t id, int16_t dagId, uint16_
 bool
 TR_CISCNode::isEqualOpc(TR_CISCNode *t)
    {
-   //TR_ASSERT((int)TR::NumIlOps == TR_variable, "assumption for reducing compilation time");
-   static_assert((int)TR::NumIlOps == TR_variable,
+   static_assert((int)TR::NumAllIlOps == TR_variable,
                  "assumption for reducing compilation time");
 
    int32_t pOpc = _opcode;
    int32_t tOpc = t->_opcode;
 
    if (pOpc == tOpc) return true;
-   else if (pOpc > TR::NumIlOps) // Please see the above assumption
+   else if (pOpc > TR::NumAllIlOps) // Please see the above assumption
       {
       switch(pOpc)
          {
@@ -191,7 +194,7 @@ TR_CISCNode::isEqualOpc(TR_CISCNode *t)
 const char *
 TR_CISCNode::getName(TR_CISCOps op, TR::Compilation * comp)
    {
-   if (op < (TR_CISCOps)TR::NumIlOps)
+   if (op < (TR_CISCOps)TR::NumAllIlOps)
       {
       TR::ILOpCode opCode;
       opCode.setOpCodeValue((enum TR::ILOpCodes)op);
@@ -761,7 +764,7 @@ TR_CISCNode::checkParentsNonRec(TR_CISCNode *p, TR_CISCNode *t, int8_t level, TR
 void
 TR_CISCNode::reverseBranchOpCodes()
    {
-   TR_ASSERT(_opcode < TR::NumIlOps && _ilOpCode.isIf(), "error: not isIf");
+   TR_ASSERT(_opcode < TR::NumAllIlOps && _ilOpCode.isIf(), "error: not isIf");
    TR_ASSERT(_numSuccs == 2, "error: _numSuccs != 2");
    TR_CISCNode *swap = _succs[0];
    _succs[0] = _succs[1];
@@ -968,7 +971,7 @@ TR_CISCGraphAspectsWithCounts::setAspectsByOpcode(int opc)
          set(iadd);
          break;
       default:
-         if (opc < TR::NumIlOps)
+         if (opc < TR::NumAllIlOps)
             {
             TR::ILOpCode opCode;
             opCode.setOpCodeValue((enum TR::ILOpCodes)opc);
@@ -1032,6 +1035,24 @@ TR_CISCGraph::makePreparedCISCGraphs(TR::Compilation *c)
    else
       graphsInitialized = true;
 
+#if defined(J9VM_OPT_JITSERVER)
+   // Prepared CISC graphs are static, i.e. initialized only once.
+   // Need to use the global allocator here.
+   if (c->isOutOfProcessCompilation())
+      {
+      JITServer::GlobalAllocationRegion globalAllocationRegion(c->fej9()->_compInfoPT);
+      initializeGraphs(c);
+      }
+   else
+#endif
+      {
+      initializeGraphs(c);
+      }
+   }
+
+void
+TR_CISCGraph::initializeGraphs(TR::Compilation *c)
+   {
    int32_t num = 0;
    bool genTRxx = c->cg()->getSupportsArrayTranslateTRxx();
    bool genSIMD = c->cg()->getSupportsVectorRegisters() && !c->getOption(TR_DisableSIMDArrayTranslate);
@@ -1506,6 +1527,28 @@ TR_CISCGraph::importUDchains(TR::Compilation *comp, TR_UseDefInfo *useDefInfo, b
          /* set DU-chains to TR_CISCNode._chain */
          TR_ASSERT(n->getTrNodeInfo()->isSingleton(), "direct store must correspond to a single TR node");
          TR::Node *trNode = n->getTrNodeInfo()->getListHead()->getData()->_node;
+
+         if (!trNode->getSymbol()->isAutoOrParm())
+            {
+            TR_ASSERT_FATAL_WITH_NODE(
+               trNode,
+               trNode->getSymbol()->isStatic(),
+               "direct store to non-auto, non-static");
+
+            // Regardless of the uses that we can see within this method (which
+            // may not even appear, since we won't necessarily get use-def
+            // indices for static accesses), it's always possible that the
+            // destination static is used after the loop, but outside of this
+            // method. Recognizing this possibility will prevent the store from
+            // being considered negligible and ultimately incorrectly removed.
+            n->addChain(_exitNode, true);
+
+            // With this use recorded here, any real uses that might happen to
+            // be available are no longer informative. Avoid adding a duplicate
+            // entry for _exitNode.
+            continue;
+            }
+
          int32_t useDefIndex = trNode->getUseDefIndex();
          if (useDefIndex == 0) continue;
          TR_ASSERT(useDefInfo->isDefIndex(useDefIndex), "error!");
@@ -4503,7 +4546,8 @@ TR_CISCTransformer::analyzeConnectionOnePair(TR_CISCNode *const p, TR_CISCNode *
                }
             else
                {
-               if (thisCount = analyzeConnectionOnePairChild(p, t, pn, t->getChild(i)))
+               thisCount = analyzeConnectionOnePairChild(p, t, pn, t->getChild(i));
+               if (thisCount)
                   {
                   successCount += thisCount;
                   break;
@@ -5207,11 +5251,11 @@ TR_CISCTransformer::extractMatchingRegion()
                   isEmbed = false;
                   if (showMesssagesStdout())
                      {
-                     printf("!!!!!!!!!!!!!! Predecessor of tID %d is different from that of idiom.\n",tID);
+                     printf("!!!!!!!!!!!!!! Predecessor of tID %" OMR_PRIu32 " is different from that of idiom.\n", tID);
                      }
                   if (trace())
                      {
-                     traceMsg(comp(), "Predecessor of tID %d is different from that of idiom.\n",tID);
+                     traceMsg(comp(), "Predecessor of tID %" OMR_PRIu32 " is different from that of idiom.\n", tID);
                      }
                   }
             }
@@ -5489,7 +5533,8 @@ TR_CISCTransformer::getP2TInLoopAllowOptionalIfSingle(TR_CISCNode *p)
    TR_CISCNode *t;
    while(true)
       {
-      if (t = getP2TInLoopIfSingle(p)) return t;
+      t = getP2TInLoopIfSingle(p);
+      if (t) return t;
       if (!p->isOptionalNode()) return 0;
       p = p->getChild(0);
       if (!p) return 0;
@@ -7117,7 +7162,15 @@ TR_CISCTransformer::analyzeOneArrayIndex(TR_CISCNode *arrayindex, TR::SymbolRefe
          }
       if (!ret) return false;
       }
-   else if (t->getOpcode() != TR_variable)
+   else if (t->getOpcode() == TR_variable)
+      {
+      TR::SymbolReference *symref = t->getHeadOfTrNodeInfo()->_node->getSymbolReference();
+      if (symref != inductionVariableSymRef)
+         {
+         return false;
+         }
+      }
+   else
       {
       return false;
       }
@@ -7194,7 +7247,8 @@ TR_CISCTransformer::simpleOptimization()
                      switch(ch->getOpcode())
                         {
                         case TR::iload:
-                           if (def = ch->getNodeIfSingleChain())
+                           def = ch->getNodeIfSingleChain();
+                           if (def)
                               {
                               if ((def->getNumChildren() > 0) && def->getChild(0))  // There is a bug where def is a TR_entrynode, so getChild(0) is null.
                                  {
@@ -7616,13 +7670,13 @@ TR_CISCTransformer::computeTopologicalEmbedding(TR_CISCGraph *P, TR_CISCGraph *T
       bool inlined = getBCIndexMinMax(_candidateRegion, &minIndex, &maxIndex, &minLN, &maxLN, true);
       if (minIndex <= maxIndex)
          {
-         sprintf(tmpbuf, ", bcindex %d - %d linenumber %d - %d%s.", minIndex, maxIndex, minLN, maxLN, inlined ? " (inlined)" : "");
+         sprintf(tmpbuf, ", bcindex %" OMR_PRIu32 " - %" OMR_PRIu32 " linenumber %" OMR_PRIu32 " - %" OMR_PRIu32 "%s.", minIndex, maxIndex, minLN, maxLN, inlined ? " (inlined)" : "");
          bcinfo = tmpbuf;
          }
 #endif
 #if SHOW_STATISTICS
       if (showMesssagesStdout())
-         printf("!! Hash=0x%llx %s %s\n", getHashValue(_candidateRegion), P->getTitle(), T->getTitle());
+         printf("!! Hash=0x%" OMR_PRIx64 " %s %s\n", getHashValue(_candidateRegion), P->getTitle(), T->getTitle());
 #endif
 
       if (trace()) traceMsg(comp(), "***** Transformed *****, %s, %s, %s, loop:%d%s\n",
@@ -7710,7 +7764,7 @@ TR_CISCTransformer::embeddingHasConflictingBranches()
          uint32_t op = pn->getOpcode();
          bool isIf =
             op == (uint32_t)TR_ifcmpall
-            || (op < (uint32_t)TR::NumIlOps && pn->getIlOpCode().isIf());
+            || (op < (uint32_t)TR::NumAllIlOps && pn->getIlOpCode().isIf());
 
          if (!isIf)
             continue;
@@ -7837,7 +7891,7 @@ TR_CISCTransformer::insertBitsKeepAliveCalls(TR::Block * block)
          {
          TR::TreeTop * prev = info->_prevTreeTop;
          TR::Block * keepAliveBlock = info->_block;
-         traceMsg(comp(), "\t\tInserting KeepAlive call clone node: %p from block %d [%p] node: %p into block :%d %p\n",callNode, keepAliveBlock->getNumber(), keepAliveBlock, tt->getNode(), block->getNumber(), block);
+         traceMsg(comp(), "\t\tInserting KeepAlive call clone node: %p from block %d [%p] node: %p into block: %d %p\n", callNode, keepAliveBlock->getNumber(), keepAliveBlock, tt->getNode(), block->getNumber(), block);
          }
       }
    }
@@ -7861,4 +7915,3 @@ TR_CISCTransformer::restoreBitsKeepAliveCalls()
       prev->insertAfter(tt);
       }
    }
-

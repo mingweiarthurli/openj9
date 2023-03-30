@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2020 IBM Corp. and others
+ * Copyright (c) 2001, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -164,9 +164,7 @@ J9SharedClassesHelpText J9SHAREDCLASSESHELPTEXT[] = {
 	{HELPTEXT_NAMEEQUALS_OPTION, J9NLS_SHRC_SHRINIT_HELPTEXT_NAMEEQUALS_WIN, 0, 0},
 #else
 	{HELPTEXT_NAMEEQUALS_OPTION, J9NLS_SHRC_SHRINIT_HELPTEXT_NAMEEQUALS2, 0, 0},
-#if !defined(J9SHR_CACHELET_SUPPORT)
 	{OPTION_GROUP_ACCESS, J9NLS_SHRC_SHRINIT_HELPTEXT_GROUPACCESS, 0, 0},
-#endif
 #endif
 	{HELPTEXT_CACHEDIR_OPTION, J9NLS_SHRC_SHRINIT_HELPTEXT_CACHEDIR, 0, 0},
 #if !defined(WIN32) && !defined(WIN64)
@@ -179,18 +177,14 @@ J9SharedClassesHelpText J9SHAREDCLASSESHELPTEXT[] = {
 	{OPTION_PRINT_SNAPSHOTNAME, 0, 0, J9NLS_SHRC_SHRINIT_HELPTEXT_PRINT_SNAPSHOT_FILENAME},
 	HELPTEXT_NEWLINE,
 #endif
-#if !defined(J9SHR_CACHELET_SUPPORT)
 	{OPTION_READONLY, J9NLS_SHRC_SHRINIT_HELPTEXT_READONLY, 0, 0},
 	{OPTION_NONPERSISTENT, J9NLS_SHRC_SHRINIT_HELPTEXT_NONPERSISTENT, 0, 0},
-#endif
 	HELPTEXT_NEWLINE,
 	{OPTION_DESTROY, J9NLS_SHRC_SHRINIT_HELPTEXT_DESTROY, 0, 0},
 	{OPTION_DESTROYALL, J9NLS_SHRC_SHRINIT_HELPTEXT_DESTROYALL, 0, 0},
 	{OPTION_DESTROYALLLAYERS, J9NLS_SHRC_SHRINIT_HELPTEXT_DESTROYALLLAYERS, 0, 0},
 	HELPTEXT_NEWLINE,
-#if !defined(J9SHR_CACHELET_SUPPORT)
 	{OPTION_RESET, J9NLS_SHRC_SHRINIT_HELPTEXT_RESET, 0, 0},
-#endif
 	{HELPTEXT_EXPIRE_OPTION, J9NLS_SHRC_SHRINIT_HELPTEXT_EXPIRE, 0, 0},
 	HELPTEXT_NEWLINE,
 #if defined(J9ZOS390)
@@ -222,14 +216,11 @@ J9SharedClassesHelpText J9SHAREDCLASSESHELPTEXT[] = {
 	{OPTION_NONE, J9NLS_SHRC_SHRINIT_HELPTEXT_NONE2, 0, 0},
 	{OPTION_UTILITIES, J9NLS_SHRC_SHRINIT_HELPTEXT_UTILITIES, 0, 0},
 	HELPTEXT_NEWLINE,
-#if !defined(J9SHR_CACHELET_SUPPORT)
 	{HELPTEXT_MODIFIEDEQUALS_OPTION, J9NLS_SHRC_SHRINIT_HELPTEXT_MODIFIEDEQUALS, 0, 0},
-#endif
 	HELPTEXT_NEWLINE,
 #if defined(AIXPPC)
 	{OPTION_PERSISTENT, J9NLS_SHRC_SHRINIT_HELPTEXT_PERSISTENT, 0, 0},
 #endif
-#if !defined(J9SHR_CACHELET_SUPPORT)
 	{OPTION_NOAOT, J9NLS_SHRC_SHRINIT_HELPTEXT_NOAOT, 0, 0},
 	{OPTION_NO_JITDATA, J9NLS_SHRC_SHRINIT_HELPTEXT_NOJITDATA, 0, 0},
 	{HELPTEXT_MPROTECTEQUALS_PUBLIC_OPTION, J9NLS_SHRC_SHRINIT_HELPTEXT_MPROTECT_EQUALS, 0, 0},
@@ -258,7 +249,6 @@ J9SharedClassesHelpText J9SHAREDCLASSESHELPTEXT[] = {
 	{HELPTEXT_ADJUST_MAXAOT_EQUALS, J9NLS_SHRC_SHRINIT_HELPTEXT_ADJUST_MAXAOT_EQUALS, 0, 0},
 	{HELPTEXT_ADJUST_MINJITDATA_EQUALS, J9NLS_SHRC_SHRINIT_HELPTEXT_ADJUST_MINJIT_EQUALS, 0, 0},
 	{HELPTEXT_ADJUST_MAXJITDATA_EQUALS, J9NLS_SHRC_SHRINIT_HELPTEXT_ADJUST_MAXJIT_EQUALS, 0, 0},
-#endif
 #if defined(J9VM_OPT_MULTI_LAYER_SHARED_CLASS_CACHE)
 	HELPTEXT_NEWLINE,
 	{HELPTEXT_LAYER_EQUALS,J9NLS_SHRC_SHRINIT_HELPTEXT_LAYER_EQUALS, 0, 0},
@@ -352,9 +342,6 @@ J9SharedClassesOptions J9SHAREDCLASSESOPTIONS[] = {
 	{ OPTION_RESTORE_FROM_SNAPSHOT, PARSE_TYPE_EXACT, RESULT_DO_RESTORE_FROM_SNAPSHOT, J9SHR_RUNTIMEFLAG_RESTORE},
 	{ OPTION_PRINT_SNAPSHOTNAME, PARSE_TYPE_EXACT, RESULT_DO_PRINT_SNAPSHOTNAME, 0},
 #endif /* !defined(WIN32) */
-#if defined(J9SHR_CACHELET_SUPPORT)
-	{ OPTION_NESTED, PARSE_TYPE_EXACT, RESULT_DO_ADD_RUNTIMEFLAG, J9SHR_RUNTIMEFLAG_ENABLE_NESTED},
-#endif
 	{ OPTION_UTILITIES, PARSE_TYPE_EXACT, RESULT_DO_UTILITIES, 0},
 	{ OPTION_PRINT_CACHENAME, PARSE_TYPE_EXACT, RESULT_DO_PRINT_CACHENAME, 0},
 	{ OPTION_NO_SEMAPHORE_CHECK, PARSE_TYPE_EXACT, RESULT_DO_REMOVE_RUNTIMEFLAG, J9SHR_RUNTIMEFLAG_ENABLE_SEMAPHORE_CHECK},
@@ -416,6 +403,7 @@ static bool isFreeDiskSpaceLow(J9JavaVM *vm, U_64* maxsize, U_64 runtimeFlags);
 static char* generateStartupHintsKey(J9JavaVM *vm);
 static void fetchStartupHintsFromSharedCache(J9VMThread* vmThread);
 static void findExistingCacheLayerNumbers(J9JavaVM* vm, const char* ctrlDirName, const char* cacheName, U_64 runtimeFlags, I_8 *maxLayerNo);
+static IDATA sysinfoGetUserNameHelper(J9JavaVM *vm, UDATA verboseFlags, char *buffer, UDATA length);
 
 typedef struct J9SharedVerifyStringTable {
 	void *romClassAreaStart;
@@ -1263,6 +1251,14 @@ j9shr_dump_help(J9JavaVM* vm, UDATA more)
 	tmpcstr = j9nls_lookup_message((J9NLS_INFO | J9NLS_DO_NOT_PRINT_MESSAGE_TAG), J9NLS_EXELIB_INTERNAL_HELP_XXDISABLEUSEGCSTARTUPHINTS, NULL);
 	j9file_printf(PORTLIB, J9PORT_TTY_OUT, "%s", tmpcstr);
 
+#if defined(J9VM_ARCH_X86)
+	tmpcstr = j9nls_lookup_message((J9NLS_INFO | J9NLS_DO_NOT_PRINT_MESSAGE_TAG), J9NLS_EXELIB_INTERNAL_HELP_XXPORTABLESHAREDCACHE, NULL);
+	j9file_printf(PORTLIB, J9PORT_TTY_OUT, "%s", tmpcstr);
+
+	tmpcstr = j9nls_lookup_message((J9NLS_INFO | J9NLS_DO_NOT_PRINT_MESSAGE_TAG), J9NLS_EXELIB_INTERNAL_HELP_XXNOPORTABLESHAREDCACHE, NULL);
+	j9file_printf(PORTLIB, J9PORT_TTY_OUT, "%s", tmpcstr);
+#endif /* defined(J9VM_ARCH_X86) */
+
 	j9file_printf(PORTLIB, J9PORT_TTY_OUT, "\n\n");
 }
 
@@ -1270,12 +1266,12 @@ j9shr_dump_help(J9JavaVM* vm, UDATA more)
  * Notify the open/close state of jar/zip files so as to force a timestamp check.
  *
  * @param [in] vm The current J9JavaVM
- * @param [in] classPathEntries  A pointer to the J9ClassPathEntry
+ * @param [in] cpePtrArray A pointer array to the J9ClassPathEntries
  * @param [in] entryCount  The count of entries on the classpath
  * @param [in] isOpen  A flag indicating the open state for jar/zip files
  */
 void
-j9shr_updateClasspathOpenState(J9JavaVM* vm, J9ClassPathEntry* classPathEntries, UDATA entryIndex, UDATA entryCount, BOOLEAN isOpen)
+j9shr_updateClasspathOpenState(J9JavaVM* vm, J9ClassPathEntry** cpePtrArray, UDATA entryIndex, UDATA entryCount, BOOLEAN isOpen)
 {
 	J9SharedClassConfig* sharedClassConfig = vm->sharedClassConfig;
 	J9VMThread* currentThread = vm->internalVMFunctions->currentVMThread(vm);
@@ -1285,8 +1281,9 @@ j9shr_updateClasspathOpenState(J9JavaVM* vm, J9ClassPathEntry* classPathEntries,
 	Trc_SHR_INIT_updateClasspathOpenState_entry(currentThread);
 
 	for (i = entryIndex; i< entryCount; i++) {
-		if (CPE_TYPE_JAR == classPathEntries[i].type) {
-			((SH_CacheMap*)(sharedClassConfig->sharedClassCache))->notifyClasspathEntryStateChange(currentThread, (const char*)classPathEntries[i].path, newState);
+		J9ClassPathEntry* classPathEntry = cpePtrArray[i];
+		if (CPE_TYPE_JAR == classPathEntry->type) {
+			((SH_CacheMap*)(sharedClassConfig->sharedClassCache))->notifyClasspathEntryStateChange(currentThread, (const char*)classPathEntry->path, newState);
 		}
 	}
 	Trc_SHR_INIT_updateClasspathOpenState_exit(currentThread);
@@ -1425,10 +1422,13 @@ hookFindSharedClass(J9HookInterface** hookInterface, UDATA eventNum, void* voidD
 	U_64 localRuntimeFlags;
 	UDATA localVerboseFlags;
 	J9SharedClassConfig* sharedClassConfig = vm->sharedClassConfig;
-	bool isBootLoader = false;
-	bool releaseSegmentMutex = false;
+	J9ClassLoader* classloader = eventData->classloader;
+	bool isBootLoader = classloader == vm->systemClassLoader;
 	omrthread_monitor_t classSegmentMutex = vm->classMemorySegments->segmentMutex;
 	IDATA* entryIndex = eventData->foundAtIndex;
+	J9ClassPathEntry** classPathEntries = eventData->classPathEntries;
+	J9ClassPathEntry* firstcpe = NULL;
+	UDATA entryCount = eventData->entryCount;
 
 	/* default values for bootstrap: */
 	IDATA helperID = 0;
@@ -1442,6 +1442,7 @@ hookFindSharedClass(J9HookInterface** hookInterface, UDATA eventNum, void* voidD
 
 	eventData->result = NULL;
 
+	Trc_SHR_Assert_ShouldNotHaveLocalMutex(classSegmentMutex);
 	if (sharedClassConfig==NULL) {
 		/* trace event is at level 1 and trace exit message is at level 2 as per CMVC 155318/157683  */
 		Trc_SHR_INIT_hookFindSharedClass_ConfigNull(currentThread);
@@ -1486,54 +1487,62 @@ hookFindSharedClass(J9HookInterface** hookInterface, UDATA eventNum, void* voidD
 		*currentState = J9VMSTATE_SHAREDCLASS_FIND;
 	}
 
-	if (NULL != eventData->classPathEntries) {
-		cpExtraInfo = eventData->classPathEntries->extraInfo;
+	if (isBootLoader) {
+		entryCount = classloader->classPathEntryCount;
+		issueReadBarrier();
+		/* variable classPathEntries caches classloader->classPathEntries outside of cpEntriesMutex, this is fine because in the case isBootLoader
+		 * is true, classPathEntries is only used in NULL checks in this function.
+		 */
+		classPathEntries = classloader->classPathEntries;
+	}
+
+	if (NULL != classPathEntries) {
+		/*
+		 * class path entries are never freed during j9shr_classStoreTransaction.
+		 * For bootstrap class loader class path entries are never freed.
+		 * For non-bootstrap class loader, its classPathEntries is only used by the shared class code (j9shr_classStoreTransaction, hookFindSharedClass and shared.c).
+		 * They are all protected by SharedClassURLClasspathHelperImpl.urlcpReadWriteLock.
+		 *
+		 * It is safe to cache the first entry pointer.
+		 */
+		if (isBootLoader) {
+			omrthread_rwmutex_enter_read(classloader->cpEntriesMutex);
+			firstcpe = classloader->classPathEntries[0];
+			omrthread_rwmutex_exit_read(classloader->cpEntriesMutex);
+		} else {
+			firstcpe = classPathEntries[0];
+		}
+		cpExtraInfo = firstcpe->extraInfo;
 		infoFound = translateExtraInfo(cpExtraInfo, &helperID, &cpType, &classpath);
 	}
 
 	/* Bootstrap loader does not provide meaningful extraInfo */
 	if (!classpath && !infoFound) {
-		UDATA pathEntryCount = eventData->entryCount;
-
+		UDATA pathEntryCount = entryCount;
 		if (J2SE_VERSION(vm) >= J2SE_V11) {
-			if (eventData->classloader == vm->systemClassLoader) {
-				isBootLoader = true;
+			if (isBootLoader) {
 				pathEntryCount += 1;
-				if (0 == omrthread_monitor_owned_by_self(classSegmentMutex)) {
-					omrthread_monitor_enter(classSegmentMutex);
-					releaseSegmentMutex = true;
-				}
+				omrthread_monitor_enter(classSegmentMutex);
 				classpath = getBootstrapClasspathItem(currentThread, vm->modulesPathEntry, pathEntryCount);
-				if (releaseSegmentMutex) {
-					omrthread_monitor_exit(classSegmentMutex);
-					releaseSegmentMutex = false;
-				}
+				omrthread_monitor_exit(classSegmentMutex);
 			}
 		} else {
-			if (0 == omrthread_monitor_owned_by_self(classSegmentMutex)) {
-				omrthread_monitor_enter(classSegmentMutex);
-				releaseSegmentMutex = true;
-			}
-			classpath = getBootstrapClasspathItem(currentThread, eventData->classPathEntries, pathEntryCount);
-			if (releaseSegmentMutex) {
-				omrthread_monitor_exit(classSegmentMutex);
-				releaseSegmentMutex = false;
-			}
+			omrthread_monitor_enter(classSegmentMutex);
+			classpath = getBootstrapClasspathItem(currentThread, firstcpe, pathEntryCount);
+			omrthread_monitor_exit(classSegmentMutex);
 		}
 	}
 
 	if (!classpath) {
 		/* No cached classpath found. Need to create a new one. */
-		if ((NULL != eventData->classPathEntries) || (eventData->classloader == vm->systemClassLoader)) {
-			if (0 == omrthread_monitor_owned_by_self(classSegmentMutex)) {
-				omrthread_monitor_enter(classSegmentMutex);
-				releaseSegmentMutex = true;
+		if ((NULL != classPathEntries) || (isBootLoader)) {
+			omrthread_monitor_enter(classSegmentMutex);
+			if (isBootLoader) {
+				classpath = createClasspath(currentThread, classloader, NULL, 0, helperID, cpType, infoFound);
+			} else {
+				classpath = createClasspath(currentThread, NULL, classPathEntries, entryCount, helperID, cpType, infoFound);
 			}
-			classpath = createClasspath(currentThread, eventData->classPathEntries, eventData->entryCount, helperID, cpType, infoFound);
-			if (releaseSegmentMutex) {
-				omrthread_monitor_exit(classSegmentMutex);
-				releaseSegmentMutex = false;
-			}
+			omrthread_monitor_exit(classSegmentMutex);
 			if (classpath == NULL) {
 				goto _done;
 			}
@@ -1555,15 +1564,9 @@ hookFindSharedClass(J9HookInterface** hookInterface, UDATA eventNum, void* voidD
 
 	if (eventData->doPreventFind) {
 		if (eventData->doPreventStore) {
-			if (0 == omrthread_monitor_owned_by_self(classSegmentMutex)) {
-				omrthread_monitor_enter(classSegmentMutex);
-				releaseSegmentMutex = true;
-			}
-			registerStoreFilter(vm, eventData->classloader, fixedName, strlen(fixedName), &(sharedClassConfig->classnameFilterPool));
-			if (releaseSegmentMutex) {
-				omrthread_monitor_exit(classSegmentMutex);
-				releaseSegmentMutex = false;
-			}
+			omrthread_monitor_enter(classSegmentMutex);
+			registerStoreFilter(vm, classloader, fixedName, strlen(fixedName), &(sharedClassConfig->classnameFilterPool));
+			omrthread_monitor_exit(classSegmentMutex);
 		}
 		goto _donePostFixedClassname;
 	}
@@ -1572,6 +1575,7 @@ hookFindSharedClass(J9HookInterface** hookInterface, UDATA eventNum, void* voidD
 					currentThread, fixedName, classpath, eventData->partition, sharedClassConfig->modContext, eventData->confirmedCount, entryIndex);
 
 	if ((isBootLoader)
+		&& (J2SE_VERSION(vm) >= J2SE_V11)
 		&& (NULL != eventData->result)
 		&& (NULL != entryIndex)
 	) {
@@ -1590,14 +1594,9 @@ hookFindSharedClass(J9HookInterface** hookInterface, UDATA eventNum, void* voidD
 	}
 
 	if (eventData->doPreventStore && (NULL == eventData->result)) {
-		if (0 == omrthread_monitor_owned_by_self(classSegmentMutex)) {
-			omrthread_monitor_enter(classSegmentMutex);
-			releaseSegmentMutex = true;
-		}
-		registerStoreFilter(vm, eventData->classloader, fixedName, strlen(fixedName), &(sharedClassConfig->classnameFilterPool));
-		if (releaseSegmentMutex) {
-			omrthread_monitor_exit(classSegmentMutex);
-		}
+		omrthread_monitor_enter(classSegmentMutex);
+		registerStoreFilter(vm, classloader, fixedName, strlen(fixedName), &(sharedClassConfig->classnameFilterPool));
+		omrthread_monitor_exit(classSegmentMutex);
 	}
 
 	if (localRuntimeFlags & J9SHR_RUNTIMEFLAG_ENABLE_TRACECOUNT) {
@@ -1662,46 +1661,6 @@ _done:
 	/* no level 1 trace event here due to performance problem stated in CMVC 155318/157683 */
 	Trc_SHR_INIT_hookFindSharedClass_exit(currentThread);
 }
-
-#if defined(J9SHR_CACHELET_SUPPORT)
-
-/**
- * Serialize shared cache.
- * THREADING: Only one thread may call this, since there is no synchronization.
- * The cache may only be serialized once. If this hook is called more than once, the 2nd and
- * later calls will do nothing.
- *
- * @param [in] hookInterface  Pointer to pointer to the hook interface structure
- * @param [in] eventNum  Not used
- * @param [in,out] voidData  Pointer to a J9VMSerializeSharedCacheEvent struct
- * @param [in] userData  Not used
- */
-void
-hookSerializeSharedCache(J9HookInterface** hookInterface, UDATA eventNum, void* voidData, void* userData)
-{
-	J9VMSerializeSharedCacheEvent* eventData = (J9VMSerializeSharedCacheEvent*)voidData;
-	J9JavaVM* vm = eventData->vm;
-	J9SharedClassConfig* sharedClassConfig = vm->sharedClassConfig;
-	J9VMThread* currentThread = vm->internalVMFunctions->currentVMThread(vm);
-	bool ok = false;
-
-	Trc_SHR_INIT_hookSerializeSharedCache_entry();
-
-	if (currentThread) {
-		ok = ((SH_CacheMap*)(sharedClassConfig->sharedClassCache))->serializeSharedCache(currentThread);
-	} else {
-		PORT_ACCESS_FROM_JAVAVM(vm);
-
-		/* this message should not be suppressable */
-		SHRINIT_ERR_TRACE(1, J9NLS_SHRC_SHRINIT_CANT_SERIALIZE_NO_CURRENT_THREAD);
-	}
-
-	eventData->result = (ok? 0 : -1);
-
-	Trc_SHR_INIT_hookSerializeSharedCache_exit();
-}
-
-#endif /* J9SHR_CACHELET_SUPPORT */
 
 /**
  * Store compiled method in shared classes cache
@@ -2003,7 +1962,6 @@ j9shr_storeSharedData(J9VMThread* currentThread, const char* key, UDATA keylen, 
 * @return J9SHR_RESOURCE_STORE_EXISTS if the attached data already exists
 * in the cache (will never return this if forceReplace is non-zero)
 * @return J9SHR_RESOURCE_STORE_ERROR if an error occurred storing the data, or
-*     	  This will occur if J9SHR_CACHELET_SUPPORT is defined
 *         This will occur if the addressInCache is not a valid cache address
 *         This will occur if cache updates are denied, either the cache is
 *		  	corrupt or there is a vm exit in progress
@@ -2021,9 +1979,6 @@ j9shr_storeAttachedData(J9VMThread* currentThread, const void* addressInCache, c
 	UDATA* currentState = &(currentThread->omrVMThread->vmState);
 	UDATA returnVal = 0;
 
-#if defined(J9SHR_CACHELET_SUPPORT)
-	return J9SHR_RESOURCE_STORE_ERROR;
-#endif
 	Trc_SHR_INIT_storeAttachedData_entry(currentThread);
 
 	if (sharedClassConfig == NULL) {
@@ -2095,7 +2050,6 @@ j9shr_storeAttachedData(J9VMThread* currentThread, const void* addressInCache, c
 * @return J9SHR_RESOURCE_PARAMETER_ERROR if shared class configuration is missing or
 * 		  if parameter error such as invalid J9SharedDataDescriptor->flags
 * @return J9SHR_RESOURCE_STORE_ERROR if an error occurred storing the data, or
-*     	  This will occur if J9SHR_CACHELET_SUPPORT is defined
 *		  This will occur if data->address is non NULL and data->length, indicating the size of buffer pointed
 *		  by data->address, is not enough to contain the data found.
 * @return J9SHR_RESOURCE_BUFFER_ALLOC_FAILED if data->address is NULL and failed to allocate memory for data buffer
@@ -2113,10 +2067,6 @@ j9shr_findAttachedData(J9VMThread* currentThread, const void* addressInCache, J9
 	const U_8* returnVal = 0;
 
 	Trc_SHR_INIT_findAttachedData_entry(currentThread);
-
-#if defined(J9SHR_CACHELET_SUPPORT)
-	return (U_8*)J9SHR_RESOURCE_STORE_ERROR;
-#endif
 
 	if (sharedClassConfig == NULL) {
 		Trc_SHR_INIT_findAttachedData_exit_SccN(currentThread);
@@ -2168,7 +2118,6 @@ j9shr_findAttachedData(J9VMThread* currentThread, const void* addressInCache, J9
 *
 * @return 0 on success
 * @return J9SHR_RESOURCE_STORE_ERROR if an error occurred storing the data
-*	 	This will occur if J9SHR_CACHELET_SUPPORT is defined
 *       This will occur if the addressInCache is not a valid record
 *       This will occur if cache updates are denied, either the cache is
 * 			corrupt or there is a vm exit in progress
@@ -2186,9 +2135,6 @@ j9shr_updateAttachedData(J9VMThread* currentThread, const void* addressInCache, 
 	UDATA* currentState = &(currentThread->omrVMThread->vmState);
 	UDATA returnVal = 0;
 
-#if defined(J9SHR_CACHELET_SUPPORT)
-	return J9SHR_RESOURCE_STORE_ERROR;
-#endif
 	Trc_SHR_INIT_updateAttachedData_entry(currentThread);
 
 	if (sharedClassConfig == NULL) {
@@ -2239,7 +2185,6 @@ j9shr_updateAttachedData(J9VMThread* currentThread, const void* addressInCache, 
 *
 * @return 0 on success
 * @return J9SHR_RESOURCE_STORE_ERROR if an error occurred storing the data
-*  	    This will occur if J9SHR_CACHELET_SUPPORT is defined
 *       This will occur if the addressInCache is not a valid record
 *       This will occur if cache updates are denied, either the cache is
 *			corrupt or there is a vm exit in progress
@@ -2256,11 +2201,6 @@ j9shr_updateAttachedUDATA(J9VMThread* currentThread, const void* addressInCache,
 	UDATA oldState = (UDATA)-1;
 	UDATA* currentState = &(currentThread->omrVMThread->vmState);
 	UDATA returnVal = 0;
-
-
-#if defined(J9SHR_CACHELET_SUPPORT)
-	return J9SHR_RESOURCE_STORE_ERROR;
-#endif
 
 	Trc_SHR_INIT_updateAttachedUDATA_entry(currentThread);
 
@@ -2308,10 +2248,6 @@ j9shr_freeAttachedDataDescriptor(J9VMThread* currentThread, J9SharedDataDescript
 {
 	J9JavaVM* vm = currentThread->javaVM;
 	PORT_ACCESS_FROM_JAVAVM(vm);
-
-#if defined(J9SHR_CACHELET_SUPPORT)
-	return;
-#endif
 
 	if (NULL != data->address) {
 		j9mem_free_memory(data->address);
@@ -2689,6 +2625,43 @@ performSharedClassesCommandLineAction(J9JavaVM* vm, J9SharedClassConfig* sharedC
 	return J9VMDLLMAIN_SILENT_EXIT_VM;
 }
 
+/* A helper to retrieve user name and store it into the buffer provided by the caller.
+ * j9sysinfo_get_env("USER") is invoked first, then j9sysinfo_get_username().
+ *
+ * @param[in] vm The Java VM
+ * @param[out] buffer Buffer for the user name
+ * @param[in] length The length of the buffer
+ *
+ * @return 0 on success, number of bytes required to hold the user name
+ * if the output buffer was too small, -1 on failure.
+ */
+static IDATA
+sysinfoGetUserNameHelper(J9JavaVM *vm, UDATA verboseFlags, char *buffer, UDATA length)
+{
+	PORT_ACCESS_FROM_JAVAVM(vm);
+
+	IDATA rc = j9sysinfo_get_env("USER", buffer, length);
+	if (rc > 0) {
+		SHRINIT_ERR_TRACE2(verboseFlags, J9NLS_SHRC_SHRINIT_FAILURE_COPYING_USERNAME_TOOLONG, length, rc);
+	} else if (rc < 0) {
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+		/* Skip j9sysinfo_get_username if a checkpoint can be taken. */
+		J9InternalVMFunctions *vmFuncs = vm->internalVMFunctions;
+		if (!vmFuncs->isCheckpointAllowed(vmFuncs->currentVMThread(vm)))
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
+		{
+			rc = j9sysinfo_get_username(buffer, length);
+			if (rc > 0) {
+				SHRINIT_ERR_TRACE2(verboseFlags, J9NLS_SHRC_SHRINIT_FAILURE_COPYING_USERNAME_TOOLONG, length, rc);
+			} else if (rc < 0) {
+				SHRINIT_ERR_TRACE(verboseFlags, J9NLS_SHRC_SHRINIT_FAILURE_COPYING_USERNAME);
+			}
+		}
+	}
+
+	return rc;
+}
+
 bool
 modifyCacheName(J9JavaVM *vm, const char* origName, UDATA verboseFlags, char** modifiedCacheName, UDATA bufLen)
 {
@@ -2722,14 +2695,7 @@ modifyCacheName(J9JavaVM *vm, const char* origName, UDATA verboseFlags, char** m
 			modIndex = origNameLen + 1;
 			bufLeft = bufLen - modIndex;
 
-			if (j9sysinfo_get_username(&((*modifiedCacheName)[modIndex]), bufLeft) != 0) {
-				char username[CACHE_ROOT_MAXLEN];
-				if (j9sysinfo_get_username(username, CACHE_ROOT_MAXLEN) == 0) {
-					IDATA usernamelen = (IDATA)strlen(username);
-					SHRINIT_ERR_TRACE2(verboseFlags, J9NLS_SHRC_SHRINIT_FAILURE_COPYING_USERNAME_TOOLONG,bufLeft,usernamelen);
-				} else {
-					SHRINIT_ERR_TRACE(verboseFlags, J9NLS_SHRC_SHRINIT_FAILURE_COPYING_USERNAME);
-				}
+			if (0 != sysinfoGetUserNameHelper(vm, verboseFlags, &((*modifiedCacheName)[modIndex]), bufLeft)) {
 				return false;
 			}
 
@@ -2766,14 +2732,7 @@ modifyCacheName(J9JavaVM *vm, const char* origName, UDATA verboseFlags, char** m
 				case 'u':
 				case 'U':
 					/* FALLTHRU is intentional due to same behaviour for 'u' and 'U'*/
-					if (j9sysinfo_get_username(&((*modifiedCacheName)[modIndex]), bufLeft) != 0) {
-						char username[CACHE_ROOT_MAXLEN];
-						if (j9sysinfo_get_username(username, CACHE_ROOT_MAXLEN) == 0) {
-							IDATA usernamelen = (IDATA)strlen(username);
-							SHRINIT_ERR_TRACE2(verboseFlags, J9NLS_SHRC_SHRINIT_FAILURE_COPYING_USERNAME_TOOLONG,bufLeft,usernamelen);
-						} else {
-							SHRINIT_ERR_TRACE(verboseFlags, J9NLS_SHRC_SHRINIT_FAILURE_COPYING_USERNAME);
-						}
+					if (0 != sysinfoGetUserNameHelper(vm, verboseFlags, &((*modifiedCacheName)[modIndex]), bufLeft)) {
 						return false;
 					}
 					break;
@@ -3286,18 +3245,6 @@ j9shr_init(J9JavaVM *vm, UDATA loadFlags, UDATA* nonfatal)
 		SHRINIT_ERR_TRACE(verboseFlags, J9NLS_SHRC_SHRINIT_CHECK_STRINGTABLE_RESET_MISSING_FLAG);
 		goto _error;
 	}
-#if defined(J9SHR_CACHELET_SUPPORT)
-	/* Set readonly unless grow was specified. */
-	if (runtimeFlags & J9SHR_RUNTIMEFLAG_ENABLE_NESTED) {
-		if (runtimeFlags & J9SHR_RUNTIMEFLAG_ENABLE_READONLY) {
-			/* specifying both grow & readonly is an error */
-			SHRINIT_ERR_TRACE(verboseFlags, J9NLS_SHRC_SHRINIT_CANT_GROW_READONLY);
-			goto _error;
-		}
-	} else {
-		runtimeFlags |= J9SHR_RUNTIMEFLAG_ENABLE_READONLY;
-	}
-#endif
 
 	/* If the command line is ordered like this: -Xshareclasses:verifyInternTree,mprotect=all
 	 * parseArgs() may still turn mprotect on when tree verification, or test, is enabled.
@@ -3322,11 +3269,7 @@ j9shr_init(J9JavaVM *vm, UDATA loadFlags, UDATA* nonfatal)
 		goto _error;
 	}
 
-	if (runtimeFlags & J9SHR_RUNTIMEFLAG_ENABLE_NESTED) {
-		cacheType = J9PORT_SHR_CACHE_TYPE_VMEM;
-	} else {
-		cacheType = getCacheTypeFromRuntimeFlags(runtimeFlags);
-	}
+    cacheType = getCacheTypeFromRuntimeFlags(runtimeFlags);
 
 	/* Do not move this line - any failures after this are affected by nonfatal, any before are not */
 	if (runtimeFlags & J9SHR_RUNTIMEFLAG_ENABLE_NONFATAL) {
@@ -3389,7 +3332,7 @@ j9shr_init(J9JavaVM *vm, UDATA loadFlags, UDATA* nonfatal)
 
 	cmBytes = SH_CacheMap::getRequiredConstrBytes(false);
 	nameBytes = (strlen(modifiedCacheNamePtr)+1) * sizeof(char);
-	modContextBytes = modContext ? ((strlen(modContext) * sizeof(char)) + sizeof(J9UTF8)) : 0;
+	modContextBytes = modContext ? (((strlen(modContext) + 1) * sizeof(char)) + sizeof(J9UTF8)) : 0;
 	memBytesNeeded = sizeof(J9SharedClassConfig) + sizeof(J9SharedClassCacheDescriptor) + cmBytes + nameBytes + modContextBytes;
 
 	tempConfig = (J9SharedClassConfig*)j9mem_allocate_memory(memBytesNeeded, J9MEM_CATEGORY_CLASSES);
@@ -3583,12 +3526,6 @@ j9shr_init(J9JavaVM *vm, UDATA loadFlags, UDATA* nonfatal)
 
 		/* Register hooks */
 		(*hook)->J9HookRegisterWithCallSite(hook, J9HOOK_VM_FIND_LOCALLY_DEFINED_CLASS, hookFindSharedClass, OMR_GET_CALLSITE(), NULL);
-
-#if defined(J9SHR_CACHELET_SUPPORT)
-		if (runtimeFlags & J9SHR_RUNTIMEFLAG_ENABLE_NESTED) {
-			(*hook)->J9HookRegisterWithCallSite(hook, J9HOOK_VM_SERIALIZE_SHARED_CACHE, hookSerializeSharedCache, OMR_GET_CALLSITE(), NULL);
-		}
-#endif
 
 		/* We don't need the string table when running with -Xshareclasses:print<XXXX>Stats.
 		 * 		This is because the JVM is terminated, after displaying the requested information.
@@ -4167,12 +4104,6 @@ j9shr_guaranteed_exit(J9JavaVM *vm, BOOLEAN exitForDebug)
 			 */
 			J9HookInterface** hook = vm->internalVMFunctions->getVMHookInterface(vm);
 			(*hook)->J9HookUnregister(hook, J9HOOK_VM_FIND_LOCALLY_DEFINED_CLASS, hookFindSharedClass, NULL);
-
-#if defined(J9SHR_CACHELET_SUPPORT)
-			if (vm->sharedClassConfig->runtimeFlags & J9SHR_RUNTIMEFLAG_ENABLE_NESTED) {
-				(*hook)->J9HookUnregister(hook, J9HOOK_VM_SERIALIZE_SHARED_CACHE, hookSerializeSharedCache, NULL);
-			}
-#endif
 			J9HookInterface **shcHooks;
 			shcHooks = zip_getVMZipCachePoolHookInterface((J9ZipCachePool *)vm->zipCachePool);
 			(*shcHooks)->J9HookUnregister(shcHooks, J9HOOK_VM_ZIP_LOAD, j9shr_hookZipLoadEvent, NULL);
@@ -5007,15 +4938,17 @@ adjustCacheSizes(J9PortLibrary* portlib, UDATA verboseFlags, J9SharedClassPreini
 void
 j9shr_jvmPhaseChange(J9VMThread *currentThread, UDATA phase)
 {
-	if (J9VM_PHASE_NOT_STARTUP == phase) {
-		J9JavaVM* vm = currentThread->javaVM;
+	J9JavaVM* vm = currentThread->javaVM;
 
-		/* OpenJ9 issue; https://github.com/eclipse/openj9/issues/3743
+	if (J9VM_PHASE_NOT_STARTUP == phase) {
+		/* OpenJ9 issue; https://github.com/eclipse-openj9/openj9/issues/3743
 		 * GC decides whether to calls vm->sharedClassConfig->storeGCHints() to store the GC hints into the shared cache. */
 		storeStartupHintsToSharedCache(currentThread);
 		if (J9_ARE_NO_BITS_SET(vm->sharedClassConfig->runtimeFlags, J9SHR_RUNTIMEFLAG_MPROTECT_PARTIAL_PAGES_ON_STARTUP)) {
 			((SH_CacheMap*)vm->sharedClassConfig->sharedClassCache)->protectPartiallyFilledPages(currentThread);
 		}
+		((SH_CacheMap*)vm->sharedClassConfig->sharedClassCache)->dontNeedMetadata(currentThread);
+	} else if (J9VM_PHASE_LATE_SCC_DISCLAIM == phase) {
 		((SH_CacheMap*)vm->sharedClassConfig->sharedClassCache)->dontNeedMetadata(currentThread);
 	}
 	return;

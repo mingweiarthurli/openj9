@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2017, 2020 IBM Corp. and others
+# Copyright (c) 2017, 2021 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,17 +15,21 @@
 # OpenJDK Assembly Exception [2].
 #
 # [1] https://www.gnu.org/software/classpath/license.html
-# [2] http://openjdk.java.net/legal/assembly-exception.html
+# [2] https://openjdk.org/legal/assembly-exception.html
 #
 # SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 ################################################################################
 
-# add_subdirectory(aixerrmsg)
+if(OMR_OS_AIX)
+	add_subdirectory(aixerrmsg)
+endif()
 add_subdirectory(algorithm)
-if(OMR_HOST_OS STREQUAL "win" AND NOT OMR_ENV_DATA64)
+add_subdirectory(annotationtests)
+if(OMR_OS_WINDOWS AND NOT OMR_ENV_DATA64)
 	add_subdirectory(bcprof)
 endif()
 add_subdirectory(bcverify)
+add_subdirectory(clinkerffi)
 add_subdirectory(cutest)
 add_subdirectory(gp)
 add_subdirectory(j9vm)
@@ -34,18 +38,22 @@ add_subdirectory(jniarg)
 add_subdirectory(jsig)
 add_subdirectory(jvmtitests)
 add_subdirectory(lazyclassload)
-if(OMR_HOST_OS STREQUAL "osx")
+if(OMR_OS_OSX)
 	add_subdirectory(loadLibraryTest)
 endif()
 add_subdirectory(port)
 add_subdirectory(props)
 add_subdirectory(redirector)
 add_subdirectory(shared)
-# add_subdirectory(shared_service)
+if(OMR_OS_WINDOWS AND NOT OMR_ENV_DATA64)
+	add_subdirectory(shared_service)
+endif()
 add_subdirectory(thread)
-if(OMR_HOST_OS STREQUAL "linux")
+if(OMR_OS_LINUX)
 	add_subdirectory(unresolved)
 endif()
 add_subdirectory(vm)
 add_subdirectory(vm_lifecycle)
-# add_subdirectory(zos)
+if(OMR_OS_ZOS)
+	add_subdirectory(zos)
+endif()

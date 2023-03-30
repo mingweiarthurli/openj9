@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -23,6 +23,9 @@
 #include <string.h>
 #if defined (LINUXPPC64) || (defined (AIXPPC) && defined (PPC64)) || defined (J9ZOS39064) || defined(J9ZTPF)
 #include <stdlib.h> /* for getenv */
+#endif
+#ifdef J9ZTPF
+#include <tpf/cujvm.h> /* for z/TPF OS VM exit hook: cjvm_jvm_shutdown_hook() */
 #endif
 
 #include "j9user.h"
@@ -42,6 +45,10 @@
 
 #include "ut_j9vm.h"
 #include "jvmri.h"
+
+#if defined(J9VM_ZOS_3164_INTEROPERABILITY)
+#include "ffi.h"
+#endif
 
 static J9JavaVM * vmList = NULL;
 
@@ -74,7 +81,6 @@ J9_DECLARE_CONSTANT_UTF8(j9_shutdown, "shutdown");
 J9_DECLARE_CONSTANT_UTF8(j9_exit, "exit");
 J9_DECLARE_CONSTANT_UTF8(j9_run, "run");
 J9_DECLARE_CONSTANT_UTF8(j9_initCause, "initCause");
-J9_DECLARE_CONSTANT_UTF8(j9_completeInitialization, "completeInitialization");
 J9_DECLARE_CONSTANT_UTF8(j9_void_void, "()V");
 J9_DECLARE_CONSTANT_UTF8(j9_class_void, "(Ljava/lang/Class;)V");
 J9_DECLARE_CONSTANT_UTF8(j9_class_class_void, "(Ljava/lang/Class;Ljava/lang/Class;)V");
@@ -84,7 +90,6 @@ J9_DECLARE_CONSTANT_UTF8(j9_throwable_throwable, "(Ljava/lang/Throwable;)Ljava/l
 J9_DECLARE_CONSTANT_UTF8(j9_int_void, "(I)V");
 
 J9_DECLARE_CONSTANT_NAS(initCauseNameAndSig, j9_initCause, j9_throwable_throwable);
-J9_DECLARE_CONSTANT_NAS(completeInitializationNameAndSig, j9_completeInitialization, j9_void_void);
 J9_DECLARE_CONSTANT_NAS(threadRunNameAndSig, j9_run, j9_void_void);
 J9_DECLARE_CONSTANT_NAS(initNameAndSig, j9_init, j9_void_void);
 J9_DECLARE_CONSTANT_NAS(printStackTraceNameAndSig, j9_printStackTrace, j9_void_void);
@@ -125,8 +130,9 @@ jint JNICALL J9_CreateJavaVM(JavaVM ** p_vm, void ** p_env, J9CreateJavaVMParams
 	omrthread_monitor_t globalMonitor;
 #endif
 
-	if (!jniVersionIsValid(version) || version == JNI_VERSION_1_1)
-		return JNI_EVERSION;			/* unknown arg style, exit. */
+	if ((JNI_VERSION_1_1 == version) || !jniVersionIsValid(version)) {
+		return JNI_EVERSION; /* unknown arg style, exit. */
+	}
 
 #ifndef J9VM_OPT_MULTI_VM
 	if (*pvmList)
@@ -223,6 +229,10 @@ error:
 #ifdef J9VM_INTERP_SIG_QUIT_THREAD
 	vm->J9SigQuitShutdown(vm);
 #endif
+
+#if defined(J9VM_INTERP_SIG_USR2)
+	vm->J9SigUsr2Shutdown(vm);
+#endif /* defined(J9VM_INTERP_SIG_USR2) */
 
 #ifdef J9VM_PROF_EVENT_REPORTING
 	if (env) {
@@ -323,11 +333,10 @@ protectedDestroyJavaVM(J9PortLibrary* portLibrary, void * userData)
 
 	Trc_JNIinv_protectedDestroyJavaVM_FinishedThreadWait();
 
-	/* Prevents daemon threads from exiting */
+	/* If exit has already started, refuse the destroy request */
 	if (vm->runtimeFlagsMutex != NULL) {
 		omrthread_monitor_enter(vm->runtimeFlagsMutex);
 	}
-
 	if (vm->runtimeFlags & J9_RUNTIME_EXIT_STARTED) {
 		if (vm->runtimeFlagsMutex != NULL) {
 			omrthread_monitor_exit(vm->runtimeFlagsMutex);
@@ -337,8 +346,6 @@ protectedDestroyJavaVM(J9PortLibrary* portLibrary, void * userData)
 		 */
 		return JNI_ERR;
 	}
-
-	vm->runtimeFlags |= J9_RUNTIME_EXIT_STARTED;
 	if (vm->runtimeFlagsMutex != NULL) {
 		omrthread_monitor_exit(vm->runtimeFlagsMutex);
 	}
@@ -346,13 +353,22 @@ protectedDestroyJavaVM(J9PortLibrary* portLibrary, void * userData)
 	/* run exit hooks */
 	sidecarShutdown(vmThread);
 
+	/* Prevent daemon threads from exiting */
+	if (vm->runtimeFlagsMutex != NULL) {
+		omrthread_monitor_enter(vm->runtimeFlagsMutex);
+	}
+	vm->runtimeFlags |= J9_RUNTIME_EXIT_STARTED;
+	if (vm->runtimeFlagsMutex != NULL) {
+		omrthread_monitor_exit(vm->runtimeFlagsMutex);
+	}
+
 	Trc_JNIinv_protectedDestroyJavaVM_vmCleanupDone();
 
 	/* mark the current thread as no-longer alive */
 	setEventFlag(vmThread, J9_PUBLIC_FLAGS_STOPPED);
 
 	/* We are dead at this point. Clear the suspend bit prior to triggering the thread end hook */
-    clearHaltFlag(vmThread, J9_PUBLIC_FLAGS_HALT_THREAD_JAVA_SUSPEND);
+	clearHaltFlag(vmThread, J9_PUBLIC_FLAGS_HALT_THREAD_JAVA_SUSPEND);
 
 	TRIGGER_J9HOOK_VM_THREAD_END(vm->hookInterface, vmThread, 1);
 
@@ -384,6 +400,12 @@ protectedDestroyJavaVM(J9PortLibrary* portLibrary, void * userData)
 	}
 #endif
 
+#if defined(J9VM_INTERP_SIG_USR2)
+	if (vm->J9SigUsr2Shutdown) {
+		vm->J9SigUsr2Shutdown(vm);
+	}
+#endif /* defined(J9VM_INTERP_SIG_USR2) */
+
 	Trc_JNIinv_protectedDestroyJavaVM_vmShutdownDone();
 
 	if (terminateRemainingThreads(vmThread)) {
@@ -405,9 +427,21 @@ protectedDestroyJavaVM(J9PortLibrary* portLibrary, void * userData)
 #endif /* COUNT_BYTECODE_PAIRS */
 
 		Trc_JNIinv_protectedDestroyJavaVM_CallingExitHookSecondary();
+
+#ifdef J9ZTPF
+		/* run z/TPF OS exit hook */
+		cjvm_jvm_shutdown_hook();
+#endif
 		
 		if (vm->exitHook) {
-			vm->exitHook(0);
+#if defined(J9VM_ZOS_3164_INTEROPERABILITY)
+			if (J9_IS_31BIT_INTEROP_TARGET(vm->exitHook)) {
+				execute31BitExitHook(vm, 0);
+			} else
+#endif /* defined(J9VM_ZOS_3164_INTEROPERABILITY) */
+			{
+				vm->exitHook(0);
+			}
 		}
 
 		return JNI_ERR;
@@ -433,8 +467,20 @@ protectedDestroyJavaVM(J9PortLibrary* portLibrary, void * userData)
 
 	Trc_JNIinv_protectedDestroyJavaVM_CallingExitHook();
 
+#ifdef J9ZTPF
+	/* run z/TPF OS exit hook */
+	cjvm_jvm_shutdown_hook();
+#endif
+
 	if (vm->exitHook) {
-		vm->exitHook(0);
+#if defined(J9VM_ZOS_3164_INTEROPERABILITY)
+		if (J9_IS_31BIT_INTEROP_TARGET(vm->exitHook)) {
+			execute31BitExitHook(vm, 0);
+		} else
+#endif /* defined(J9VM_ZOS_3164_INTEROPERABILITY) */
+		{
+			vm->exitHook(0);
+		}
 	}
 
 	freeJavaVM(vm);
@@ -603,7 +649,6 @@ protectedInternalAttachCurrentThread(J9PortLibrary* portLibrary, void * userData
 	char *modifiedThreadName = NULL; /* needed if the original thread name is bad UTF8 */
 	j9object_t *threadGroup = NULL;
 	J9VMThread *env;
-	UDATA osStackFree;
 	void *memorySpace = vm->defaultMemorySpace;
 #if defined(J9VM_OPT_JAVA_OFFLOAD_SUPPORT)
 	BOOLEAN ifaEnabled = FALSE;
@@ -670,11 +715,7 @@ protectedInternalAttachCurrentThread(J9PortLibrary* portLibrary, void * userData
 
 	/* Determine the thread's remaining OS stack */
 
-	osStackFree = omrthread_current_stack_free();
-	if (osStackFree == 0) {
-		osStackFree = vm->defaultOSStackSize;
-	}
-	env->currentOSStackFree = osStackFree - (osStackFree / J9VMTHREAD_RESERVED_C_STACK_FRACTION);
+	initializeCurrentOSStackFree(env, args->osThread, vm->defaultOSStackSize);
 
 	threadAboutToStart(env);
 
@@ -805,14 +846,9 @@ jint JNICALL GetEnv(JavaVM *jvm, void **penv, jint version)
 		return JNI_EDETACHED;
 	}
 
-	/* Call the hook - if rc changes from JNI_EVERSION, return it.
-	 * Note: the JavaVM parameter must be used in the call instead of the J9JavaVM
-	 * because the JavaVM parameter should be a J9InvocationJavaVM* when GetEnv()
-	 * is called from JVMTI agents.
-	 */
-	TRIGGER_J9HOOK_VM_GETENV(vm->hookInterface, jvm, penv, version, rc);
-	if (rc != JNI_EVERSION) {
-		return rc;
+	if (jniVersionIsValid((UDATA)version)) {
+		*penv = (void *)vmThread;
+		return JNI_OK;
 	}
 
 	if (version == UTE_VERSION_1_1) {
@@ -827,9 +863,8 @@ jint JNICALL GetEnv(JavaVM *jvm, void **penv, jint version)
 		if (vm->j9rasGlobalStorage == NULL) {	
 			j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_VM_JVMRI_REQUESTED_WITHOUT_TRACE);
 			return JNI_EINVAL;
-		} else {
-			*penv = ((RasGlobalStorage *)vm->j9rasGlobalStorage)->jvmriInterface;
 		}
+		*penv = ((RasGlobalStorage *)vm->j9rasGlobalStorage)->jvmriInterface;
 		return *penv == NULL ? JNI_EVERSION : JNI_OK;
 	}
 
@@ -846,15 +881,22 @@ jint JNICALL GetEnv(JavaVM *jvm, void **penv, jint version)
 	 */
 	if (IFA_ENABLED_JNI_VERSION == (version & IFA_ENABLED_JNI_VERSION_MASK)) {
 		version &= ~IFA_ENABLED_JNI_VERSION_MASK;
+		if (jniVersionIsValid((UDATA)version)) {
+			*penv = (void *)vmThread;
+			return JNI_OK;
+		}
+		return JNI_EVERSION;
 	}
 #endif /* defined(J9VM_OPT_JAVA_OFFLOAD_SUPPORT) */
 
-   if (!jniVersionIsValid((UDATA)version)) {
-		return JNI_EVERSION;
-	}
-
-	*penv = (void *)vmThread;
-	return JNI_OK;
+	/* Call the hook to allow modules to add custom version numbers.
+	 *
+	 * Note: the JavaVM parameter must be used in the call instead of the J9JavaVM
+	 * because the JavaVM parameter should be a J9InvocationJavaVM* when GetEnv()
+	 * is called from JVMTI agents.
+	 */
+	TRIGGER_J9HOOK_VM_GETENV(vm->hookInterface, jvm, penv, version, rc);
+	return rc;
 }
 
 
@@ -1078,38 +1120,20 @@ jint JNICALL AttachCurrentThreadAsDaemon(JavaVM * vm, void ** p_env, void * thr_
 
 #if (defined(J9VM_OPT_SIDECAR)) 
 /* run the shutdown method in java.lang.Shutdown */
-void sidecarShutdown(J9VMThread* shutdownThread)
-{
+void sidecarShutdown(J9VMThread* shutdownThread) {
 	J9JavaVM * vm = shutdownThread->javaVM;
-	omrthread_monitor_t mutex = vm->runtimeFlagsMutex;
-	J9NameAndSignature nas;
 
-	nas.name = (J9UTF8*)&j9_shutdown;
-	nas.signature = (J9UTF8*)&j9_void_void;
+	if (!(vm->runtimeFlags & J9_RUNTIME_CLEANUP)) {
+		J9NameAndSignature nas;
 
-	/* Set a flag to allow System.exit to run from within finalizers run by the shutdown code */
+		nas.name = (J9UTF8*)&j9_shutdown;
+		nas.signature = (J9UTF8*)&j9_void_void;
 
-	if (NULL != mutex) {
-		omrthread_monitor_enter(mutex);
-	}
-	vm->runtimeFlags |= J9_RUNTIME_CLEANUP;
-	if (NULL != mutex) {
-		omrthread_monitor_exit(mutex);
-	}
-
-	enterVMFromJNI(shutdownThread);
-	runStaticMethod(shutdownThread, (U_8*)"java/lang/Shutdown", &nas, 0, NULL);
-	internalExceptionDescribe(shutdownThread);
-	releaseVMAccess(shutdownThread);
-
-	/* Unset the flag so System.exit is no longer allowed (particularly while the VMDeath JMVTI event is in progress) */
-
-	if (NULL != mutex) {
-		omrthread_monitor_enter(mutex);
-	}
-	vm->runtimeFlags &= ~J9_RUNTIME_CLEANUP;
-	if (NULL != mutex) {
-		omrthread_monitor_exit(mutex);
+		vm->runtimeFlags |= J9_RUNTIME_CLEANUP;
+		enterVMFromJNI(shutdownThread);
+		runStaticMethod(shutdownThread, (U_8*)"java/lang/Shutdown", &nas, 0, NULL);
+		internalExceptionDescribe(shutdownThread);
+		releaseVMAccess(shutdownThread);
 	}
 }
 #endif /* J9VM_OPT_SIDECAR */
@@ -1333,6 +1357,26 @@ J9_GetInterface(J9_INTERFACE_SELECTOR interfaceSelector, J9PortLibrary* portLib,
 	Assert_VM_unreachable();
 	return NULL;
 }
+
+#if defined(J9VM_ZOS_3164_INTEROPERABILITY)
+void
+execute31BitExitHook(J9JavaVM * vm, jint rc)
+{
+	Assert_VM_true(J9_IS_31BIT_INTEROP_TARGET(vm->exitHook));
+
+	ffi_type* args[1];
+	void* values[1];
+	ffi_cif cif_t;
+	ffi_cif * const cif = &cif_t;
+
+	args[0]= &ffi_type_sint32;
+	values[0] = (void*)&(rc);
+
+	if (FFI_OK == ffi_prep_cif(cif, FFI_CEL4RO31, 1, &ffi_type_void, args)) {
+		ffi_call(cif, FFI_FN(vm->exitHook), NULL, values);
+	}
+}
+#endif /* defined(J9VM_ZOS_3164_INTEROPERABILITY) */
 
 #endif /* J9VM_OPT_SIDECAR */
 

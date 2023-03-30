@@ -1,6 +1,6 @@
-/*[INCLUDE-IF Sidecar18-SE]*/
+/*[INCLUDE-IF JAVA_SPEC_VERSION >= 8]*/
 /*******************************************************************************
- * Copyright (c) 1998, 2019 IBM Corp. and others
+ * Copyright (c) 1998, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -39,6 +39,9 @@ import sun.reflect.CallerSensitive;
  * @author      OTI
  * @version     initial
  */
+/*[IF JAVA_SPEC_VERSION >= 17]*/
+@Deprecated(since="17", forRemoval=true)
+/*[ENDIF] JAVA_SPEC_VERSION >= 17 */
 public final class AccessController {
 	static {
 		// Initialize vm-internal caches
@@ -495,11 +498,20 @@ private static AccessControlContext getContextHelper(boolean forDoPrivilegedWith
 	AccessControlContext accLower = null;
 	for (int j = 0; j < frameNbr; ++j) {
 		AccessControlContext acc = (AccessControlContext) domains[j * OBJS_ARRAY_SIZE];
-		/*[PR JAZZ 66930] j.s.AccessControlContext.checkPermission() invoke untrusted ProtectionDomain.implies */
-		// the actual ProtectionDomain element starts at index 1
-		ProtectionDomain[] pDomains = generatePDarray(activeDC, acc, (Object[]) domains[j * OBJS_ARRAY_SIZE + OBJS_INDEX_PDS], false, 1);
+		ProtectionDomain[] pDomains;
 		AccessControlContext accTmp;
-		int newAuthorizedState = getNewAuthorizedState(acc, (ProtectionDomain)((Object[]) domains[j * OBJS_ARRAY_SIZE + OBJS_INDEX_PDS])[0]);
+		int newAuthorizedState;
+		// for limited doPrivilegedWithCombiner frames, the second element is a single ProtectionDomain instead of an array
+		// see Java_java_security_AccessController_getAccSnapshot function comments
+		if (forDoPrivilegedWithCombiner && j > 0) {
+			pDomains = generatePDarray(activeDC, acc, new Object[]{ domains[j * OBJS_ARRAY_SIZE + OBJS_INDEX_PDS] }, false, 0);
+			newAuthorizedState = getNewAuthorizedState(acc, (ProtectionDomain)domains[j * OBJS_ARRAY_SIZE + OBJS_INDEX_PDS]);
+		} else {
+			/*[PR JAZZ 66930] j.s.AccessControlContext.checkPermission() invoke untrusted ProtectionDomain.implies */
+			// the actual ProtectionDomain element starts at index 1
+			pDomains = generatePDarray(activeDC, acc, (Object[]) domains[j * OBJS_ARRAY_SIZE + OBJS_INDEX_PDS], false, 1);
+			newAuthorizedState = getNewAuthorizedState(acc, (ProtectionDomain)((Object[]) domains[j * OBJS_ARRAY_SIZE + OBJS_INDEX_PDS])[0]);
+		}
 		if (((null != acc) && acc.isLimitedContext) || (1 < frameNbr)) {
 			// there is a limited doPrivilege frame
 			accTmp = new AccessControlContext(acc, pDomains, newAuthorizedState);
@@ -510,6 +522,10 @@ private static AccessControlContext getContextHelper(boolean forDoPrivilegedWith
 		}
 		if (null != acc && null != acc.domainCombiner) {
 			accTmp.domainCombiner = acc.domainCombiner;
+			if (activeDC == null) {
+				// This activeDC will be set to accContext.domainCombiner.
+				activeDC = acc.domainCombiner;
+			}
 		}
 		if (null != domains[j * OBJS_ARRAY_SIZE + OBJS_INDEX_PERMS_OR_CACHECHECKED]) {
 			// this is frame with limited permissions
@@ -816,7 +832,7 @@ public static <T> T doPrivileged (PrivilegedExceptionAction<T> action, AccessCon
  */
 @CallerSensitive
 public static <T> T doPrivilegedWithCombiner(PrivilegedAction<T> action) {
-	return doPrivileged(action, getContextHelper(true));
+	return doPrivileged(action, doPrivilegedWithCombinerHelper(null));
 }
 
 /**
@@ -843,7 +859,7 @@ public static <T> T doPrivilegedWithCombiner(PrivilegedAction<T> action) {
 public static <T> T doPrivilegedWithCombiner(PrivilegedExceptionAction<T> action)
 	throws PrivilegedActionException
 {
-	return doPrivileged(action, getContextHelper(true));
+	return doPrivileged(action, doPrivilegedWithCombinerHelper(null));
 }
 
 /**
@@ -922,9 +938,7 @@ public static <T> T doPrivilegedWithCombiner(PrivilegedAction<T> action,
 		AccessControlContext context, Permission... perms)
 {
 	checkPermsNPE(perms);
-	ProtectionDomain domain = getCallerPD(1);
-	ProtectionDomain[] pdArray = (domain == null) ? null : new ProtectionDomain[] { domain };
-	return doPrivileged(action, new AccessControlContext(context, pdArray, getNewAuthorizedState(context, domain)), perms);
+	return doPrivileged(action, doPrivilegedWithCombinerHelper(context), perms);
 }
 
 /**
@@ -999,9 +1013,27 @@ public static <T> T doPrivilegedWithCombiner(PrivilegedExceptionAction<T> action
 	throws PrivilegedActionException
 {
 	checkPermsNPE(perms);
-	ProtectionDomain domain = getCallerPD(1);
+	return doPrivileged(action, doPrivilegedWithCombinerHelper(context), perms);
+}
+
+/**
+ * Helper method to construct an AccessControlContext for doPrivilegedWithCombiner methods.
+ *
+ * @param   context an AccessControlContext, if it is null, use getContextHelper() to construct a context.
+ *
+ * @return  An AccessControlContext to be applied to the doPrivileged(action, context, perms).
+ */
+@CallerSensitive
+private static AccessControlContext doPrivilegedWithCombinerHelper(AccessControlContext context) {
+	ProtectionDomain domain = getCallerPD(2);
 	ProtectionDomain[] pdArray = (domain == null) ? null : new ProtectionDomain[] { domain };
-	return doPrivileged(action, new AccessControlContext(context, pdArray, getNewAuthorizedState(context, domain)), perms);
+	AccessControlContext fixedContext = new AccessControlContext(context, pdArray, getNewAuthorizedState(context, domain));
+	if (context == null) {
+		AccessControlContext parentContext = getContextHelper(true);
+		fixedContext.domainCombiner = parentContext.domainCombiner;
+		fixedContext.nextStackAcc = parentContext;
+	}
+	return fixedContext;
 }
 
 }

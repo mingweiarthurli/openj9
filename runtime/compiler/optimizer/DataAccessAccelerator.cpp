@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -107,10 +107,10 @@ int32_t TR_DataAccessAccelerator::perform()
         {
         TR::Block* block = iter.currentBlock();
 
-        result |= performOnBlock(block, &variableCallTreeTops);
+        result += performOnBlock(block, &variableCallTreeTops);
         }
 
-     result |= processVariableCalls(&variableCallTreeTops);
+     result += processVariableCalls(&variableCallTreeTops);
      }
 
    if (result != 0)
@@ -126,7 +126,7 @@ int32_t TR_DataAccessAccelerator::perform()
 int32_t
 TR_DataAccessAccelerator::processVariableCalls(TreeTopContainer* variableCallTreeTops)
    {
-   int result = 0;
+   int32_t result = 0;
 
    // Process variable precision calls after iterating through all the nodes
    for(int i = 0; i < variableCallTreeTops->size(); ++i)
@@ -143,21 +143,37 @@ TR_DataAccessAccelerator::processVariableCalls(TreeTopContainer* variableCallTre
                // DAA Packed Decimal <-> Integer
                case TR::com_ibm_dataaccess_DecimalData_convertPackedDecimalToInteger_:
                   {
-                  result |= generatePD2IVariableParameter(treeTop, callNode, true, false); continue;
+                  if (generatePD2IVariableParameter(treeTop, callNode, true, false))
+                     {
+                     ++result;
+                     }
+                  continue;
                   }
                case TR::com_ibm_dataaccess_DecimalData_convertPackedDecimalToInteger_ByteBuffer_:
                   {
-                  result |= generatePD2IVariableParameter(treeTop, callNode, true, true); continue;
+                  if (generatePD2IVariableParameter(treeTop, callNode, true, true))
+                     {
+                     ++result;
+                     }
+                  continue;
                   }
 
                   // DAA Packed Decimal <-> Long
                case TR::com_ibm_dataaccess_DecimalData_convertPackedDecimalToLong_:
                   {
-                  result |= generatePD2IVariableParameter(treeTop, callNode, false, false); continue;
+                  if (generatePD2IVariableParameter(treeTop, callNode, false, false))
+                     {
+                     ++result;
+                     }
+                  continue;
                   }
                case TR::com_ibm_dataaccess_DecimalData_convertPackedDecimalToLong_ByteBuffer_:
                   {
-                  result |= generatePD2IVariableParameter(treeTop, callNode, false, true); continue;
+                  if (generatePD2IVariableParameter(treeTop, callNode, false, true))
+                     {
+                     ++result;
+                     }
+                  continue;
                   }
                default:
                   break;
@@ -261,7 +277,8 @@ int32_t TR_DataAccessAccelerator::performOnBlock(TR::Block* block, TreeTopContai
                   returnNode = insertDecimalGetIntrinsic(treeTop, callNode, 8, 8);
                   break;
 
-               default: break;
+               default:
+                  break;
                   }
 
                if (returnNode)
@@ -293,21 +310,43 @@ int32_t TR_DataAccessAccelerator::performOnBlock(TR::Block* block, TreeTopContai
                   {
                // DAA Packed Decimal Check
                case TR::com_ibm_dataaccess_PackedDecimal_checkPackedDecimal_:
-                  result |= inlineCheckPackedDecimal(treeTop, callNode); break;
+                  if (inlineCheckPackedDecimal(treeTop, callNode))
+                     {
+                     ++result;
+                     }
+                  break;
 
                   // DAA Packed Decimal <-> Unicode Decimal
                case TR::com_ibm_dataaccess_DecimalData_convertPackedDecimalToUnicodeDecimal_:
-                  result |= generatePD2UD(treeTop, callNode, true); break;
+                  if (generatePD2UD(treeTop, callNode, true))
+                     {
+                     ++result;
+                     }
+                  break;
                case TR::com_ibm_dataaccess_DecimalData_convertUnicodeDecimalToPackedDecimal_:
-                  result |= generateUD2PD(treeTop, callNode, true); break;
+                  if (generateUD2PD(treeTop, callNode, true))
+                     {
+                     ++result;
+                     }
+                  break;
 
                   // DAA Packed Decimal <-> External Decimal
                case TR::com_ibm_dataaccess_DecimalData_convertExternalDecimalToPackedDecimal_:
-                  result |= generateUD2PD(treeTop, callNode, false); break;
+                  if (generateUD2PD(treeTop, callNode, false))
+                     {
+                     ++result;
+                     }
+                  break;
                case TR::com_ibm_dataaccess_DecimalData_convertPackedDecimalToExternalDecimal_:
-                  result |= generatePD2UD(treeTop, callNode, false); break;
+                  if (generatePD2UD(treeTop, callNode, false))
+                     {
+                     ++result;
+                     }
+                  break;
 
-               default: matched = false; break;
+               default:
+                  matched = false;
+                  break;
                   }
                }
 
@@ -321,33 +360,81 @@ int32_t TR_DataAccessAccelerator::performOnBlock(TR::Block* block, TreeTopContai
                   {
                // DAA Packed Decimal arithmetic methods
                case TR::com_ibm_dataaccess_PackedDecimal_addPackedDecimal_:
-                  result |= genArithmeticIntrinsic(treeTop, callNode, TR::pdadd); break;
+                  if (genArithmeticIntrinsic(treeTop, callNode, TR::pdadd))
+                     {
+                     ++result;
+                     }
+                  break;
                case TR::com_ibm_dataaccess_PackedDecimal_subtractPackedDecimal_:
-                  result |= genArithmeticIntrinsic(treeTop, callNode, TR::pdsub); break;
+                  if (genArithmeticIntrinsic(treeTop, callNode, TR::pdsub))
+                     {
+                     ++result;
+                     }
+                  break;
                case TR::com_ibm_dataaccess_PackedDecimal_multiplyPackedDecimal_:
-                  result |= genArithmeticIntrinsic(treeTop, callNode, TR::pdmul); break;
+                  if (genArithmeticIntrinsic(treeTop, callNode, TR::pdmul))
+                     {
+                     ++result;
+                     }
+                  break;
                case TR::com_ibm_dataaccess_PackedDecimal_dividePackedDecimal_:
-                  result |= genArithmeticIntrinsic(treeTop, callNode, TR::pddiv); break;
+                  if (genArithmeticIntrinsic(treeTop, callNode, TR::pddiv))
+                     {
+                     ++result;
+                     }
+                  break;
                case TR::com_ibm_dataaccess_PackedDecimal_remainderPackedDecimal_:
-                  result |= genArithmeticIntrinsic(treeTop, callNode, TR::pdrem); break;
+                  if (genArithmeticIntrinsic(treeTop, callNode, TR::pdrem))
+                     {
+                     ++result;
+                     }
+                  break;
 
                   // DAA Packed Decimal shift methods
                case TR::com_ibm_dataaccess_PackedDecimal_shiftLeftPackedDecimal_:
-                  result |= genShiftLeftIntrinsic(treeTop, callNode); break;
+                  if (genShiftLeftIntrinsic(treeTop, callNode))
+                     {
+                     ++result;
+                     }
+                  break;
                case TR::com_ibm_dataaccess_PackedDecimal_shiftRightPackedDecimal_:
-                  result |= genShiftRightIntrinsic(treeTop, callNode); break;
+                  if (genShiftRightIntrinsic(treeTop, callNode))
+                     {
+                     ++result;
+                     }
+                  break;
 
                   // DAA Packed Decimal comparison methods
                case TR::com_ibm_dataaccess_PackedDecimal_lessThanPackedDecimal_:
-                  result |= genComparisionIntrinsic(treeTop, callNode, TR::pdcmplt); break;
+                  if (genComparisionIntrinsic(treeTop, callNode, TR::pdcmplt))
+                     {
+                     ++result;
+                     }
+                  break;
                case TR::com_ibm_dataaccess_PackedDecimal_lessThanOrEqualsPackedDecimal_:
-                  result |= genComparisionIntrinsic(treeTop, callNode, TR::pdcmple); break;
+                  if (genComparisionIntrinsic(treeTop, callNode, TR::pdcmple))
+                     {
+                     ++result;
+                     }
+                  break;
                case TR::com_ibm_dataaccess_PackedDecimal_greaterThanPackedDecimal_:
-                  result |= genComparisionIntrinsic(treeTop, callNode, TR::pdcmpgt); break;
+                  if (genComparisionIntrinsic(treeTop, callNode, TR::pdcmpgt))
+                     {
+                     ++result;
+                     }
+                  break;
                case TR::com_ibm_dataaccess_PackedDecimal_greaterThanOrEqualsPackedDecimal_:
-                  result |= genComparisionIntrinsic(treeTop, callNode, TR::pdcmpge); break;
+                  if (genComparisionIntrinsic(treeTop, callNode, TR::pdcmpge))
+                     {
+                     ++result;
+                     }
+                  break;
                case TR::com_ibm_dataaccess_PackedDecimal_equalsPackedDecimal_:
-                  result |= genComparisionIntrinsic(treeTop, callNode, TR::pdcmpeq); break;
+                  if (genComparisionIntrinsic(treeTop, callNode, TR::pdcmpeq))
+                     {
+                     ++result;
+                     }
+                  break;
 
                   // DAA Packed Decimal <-> Integer
                case TR::com_ibm_dataaccess_DecimalData_convertPackedDecimalToInteger_:
@@ -358,7 +445,10 @@ int32_t TR_DataAccessAccelerator::performOnBlock(TR::Block* block, TreeTopContai
                      }
                   else
                      {
-                     result |= generatePD2I(treeTop, callNode, true, false);
+                     if (generatePD2I(treeTop, callNode, true, false))
+                        {
+                        ++result;
+                        }
                      }
                   break;
                   }
@@ -370,14 +460,25 @@ int32_t TR_DataAccessAccelerator::performOnBlock(TR::Block* block, TreeTopContai
                      }
                   else
                      {
-                     result |= generatePD2I(treeTop, callNode, true, true);
+                     if (generatePD2I(treeTop, callNode, true, true))
+                        {
+                        ++result;
+                        }
                      }
                   break;
                   }
                case TR::com_ibm_dataaccess_DecimalData_convertIntegerToPackedDecimal_:
-                  result |= generateI2PD(treeTop, callNode, true, false); break;
+                  if (generateI2PD(treeTop, callNode, true, false))
+                     {
+                     ++result;
+                     }
+                  break;
                case TR::com_ibm_dataaccess_DecimalData_convertIntegerToPackedDecimal_ByteBuffer_:
-                  result |= generateI2PD(treeTop, callNode, true, true); break;
+                  if (generateI2PD(treeTop, callNode, true, true))
+                     {
+                     ++result;
+                     }
+                  break;
 
                   // DAA Packed Decimal <-> Long
                case TR::com_ibm_dataaccess_DecimalData_convertPackedDecimalToLong_:
@@ -388,7 +489,10 @@ int32_t TR_DataAccessAccelerator::performOnBlock(TR::Block* block, TreeTopContai
                      }
                   else
                      {
-                     result |= generatePD2I(treeTop, callNode, false, false);
+                     if (generatePD2I(treeTop, callNode, false, false))
+                        {
+                        ++result;
+                        }
                      }
                   break;
                   }
@@ -400,16 +504,29 @@ int32_t TR_DataAccessAccelerator::performOnBlock(TR::Block* block, TreeTopContai
                      }
                   else
                      {
-                     result |= generatePD2I(treeTop, callNode, false, true);
+                     if (generatePD2I(treeTop, callNode, false, true))
+                        {
+                        ++result;
+                        }
                      }
                   break;
                   }
                case TR::com_ibm_dataaccess_DecimalData_convertLongToPackedDecimal_:
-                  result |= generateI2PD(treeTop, callNode, false, false); break;
+                  if (generateI2PD(treeTop, callNode, false, false))
+                     {
+                     ++result;
+                     }
+                  break;
                case TR::com_ibm_dataaccess_DecimalData_convertLongToPackedDecimal_ByteBuffer_:
-                  result |= generateI2PD(treeTop, callNode, false, true); break;
+                  if (generateI2PD(treeTop, callNode, false, true))
+                     {
+                     ++result;
+                     }
+                  break;
 
-               default: matched = false; break;
+               default:
+                  matched = false;
+                  break;
                   }
                }
 
@@ -418,7 +535,7 @@ int32_t TR_DataAccessAccelerator::performOnBlock(TR::Block* block, TreeTopContai
                 && TR_OSRGuardRemoval::findMatchingOSRGuard(comp(), treeTop))
                requestOSRGuardRemoval = true;
 
-            blockResult |= result;
+            blockResult += result;
             }
          }
       }
@@ -469,7 +586,7 @@ TR::Node* TR_DataAccessAccelerator::insertDecimalGetIntrinsic(TR::TreeTop* callT
    // Determines whether a TR::ByteSwap needs to be inserted before the store to the byteArray
    bool requiresByteSwap = comp()->target().cpu.isBigEndian() != static_cast <bool> (bigEndianNode->getInt());
 
-   if (requiresByteSwap && !comp()->target().cpu.isZ())
+   if (requiresByteSwap && !comp()->cg()->supportsByteswap())
       {
       printInliningStatus (false, callNode, "Unmarshalling is not supported because ByteSwap IL evaluators are not implemented.");
       return NULL;
@@ -497,8 +614,8 @@ TR::Node* TR_DataAccessAccelerator::insertDecimalGetIntrinsic(TR::TreeTop* callT
       // Default case is impossible due to previous checks
       switch (sourceNumBytes)
          {
-         case 4: op = requiresByteSwap ? TR::iriload : TR::floadi; break;
-         case 8: op = requiresByteSwap ? TR::irlload : TR::dloadi; break;
+         case 4: op = requiresByteSwap ? TR::iloadi : TR::floadi; break;
+         case 8: op = requiresByteSwap ? TR::lloadi : TR::dloadi; break;
          }
 
       // Default case is impossible due to previous checks
@@ -515,8 +632,8 @@ TR::Node* TR_DataAccessAccelerator::insertDecimalGetIntrinsic(TR::TreeTop* callT
          // Default case is impossible due to previous checks
          switch (sourceNumBytes)
             {
-            case 4: valueNode = TR::Node::create(TR::ibits2f, 1, valueNode); break;
-            case 8: valueNode = TR::Node::create(TR::lbits2d, 1, valueNode); break;
+            case 4: valueNode = TR::Node::create(TR::ibits2f, 1, TR::Node::create(TR::ibyteswap, 1, valueNode)); break;
+            case 8: valueNode = TR::Node::create(TR::lbits2d, 1, TR::Node::create(TR::lbyteswap, 1, valueNode)); break;
             }
          }
 
@@ -565,7 +682,7 @@ TR::Node* TR_DataAccessAccelerator::insertDecimalSetIntrinsic(TR::TreeTop* callT
    // Determines whether a TR::ByteSwap needs to be inserted before the store to the byteArray
    bool requiresByteSwap = comp()->target().cpu.isBigEndian() != static_cast <bool> (bigEndianNode->getInt());
 
-   if (requiresByteSwap && !comp()->target().cpu.isZ())
+   if (requiresByteSwap && !comp()->cg()->supportsByteswap())
       {
       printInliningStatus (false, callNode, "Unmarshalling is not supported because ByteSwap IL evaluators are not implemented.");
       return NULL;
@@ -600,8 +717,8 @@ TR::Node* TR_DataAccessAccelerator::insertDecimalSetIntrinsic(TR::TreeTop* callT
       // Default case is impossible due to previous checks
       switch (targetNumBytes)
          {
-         case 4: op = requiresByteSwap ? TR::iristore : TR::fstorei; break;
-         case 8: op = requiresByteSwap ? TR::irlstore : TR::dstorei; break;
+         case 4: op = requiresByteSwap ? TR::istorei : TR::fstorei; break;
+         case 8: op = requiresByteSwap ? TR::lstorei : TR::dstorei; break;
          }
 
       // Create the proper conversion if the source and target sizes are different
@@ -615,8 +732,8 @@ TR::Node* TR_DataAccessAccelerator::insertDecimalSetIntrinsic(TR::TreeTop* callT
          // Default case is impossible due to previous checks
          switch (targetNumBytes)
             {
-            case 4: valueNode = TR::Node::create(TR::fbits2i, 1, valueNode); break;
-            case 8: valueNode = TR::Node::create(TR::dbits2l, 1, valueNode); break;
+            case 4: valueNode = TR::Node::create(TR::ibyteswap, 1, TR::Node::create(TR::fbits2i, 1, valueNode)); break;
+            case 8: valueNode = TR::Node::create(TR::lbyteswap, 1, TR::Node::create(TR::dbits2l, 1, valueNode)); break;
             }
          }
 
@@ -749,15 +866,6 @@ TR::Node* TR_DataAccessAccelerator::insertIntegerGetIntrinsic(TR::TreeTop* callT
       return NULL;
       }
 
-   // Determines whether a TR::ByteSwap needs to be inserted before the store to the byteArray
-   bool requiresByteSwap = comp()->target().cpu.isBigEndian() != static_cast <bool> (bigEndianNode->getInt());
-
-   if (requiresByteSwap && !comp()->target().cpu.isZ())
-      {
-      printInliningStatus (false, callNode, "Unmarshalling is not supported because ByteSwap IL evaluators are not implemented.");
-      return NULL;
-      }
-
    bool needUnsignedConversion = false;
 
    // This check indicates that the sourceNumBytes value is specified on the callNode, so we must extract it
@@ -800,6 +908,15 @@ TR::Node* TR_DataAccessAccelerator::insertIntegerGetIntrinsic(TR::TreeTop* callT
       sourceNumBytes = targetNumBytes;
       }
 
+   // Determines whether a TR::ByteSwap needs to be inserted before the store to the byteArray
+   bool requiresByteSwap = sourceNumBytes != 1 && comp()->target().cpu.isBigEndian() != static_cast <bool> (bigEndianNode->getInt());
+
+   if (requiresByteSwap && !comp()->cg()->supportsByteswap())
+      {
+      printInliningStatus (false, callNode, "Unmarshalling is not supported because ByteSwap IL evaluators are not implemented.");
+      return NULL;
+      }
+
    if (performTransformation(comp(), "O^O TR_DataAccessAccelerator: genSimpleGetBinary call: %p inlined.\n", callNode))
       {
       insertByteArrayNULLCHK(callTreeTop, callNode, byteArrayNode);
@@ -820,14 +937,15 @@ TR::Node* TR_DataAccessAccelerator::insertIntegerGetIntrinsic(TR::TreeTop* callT
          }
 
       TR::ILOpCodes op = TR::BadILOp;
+      TR::ILOpCodes byteswapOp = TR::BadILOp;
 
       // Default case is impossible due to previous checks
       switch (sourceNumBytes)
          {
          case 1: op = TR::bloadi; break;
-         case 2: op = requiresByteSwap ? TR::irsload : TR::sloadi; break;
-         case 4: op = requiresByteSwap ? TR::iriload : TR::iloadi; break;
-         case 8: op = requiresByteSwap ? TR::irlload : TR::lloadi; break;
+         case 2: op = TR::sloadi; byteswapOp = TR::sbyteswap; break;
+         case 4: op = TR::iloadi; byteswapOp = TR::ibyteswap; break;
+         case 8: op = TR::lloadi; byteswapOp = TR::lbyteswap; break;
          }
 
       // Default case is impossible due to previous checks
@@ -840,6 +958,11 @@ TR::Node* TR_DataAccessAccelerator::insertIntegerGetIntrinsic(TR::TreeTop* callT
          }
 
       TR::Node* valueNode = TR::Node::createWithSymRef(op, 1, 1, createByteArrayElementAddress(callTreeTop, callNode, byteArrayNode, offsetNode), comp()->getSymRefTab()->findOrCreateGenericIntShadowSymbolReference(0));
+
+      if (requiresByteSwap)
+         {
+         valueNode = TR::Node::create(byteswapOp, 1, valueNode);
+         }
 
       if (sourceDataType != targetDataType)
          {
@@ -869,15 +992,6 @@ TR::Node* TR_DataAccessAccelerator::insertIntegerSetIntrinsic(TR::TreeTop* callT
    if (!bigEndianNode->getOpCode().isLoadConst())
       {
       printInliningStatus (false, callNode, "bigEndianNode is not constant.");
-      return NULL;
-      }
-
-   // Determines whether a TR::ByteSwap needs to be inserted before the store to the byteArray
-   bool requiresByteSwap = comp()->target().cpu.isBigEndian() != static_cast <bool> (bigEndianNode->getInt());
-
-   if (requiresByteSwap && !comp()->target().cpu.isZ())
-      {
-      printInliningStatus (false, callNode, "Marshalling is not supported because ByteSwap IL evaluators are not implemented.");
       return NULL;
       }
 
@@ -911,6 +1025,15 @@ TR::Node* TR_DataAccessAccelerator::insertIntegerSetIntrinsic(TR::TreeTop* callT
       targetNumBytes = sourceNumBytes;
       }
 
+   // Determines whether a TR::ByteSwap needs to be inserted before the store to the byteArray
+   bool requiresByteSwap = targetNumBytes != 1 && comp()->target().cpu.isBigEndian() != static_cast <bool> (bigEndianNode->getInt());
+
+   if (requiresByteSwap && !comp()->cg()->supportsByteswap())
+      {
+      printInliningStatus (false, callNode, "Marshalling is not supported because ByteSwap IL evaluators are not implemented.");
+      return NULL;
+      }
+
    if (performTransformation(comp(), "O^O TR_DataAccessAccelerator: genSimplePutBinary call: %p inlined.\n", callNode))
       {
       insertByteArrayNULLCHK(callTreeTop, callNode, byteArrayNode);
@@ -940,20 +1063,26 @@ TR::Node* TR_DataAccessAccelerator::insertIntegerSetIntrinsic(TR::TreeTop* callT
          }
 
       TR::ILOpCodes op = TR::BadILOp;
+      TR::ILOpCodes byteswapOp = TR::BadILOp;
 
       // Default case is impossible due to previous checks
       switch (targetNumBytes)
          {
          case 1: op = TR::bstorei; break;
-         case 2: op = requiresByteSwap ? TR::irsstore : TR::sstorei; break;
-         case 4: op = requiresByteSwap ? TR::iristore : TR::istorei; break;
-         case 8: op = requiresByteSwap ? TR::irlstore : TR::lstorei; break;
+         case 2: op = TR::sstorei; byteswapOp = TR::sbyteswap; break;
+         case 4: op = TR::istorei; byteswapOp = TR::ibyteswap; break;
+         case 8: op = TR::lstorei; byteswapOp = TR::lbyteswap; break;
          }
 
       // Create the proper conversion if the source and target sizes are different
       if (sourceDataType != targetDataType)
          {
          valueNode = TR::Node::create(TR::ILOpCode::getProperConversion(sourceDataType, targetDataType, false), 1, valueNode);
+         }
+
+      if (requiresByteSwap)
+         {
+         valueNode = TR::Node::create(byteswapOp, 1, valueNode);
          }
 
       return TR::Node::createWithSymRef(op, 2, 2, createByteArrayElementAddress(callTreeTop, callNode, byteArrayNode, offsetNode), valueNode, comp()->getSymRefTab()->findOrCreateGenericIntShadowSymbolReference(0));
@@ -1217,7 +1346,7 @@ bool TR_DataAccessAccelerator::generateI2PD(TR::TreeTop* treeTop, TR::Node* call
        * AddrNode1 and AddrNode2 were the same node, the LocalCSE would not consider AddrNode1 an alternative replacement
        * of AddrNode3 because the BCDCHK's symbol canGCAndReturn().
        *
-       * With AddrNode2 and AddrNode3 commoned up, the LocalCSE is able to copy propagate pdshlOverflow to the the pd2zd
+       * With AddrNode2 and AddrNode3 commoned up, the LocalCSE is able to copy propagate pdshlOverflow to the pd2zd
        * tree and replace its pdloadi.
        */
       TR::Node * outOfLineCopyBackAddr = constructAddressNode(callNode, pdNode, offsetNode);
@@ -2564,7 +2693,7 @@ bool TR_DataAccessAccelerator::generatePD2UD(TR::TreeTop* treeTop, TR::Node* cal
          TR_ASSERT(false, "unsupported decimalType.\n");
          }
 
-      TR::Node * pd2decimalNode;
+      TR::Node * pd2decimalNode = NULL;
       if (isPD2UD || type == 1)
          {
          pd2decimalNode = TR::Node::create(op, 1, pdload);

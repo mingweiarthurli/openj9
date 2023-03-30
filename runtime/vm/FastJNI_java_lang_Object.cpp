@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2014 IBM Corp. and others
+ * Copyright (c) 2001, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,21 +15,25 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
 
 #include "fastJNI.h"
 
-#include "j9protos.h"
 #include "j9consts.h"
-#include "VMHelpers.hpp"
+#include "j9protos.h"
 #include "ObjectMonitor.hpp"
+#include "ut_j9vm.h"
+#include "VMHelpers.hpp"
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+#include "CRIUHelpers.hpp"
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
 
 extern "C" {
 
-/* java.lang.Object: public final native void wait(long millis, int nanos) throws InterruptedException; */
+/* java.lang.Object: public final native void waitImpl(long millis, int nanos) throws InterruptedException; */
 void JNICALL
 Fast_java_lang_Object_wait(J9VMThread *currentThread, j9object_t receiverObject, jlong millis, jint nanos)
 {
@@ -43,14 +47,22 @@ Fast_java_lang_Object_wait(J9VMThread *currentThread, j9object_t receiverObject,
 void JNICALL
 Fast_java_lang_Object_notifyAll(J9VMThread *currentThread, j9object_t receiverObject)
 {
-	omrthread_monitor_t monitorPtr = NULL;
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+	if (VM_CRIUHelpers::isJVMInSingleThreadMode(currentThread->javaVM)) {
+		/* The exception is already set if the operation failed. */
+		VM_CRIUHelpers::delayedLockingOperation(currentThread, receiverObject, J9_SINGLE_THREAD_MODE_OP_NOTIFY_ALL);
+	} else
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
+	{
+		omrthread_monitor_t monitorPtr = NULL;
 
-	if (VM_ObjectMonitor::getMonitorForNotify(currentThread, receiverObject, &monitorPtr, true)) {
-		if (0 != omrthread_monitor_notify_all(monitorPtr)) {
+		if (VM_ObjectMonitor::getMonitorForNotify(currentThread, receiverObject, &monitorPtr, true)) {
+			if (0 != omrthread_monitor_notify_all(monitorPtr)) {
+				setCurrentException(currentThread, J9VMCONSTANTPOOL_JAVALANGILLEGALMONITORSTATEEXCEPTION, NULL);
+			}
+		} else if (NULL != monitorPtr) {
 			setCurrentException(currentThread, J9VMCONSTANTPOOL_JAVALANGILLEGALMONITORSTATEEXCEPTION, NULL);
 		}
-	} else if (NULL != monitorPtr) {
-		setCurrentException(currentThread, J9VMCONSTANTPOOL_JAVALANGILLEGALMONITORSTATEEXCEPTION, NULL);
 	}
 }
 
@@ -58,19 +70,27 @@ Fast_java_lang_Object_notifyAll(J9VMThread *currentThread, j9object_t receiverOb
 void JNICALL
 Fast_java_lang_Object_notify(J9VMThread *currentThread, j9object_t receiverObject)
 {
-	omrthread_monitor_t monitorPtr = NULL;
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+	if (VM_CRIUHelpers::isJVMInSingleThreadMode(currentThread->javaVM)) {
+		/* The exception is already set if the operation failed. */
+		VM_CRIUHelpers::delayedLockingOperation(currentThread, receiverObject, J9_SINGLE_THREAD_MODE_OP_NOTIFY);
+	} else
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
+	{
+		omrthread_monitor_t monitorPtr = NULL;
 
-	if (VM_ObjectMonitor::getMonitorForNotify(currentThread, receiverObject, &monitorPtr, true)) {
-		if (0 != omrthread_monitor_notify(monitorPtr)) {
+		if (VM_ObjectMonitor::getMonitorForNotify(currentThread, receiverObject, &monitorPtr, true)) {
+			if (0 != omrthread_monitor_notify(monitorPtr)) {
+				setCurrentException(currentThread, J9VMCONSTANTPOOL_JAVALANGILLEGALMONITORSTATEEXCEPTION, NULL);
+			}
+		} else if (NULL != monitorPtr) {
 			setCurrentException(currentThread, J9VMCONSTANTPOOL_JAVALANGILLEGALMONITORSTATEEXCEPTION, NULL);
 		}
-	} else if (NULL != monitorPtr) {
-		setCurrentException(currentThread, J9VMCONSTANTPOOL_JAVALANGILLEGALMONITORSTATEEXCEPTION, NULL);
 	}
 }
 
 J9_FAST_JNI_METHOD_TABLE(java_lang_Object)
-	J9_FAST_JNI_METHOD("wait", "(JI)V", Fast_java_lang_Object_wait,
+	J9_FAST_JNI_METHOD("waitImpl", "(JI)V", Fast_java_lang_Object_wait,
 		J9_FAST_JNI_RETAIN_VM_ACCESS | J9_FAST_JNI_DO_NOT_WRAP_OBJECTS)
 	J9_FAST_JNI_METHOD("notifyAll", "()V", Fast_java_lang_Object_notifyAll,
 		J9_FAST_JNI_RETAIN_VM_ACCESS | J9_FAST_JNI_DO_NOT_WRAP_OBJECTS)

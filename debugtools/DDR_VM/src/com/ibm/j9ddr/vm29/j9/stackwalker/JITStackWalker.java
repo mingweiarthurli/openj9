@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2009, 2020 IBM Corp. and others
+ * Copyright (c) 2009, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -555,6 +555,9 @@ public class JITStackWalker
 					while ((sigChar = jitNextSigChar(signatureString)) != ')') {
 						
 						switch (sigChar) {
+							/*[IF INLINE-TYPES]*/
+							case 'Q': /* fall through */
+							/*[ENDIF] INLINE-TYPES*/
 							case 'L':
 								if (J9SW_ARGUMENT_REGISTER_COUNT_DEFINED && ! stackSpillCount.eq(0) ) {
 									if ((walkState.flags & J9_STACKWALK_ITERATE_O_SLOTS) != 0) {
@@ -631,6 +634,10 @@ public class JITStackWalker
 					break;
 				}
 				/* Fall through to consume type name, utfChar == 'L' for return value */
+
+			/*[IF INLINE-TYPES]*/
+			case 'Q': /* fall through */
+			/*[ENDIF] INLINE-TYPES*/
 			case 'L':
 				while (signatureString.charAt(charIndex++) != ';') ;
 			}
@@ -1199,10 +1206,7 @@ public class JITStackWalker
 		private static void
 		jitWalkStackAllocatedObject(WalkState walkState, J9ObjectPointer object) throws CorruptDataException
 		{
-//			if (J9_STACKWALK_INCLUDE_ARRAYLET_LEAVES == (walkState.flags & J9_STACKWALK_INCLUDE_ARRAYLET_LEAVES)) {
-//				iterateObjectSlotsFlags = iterateObjectSlotsFlags.bitOr(j9mm_iterator_flag_include_arraylet_leaves);
-//			}
-			
+
 			swPrintf(walkState, 4, "\t\tSA-Obj[{0}]", Long.toHexString(object.getAddress()));
 			
 			GCObjectIterator it = GCObjectIterator.fromJ9Object(object, false);

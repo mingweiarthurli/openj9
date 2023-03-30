@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -75,14 +75,14 @@ uint8_t *TR::ARMMonitorEnterSnippet::emitSnippetBody()
    TR::RealRegister *addrReg  = cg()->machine()->getRealRegister(deps->getPostConditions()->getRegisterDependency(2)->getRealRegister());
    TR::RealRegister *tempReg  = cg()->machine()->getRealRegister(deps->getPostConditions()->getRegisterDependency(3)->getRealRegister());
 
-   TR_ARMOpCode opcode;
-   TR_ARMOpCodes opCodeValue;
+   TR::InstOpCode opcode;
+   TR::InstOpCode::Mnemonic opCodeValue;
 
    uint8_t *buffer = cg()->getBinaryBufferCursor();
 
    _incLabel->setCodeLocation(buffer);
 
-   opcode.setOpCodeValue(ARMOp_mvn);
+   opcode.setOpCodeValue(TR::InstOpCode::mvn);
    buffer = opcode.copyBinaryToBuffer(buffer);
    tempReg->setRegisterFieldRD((uint32_t *)buffer);
    // OBJECT_HEADER_LOCK_BITS_MASK          is 0xFF
@@ -92,7 +92,7 @@ uint8_t *TR::ARMMonitorEnterSnippet::emitSnippetBody()
    *(int32_t *)buffer |= ((uint32_t)(ARMConditionCodeAL) << 28 | 0x1 << 25 | (OBJECT_HEADER_LOCK_BITS_MASK - OBJECT_HEADER_LOCK_LAST_RECURSION_BIT));
    buffer += ARM_INSTRUCTION_LENGTH;
 
-   opcode.setOpCodeValue(ARMOp_and);
+   opcode.setOpCodeValue(TR::InstOpCode::and_);
    buffer = opcode.copyBinaryToBuffer(buffer);
    tempReg->setRegisterFieldRD((uint32_t *)buffer);
    dataReg->setRegisterFieldRN((uint32_t *)buffer);
@@ -100,21 +100,21 @@ uint8_t *TR::ARMMonitorEnterSnippet::emitSnippetBody()
    *(int32_t *)buffer |= ((uint32_t)(ARMConditionCodeAL) << 28);
    buffer += ARM_INSTRUCTION_LENGTH;
 
-   opcode.setOpCodeValue(ARMOp_cmp);
+   opcode.setOpCodeValue(TR::InstOpCode::cmp);
    buffer = opcode.copyBinaryToBuffer(buffer);
    metaReg->setRegisterFieldRN((uint32_t *)buffer);
    tempReg->setRegisterFieldRM((uint32_t *)buffer);
    *(int32_t *)buffer |= ((uint32_t)(ARMConditionCodeAL) << 28);
    buffer += ARM_INSTRUCTION_LENGTH;
 
-   opcode.setOpCodeValue(ARMOp_add);
+   opcode.setOpCodeValue(TR::InstOpCode::add);
    buffer = opcode.copyBinaryToBuffer(buffer);
    dataReg->setRegisterFieldRD((uint32_t *)buffer);
    dataReg->setRegisterFieldRN((uint32_t *)buffer);
    *(int32_t *)buffer |= ((uint32_t)(ARMConditionCodeEQ) << 28 | 0x1 << 25 | LOCK_INC_DEC_VALUE);
    buffer += ARM_INSTRUCTION_LENGTH;
 
-   opcode.setOpCodeValue(ARMOp_str);
+   opcode.setOpCodeValue(TR::InstOpCode::str);
    buffer = opcode.copyBinaryToBuffer(buffer);
    dataReg->setRegisterFieldRD((uint32_t *)buffer);
    addrReg->setRegisterFieldRN((uint32_t *)buffer); // offset_12 = 0, U = X, B = 0, L = 0
@@ -122,7 +122,7 @@ uint8_t *TR::ARMMonitorEnterSnippet::emitSnippetBody()
    // No modification needed
    buffer += ARM_INSTRUCTION_LENGTH;
 
-   opcode.setOpCodeValue(ARMOp_b);
+   opcode.setOpCodeValue(TR::InstOpCode::b);
    buffer = opcode.copyBinaryToBuffer(buffer);
    *(int32_t *)buffer |= ((uint32_t)(ARMConditionCodeEQ) << 28 | ((getRestartLabel()->getCodeLocation() - buffer - 8) >> 2) & 0x00FFFFFF);
    buffer += ARM_INSTRUCTION_LENGTH;
@@ -226,8 +226,8 @@ uint8_t *TR::ARMMonitorExitSnippet::emitSnippetBody()
    TR::RealRegister *monitorReg = cg()->machine()->getRealRegister(deps->getPostConditions()->getRegisterDependency(1)->getRealRegister());
    TR::RealRegister *threadReg  = cg()->machine()->getRealRegister(deps->getPostConditions()->getRegisterDependency(2)->getRealRegister());
 
-   TR_ARMOpCode opcode;
-   TR_ARMOpCodes opCodeValue;
+   TR::InstOpCode opcode;
+   TR::InstOpCode::Mnemonic opCodeValue;
 
    uint8_t *buffer = cg()->getBinaryBufferCursor();
 #if 0
@@ -279,7 +279,7 @@ uint8_t *TR::ARMMonitorExitSnippet::emitSnippetBody()
       *(int32_t *)buffer |= 8;
       buffer += ARM_INSTRUCTION_LENGTH;
 
-      opcode.setOpCodeValue(ARMOp_b);
+      opcode.setOpCodeValue(TR::InstOpCode::b);
       buffer = opcode.copyBinaryToBuffer(buffer);
       *(int32_t *)buffer |= ((uint32_t)(ARMConditionCodeAL) << 28 | ((getRestoreAndCallLabel()->getCodeLocation()-buffer) >> 2) & 0x00FFFFFF);
       buffer += ARM_INSTRUCTION_LENGTH;
@@ -387,7 +387,7 @@ uint8_t *TR::ARMMonitorExitSnippet::emitSnippetBody()
    else
 #endif
       {
-      opcode.setOpCodeValue(ARMOp_mvn);
+      opcode.setOpCodeValue(TR::InstOpCode::mvn);
       buffer = opcode.copyBinaryToBuffer(buffer);
       threadReg->setRegisterFieldRD((uint32_t *)buffer);
       // 32-bit immediate shifter_operand
@@ -396,7 +396,7 @@ uint8_t *TR::ARMMonitorExitSnippet::emitSnippetBody()
       *(int32_t *)buffer |= ((uint32_t)(ARMConditionCodeAL) << 28 | 0x1 << 25 | OBJECT_HEADER_LOCK_RECURSION_MASK);
       buffer += ARM_INSTRUCTION_LENGTH;
 
-      opcode.setOpCodeValue(ARMOp_and);
+      opcode.setOpCodeValue(TR::InstOpCode::and_);
       buffer = opcode.copyBinaryToBuffer(buffer);
       threadReg->setRegisterFieldRD((uint32_t *)buffer);
       monitorReg->setRegisterFieldRN((uint32_t *)buffer);
@@ -404,21 +404,21 @@ uint8_t *TR::ARMMonitorExitSnippet::emitSnippetBody()
       *(int32_t *)buffer |= ((uint32_t)(ARMConditionCodeAL) << 28);
       buffer += ARM_INSTRUCTION_LENGTH;
 
-      opcode.setOpCodeValue(ARMOp_cmp);
+      opcode.setOpCodeValue(TR::InstOpCode::cmp);
       buffer = opcode.copyBinaryToBuffer(buffer);
       metaReg->setRegisterFieldRN((uint32_t *)buffer);
       threadReg->setRegisterFieldRM((uint32_t *)buffer);
       *(int32_t *)buffer |= ((uint32_t)(ARMConditionCodeAL) << 28);
       buffer += ARM_INSTRUCTION_LENGTH;
 
-      opcode.setOpCodeValue(ARMOp_sub);
+      opcode.setOpCodeValue(TR::InstOpCode::sub);
       buffer = opcode.copyBinaryToBuffer(buffer);
       monitorReg->setRegisterFieldRD((uint32_t *)buffer);
       monitorReg->setRegisterFieldRN((uint32_t *)buffer);
       *(int32_t *)buffer |= ((uint32_t)(ARMConditionCodeEQ) << 28 | 0x1 << 25 | (LOCK_INC_DEC_VALUE & 0xFFFF));
       buffer += ARM_INSTRUCTION_LENGTH;
 
-      opcode.setOpCodeValue(ARMOp_str);
+      opcode.setOpCodeValue(TR::InstOpCode::str);
       buffer = opcode.copyBinaryToBuffer(buffer);
       monitorReg->setRegisterFieldRD((uint32_t *)buffer);
       objReg->setRegisterFieldRN((uint32_t *)buffer);
@@ -427,7 +427,7 @@ uint8_t *TR::ARMMonitorExitSnippet::emitSnippetBody()
       *(int32_t *)buffer |= ((uint32_t)(ARMConditionCodeEQ) << 28 | 0x1 << 24 | 0x1 << 23 | _lwOffset & 0xFFF);
       buffer += ARM_INSTRUCTION_LENGTH;
 
-      opcode.setOpCodeValue(ARMOp_b);
+      opcode.setOpCodeValue(TR::InstOpCode::b);
       buffer = opcode.copyBinaryToBuffer(buffer);
       // Back to restartLabel
       *(int32_t *)buffer |= ((uint32_t)(ARMConditionCodeEQ) << 28 |((getRestartLabel()->getCodeLocation() - buffer - 8) >> 2) & 0x00FFFFFF);

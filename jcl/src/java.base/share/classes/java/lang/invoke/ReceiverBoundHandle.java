@@ -1,6 +1,6 @@
-/*[INCLUDE-IF Sidecar17]*/
+/*[INCLUDE-IF Sidecar17 & !OPENJDK_METHODHANDLES]*/
 /*******************************************************************************
- * Copyright (c) 2009, 2019 IBM Corp. and others
+ * Copyright (c) 2009, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,13 +16,22 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
 package java.lang.invoke;
 
 import java.lang.reflect.Modifier;
+
+/*[IF JAVA_SPEC_VERSION >= 15]*/
+import com.ibm.oti.vm.VMLangAccess;
+import java.lang.invoke.MethodHandles.Lookup;
+import java.lang.reflect.Field;
+import java.security.AccessController;
+import java.security.PrivilegedAction;
+import java.util.List;
+/*[ENDIF] JAVA_SPEC_VERSION >= 15 */
 
 /* ReceiverBoundHandle is a DirectHandle subclass used to call methods 
  * that have an exact known address and a bound first parameter.
@@ -101,6 +110,46 @@ final class ReceiverBoundHandle extends DirectHandle {
 		return result;
 	}
 
+/*[IF JAVA_SPEC_VERSION >= 15]*/
+	@Override
+	boolean addRelatedMHs(List<MethodHandle> relatedMHs) {
+		VMLangAccess vma = Lookup.getVMLangAccess();
+		ClassLoader rawLoader = vma.getClassloader(receiver.getClass());
+		Class<?> injectedSecurityFrame = null;
+		
+		synchronized (SecurityFrameInjector.loaderLock) {
+			injectedSecurityFrame = SecurityFrameInjector.probeLoaderToSecurityFrameMap(rawLoader);
+		}
+		
+		if ((injectedSecurityFrame == null) || !injectedSecurityFrame.isInstance(receiver)) {
+			/* Receiver object cannot be an instance of SecurityFrame as its classloader 
+			 * doesn't have an injected security frame class.
+			 */
+			return false;
+		}
+		
+		final Class<?> finalInjectedSecurityFrame = injectedSecurityFrame;
+		
+		MethodHandle target = AccessController.doPrivileged(new PrivilegedAction<MethodHandle>() {
+			public MethodHandle run() {
+				try {
+					Field targetField = finalInjectedSecurityFrame.getDeclaredField("target"); //$NON-NLS-1$
+					targetField.setAccessible(true);
+					return (MethodHandle)targetField.get(receiver);
+				} catch (NoSuchFieldException | SecurityException | IllegalArgumentException | IllegalAccessException e) {
+					throw (InternalError)new InternalError().initCause(e);
+				}
+			}
+		});
+		
+		if (target.type() == type()) {
+			relatedMHs.add(target);
+			return true;
+		}
+		
+		return false;
+	}
+/*[ENDIF] JAVA_SPEC_VERSION >= 15 */
 
 	// {{{ JIT support
 	private static final ThunkTable _thunkTable = new ThunkTable();
@@ -196,4 +245,3 @@ final class ReceiverBoundHandle extends DirectHandle {
 		super.compareWithDirect(left, c);
 	}
 }
-

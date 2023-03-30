@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -72,7 +72,6 @@
 #endif /* J9VM_GC_REALTIME */
 #include "ClassLoaderManager.hpp"
 #include "Debug.hpp"
-#include "Dispatcher.hpp"
 #include "EnvironmentBase.hpp"
 #if defined(J9VM_GC_FINALIZATION)
 #include "FinalizeListManager.hpp"
@@ -82,6 +81,7 @@
 #include "GlobalCollector.hpp"
 #include "HeapRegionDescriptor.hpp"
 #include "HeapRegionManager.hpp"
+#include "LargeObjectAllocateStats.hpp"
 #include "Math.hpp"
 #include "MemorySpace.hpp"
 #include "MemorySubSpace.hpp"
@@ -107,13 +107,6 @@
 #if defined(OMR_GC_IDLE_HEAP_MANAGER)
 #include "IdleGCManager.hpp"
 #endif
-
-#if defined(J9ZOS39064)
-#include "omriarv64.h"
-#pragma linkage (GETTTT,OS)
-#pragma map (getUserExtendedPrivateAreaMemoryType,"GETTTT")
-UDATA getUserExtendedPrivateAreaMemoryType();
-#endif /* defined(J9ZOS39064) */
 
 /**
  * If we fail to allocate heap structures with the default Xmx value,
@@ -219,16 +212,16 @@ initializeMutatorModelJava(J9VMThread* vmThread)
 void
 cleanupMutatorModelJava(J9VMThread* vmThread)
 {
-	J9VMDllLoadInfo* loadInfo;
-	J9JavaVM* vm = vmThread->javaVM;
 	MM_EnvironmentBase *env = MM_EnvironmentBase::getEnvironment(vmThread->omrVMThread);
 
 	if (NULL != env) {
+		J9JavaVM *vm = vmThread->javaVM;
+		J9VMDllLoadInfo *loadInfo = getGCDllLoadInfo(vm);
+
 		/* cleanupMutatorModelJava is called as part of the main vmThread shutdown, which happens after
 		 * gcCleanupHeapStructures has been called. We should therefore only flush allocation caches
 		 * if there is still a heap.
 		 */
-		loadInfo = FIND_DLL_TABLE_ENTRY(THIS_DLL_NAME);
 		if (!IS_STAGE_COMPLETED(loadInfo->completedBits, HEAP_STRUCTURES_FREED)) {
 			/* this can only be called if the heap still exists since it will ask the TLH chunk to be abandoned with crashes if the heap is deallocated */
 			GC_OMRVMThreadInterface::flushCachesForGC(env);
@@ -298,6 +291,9 @@ gcCleanupHeapStructures(J9JavaVM * vm)
 	if (vm->mainThread && vm->mainThread->threadObject) {
 		/* main thread has not been deallocated yet, but heap has gone */
 		vm->mainThread->threadObject = NULL;
+#if JAVA_SPEC_VERSION >= 19
+		vm->mainThread->carrierThreadObject = NULL;
+#endif /* JAVA_SPEC_VERSION >= 19 */
 	}
 	return;
 }
@@ -312,7 +308,11 @@ j9gc_initialize_heap(J9JavaVM *vm, IDATA *memoryParameterTable, UDATA heapBytesR
 	MM_EnvironmentBase env(vm->omrVM);
 	MM_GlobalCollector *globalCollector;
 	PORT_ACCESS_FROM_JAVAVM(vm);
-	J9VMDllLoadInfo *loadInfo = FIND_DLL_TABLE_ENTRY(THIS_DLL_NAME);
+	J9VMDllLoadInfo *loadInfo = getGCDllLoadInfo(vm);
+
+	if (J9_ARE_ANY_BITS_SET(vm->extendedRuntimeFlags2, J9_EXTENDED_RUNTIME2_ENABLE_PORTABLE_SHARED_CACHE)) {
+		extensions->shouldForceLowMemoryHeapCeilingShiftIfPossible = true;
+	}
 
 #if defined(J9VM_GC_BATCH_CLEAR_TLH)
 	/* Record batch clear state in VM so inline allocates can decide correct initialization procedure */
@@ -437,7 +437,7 @@ j9gc_initialize_heap(J9JavaVM *vm, IDATA *memoryParameterTable, UDATA heapBytesR
 		goto error_no_memory;
 	}
 
-	extensions->dispatcher = extensions->configuration->createDispatcher(&env, (omrsig_handler_fn)vm->internalVMFunctions->structuredSignalHandlerVM, vm, vm->defaultOSStackSize);
+	extensions->dispatcher = extensions->configuration->createParallelDispatcher(&env, (omrsig_handler_fn)vm->internalVMFunctions->structuredSignalHandlerVM, vm, vm->defaultOSStackSize);
 	if (NULL == extensions->dispatcher) {
 		loadInfo->fatalErrorStr = (char *)j9nls_lookup_message(J9NLS_DO_NOT_PRINT_MESSAGE_TAG | J9NLS_DO_NOT_APPEND_NEWLINE, J9NLS_GC_FAILED_TO_INSTANTIATE_TASK_DISPATCHER, "Failed to instantiate task dispatcher.");
 		goto error_no_memory;
@@ -512,7 +512,7 @@ gcInitializeHeapStructures(J9JavaVM *vm)
 
 	MM_MemorySpace *defaultMemorySpace;
 	MM_GCExtensions *extensions = MM_GCExtensions::getExtensions(vm);
-	J9VMDllLoadInfo *loadInfo = FIND_DLL_TABLE_ENTRY(THIS_DLL_NAME);
+	J9VMDllLoadInfo *loadInfo = getGCDllLoadInfo(vm);
 
 	/* For now, number of segments to default in pool */
 	if ((vm->memorySegments = vm->internalVMFunctions->allocateMemorySegmentList(vm, 10, OMRMEM_CATEGORY_VM)) == NULL) {
@@ -568,11 +568,18 @@ gcStartupHeapManagement(J9JavaVM *javaVM)
 	int result = 0;
 
 #if defined(J9VM_GC_FINALIZATION)
-	result = j9gc_finalizer_startup(javaVM);
-	if (JNI_OK != result) {
-		PORT_ACCESS_FROM_JAVAVM(javaVM);
-		j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_GC_FAILED_TO_INITIALIZE_FINALIZE_SUPPORT);
-		return result;
+#if JAVA_SPEC_VERSION >= 18
+	if (J9_ARE_ANY_BITS_SET(javaVM->extendedRuntimeFlags2, J9_EXTENDED_RUNTIME2_DISABLE_FINALIZATION)) {
+		/* Finalization is disabled */
+	} else
+#endif /* JAVA_SPEC_VERSION >= 18 */
+	{
+		result = j9gc_finalizer_startup(javaVM);
+		if (JNI_OK != result) {
+			PORT_ACCESS_FROM_JAVAVM(javaVM);
+			j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_GC_FAILED_TO_INITIALIZE_FINALIZE_SUPPORT);
+			return result;
+		}
 	}
 #endif /* J9VM_GC_FINALIZATION */
 
@@ -798,11 +805,19 @@ gcInitializeCalculatedValues(J9JavaVM *javaVM, IDATA* memoryParameters)
 	 * This used to be for free, calculations based on Xmx, now it is a manual check
 	 * in setConfigurationSpecificMemoryParameters
 	 */
-	/* TODO aryoung: eventually segregated heaps will allow heap expansion, although metronome
-	 * itself will still require a fully expanded heap on startup */
-	const bool shouldMaximizeInitialHeap = (extensions->isSegregatedHeap() || extensions->isMetronomeGC());
-	const UDATA initialXmsValueMax = shouldMaximizeInitialHeap ? J9_MEMORY_MAX : (8 * 1024 * 1024);
-	const UDATA initialXmsValueMin = shouldMaximizeInitialHeap ? UDATA_MAX     : (8 * 1024 * 1024);
+	UDATA initialXmsValueMax = 8 * 1024 * 1024;
+	UDATA initialXmsValueMin = 8 * 1024 * 1024;
+	if (extensions->isSegregatedHeap() || extensions->isMetronomeGC()) {
+		/* TODO aryoung: eventually segregated heaps will allow heap expansion, although metronome
+		 * itself will still require a fully expanded heap on startup
+		 */
+		initialXmsValueMax = J9_MEMORY_MAX;
+		initialXmsValueMin = UDATA_MAX;
+	} else if (J9_ARE_ANY_BITS_SET(javaVM->extendedRuntimeFlags2, J9_EXTENDED_RUNTIME2_TUNE_THROUGHPUT)) {
+		/* For -Xtune:throughput we want to set Xms=Xmx */
+		initialXmsValueMax = extensions->memoryMax;
+		initialXmsValueMin = extensions->memoryMax;
+	}
 
 	/**
 	 * GC memory parameters to be store in GCExtensions
@@ -1085,27 +1100,14 @@ gcInitializeXmxXmdxVerification(J9JavaVM *javaVM, IDATA* memoryParameters, bool 
 			 * - 2_TO_64 to support heaps allocation below 64GB
 			 * - 2_TO_32 to support heaps allocation below 32GB
 			 */
-			UDATA maxHeapForCR = 0;
-			switch (getUserExtendedPrivateAreaMemoryType()) {
-			case ZOS64_VMEM_ABOVE_BAR_GENERAL:
-			default:
-				/* options are not supported, heap allocation will fail eventually */
-				break;
-			case ZOS64_VMEM_2_TO_32G:
-				maxHeapForCR = DEFAULT_LOW_MEMORY_HEAP_CEILING;
-				break;
-			case ZOS64_VMEM_2_TO_64G:
-				maxHeapForCR = LOW_MEMORY_HEAP_CEILING;
-				break;
-			}
-
+			U_64 maxHeapForCR = zosGetMaxHeapSizeForCR();
 			if (0 == maxHeapForCR) {
 				/* Redirector should not allow to run Compressed References JVM if options are not available */
 				Assert_MM_unreachable();
 				/* Fail to initialize if assertions are off */
 				return JNI_ERR;
 			}
-	
+
 			/* Adjust heap ceiling value if it is necessary */
 			if (extensions->heapCeiling > maxHeapForCR) {
 				extensions->heapCeiling = maxHeapForCR;
@@ -2068,7 +2070,7 @@ combinationMemoryParameterVerification(J9JavaVM *javaVM, IDATA* memoryParameters
 				 * space to Xmos
 				 */
 				if ((candidateXmosValue + candidateXmnsValue) > maximumXmsValue) {
-					candidateXmnsValue = newSpaceSizeMinimum;
+					candidateXmnsValue = OMR_MAX(newSpaceSizeMinimum, maximumXmsValue - candidateXmosValue);
 					candidateXmosValue = maximumXmsValue - candidateXmnsValue;
 
 					/* Verify not too large */
@@ -2275,20 +2277,29 @@ combinationMemoryParameterVerification(J9JavaVM *javaVM, IDATA* memoryParameters
 			subSpaceTooLargeOption = "-Xmns";
 			goto _subSpaceTooLarge;
 		}
+		if (!isLessThanEqualOrUnspecifiedAgainstFixed(&extensions->userSpecifiedParameters._Xmns, ms)) {
+			if (!opt_XmsSet) {
+				ms = extensions->userSpecifiedParameters._Xmns._valueSpecified;
+				extensions->initialMemorySize = ms;
+				extensions->oldSpaceSize = extensions->initialMemorySize;
+			} else {
+				memoryOption = "-Xmn";
+				subSpaceTooLargeOption = displayXmsOrInitialRAMPercentage(memoryParameters);
+				goto _subSpaceTooLarge;
+			}
+		}
 		/* now interpret the values */
 		UDATA idealEdenMin = 0;
 		UDATA idealEdenMax = 0;
-		/* this implementation is meant to follow this design from JAZZ 39694
+		/*----------------------------------------------------------------
+		Arguments specified	|	initial Eden		|	maxEden
 		----------------------------------------------------------------
-		Arguments specified	|	minEden				|	maxEden
-		----------------------------------------------------------------
-		XmnA				|	OMR_MIN(A,Y)		|	A
+		XmnA				|	OMR_MIN(A,ms)		|	A
 		XmnsB				|	B					|	B
-		XmnxC				|	OMR_MIN(C,Y)		|	C
+		XmnxC				|	OMR_MIN(C,ms)		|	C
 		XmnsB XmnxC			|	B					|	C
-		(none)				|	OMR_MIN(X/4,Y)		|	X/4
-		----------------------------------------------------------------
-		 */
+		(none)				|	OMR_MIN(mx/4,ms)	|	mx*3/4
+		----------------------------------------------------------------*/
 		if (extensions->userSpecifiedParameters._Xmn._wasSpecified) {
 			/* earlier error checking would have ensured that we didn't specify -Xmns or -Xmnx with -Xmn */
 			UDATA mn = extensions->userSpecifiedParameters._Xmn._valueSpecified;
@@ -2310,8 +2321,10 @@ combinationMemoryParameterVerification(J9JavaVM *javaVM, IDATA* memoryParameters
 			idealEdenMax = mnx;
 		} else {
 			UDATA quarterMax = mx/4;
+			UDATA threeQuarterMax = quarterMax * 3;
+
 			idealEdenMin = OMR_MIN(quarterMax, ms);
-			idealEdenMax = quarterMax;
+			idealEdenMax = threeQuarterMax;
 		}
 
 		/* eden size has to be aligned with region size */
@@ -2707,7 +2720,7 @@ configurateGCWithPolicyAndOptionsStandard(MM_EnvironmentBase *env)
 				uintptr_t nurserySize = extensions->memoryMax / 4;
 
 				/*
-				 * correctness of -Xmn* values will be analyzed later on with with initialization error in case of bad combination
+				 * correctness of -Xmn* values will be analyzed later on with initialization error in case of bad combination
 				 * so assume here all of them are correct, just check none of them is larger then entire heap size
 				 */
 				if (extensions->userSpecifiedParameters._Xmn._wasSpecified) {
@@ -2828,8 +2841,7 @@ configurateGCWithPolicyAndOptions(OMR_VM* omrVM)
 jint
 gcInitializeDefaults(J9JavaVM* vm)
 {
-	J9VMDllLoadInfo *loadInfo = FIND_DLL_TABLE_ENTRY(THIS_DLL_NAME);
-
+	J9VMDllLoadInfo *loadInfo = getGCDllLoadInfo(vm);
 	UDATA tableSize = (opt_none + 1) * sizeof(IDATA);
 	UDATA realtimeSizeClassesAllocationSize = ROUND_TO(sizeof(UDATA), sizeof(J9VMGCSizeClasses));
 	IDATA *memoryParameterTable;
@@ -2903,40 +2915,36 @@ gcInitializeDefaults(J9JavaVM* vm)
 	vm->vmThreadSize = J9_VMTHREAD_SEGREGATED_ALLOCATION_CACHE_OFFSET + vm->segregatedAllocationCacheSize + sizeof(OMR_VMThread);
 
 #if defined(OMR_GC_CONCURRENT_SCAVENGER)
-	if (gc_policy_gencon == extensions->configurationOptions._gcPolicy) {
-		/* after we parsed cmd line options, check if we can obey the request to run CS (valid for Gencon only) */
-		if (extensions->concurrentScavengerForced) {
-#if defined(J9VM_ARCH_X86) || defined(J9VM_ARCH_POWER) || defined(J9VM_ARCH_AARCH64)
-			/*
-			 * x86, POWER and AArch64 do not respect -XXgc:softwareRangeCheckReadBarrier and have it set to true always.
-			 *
-			 * Z is the only consumer that actually uses -XXgc:softwareRangeCheckReadBarrier
-			 * to overwrite HW concurrent scavenge.
-			 */
-			extensions->softwareRangeCheckReadBarrier = true;
-#endif /* J9VM_ARCH_X86 || J9VM_ARCH_POWER || J9VM_ARCH_AARCH64 */
-			if (LOADED == (FIND_DLL_TABLE_ENTRY(J9_JIT_DLL_NAME)->loadFlags & LOADED)) {
-				/* If running jitted, it must be on supported h/w */
-				J9ProcessorDesc  processorDesc;
-				j9sysinfo_get_processor_description(&processorDesc);
-				bool hwSupported = j9sysinfo_processor_has_feature(&processorDesc, J9PORT_S390_FEATURE_GUARDED_STORAGE) &&
-						j9sysinfo_processor_has_feature(&processorDesc, J9PORT_S390_FEATURE_SIDE_EFFECT_ACCESS);
+	if ((gc_policy_gencon == extensions->configurationOptions._gcPolicy) && extensions->concurrentScavengerForced) {
 
-				if (hwSupported) {
-					/* Software Barrier request overwrites HW usage on supported HW */
-					extensions->concurrentScavengerHWSupport = hwSupported && !extensions->softwareRangeCheckReadBarrier;
-					extensions->concurrentScavenger = hwSupported || extensions->softwareRangeCheckReadBarrier;
-				} else {
-					extensions->concurrentScavengerHWSupport = false;
-#if defined(J9VM_ARCH_X86) || defined(J9VM_ARCH_POWER) || defined(J9VM_ARCH_AARCH64) || defined(J9VM_ARCH_S390)
-					extensions->concurrentScavenger = true;
-#endif /*J9VM_ARCH_X86 || J9VM_ARCH_POWER || J9VM_ARCH_AARCH64 || J9VM_ARCH_S390 */
-				}
-			} else {
-				/* running interpreted is ok on any h/w */
-				extensions->concurrentScavenger = true;
+		extensions->concurrentScavenger = true;
+
+		if (LOADED == (FIND_DLL_TABLE_ENTRY(J9_JIT_DLL_NAME)->loadFlags & LOADED)) {
+
+			/* Check for supported hardware */
+			J9ProcessorDesc  processorDesc;
+			j9sysinfo_get_processor_description(&processorDesc);
+			bool hwSupported = j9sysinfo_processor_has_feature(&processorDesc, J9PORT_S390_FEATURE_GUARDED_STORAGE) &&
+					j9sysinfo_processor_has_feature(&processorDesc, J9PORT_S390_FEATURE_SIDE_EFFECT_ACCESS);
+
+			if (hwSupported) {
+				/*
+				 * HW support can be overwritten by
+				 *  - explicit Software Range Check Barrier request -XXgc:softwareRangeCheckReadBarrier
+				 *  - usage of CRIU
+				 *  - usage of Portable AOT
+				 */
+				extensions->concurrentScavengerHWSupport = hwSupported
+					&& !extensions->softwareRangeCheckReadBarrierForced
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+					&& !vm->internalVMFunctions->isCRIUSupportEnabled(vm->internalVMFunctions->currentVMThread(vm))
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
+					&& !J9_ARE_ANY_BITS_SET(vm->extendedRuntimeFlags2, J9_EXTENDED_RUNTIME2_ENABLE_PORTABLE_SHARED_CACHE);
 			}
 		}
+
+		/* Use Software Range Check Barrier if HW Support is not available or is not allowed to be used */
+		extensions->softwareRangeCheckReadBarrier = !extensions->concurrentScavengerHWSupport;
 	}
 #endif /* OMR_GC_CONCURRENT_SCAVENGER */
 
@@ -2951,7 +2959,6 @@ gcInitializeDefaults(J9JavaVM* vm)
 	}
 
 	extensions->trackMutatorThreadCategory = J9_ARE_NO_BITS_SET(vm->extendedRuntimeFlags, J9_EXTENDED_RUNTIME_REDUCE_CPU_MONITOR_OVERHEAD);
-
 
 	if (!gcParseTGCCommandLine(vm)) {
 		loadInfo->fatalErrorStr = (char *)j9nls_lookup_message(J9NLS_DO_NOT_PRINT_MESSAGE_TAG | J9NLS_DO_NOT_APPEND_NEWLINE, J9NLS_GC_FAILED_TO_INITIALIZE_PARSING_COMMAND_LINE, "Failed to initialize, parsing command line.");
@@ -3007,6 +3014,11 @@ gcInitializeDefaults(J9JavaVM* vm)
 		loadInfo->fatalErrorStr = NULL;
 	}
 
+	/* initialize largeObjectAllocationProfilingVeryLargeObjectThreshold, largeObjectAllocationProfilingVeryLargeObjectSizeClass and freeMemoryProfileMaxSizeClasses for non segregated memoryPool case */
+	if (gc_policy_metronome != extensions->configurationOptions._gcPolicy) {
+		MM_LargeObjectAllocateStats::initializeFreeMemoryProfileMaxSizeClasses(&env, extensions->largeObjectAllocationProfilingVeryLargeObjectThreshold,
+				(float)extensions->largeObjectAllocationProfilingSizeClassRatio / (float)100.0, extensions->heap->getMaximumMemorySize());
+	}
 	warnIfPageSizeNotSatisfied(vm,extensions);
 	j9mem_free_memory(memoryParameterTable);
 	return J9VMDLLMAIN_OK;

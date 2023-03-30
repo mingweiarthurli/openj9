@@ -1,7 +1,6 @@
-<?xml version="1.0" encoding="UTF-8"?>
-
+<?xml version='1.0' encoding='UTF-8'?>
 <!--
-  Copyright (c) 2016, 2020 IBM Corp. and others
+  Copyright (c) 2016, 2021 IBM Corp. and others
 
   This program and the accompanying materials are made available under
   the terms of the Eclipse Public License 2.0 which accompanies this
@@ -17,13 +16,11 @@
   OpenJDK Assembly Exception [2].
 
   [1] https://www.gnu.org/software/classpath/license.html
-  [2] http://openjdk.java.net/legal/assembly-exception.html
+  [2] https://openjdk.org/legal/assembly-exception.html
 
   SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 -->
-
 <playlist xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../TKG/playlist.xsd">
-	
 	<test>
 		<testCaseName>MethodVisibilityTests</testCaseName>
 		<!--  Don$(SQ)t put generaltest.jar on the classpath.  
@@ -46,19 +43,18 @@
 		<groups>
 			<group>functional</group>
 		</groups>
-		<subsets>
-			<subset>9+</subset>
-		</subsets>
+		<versions>
+			<version>9+</version>
+		</versions>
 		<impls>
 			<impl>openj9</impl>
 			<impl>ibm</impl>
 		</impls>
 	</test>
-
 	<test>
 		<testCaseName>UnreflectTests</testCaseName>
 		<command>$(JAVA_COMMAND) $(JVM_OPTIONS) \
-		-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)module_bin$(D)org.openj9test.modularity.unnamed$(Q) \
+		-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)GeneralTest.jar$(P)$(TEST_RESROOT)$(D)module_bin$(D)org.openj9test.modularity.unnamed$(Q) \
 		--module-path $(Q)$(TEST_RESROOT)$(D)module_bin$(Q) \
 		--add-modules org.openj9test.modularity.testUnreflect,org.openj9test.modularity.dummy \
 		--add-exports org.openj9test.modularity.testUnreflect/org.openj9.test.modularity.tests=ALL-UNNAMED \
@@ -75,15 +71,14 @@
 		<groups>
 			<group>functional</group>
 		</groups>
-		<subsets>
-			<subset>9+</subset>
-		</subsets>
+		<versions>
+			<version>9+</version>
+		</versions>
 		<impls>
 			<impl>openj9</impl>
 			<impl>ibm</impl>
 		</impls>
 	</test>
-	
 	<test>
 		<testCaseName>StackWalkerTest</testCaseName>
 		<variations>
@@ -102,18 +97,18 @@
 		<groups>
 			<group>functional</group>
 		</groups>
-		<subsets>
-			<subset>9+</subset>
-		</subsets>
+		<versions>
+			<version>9+</version>
+		</versions>
 		<impls>
 			<impl>openj9</impl>
 			<impl>ibm</impl>
 		</impls>
 	</test>
-
 	<test>
 		<testCaseName>CallerSensitiveGetCallerClassTest</testCaseName>
 		<variations>
+			<variation>NoOptions</variation>
 		</variations>
 		<command>$(JAVA_COMMAND) $(JVM_OPTIONS) \
 	-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)GeneralTest.jar$(Q) \
@@ -128,15 +123,14 @@
 		<groups>
 			<group>functional</group>
 		</groups>
-		<subsets>
-			<subset>9+</subset>
-		</subsets>
+		<versions>
+			<version>9+</version>
+		</versions>
 		<impls>
 			<impl>openj9</impl>
 			<impl>ibm</impl>
 		</impls>
 	</test>
-
 	<test>
 		<testCaseName>VarHandleInvokerTest</testCaseName>
 		<variations>
@@ -155,15 +149,14 @@
 		<groups>
 			<group>functional</group>
 		</groups>
-		<subsets>
-			<subset>9+</subset>
-		</subsets>
+		<versions>
+			<version>9+</version>
+		</versions>
 		<impls>
 			<impl>openj9</impl>
 			<impl>ibm</impl>
 		</impls>
 	</test>
-
 	<test>
 		<testCaseName>VarHandle</testCaseName>
 		<command>$(JAVA_COMMAND) $(JVM_OPTIONS) \
@@ -178,15 +171,14 @@
 		<groups>
 			<group>functional</group>
 		</groups>
-		<subsets>
-			<subset>9+</subset>
-		</subsets>
+		<versions>
+			<version>9+</version>
+		</versions>
 		<impls>
 			<impl>openj9</impl>
 			<impl>ibm</impl>
 		</impls>
 	</test>
-
 	<test>
 		<testCaseName>View-LE-OnHeap</testCaseName>
 		<command>$(JAVA_COMMAND) $(JVM_OPTIONS) \
@@ -201,15 +193,14 @@
 		<groups>
 			<group>functional</group>
 		</groups>
-		<subsets>
-			<subset>9+</subset>
-		</subsets>
+		<versions>
+			<version>9+</version>
+		</versions>
 		<impls>
 			<impl>openj9</impl>
 			<impl>ibm</impl>
 		</impls>
 	</test>
-
 	<test>
 		<testCaseName>View-LE-OffHeap</testCaseName>
 		<command>$(JAVA_COMMAND) $(JVM_OPTIONS) \
@@ -224,15 +215,14 @@
 		<groups>
 			<group>functional</group>
 		</groups>
-		<subsets>
-			<subset>9+</subset>
-		</subsets>
+		<versions>
+			<version>9+</version>
+		</versions>
 		<impls>
 			<impl>openj9</impl>
 			<impl>ibm</impl>
 		</impls>
 	</test>
-
 	<test>
 		<testCaseName>View-BE-OnHeap</testCaseName>
 		<command>$(JAVA_COMMAND) $(JVM_OPTIONS) \
@@ -247,15 +237,14 @@
 		<groups>
 			<group>functional</group>
 		</groups>
-		<subsets>
-			<subset>9+</subset>
-		</subsets>
+		<versions>
+			<version>9+</version>
+		</versions>
 		<impls>
 			<impl>openj9</impl>
 			<impl>ibm</impl>
 		</impls>
 	</test>
-
 	<test>
 		<testCaseName>View-BE-OffHeap</testCaseName>
 		<command>$(JAVA_COMMAND) $(JVM_OPTIONS) \
@@ -270,15 +259,14 @@
 		<groups>
 			<group>functional</group>
 		</groups>
-		<subsets>
-			<subset>9+</subset>
-		</subsets>
+		<versions>
+			<version>9+</version>
+		</versions>
 		<impls>
 			<impl>openj9</impl>
 			<impl>ibm</impl>
 		</impls>
 	</test>
-
 	<test>
 		<testCaseName>defineModuleAsClassTest</testCaseName>
 		<command>$(JAVA_COMMAND) $(JVM_OPTIONS) \
@@ -293,15 +281,14 @@
 		<groups>
 			<group>functional</group>
 		</groups>
-		<subsets>
-			<subset>9+</subset>
-		</subsets>
+		<versions>
+			<version>9+</version>
+		</versions>
 		<impls>
 			<impl>openj9</impl>
 			<impl>ibm</impl>
 		</impls>
 	</test>
-
 	<test>
 		<testCaseName>constantPoolTagTests</testCaseName>
 		<command>$(JAVA_COMMAND) $(JVM_OPTIONS) \
@@ -318,15 +305,14 @@
 		<groups>
 			<group>functional</group>
 		</groups>
-		<subsets>
-			<subset>9+</subset>
-		</subsets>
+		<versions>
+			<version>9+</version>
+		</versions>
 		<impls>
 			<impl>openj9</impl>
 			<impl>ibm</impl>
 		</impls>
 	</test>
-	
 	<test>
 		<testCaseName>Test_Math_Fma</testCaseName>
 		<variations>
@@ -346,15 +332,14 @@
 		<groups>
 			<group>functional</group>
 		</groups>
-		<subsets>
-			<subset>9+</subset>
-		</subsets>
+		<versions>
+			<version>9+</version>
+		</versions>
 		<impls>
 			<impl>openj9</impl>
 			<impl>ibm</impl>
 		</impls>
 	</test>
-	
 	<test>
 		<testCaseName>Test_StrictMath_Fma</testCaseName>
 		<variations>
@@ -374,15 +359,14 @@
 		<groups>
 			<group>functional</group>
 		</groups>
-		<subsets>
-			<subset>9+</subset>
-		</subsets>
+		<versions>
+			<version>9+</version>
+		</versions>
 		<impls>
 			<impl>openj9</impl>
 			<impl>ibm</impl>
 		</impls>
 	</test>
-
 	<test>
 		<testCaseName>Test_Class</testCaseName>
 		<command>$(JAVA_COMMAND) $(JVM_OPTIONS) \
@@ -398,9 +382,9 @@
 		<groups>
 			<group>functional</group>
 		</groups>
-		<subsets>
-			<subset>9+</subset>
-		</subsets>
+		<versions>
+			<version>9+</version>
+		</versions>
 		<impls>
 			<impl>openj9</impl>
 			<impl>ibm</impl>
@@ -422,9 +406,10 @@
 		<groups>
 			<group>functional</group>
 		</groups>
-		<subsets>
-			<subset>9+</subset>
-		</subsets>
+		<versions>
+			<version>11</version>
+			<version>16</version>
+		</versions>
 		<impls>
 			<impl>openj9</impl>
 			<impl>ibm</impl>
@@ -446,15 +431,44 @@
 		<groups>
 			<group>functional</group>
 		</groups>
-		<subsets>
-			<subset>9+</subset>
-		</subsets>
+		<versions>
+			<version>9+</version>
+		</versions>
 		<impls>
 			<impl>openj9</impl>
 			<impl>ibm</impl>
 		</impls>
 	</test>
+	<test>
+		<testCaseName>StaticAccessChecks-IllegalAccessDenyWithPermit</testCaseName>
+		<disables>
+			<disable>
+				<comment>https://github.com/eclipse-openj9/openj9/issues/12890</comment>
+			</disable>
+		</disables>
+		<command>$(JAVA_COMMAND) $(JVM_OPTIONS) --illegal-access=permit \
+	-cp $(Q)$(RESOURCES_DIR)$(P)$(TESTNG)$(P)$(TEST_RESROOT)$(D)GeneralTest.jar$(P)$(LIB_DIR)$(D)asm-all.jar$(Q) \
+	org.testng.TestNG -d $(REPORTDIR) $(Q)$(TEST_RESROOT)$(D)testng.xml$(Q) \
+	-testnames AccessRestrictedClass \
+	-groups $(TEST_GROUP) \
+	-excludegroups $(DEFAULT_EXCLUDE); \
+	$(TEST_STATUS)
+		</command>
 
+		<levels>
+			<level>extended</level>
+		</levels>
+		<groups>
+			<group>functional</group>
+		</groups>
+		<versions>
+			<version>17+</version>
+		</versions>
+		<impls>
+			<impl>openj9</impl>
+			<impl>ibm</impl>
+		</impls>
+	</test>
 	<test>
 		<testCaseName>TestJava9AttachAPI</testCaseName>
 		<command>$(JAVA_COMMAND) $(JVM_OPTIONS) \
@@ -471,9 +485,9 @@
 		<groups>
 			<group>functional</group>
 		</groups>
-		<subsets>
-			<subset>9+</subset>
-		</subsets>
+		<versions>
+			<version>9+</version>
+		</versions>
 		<impls>
 			<impl>openj9</impl>
 			<impl>ibm</impl>
@@ -493,9 +507,9 @@
 		<groups>
 			<group>functional</group>
 		</groups>
-		<subsets>
-			<subset>9+</subset>
-		</subsets>
+		<versions>
+			<version>9+</version>
+		</versions>
 		<impls>
 			<impl>openj9</impl>
 			<impl>ibm</impl>

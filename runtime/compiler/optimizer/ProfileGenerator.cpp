@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -37,6 +37,7 @@
 #include "env/IO.hpp"
 #include "env/TRMemory.hpp"
 #include "env/jittypes.h"
+#include "env/VerboseLog.hpp"
 #include "il/Block.hpp"
 #include "il/DataTypes.hpp"
 #include "il/ILOpCodes.hpp"
@@ -785,26 +786,13 @@ void TR_ProfileGenerator::createProfiledMethod()
          // recompilationCounter--;
          TR::StaticSymbol * symbol = recompilationCounterSymRef->getSymbol()->castToStaticSymbol();
          TR::DataType type = symbol->getDataType();
-         if (comp()->cg()->getAccessStaticsIndirectly() && !recompilationCounterSymRef->isUnresolved() && type != TR::Address)
-            {
-            TR::SymbolReference * symRefShadow = comp()->getSymRefTab()->createKnownStaticDataSymbolRef(symbol->getStaticAddress(), type);
-            TR::Node * loadaddrNode = TR::Node::createWithSymRef(node, TR::loadaddr, 0, symRefShadow);
-            newNode = TR::Node::createWithSymRef(TR::istorei, 2, 2, loadaddrNode,
-                                      TR::Node::create(TR::iadd, 2,
-                                      TR::Node::createWithSymRef(TR::iloadi, 1, 1, loadaddrNode, recompilationCounterSymRef),
-                                      TR::Node::create(node, TR::iconst, 0, -1)),
-                                      recompilationCounterSymRef);
-            }
-         else
-            {
-            newNode = TR::Node::createWithSymRef(TR::istore, 1, 1,
-               TR::Node::create(
-                  TR::iadd,
-                  2,
-                  TR::Node::createWithSymRef(node, TR::iload, 0, recompilationCounterSymRef),
-                  TR::Node::create(node, TR::iconst, 0, -1)),
-               recompilationCounterSymRef);
-            }
+         newNode = TR::Node::createWithSymRef(TR::istore, 1, 1,
+                      TR::Node::create(
+                      TR::iadd,
+                      2,
+                      TR::Node::createWithSymRef(node, TR::iload, 0, recompilationCounterSymRef),
+                      TR::Node::create(node, TR::iconst, 0, -1)),
+                      recompilationCounterSymRef);
          treeTop = TR::TreeTop::create(comp(), treeTop, newNode);
 
          if (regDeps)

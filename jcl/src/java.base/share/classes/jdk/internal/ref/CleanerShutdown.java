@@ -1,6 +1,6 @@
 /*[INCLUDE-IF Sidecar19-SE]*/
 /*******************************************************************************
- * Copyright (c) 2016, 2017 IBM Corp. and others
+ * Copyright (c) 2016, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -49,24 +49,12 @@ public class CleanerShutdown {
 		
 		try {
 			Method phantomRemove = PhantomCleanable.class.getDeclaredMethod("remove", (Class<?>[]) null); //$NON-NLS-1$
-			Method weakRemove = WeakCleanable.class.getDeclaredMethod("remove", (Class<?>[]) null); //$NON-NLS-1$
-			Method softRemove = SoftCleanable.class.getDeclaredMethod("remove", (Class<?>[]) null); //$NON-NLS-1$
 			AccessController.doPrivileged((PrivilegedAction<Void>) () -> {
 				phantomRemove.setAccessible(true);
-				weakRemove.setAccessible(true);
-				softRemove.setAccessible(true);
 				return null;
 			});
 			while(!commonCleanerImpl.phantomCleanableList.isListEmpty()) {
 				phantomRemove.invoke(commonCleanerImpl.phantomCleanableList, (Object[]) null);
-			}
-
-			while(!commonCleanerImpl.weakCleanableList.isListEmpty()) {
-				phantomRemove.invoke(commonCleanerImpl.weakCleanableList, (Object[]) null);
-			}
-
-			while(!commonCleanerImpl.softCleanableList.isListEmpty()) {
-				phantomRemove.invoke(commonCleanerImpl.softCleanableList, (Object[]) null);
 			}
 		} catch (NoSuchMethodException
 				| SecurityException

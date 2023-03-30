@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -2234,7 +2234,7 @@ j9process_runTests(struct J9PortLibrary *portLibrary, char *argv0, char* j9proce
 		/* z/OS: writes extra characters to the console in the build environment when a process catches a SIGQUIT.
 		 * Linux: in certain Linux distros the /bin/sh command receives a SIGQUIT signal, see PR 56109.
 		 * OSX: make, tee and other test framework processes receive a SIGQUIT signal, which causes the test
-		 *      framework to crash. See https://github.com/eclipse/openj9/issues/4520.
+		 *      framework to crash. See https://github.com/eclipse-openj9/openj9/issues/4520.
 		 */
 		rc |= j9process_testNewProcessGroupByTriggeringSignal(portLibrary);
 #endif /* !(defined(J9ZOS390) || defined(LINUX) || defined(OSX)) */

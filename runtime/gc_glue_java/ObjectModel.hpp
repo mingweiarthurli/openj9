@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -97,6 +97,7 @@ private:
 	GC_ArrayObjectModel *_indexableObjectModel; /**< pointer to the indexable object model in extensions (so that we can delegate to it) */
 	J9Class *_classClass; /**< java.lang.Class class pointer for detecting special objects */
 	J9Class *_classLoaderClass; /**< java.lang.ClassLoader class pointer for detecting special objects */
+	J9Class *_continuationClass; /**< jdk/internal/vm/Continuation class pointer for detecting subclass of Continuation */
 	J9Class *_atomicMarkableReferenceClass; /**< java.util.concurrent.atomic.AtomicMarkableReference class pointer for detecting special objects */
 
 protected:
@@ -115,7 +116,8 @@ public:
 		SCAN_ATOMIC_MARKABLE_REFERENCE_OBJECT = 7,
 		SCAN_OWNABLESYNCHRONIZER_OBJECT = 8,
 		SCAN_MIXED_OBJECT_LINKED = 9,
-		SCAN_FLATTENED_ARRAY_OBJECT = 10
+		SCAN_FLATTENED_ARRAY_OBJECT = 10,
+		SCAN_CONTINUATION_OBJECT = 11
 	};
 
 	/**
@@ -145,20 +147,20 @@ private:
 	 * Examine all classes as they are loaded to determine if they require the J9AccClassGCSpecial bit.
 	 * These classes are handled specially by GC_ObjectModel::getScanType()
 	 */
-	static void internalClassLoadHook(J9HookInterface** hook, UDATA eventNum, void* eventData, void* userData);
+	static void internalClassLoadHook(J9HookInterface** hook, uintptr_t eventNum, void* eventData, void* userData);
 
 	/**
 	 * Update all of the  GC special class pointers to their most current version after a class
 	 * redefinition has occurred.
 	 */
-	static void classesRedefinedHook(J9HookInterface** hook, UDATA eventNum, void* eventData, void* userData);
+	static void classesRedefinedHook(J9HookInterface** hook, uintptr_t eventNum, void* eventData, void* userData);
 	
 	/**
 	 * Returns the shape of an class.
 	 * @param objectPtr Pointer to object whose shape is required.
 	 * @return The shape of the object
 	 */
-	MMINLINE UDATA
+	MMINLINE uintptr_t
 	getClassShape(J9Object *objectPtr)
 	{
 		J9Class* clazz = J9GC_J9OBJECT_CLAZZ(objectPtr, this);
@@ -179,7 +181,7 @@ public:
 		switch(J9GC_CLASS_SHAPE(clazz)) {
 		case OBJECT_HEADER_SHAPE_MIXED:
 		{
-			UDATA classFlags = J9CLASS_FLAGS(clazz) & (J9AccClassReferenceMask | J9AccClassGCSpecial | J9AccClassOwnableSynchronizer);
+			uintptr_t classFlags = J9CLASS_FLAGS(clazz) & (J9AccClassReferenceMask | J9AccClassGCSpecial | J9AccClassOwnableSynchronizer | J9AccClassContinuation);
 			if (0 == classFlags) {
 				if (0 != clazz->selfReferencingField1) {
 					result = SCAN_MIXED_OBJECT_LINKED;
@@ -193,6 +195,8 @@ public:
 					result = getSpecialClassScanType(clazz);
 				} else if (0 != (classFlags & J9AccClassOwnableSynchronizer)) {
 					result = SCAN_OWNABLESYNCHRONIZER_OBJECT;
+				} else if (0 != (classFlags & J9AccClassContinuation)) {
+					result = SCAN_CONTINUATION_OBJECT;
 				} else {
 					/* Assert_MM_unreachable(); */
 					assert(false);
@@ -202,7 +206,11 @@ public:
 		}
 		case OBJECT_HEADER_SHAPE_POINTERS:
 			if (J9_IS_J9CLASS_FLATTENED(clazz)) {
-				result = SCAN_FLATTENED_ARRAY_OBJECT;
+				if (J9CLASS_HAS_REFERENCES(((J9ArrayClass *)clazz)->leafComponentType)) {
+					result = SCAN_FLATTENED_ARRAY_OBJECT;
+				} else {
+					result = SCAN_PRIMITIVE_ARRAY_OBJECT;
+				}
 			} else {
 				result = SCAN_POINTER_ARRAY_OBJECT;
 			}
@@ -233,7 +241,7 @@ public:
 	 * @param objectPtr Pointer to object whose depth is required.
 	 * @return The depth of the object
 	 */
-	MMINLINE UDATA
+	MMINLINE uintptr_t
 	getObjectDepth(J9Object *objectPtr)
 	{
 		return (getRememberedBits(objectPtr) & OBJECT_HEADER_DEPTH_MASK);
@@ -359,17 +367,17 @@ public:
 	 * @param object[in] the object to be hashed
 	 * @return the persistent, basic hash code for the object 
 	 */
-	MMINLINE I_32
+	MMINLINE int32_t
 	getObjectHashCode(J9JavaVM *vm, J9Object *object)
 	{
-		I_32 result = 0;
+		int32_t result = 0;
 #if defined (OMR_GC_MODRON_COMPACTION) || defined (J9VM_GC_GENERATIONAL)
 		if (hasBeenMoved(object)) {
-			UDATA hashOffset = getHashcodeOffset(object);
-			result = *(I_32*)((U_8*)object + hashOffset);
+			uintptr_t hashOffset = getHashcodeOffset(object);
+			result = *(int32_t*)((uint8_t*)object + hashOffset);
 		} else {
 			atomicSetObjectFlags(object, 0, OBJECT_HEADER_HAS_BEEN_HASHED_IN_CLASS);
-			result = convertValueToHash(vm, (UDATA)object);
+			result = convertValueToHash(vm, (uintptr_t)object);
 		}
 #else /* defined (OMR_GC_MODRON_COMPACTION) || defined (J9VM_GC_GENERATIONAL) */
 		result = computeObjectAddressToHash(vm, object);
@@ -388,10 +396,10 @@ public:
 	initializeHashSlot(J9JavaVM* vm, J9Object *objectPtr)
 	{
 #if defined (OMR_GC_MODRON_COMPACTION) || defined (J9VM_GC_GENERATIONAL)
-		UDATA hashOffset = getHashcodeOffset(objectPtr);
-		U_32 *hashCodePointer = (U_32*)((U_8*)objectPtr + hashOffset);
+		uintptr_t hashOffset = getHashcodeOffset(objectPtr);
+		uint32_t *hashCodePointer = (uint32_t*)((uint8_t*)objectPtr + hashOffset);
 
-		*hashCodePointer = convertValueToHash(vm, (UDATA)objectPtr);
+		*hashCodePointer = convertValueToHash(vm, (uintptr_t)objectPtr);
 		setObjectHasBeenMoved(objectPtr);
 #endif /* defined (OMR_GC_MODRON_COMPACTION) || defined (J9VM_GC_GENERATIONAL) */
 	}
@@ -484,37 +492,10 @@ public:
 		setObjectFlags(objectPtr, OBJECT_HEADER_HAS_BEEN_HASHED_IN_CLASS, OBJECT_HEADER_HAS_BEEN_MOVED_IN_CLASS);
 	}
 
-	MMINLINE void
-	preMove(OMR_VMThread* vmThread, omrobjectptr_t objectPtr)
+	MMINLINE int32_t
+	computeObjectHash(MM_ForwardedHeader *forwardedHeader)
 	{
-		bool hashed = hasBeenHashed(objectPtr);
-		bool moved = hasBeenMoved(objectPtr);
-
-		vmThread->movedObjectHashCodeCache.hasBeenHashed = hashed;
-		vmThread->movedObjectHashCodeCache.hasBeenMoved = moved;
-
-		if (hashed && !moved) {
-			/* calculate this BEFORE we (potentially) destroy the object */
-			vmThread->movedObjectHashCodeCache.originalHashCode = computeObjectAddressToHash((J9JavaVM *)vmThread->_vm->_language_vm, objectPtr);
-		}
-	}
-
-	/**
-	 * This method may be called during heap compaction, after the object has been moved to a new location.
-	 * The implementation may apply any information extracted and cached in the calling thread at this point.
-	 *
-	 * @param[in] vmThread points to the calling thread
-	 * @param[in] objectPtr points to the object that has just been moved
-	 * @param[in] objectPtrOffsetInBytes byte offset from objectPtr to location to store extracted information
-	 * @see preMove(OMR_VMThread*, omrobjectptr_t)
-	 */
-	MMINLINE void
-	postMove(OMR_VMThread* vmThread, omrobjectptr_t objectPtr)
-	{
-		if (vmThread->movedObjectHashCodeCache.hasBeenHashed && !vmThread->movedObjectHashCodeCache.hasBeenMoved) {
-			*(uint32_t*)((uintptr_t)objectPtr + getHashcodeOffset(objectPtr)) = vmThread->movedObjectHashCodeCache.originalHashCode;
-			setObjectFlags(objectPtr, 0, OBJECT_HEADER_HAS_BEEN_MOVED_IN_CLASS | OBJECT_HEADER_HAS_BEEN_HASHED_IN_CLASS);
-		}
+		return convertValueToHash(_javaVM, (uintptr_t)forwardedHeader->getObject());
 	}
 
 	MMINLINE uintptr_t
@@ -529,7 +510,7 @@ public:
 	 * @param objectPtr Pointer to an object
 	 * @return The consumed heap size of an object, in bytes, including the header
 	 */
-	MMINLINE UDATA
+	MMINLINE uintptr_t
 	getConsumedSizeInBytesWithHeaderForMove(J9Object *objectPtr)
 	{
 		return adjustSizeInBytes(getObjectModelDelegate()->getObjectSizeInBytesWithHeader(objectPtr, hasBeenHashed(objectPtr)));
@@ -542,7 +523,7 @@ public:
 	 * @param objectPtr Pointer to an object
 	 * @return The consumed heap size of an object, in bytes, including the header
 	 */
-	MMINLINE UDATA
+	MMINLINE uintptr_t
 	getConsumedSizeInBytesWithHeaderBeforeMove(J9Object *objectPtr)
 	{
 		return adjustSizeInBytes(getObjectModelDelegate()->getObjectSizeInBytesWithHeader(objectPtr, hasBeenMoved(objectPtr) && !hasRecentlyBeenMoved(objectPtr)));
@@ -565,80 +546,6 @@ public:
 	}
 
 	/**
-	 * Extract the size (as getSizeInElements()) from an unforwarded object
-	 *
-	 * This method will assert if the object is not indexable or has been marked as forwarded.
-	 *
-	 * @param[in] forwardedHeader pointer to the MM_ForwardedHeader instance encapsulating the object
-	 * @return the size (#elements) of the array encapsulated by forwardedHeader
-	 * @see MM_ForwardingHeader::isForwardedObject()
-	 */
-	MMINLINE uint32_t
-	getPreservedIndexableSize(MM_ForwardedHeader *forwardedHeader)
-	{
-		ForwardedHeaderAssert(isIndexable(getPreservedClass(forwardedHeader)));
-
-		/* in compressed headers, the size of the object is stored in the low-order half of the uintptr_t read when we read clazz
-		 * so read it from there instead of the heap (since the heap copy would have been over-written by the forwarding
-		 * pointer if another thread copied the object underneath us). In non-compressed, this field should still be readable
-		 * out of the heap.
-		 */
-		uint32_t size = 0;
-#if defined (OMR_GC_COMPRESSED_POINTERS)
-		if (compressObjectReferences()) {
-			size = forwardedHeader->getPreservedOverlap();
-		} else
-#endif /* defined (OMR_GC_COMPRESSED_POINTERS) */
-		{
-			size = ((J9IndexableObjectContiguousFull *)forwardedHeader->getObject())->size;
-		}
-
-		if (0 == size) {
-			/* Discontiguous */
-			if (compressObjectReferences()) {
-				size = ((J9IndexableObjectDiscontiguousCompressed *)forwardedHeader->getObject())->size;
-			} else {
-				size = ((J9IndexableObjectDiscontiguousFull *)forwardedHeader->getObject())->size;
-			}
-		}
-
-		return size;
-	}
-	
-	/**
-	 * Extract the array layout from preserved info in Forwarded header
-	 * (this mimics getArrayLayout())
-	 *
-	 * @param[in] forwardedHeader pointer to the MM_ForwardedHeader instance encapsulating the object
-	 * @return the ArrayLayout for the forwarded object
-	 */
-	GC_ArrayletObjectModel::ArrayLayout
-	getPreservedArrayLayout(MM_ForwardedHeader *forwardedHeader)
-	{
-		GC_ArrayletObjectModel::ArrayLayout layout = GC_ArrayletObjectModel::InlineContiguous;
-		 uint32_t size = 0;
-#if defined (OMR_GC_COMPRESSED_POINTERS)
-		if (compressObjectReferences()) {
-			size = forwardedHeader->getPreservedOverlap();
-		} else
-#endif /* defined (OMR_GC_COMPRESSED_POINTERS) */
-		{
-			size = ((J9IndexableObjectContiguousFull *)forwardedHeader->getObject())->size;
-		}
-		
-		if (0 != size) {
-			return layout;
-		}
-
-		/* we know we are dealing with heap object, so we don't need to check against _arrayletRangeBase/Top, like getArrayLayout does */
-		J9Class *clazz = getPreservedClass(forwardedHeader);
-		uintptr_t dataSizeInBytes = _indexableObjectModel->getDataSizeInBytes(clazz, getPreservedIndexableSize(forwardedHeader));
-		layout = _indexableObjectModel->getArrayletLayout(clazz, dataSizeInBytes);
-		
-		return layout;	
-	}
-
-	/**
 	 * Update the new version of this object after it has been copied. This undoes any damaged
 	 * caused by installing the forwarding pointer into the original prior to the copy, and sets
 	 * the object age.
@@ -655,6 +562,29 @@ public:
 	{
 		GC_ObjectModelBase::fixupForwardedObject(forwardedHeader, destinationObjectPtr, objectAge);
 
+		if (isIndexable(forwardedHeader)) {
+			/* Updates internal field of indexable objects. Every indexable object have an extra field
+			 * that can be used to store any extra information about the indexable object. One use case is
+			 * OpenJ9 where we use this field to point to array data. In this case it will always point to
+			 * the address right after the header, in case of contiguous data it will point to the data
+			 * itself, and in case of discontiguous arraylet it will point to the first arrayiod. How to
+			 * updated dataAddr is up to the target language that must override fixupDataAddr */
+			_indexableObjectModel->fixupDataAddr(forwardedHeader, destinationObjectPtr);
+		}
+
+		fixupHashFlagsAndSlot(forwardedHeader, destinationObjectPtr);
+	}
+
+	/**
+	 * This will install the correct (i.e. unforwarded) class pointer, update the hashed/moved
+	 * flags and install the hash code if the object has been hashed but not previously moved.
+	 *
+	 * @param[in] forwardedHeader pointer to the MM_ForwardedHeader instance encapsulating the object
+	 * @param[in] destinationObjectPtr pointer to the copied object to be fixed up
+	 */
+	MMINLINE void
+	fixupHashFlagsAndSlot(MM_ForwardedHeader *forwardedHeader, omrobjectptr_t destinationObjectPtr)
+	{
 		/*	To have ability to backout last scavenge we need to recognize objects just moved (moved first time) in current scavenge
 		 *
 		 *	Bits	State
@@ -663,7 +593,7 @@ public:
 		 * 	0 0		not moved / not hashed
 		 * 	0 1		not moved / hashed
 		 * 	1 0		just moved / hashed
-		 *  1 1		moved / hashed
+		 * 	1 1		moved / hashed
 		 *	--------------------------------
 		 */
 		if (hasBeenMoved(getPreservedFlags(forwardedHeader))) {
@@ -676,10 +606,11 @@ public:
 			uintptr_t hashOffset;
 			J9Class *clazz = getPreservedClass(forwardedHeader);
 			if (isIndexable(clazz)) {
-				hashOffset = _indexableObjectModel->getHashcodeOffset(clazz, getPreservedArrayLayout(forwardedHeader), getPreservedIndexableSize(forwardedHeader));
+				hashOffset = _indexableObjectModel->getPreservedHashcodeOffset(forwardedHeader);
 			} else {
 				hashOffset = _mixedObjectModel->getHashcodeOffset(clazz);
 			}
+
 			uint32_t *hashCodePointer = (uint32_t*)((uint8_t*) destinationObjectPtr + hashOffset);
 			*hashCodePointer = convertValueToHash(_javaVM, (uintptr_t)forwardedHeader->getObject());
 			setObjectJustHasBeenMoved(destinationObjectPtr);

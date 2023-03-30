@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2019, 2019 IBM Corp. and others
+ * Copyright (c) 2019, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -26,9 +26,11 @@
 #include <string.h>
 
 #include "control/Options.hpp"
+#include "env/VerboseLog.hpp"
 
 #define OPENSSL_VERSION_1_0 "OpenSSL 1.0."
 #define OPENSSL_VERSION_1_1 "OpenSSL 1.1."
+#define OPENSSL_VERSION_3_X "OpenSSL 3."
 
 OOpenSSL_version_t * OOpenSSL_version = NULL;
 
@@ -68,6 +70,7 @@ OSSL_accept_t * OSSL_accept = NULL;
 OSSL_connect_t * OSSL_connect = NULL;
 OSSL_get_peer_certificate_t * OSSL_get_peer_certificate = NULL;
 OSSL_get_verify_result_t * OSSL_get_verify_result = NULL;
+OSSL_get_error_t * OSSL_get_error = NULL;
 
 OSSL_CTX_new_t * OSSL_CTX_new = NULL;
 OSSL_CTX_set_session_id_context_t * OSSL_CTX_set_session_id_context = NULL;
@@ -83,6 +86,10 @@ OBIO_free_all_t * OBIO_free_all = NULL;
 OBIO_new_ssl_t * OBIO_new_ssl = NULL;
 OBIO_write_t * OBIO_write = NULL;
 OBIO_read_t * OBIO_read = NULL;
+OBIO_test_flags_t * OBIO_test_flags = NULL;
+OBIO_should_retry_t * OBIO_should_retry = NULL;
+OBIO_should_read_t * OBIO_should_read = NULL;
+OBIO_should_write_t * OBIO_should_write = NULL;
 
 OPEM_read_bio_PrivateKey_t * OPEM_read_bio_PrivateKey = NULL;
 OPEM_read_bio_X509_t * OPEM_read_bio_X509 = NULL;
@@ -92,6 +99,13 @@ OX509_INFO_free_t * OX509_INFO_free = NULL;
 OX509_STORE_add_cert_t * OX509_STORE_add_cert = NULL;
 OX509_STORE_add_crl_t * OX509_STORE_add_crl = NULL;
 OX509_free_t * OX509_free = NULL;
+
+OEVP_MD_CTX_new_t * OEVP_MD_CTX_new = NULL;
+OEVP_MD_CTX_free_t * OEVP_MD_CTX_free = NULL;
+OEVP_DigestInit_ex_t * OEVP_DigestInit_ex = NULL;
+OEVP_DigestUpdate_t * OEVP_DigestUpdate = NULL;
+OEVP_DigestFinal_ex_t * OEVP_DigestFinal_ex = NULL;
+OEVP_sha256_t * OEVP_sha256 = NULL;
 
 OERR_print_errors_fp_t * OERR_print_errors_fp = NULL;
 
@@ -195,15 +209,34 @@ void Osk110_X509_INFO_pop_free(STACK_OF(X509_INFO) *st, OX509_INFO_free_t *X509I
    (*Osk_pop_free)((_STACK *)st, (OPENSSL110_sk_freefunc)X509InfoFreeFunc);
    }
 
+int handle_BIO_should_retry(BIO *bio)
+   {
+   // # define BIO_should_retry(a)             BIO_test_flags(a, BIO_FLAGS_SHOULD_RETRY)
+   return (*OBIO_test_flags)(bio, BIO_FLAGS_SHOULD_RETRY);
+   }
+
+int handle_BIO_should_read(BIO *bio)
+   {
+   // # define BIO_should_read(a)             BIO_test_flags(a, BIO_FLAGS_READ)
+   return (*OBIO_test_flags)(bio, BIO_FLAGS_READ);
+   }
+
+int handle_BIO_should_write(BIO *bio)
+   {
+   // # define BIO_should_retry(a)             BIO_test_flags(a, BIO_FLAGS_WRITE)
+   return (*OBIO_test_flags)(bio, BIO_FLAGS_WRITE);
+   }
+
 namespace JITServer
 {
 void *loadLibssl()
    {
    void *result = NULL;
 
-   // Library names for OpenSSL 1.1.1, 1.1.0, 1.0.2 and symbolic links
+   // Library names for OpenSSL 3, 1.1.1, 1.1.0, 1.0.2 and symbolic links
    static const char * const libNames[] =
       {
+      "libssl.so.3",     // 3.x library name
       "libssl.so.1.1",   // 1.1.x library name
       "libssl.so.1.0.0", // 1.0.x library name
       "libssl.so.10",    // 1.0.x library name on RHEL
@@ -247,6 +280,10 @@ int findLibsslVersion(void *handle)
       if (0 == strncmp(openssl_version, OPENSSL_VERSION_1_1, strlen(OPENSSL_VERSION_1_1)))
          {
          ossl_ver = 1;
+         }
+      else if (0 == strncmp(openssl_version, OPENSSL_VERSION_3_X, strlen(OPENSSL_VERSION_3_X)))
+         {
+         ossl_ver = 3;
          }
       }
    else
@@ -309,6 +346,7 @@ void dbgPrintSymbols()
    printf(" SSL_connect %p\n", OSSL_connect);
    printf(" SSL_get_peer_certificate %p\n", OSSL_get_peer_certificate);
    printf(" SSL_get_verify_result %p\n", OSSL_get_verify_result);
+   printf(" SSL_get_error %p\n", OSSL_get_error);
 
    printf(" SSL_CTX_new %p\n", OSSL_CTX_new);
    printf(" SSL_CTX_set_session_id_context %p\n", OSSL_CTX_set_session_id_context);
@@ -324,6 +362,7 @@ void dbgPrintSymbols()
    printf(" BIO_new_ssl %p\n", OBIO_new_ssl);
    printf(" BIO_write %p\n", OBIO_write);
    printf(" BIO_read %p\n", OBIO_read);
+   printf(" BIO_test_flags %p\n", OBIO_test_flags);
 
    printf(" PEM_read_bio_PrivateKey %p\n", OPEM_read_bio_PrivateKey);
    printf(" PEM_read_bio_X509 %p\n", OPEM_read_bio_X509);
@@ -332,6 +371,13 @@ void dbgPrintSymbols()
    printf(" X509_STORE_add_cert %p\n", OX509_STORE_add_cert);
    printf(" X509_STORE_add_crl %p\n", OX509_STORE_add_crl);
    printf(" X509_free %p\n", OX509_free);
+
+   printf(" EVP_MD_CTX_new %p\n", OEVP_MD_CTX_new);
+   printf(" EVP_MD_CTX_free %p\n", OEVP_MD_CTX_free);
+   printf(" EVP_DigestInit_ex %p\n", OEVP_DigestInit_ex);
+   printf(" EVP_DigestUpdate %p\n", OEVP_DigestUpdate);
+   printf(" EVP_DigestFinal_ex %p\n", OEVP_DigestFinal_ex);
+   printf(" EVP_sha256 %p\n", OEVP_sha256);
 
    printf(" ERR_print_errors_fp %p\n", OERR_print_errors_fp);
 
@@ -403,6 +449,14 @@ bool loadLibsslAndFindSymbols()
       Osk_X509_INFO_value = &Osk110_X509_INFO_value;
       Osk_X509_INFO_pop_free = &Osk110_X509_INFO_pop_free;
       }
+   if (3 == ossl_ver)
+      {
+      OSSL_get_peer_certificate = (OSSL_get_peer_certificate_t *)findLibsslSymbol(handle, "SSL_get1_peer_certificate");
+      }
+   else
+      {
+      OSSL_get_peer_certificate = (OSSL_get_peer_certificate_t *)findLibsslSymbol(handle, "SSL_get_peer_certificate");
+      }
 
    OSSL_CTX_ctrl = (OSSL_CTX_ctrl_t *)findLibsslSymbol(handle, "SSL_CTX_ctrl");
    OBIO_ctrl = (OBIO_ctrl_t *)findLibsslSymbol(handle, "BIO_ctrl");
@@ -420,8 +474,8 @@ bool loadLibsslAndFindSymbols()
    OSSL_get_version = (OSSL_get_version_t *)findLibsslSymbol(handle, "SSL_get_version");
    OSSL_accept = (OSSL_accept_t *)findLibsslSymbol(handle, "SSL_accept");
    OSSL_connect = (OSSL_connect_t *)findLibsslSymbol(handle, "SSL_connect");
-   OSSL_get_peer_certificate = (OSSL_get_peer_certificate_t *)findLibsslSymbol(handle, "SSL_get_peer_certificate");
    OSSL_get_verify_result = (OSSL_get_verify_result_t *)findLibsslSymbol(handle, "SSL_get_verify_result");
+   OSSL_get_error = (OSSL_get_error_t *)findLibsslSymbol(handle, "SSL_get_error");
 
    OSSL_CTX_new = (OSSL_CTX_new_t *)findLibsslSymbol(handle, "SSL_CTX_new");
    OSSL_CTX_set_session_id_context = (OSSL_CTX_set_session_id_context_t *)findLibsslSymbol(handle, "SSL_CTX_set_session_id_context");
@@ -437,6 +491,10 @@ bool loadLibsslAndFindSymbols()
    OBIO_new_ssl = (OBIO_new_ssl_t *)findLibsslSymbol(handle, "BIO_new_ssl");
    OBIO_write = (OBIO_write_t *)findLibsslSymbol(handle, "BIO_write");
    OBIO_read = (OBIO_read_t *)findLibsslSymbol(handle, "BIO_read");
+   OBIO_test_flags = (OBIO_test_flags_t *)findLibsslSymbol(handle, "BIO_test_flags");
+   OBIO_should_retry = &handle_BIO_should_retry;
+   OBIO_should_read = &handle_BIO_should_read;
+   OBIO_should_write = &handle_BIO_should_write;
 
    OPEM_read_bio_PrivateKey = (OPEM_read_bio_PrivateKey_t *)findLibsslSymbol(handle, "PEM_read_bio_PrivateKey");
    OPEM_read_bio_X509 = (OPEM_read_bio_X509_t *)findLibsslSymbol(handle, "PEM_read_bio_X509");
@@ -446,6 +504,15 @@ bool loadLibsslAndFindSymbols()
    OX509_STORE_add_cert = (OX509_STORE_add_cert_t *)findLibsslSymbol(handle, "X509_STORE_add_cert");
    OX509_STORE_add_crl = (OX509_STORE_add_crl_t *)findLibsslSymbol(handle, "X509_STORE_add_crl");
    OX509_free = (OX509_free_t *)findLibsslSymbol(handle, "X509_free");
+
+   OEVP_MD_CTX_new = (OEVP_MD_CTX_new_t *)findLibsslSymbol(handle, (ossl_ver == 0) ? "EVP_MD_CTX_create"
+                                                                                   : "EVP_MD_CTX_new");
+   OEVP_MD_CTX_free = (OEVP_MD_CTX_free_t *)findLibsslSymbol(handle, (ossl_ver == 0) ? "EVP_MD_CTX_destroy"
+                                                                                     : "EVP_MD_CTX_free");
+   OEVP_DigestInit_ex = (OEVP_DigestInit_ex_t *)findLibsslSymbol(handle, "EVP_DigestInit_ex");
+   OEVP_DigestUpdate = (OEVP_DigestUpdate_t *)findLibsslSymbol(handle, "EVP_DigestUpdate");
+   OEVP_DigestFinal_ex = (OEVP_DigestFinal_ex_t *)findLibsslSymbol(handle, "EVP_DigestFinal_ex");
+   OEVP_sha256 = (OEVP_sha256_t *)findLibsslSymbol(handle, "EVP_sha256");
 
    OERR_print_errors_fp = (OERR_print_errors_fp_t *)findLibsslSymbol(handle, "ERR_print_errors_fp");
 
@@ -481,6 +548,7 @@ bool loadLibsslAndFindSymbols()
        (OSSL_connect == NULL) ||
        (OSSL_get_peer_certificate == NULL) ||
        (OSSL_get_verify_result == NULL) ||
+       (OSSL_get_error == NULL) ||
 
        (OSSL_CTX_new == NULL) ||
        (OSSL_CTX_set_session_id_context == NULL) ||
@@ -496,6 +564,7 @@ bool loadLibsslAndFindSymbols()
        (OBIO_new_ssl == NULL) ||
        (OBIO_write == NULL) ||
        (OBIO_read == NULL) ||
+       (OBIO_test_flags == NULL) ||
 
        (OPEM_read_bio_PrivateKey == NULL) ||
        (OPEM_read_bio_X509 == NULL) ||
@@ -505,6 +574,13 @@ bool loadLibsslAndFindSymbols()
        (OX509_STORE_add_cert == NULL) ||
        (OX509_STORE_add_crl == NULL) ||
        (OX509_free == NULL) ||
+
+       (OEVP_MD_CTX_new == NULL) ||
+       (OEVP_MD_CTX_free == NULL) ||
+       (OEVP_DigestInit_ex == NULL) ||
+       (OEVP_DigestUpdate == NULL) ||
+       (OEVP_DigestFinal_ex == NULL) ||
+       (OEVP_sha256 == NULL) ||
 
        (OERR_print_errors_fp == NULL)
       )

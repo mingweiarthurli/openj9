@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2020 IBM Corp. and others
+ * Copyright (c) 2001, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -35,6 +35,9 @@
 #include "bcnames.h"
 
 #include "BuildResult.hpp"
+#if defined(J9VM_OPT_OPENJDK_METHODHANDLE)
+#include "VMHelpers.hpp"
+#endif /* defined(J9VM_OPT_OPENJDK_METHODHANDLE) */
 
 /*
  * It is not guaranteed that slot1 value for constantpool index=0 entry will be zero. 
@@ -809,14 +812,25 @@ class RecordComponentIterator
 
 	/*
 	 * Iterate over the constant pool indices corresponding to interface names (UTF8s).
+	 * Also iterates over the injected interface names (UTF8s) in the "extra" cp slots.
+	 * numOfInjectedInterfaces represents the number of extra slots containing the UTF8s.
 	 */
+#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+	void interfacesDo(ConstantPoolIndexVisitor *visitor, U_16 numOfInjectedInterfaces)
+#else /* J9VM_OPT_VALHALLA_VALUE_TYPES */
 	void interfacesDo(ConstantPoolIndexVisitor *visitor)
+#endif /* J9VM_OPT_VALHALLA_VALUE_TYPES */
 	{
 		U_16 *end = _classFile->interfaces + getInterfacesCount();
 		for (U_16 *interface = _classFile->interfaces; interface != end; ++interface) {
 			/* Each interface is a constantClass, use slot1 to get at the underlying UTF8 */
 			visitor->visitConstantPoolIndex(U_16(_classFile->constantPool[ *interface ].slot1));
 		}
+#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+		for (int i = 0; i < numOfInjectedInterfaces; i++) {
+			visitor->visitConstantPoolIndex(getConstantPoolCount() + i);
+		}
+#endif /* J9VM_OPT_VALHALLA_VALUE_TYPES */
 	}
 
 	/*
@@ -836,6 +850,28 @@ class RecordComponentIterator
 				if (thisClassUTF8 == outerClassUTF8) {
 					/* Member class - use slot1 to get at the underlying UTF8. */
 					U_16  innerClassUTF8 = UTF8_INDEX_FROM_CLASS_INDEX(_classFile->constantPool, entry->innerClassInfoIndex);
+					visitor->visitConstantPoolIndex(innerClassUTF8);
+				}
+			}
+		}
+	}
+
+	/*
+	 * Iterate over the constant pool indices corresponding to enclosed inner class names (UTF8s).
+	 */
+	void enclosedInnerClassesDo(ConstantPoolIndexVisitor *visitor)
+	{
+		if (NULL != _innerClasses) {
+			J9CfrClassesEntry *end = _innerClasses->classes + _innerClasses->numberOfClasses;
+			U_16 thisClassUTF8 = UTF8_INDEX_FROM_CLASS_INDEX(_classFile->constantPool, _classFile->thisClass);
+			for (J9CfrClassesEntry *entry = _innerClasses->classes; entry != end; ++entry) {
+				U_16  outerClassUTF8 = UTF8_INDEX_FROM_CLASS_INDEX(_classFile->constantPool, entry->outerClassInfoIndex);
+				U_16  innerClassUTF8 = UTF8_INDEX_FROM_CLASS_INDEX(_classFile->constantPool, entry->innerClassInfoIndex);
+				/* Count all remaining entries in the InnerClass attribute (except the entries covered by innerClassesDo())
+				 * so as to check the InnerClass attribute between the inner classes and the enclosing class.
+				 * See getDeclaringClass() for details.
+				 */
+				if ((thisClassUTF8 != outerClassUTF8) && (thisClassUTF8 != innerClassUTF8)) {
 					visitor->visitConstantPoolIndex(innerClassUTF8);
 				}
 			}
@@ -899,6 +935,7 @@ class RecordComponentIterator
 	U_16 getDoubleScalarStaticCount() const { return _doubleScalarStaticCount; }
 	U_16 getMemberAccessFlags() const { return _memberAccessFlags; }
 	U_16 getInnerClassCount() const { return _innerClassCount; }
+	U_16 getEnclosedInnerClassCount() const { return _enclosedInnerClassCount; }
 #if JAVA_SPEC_VERSION >= 11
 	U_16 getNestMembersCount() const { return _nestMembersCount; }
 	U_16 getNestHostNameIndex() const { return _nestHost; }
@@ -975,6 +1012,12 @@ class RecordComponentIterator
 	U_16 getRecordComponentCount() const { return _recordComponentCount; }
 	bool isSealed() const { return _isSealed; }
 	U_16 getPermittedSubclassesClassCount() const { return _isSealed ? _permittedSubclassesAttribute->numberOfClasses : 0; }
+	bool isValueBased() const { return _isClassValueBased; }
+#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+	bool needsIdentityFlag() const { return _isIdentityFlagNeeded; }
+	bool hasIdentityFlagSet() const { return _hasIdentityFlagSet; }
+	bool isValueType() const { return _isValueType; }
+#endif /* J9VM_OPT_VALHALLA_VALUE_TYPES */
 
 	U_16 getPermittedSubclassesClassNameAtIndex(U_16 index) const {
 		U_16 result = 0;
@@ -1010,9 +1053,22 @@ private:
 		FRAMEITERATORSKIP_ANNOTATION,
 		SUN_REFLECT_CALLERSENSITIVE_ANNOTATION,
 		JDK_INTERNAL_REFLECT_CALLERSENSITIVE_ANNOTATION,
+#if JAVA_SPEC_VERSION >= 18
+		JDK_INTERNAL_REFLECT_CALLERSENSITIVEADAPTER_ANNOTATION,
+#endif /* JAVA_SPEC_VERSION >= 18*/
 		JAVA8_CONTENDED_ANNOTATION,
 		CONTENDED_ANNOTATION,
 		UNMODIFIABLE_ANNOTATION,
+		VALUEBASED_ANNOTATION,
+#if defined(J9VM_OPT_OPENJDK_METHODHANDLE)
+		HIDDEN_ANNOTATION,
+#endif /* defined(J9VM_OPT_OPENJDK_METHODHANDLE) */
+#if JAVA_SPEC_VERSION >= 16
+		SCOPED_ANNOTATION,
+#endif /* JAVA_SPEC_VERSION >= 16*/
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+		NOT_CHECKPOINT_SAFE_ANNOTATION,
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
 		KNOWN_ANNOTATION_COUNT
 	};
 
@@ -1037,6 +1093,7 @@ private:
 	U_16 _doubleScalarStaticCount;
 	U_16 _memberAccessFlags;
 	U_16 _innerClassCount;
+	U_16 _enclosedInnerClassCount;
 #if JAVA_SPEC_VERSION >= 11
 	U_16 _nestMembersCount;
 	U_16 _nestHost;
@@ -1063,6 +1120,15 @@ private:
 	bool _needsStaticConstantInit;
 	bool _isRecord;
 	bool _isSealed;
+	bool _isClassValueBased;
+#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+	bool _hasIdentityFlagSet;
+	bool _isIdentityFlagNeeded;
+	bool _isValueType;
+	bool _hasNonStaticSynchronizedMethod;
+	bool _hasNonStaticFields;
+	bool _hasNonEmptyConstructor;
+#endif /* J9VM_OPT_VALHALLA_VALUE_TYPES */
 
 	FieldInfo *_fieldsInfo;
 	MethodInfo *_methodsInfo;
@@ -1084,7 +1150,11 @@ private:
 	void walkHeader();
 	void walkFields();
 	void walkAttributes();
+	void checkHiddenClass();
 	void walkInterfaces();
+#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+	void checkAndRecordIsIdentityFlagNeeded();
+#endif /* defined(J9VM_OPT_VALHALLA_VALUE_TYPES) */
 	void walkMethods();
 	void walkRecordComponents(J9CfrAttributeRecord *attrib);
 
@@ -1113,6 +1183,10 @@ private:
 	bool methodIsObjectConstructor(U_16 methodIndex);
 	bool methodIsClinit(U_16 methodIndex);
 	bool methodIsNonStaticNonAbstract(U_16 methodIndex);
+#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+	bool methodIsConstructor(U_16 methodIndex);
+	bool methodIsNonStaticSynchronized(U_16 methodIndex);
+#endif /* defined(J9VM_OPT_VALHALLA_VALUE_TYPES) */
 
 	bool shouldConvertInvokeVirtualToInvokeSpecialForMethodRef(U_16 methodRefCPIndex);
 	UDATA shouldConvertInvokeVirtualToMethodHandleBytecodeForMethodRef(U_16 methodRefCPIndex);
@@ -1148,7 +1222,7 @@ private:
 	VMINLINE void markClassAsUsedByNew(U_16 classCPIndex);
 
 #if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
-	VMINLINE void markClassAsUsedByDefaultValue(U_16 classCPIndex);
+	VMINLINE void markClassAsUsedByAconst_init(U_16 classCPIndex);
 	VMINLINE void markFieldRefAsUsedByWithField(U_16 fieldRefCPIndex);
 #endif /* defined(J9VM_OPT_VALHALLA_VALUE_TYPES) */
 

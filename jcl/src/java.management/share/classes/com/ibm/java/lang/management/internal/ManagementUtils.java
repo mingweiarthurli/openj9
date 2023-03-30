@@ -1,6 +1,6 @@
-/*[INCLUDE-IF Sidecar17]*/
+/*[INCLUDE-IF JAVA_SPEC_VERSION >= 8]*/
 /*******************************************************************************
- * Copyright (c) 2008, 2019 IBM Corp. and others
+ * Copyright (c) 2008, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -242,7 +242,12 @@ public final class ManagementUtils {
 
 		@SuppressWarnings("unchecked")
 		Collection<CompositeData> rows = (Collection<CompositeData>) data.values();
-		Map<Object, Object> result = new HashMap<>(rows.size());
+		/*[IF JAVA_SPEC_VERSION >= 19]
+		Map<Object, Object> result = HashMap.newHashMap(rows.size());
+		/*[ELSE] JAVA_SPEC_VERSION >= 19 */
+		// HashMap.DEFAULT_LOAD_FACTOR is 0.75
+		Map<Object, Object> result = new HashMap<>(rows.size() * 4 / 3);
+		/*[ENDIF] JAVA_SPEC_VERSION >= 19 */
 
 		for (CompositeData rowCD : rows) {
 			result.put(rowCD.get(keys[0]), rowCD.get(keys[1]));
@@ -444,6 +449,7 @@ public final class ManagementUtils {
 		int i = name.lastIndexOf('.');
 
 		if (i != -1) {
+			@SuppressWarnings("removal")
 			SecurityManager sm = System.getSecurityManager();
 			if (sm != null) {
 				sm.checkPackageAccess(name.substring(0, i));
@@ -595,7 +601,7 @@ public final class ManagementUtils {
 	 */
 	public static final String BUFFERPOOL_MXBEAN_DOMAIN_TYPE = "java.nio:type=BufferPool"; //$NON-NLS-1$
 
-	/*[IF !Sidecar19-SE]*/
+	/*[IF JAVA_SPEC_VERSION == 8]*/
 
 	/**
 	 * @param mxbeanName
@@ -891,7 +897,8 @@ public final class ManagementUtils {
 			checkNames(beans, pattern);
 			/*[ENDIF]*/
 
-			this.beansByName = new HashMap<>(beans.size());
+			// HashMap.DEFAULT_LOAD_FACTOR is 0.75
+			this.beansByName = new HashMap<>(beans.size() * 4 / 3);
 			this.interfaceTypes = new HashSet<>();
 			this.isSingleton = true;
 
@@ -1022,6 +1029,6 @@ public final class ManagementUtils {
 
 	}
 
-	/*[ENDIF] !Sidecar19-SE*/
+	/*[ENDIF] JAVA_SPEC_VERSION == 8 */
 
 }

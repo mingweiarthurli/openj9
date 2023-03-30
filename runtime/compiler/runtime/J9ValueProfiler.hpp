@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -31,6 +31,7 @@
 #include "infra/CriticalSection.hpp"
 #include "compile/Compilation.hpp"
 #include "infra/vector.hpp"
+#include "omrformatconsts.h"
 
 // Global lock used by Array & List profilers
 extern TR::Monitor *vpMonitor;
@@ -197,6 +198,7 @@ class TR_AbstractProfilerInfo : public TR_Link0<TR_AbstractProfilerInfo>
    public:
    TR_AbstractProfilerInfo(TR_ByteCodeInfo &bci) : _byteCodeInfo(bci) {}
 
+   virtual ~TR_AbstractProfilerInfo() {}
    /**
     * Common methods based on metadata and frequencies.
     */
@@ -696,7 +698,7 @@ TR_EmbeddedHashTable<T, bits>::addKey(T value)
    if (dumpInfo)
       {
       OMR::CriticalSection lock(vpMonitor);
-      printf("Pre %X", value);
+      printf("Pre %" OMR_PRIX64, static_cast<uint64_t>(value));
       this->dumpInfo(TR::IO::Stdout);
       fflush(stdout);
       }
@@ -790,7 +792,7 @@ TR_EmbeddedHashTable<T, bits>::addKey(T value)
    if (dumpInfo)
       {
       OMR::CriticalSection lock(vpMonitor);
-      printf("Post %X", value);
+      printf("Post %" OMR_PRIX64, static_cast<uint64_t>(value));
       this->dumpInfo(TR::IO::Stdout);
       fflush(stdout);
       }
@@ -1042,7 +1044,7 @@ TR_EmbeddedHashTable<T, bits>::rearrange(HashFunction &hash)
       {
       for (size_t i = 0; i < length; ++i)
          {
-         printf("%d -> %d\n", i, plannedMoves[i]);
+         printf("%" OMR_PRIu64 " -> %" OMR_PRIu64 "\n", static_cast<uint64_t>(i), static_cast<uint64_t>(plannedMoves[i]));
          }
       }
 
@@ -1210,7 +1212,7 @@ TR_LinkedListProfilerInfo<T>::~TR_LinkedListProfilerInfo()
    while (cursor)
       {
       auto next = cursor->getNext();
-      ~Element(cursor);
+      cursor->~Element();
       jitPersistentFree(cursor);
       cursor = next;
       }

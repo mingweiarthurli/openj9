@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-Copyright (c) 2006, 2019 IBM Corp. and others
+Copyright (c) 2006, 2022 IBM Corp. and others
 
 This program and the accompanying materials are made available under
 the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@ Exception [1] and GNU General Public License, version 2 with the
 OpenJDK Assembly Exception [2].
 
 [1] https://www.gnu.org/software/classpath/license.html
-[2] http://openjdk.java.net/legal/assembly-exception.html
+[2] https://openjdk.org/legal/assembly-exception.html
 
 SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 -->
@@ -779,6 +779,8 @@ typedef UDATA (* lookupNativeAddressCallback)(struct J9VMThread *currentThread, 
 		<description>
 			Triggered when a classloader is looking for a locally defined class. It looks first in its local cache,
 			then this hook allows a ROMClass to be provided before the classloader looks on disk.
+			Use the class path entries from classloader->classPathEntries if it is bootstrap class loader. Otherwise, use
+			classPathEntries passed in.
 		</description>
 		<struct>J9VMFindLocalClassEvent</struct>
 		<data type="struct J9VMThread*" name="currentThread" description="current thread" />
@@ -786,7 +788,7 @@ typedef UDATA (* lookupNativeAddressCallback)(struct J9VMThread *currentThread, 
 		<data type="struct J9Module*" name="j9module" description="the module the class belongs to" />
 		<data type="const char*" name="className" description="name of class to find" />
 		<data type="UDATA" name="classNameLength" description="length of the className param" />
-		<data type="struct J9ClassPathEntry*" name="classPathEntries" description="caller classloader classpath" />
+		<data type="struct J9ClassPathEntry**" name="classPathEntries" description="caller classpath, use this parameter if it is not bootstrap class loader" />
 		<data type="UDATA" name="entryCount" description="number of classpath entries" />
 		<data type="IDATA" name="confirmedCount" description="number of confirmed classpath entries" />
 		<data type="const struct J9UTF8*" name="partition" description="optional partition for relocating the class" />
@@ -1298,5 +1300,55 @@ typedef UDATA (* lookupNativeAddressCallback)(struct J9VMThread *currentThread, 
 		<struct>J9VMRuntimeStateChanged</struct>
 		<data type="struct J9VMThread*" name="vmThread" description="current thread" />
 		<data type="U_32" name="state" description="the VM runtime state" />
+	</event>
+
+	<event>
+		<name>J9HOOK_VM_MODULE_LOAD</name>
+		<description>
+			Triggered when Java module has been loaded
+		</description>
+		<struct>J9VMModuleLoadEvent</struct>
+		<data type="struct J9VMThread*" name="currentThread" description="current thread" />
+		<data type="struct J9Module*" name="module" description="module" />
+	</event>
+
+	<event>
+		<name>J9HOOK_VM_MODULE_UNLOAD</name>
+		<description>
+			Triggered when Java module is being unloaded
+		</description>
+		<struct>J9VMModuleUnloadEvent</struct>
+		<data type="struct J9VMThread*" name="currentThread" description="current thread" />
+		<data type="struct J9Module*" name="module" description="module" />
+	</event>
+	<event>
+		<name>J9HOOK_VM_PREPARING_FOR_CHECKPOINT</name>
+		<description>Triggered as the JVM is preparing for a checkpoint</description>
+		<struct>J9CheckpointEvent</struct>
+		<data type="struct J9VMThread*" name="currentThread" description="current thread" />
+	</event>
+	<event>
+		<name>J9HOOK_VM_PREPARING_FOR_RESTORE</name>
+		<description>Triggered as the JVM is preparing to restore from a checkpointed JVM</description>
+		<struct>J9RestoreEvent</struct>
+		<data type="struct J9VMThread*" name="currentThread" description="current thread" />
+	</event>
+
+	<event>
+		<name>J9HOOK_VM_VIRTUAL_THREAD_STARTED</name>
+		<description>
+			Triggered once the virtual thread is ready to run. At this point the virtual thread has an object associated with it.
+		</description>
+		<struct>J9VirtualThreadStartedEvent</struct>
+		<data type="struct J9VMThread*" name="currentThread" description="current thread" />
+	</event>
+
+	<event>
+		<name>J9HOOK_VM_VIRTUAL_THREAD_END</name>
+		<description>
+			Triggered when a virtual thread is about to die.
+		</description>
+		<struct>J9VirtualThreadEndEvent</struct>
+		<data type="struct J9VMThread*" name="currentThread" description="current thread" />
 	</event>
 </interface>

@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020, 2020 IBM Corp. and others
+# Copyright (c) 2020, 2021 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
 # OpenJDK Assembly Exception [2].
 #
 # [1] https://www.gnu.org/software/classpath/license.html
-# [2] http://openjdk.java.net/legal/assembly-exception.html
+# [2] https://openjdk.org/legal/assembly-exception.html
 #
 # SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 ################################################################################
@@ -25,12 +25,17 @@ set(J9VM_ENV_HAS_FPU ON CACHE BOOL "")
 set(J9VM_ENV_LITTLE_ENDIAN ON CACHE BOOL "")
 set(J9VM_ENV_DATA64 ON CACHE BOOL "")
 
+set(J9VM_INTERP_ATOMIC_FREE_JNI ON CACHE BOOL "")
+set(J9VM_INTERP_ATOMIC_FREE_JNI_USES_FLUSH ON CACHE BOOL "")
+set(J9VM_INTERP_TWO_PASS_EXCLUSIVE ON CACHE BOOL "")
+
 set(J9VM_GC_ENABLE_DOUBLE_MAP OFF CACHE BOOL "")
 set(J9VM_INTERP_SIG_QUIT_THREAD_USES_SEMAPHORES OFF CACHE BOOL "")
 set(J9VM_JIT_NEW_DUAL_HELPERS OFF CACHE BOOL "")
 set(J9VM_OPT_ZERO ON CACHE BOOL "")
 
 set(OMR_GC_CONCURRENT_SCAVENGER ON CACHE BOOL "")
+set(OMR_GC_IDLE_HEAP_MANAGER ON CACHE BOOL "")
 
 include("${CMAKE_CURRENT_LIST_DIR}/linux.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/common.cmake")

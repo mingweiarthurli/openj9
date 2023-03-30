@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2020 IBM Corp. and others
+ * Copyright (c) 2001, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -38,9 +38,6 @@
 
 #include "OSCachesysv.hpp"
 #include "OSCachemmap.hpp"
-#if defined(J9SHR_CACHELET_SUPPORT)
-#include "OSCachevmem.hpp"
-#endif /* J9SHR_CACHELET_SUPPORT */
 #include "CacheMap.hpp"
 
 /**
@@ -211,7 +208,7 @@ SH_OSCache::getCacheDir(J9JavaVM* vm, const char* ctrlDirName, char* buffer, UDA
 		flags |= J9SHMEM_GETDIR_APPEND_BASEDIR;
 	}
 
-#if defined(OPENJ9_BUILD)
+#if defined(OPENJ9_BUILD) && !defined(J9ZOS390)
 	if ((NULL == ctrlDirName)
 		&& J9_ARE_NO_BITS_SET(vm->sharedCacheAPI->runtimeFlags, J9SHR_RUNTIMEFLAG_ENABLE_GROUP_ACCESS)
 	) {
@@ -221,7 +218,7 @@ SH_OSCache::getCacheDir(J9JavaVM* vm, const char* ctrlDirName, char* buffer, UDA
 
 		flags |= J9SHMEM_GETDIR_USE_USERHOME;
 	}
-#endif /*defined(OPENJ9_BUILD) */
+#endif /*defined(OPENJ9_BUILD) && !defined(J9ZOS390) */
 
 	rc = j9shmem_getDir(ctrlDirName, flags, buffer, bufferSize);
 
@@ -545,12 +542,6 @@ SH_OSCache::newInstance(J9PortLibrary* portlib, SH_OSCache* memForConstructor, c
 		break;
 	case J9PORT_SHR_CACHE_TYPE_SNAPSHOT:
 		break;
-#if defined(J9SHR_CACHELET_SUPPORT)
-	case J9PORT_SHR_CACHE_TYPE_VMEM :
-		/* TODO : tracepoint */
-		new(newOSC) SH_OSCachevmem();
-		break;
-#endif
 	}
 	Trc_SHR_OSC_newInstance_initializingNewObject();
 	newOSC->initialize(PORTLIB, ((char*)memForConstructor + SH_OSCache::getRequiredConstrBytes()), generation, layer);
@@ -1007,13 +998,13 @@ SH_OSCache::getCacheStatistics(J9JavaVM* vm, const char* ctrlDirName, const char
 	} else if (J9PORT_SHR_CACHE_TYPE_SNAPSHOT == result->versionData.cacheType) {
 		Trc_SHR_OSC_getCacheStatistics_stattingSnapshot();
 		if (0 == removeCacheVersionAndGen(result->name, CACHE_ROOT_MAXLEN, J9SH_VERSION_STRING_LEN + 1, cacheNameWithVGen)) {
-			result->lastattach = J9SH_OSCACHE_UNKNOWN;
-			result->lastdetach = J9SH_OSCACHE_UNKNOWN;
-			result->createtime = J9SH_OSCACHE_UNKNOWN;
-			result->os_shmid = (UDATA)J9SH_OSCACHE_UNKNOWN;
-			result->os_semid = (UDATA)J9SH_OSCACHE_UNKNOWN;
-			result->nattach = (UDATA)J9SH_OSCACHE_UNKNOWN;
-			result->isCorrupt = (UDATA)J9SH_OSCACHE_UNKNOWN;
+			result->lastattach = (IDATA)J9SH_OSCACHE_UNKNOWN;
+			result->lastdetach = (IDATA)J9SH_OSCACHE_UNKNOWN;
+			result->createtime = (IDATA)J9SH_OSCACHE_UNKNOWN;
+			result->os_shmid = J9SH_OSCACHE_UNKNOWN;
+			result->os_semid = J9SH_OSCACHE_UNKNOWN;
+			result->nattach = J9SH_OSCACHE_UNKNOWN;
+			result->isCorrupt = J9SH_OSCACHE_UNKNOWN;
 			/* rc is initialized to -1. If reach this point, getCacheStatistics() is successful for snapshot, set rc to 0 */
 			rc = 0;
 		}

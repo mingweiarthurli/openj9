@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2020 IBM Corp. and others
+ * Copyright (c) 2001, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -72,7 +72,7 @@ Fast_java_lang_Class_forNameImpl(J9VMThread *currentThread, j9object_t className
 		goto done;
 	}
 
-	/* Fetch the J9ClasLoader, creating it if need be */
+	/* Fetch the J9ClassLoader, creating it if need be */
 	if (NULL == classLoaderObject) {
 		classLoader = vm->systemClassLoader;
 	} else {
@@ -87,20 +87,14 @@ Fast_java_lang_Class_forNameImpl(J9VMThread *currentThread, j9object_t className
 		}
 	}
 
-	/* Make sure the name is legal */
-	if (CLASSNAME_INVALID == verifyQualifiedName(currentThread, classNameObject)) {
-		goto throwCNFE;
-	}
-
 	/* Find the class */
 	PUSH_OBJECT_IN_SPECIAL_FRAME(currentThread, classNameObject);
-	foundClass = internalFindClassString(currentThread, NULL, classNameObject, classLoader, 0);
+	foundClass = internalFindClassString(currentThread, NULL, classNameObject, classLoader, 0, CLASSNAME_VALID);
 	classNameObject = POP_OBJECT_IN_SPECIAL_FRAME(currentThread);
 
 	if (NULL == foundClass) {
 		/* Not found - if no exception is pending, throw ClassNotFoundException */
 		if (NULL == currentThread->currentException) {
-throwCNFE:
 			setCurrentException(currentThread, J9VMCONSTANTPOOL_JAVALANGCLASSNOTFOUNDEXCEPTION, (UDATA*)classNameObject);
 		}
 		goto done;
@@ -135,6 +129,26 @@ Fast_java_lang_Class_isPrimitive(J9VMThread *currentThread, j9object_t classObje
 	J9Class *receiverClazz = J9VM_J9CLASS_FROM_HEAPCLASS(currentThread, classObject);
 	return J9ROMCLASS_IS_PRIMITIVE_TYPE(receiverClazz->romClass) ? JNI_TRUE : JNI_FALSE;
 }
+
+#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+/* java.lang.Class: private native boolean isPrimitiveClass(); */
+jboolean JNICALL
+Fast_java_lang_Class_isPrimitiveClass(J9VMThread *currentThread, j9object_t classObject)
+{
+	J9Class *receiverClazz = J9VM_J9CLASS_FROM_HEAPCLASS(currentThread, classObject);
+	bool isPrimitiveClass = J9_IS_J9CLASS_PRIMITIVE_VALUETYPE(receiverClazz);
+	return isPrimitiveClass ? JNI_TRUE : JNI_FALSE;
+}
+
+/* java.lang.Class: private native boolean isIdentity(); */
+jboolean JNICALL
+Fast_java_lang_Class_isIdentity(J9VMThread *currentThread, j9object_t classObject)
+{
+	J9Class *receiverClazz = J9VM_J9CLASS_FROM_HEAPCLASS(currentThread, classObject);
+	bool isIdentity = J9ROMCLASS_HAS_IDENTITY(receiverClazz->romClass);
+	return isIdentity ? JNI_TRUE : JNI_FALSE;
+}
+#endif /* J9VM_OPT_VALHALLA_VALUE_TYPES */
 
 /* java.lang.Class: public native boolean isInstance(Object object); */
 jboolean JNICALL
@@ -210,9 +224,9 @@ Fast_java_lang_Class_getComponentType(J9VMThread *currentThread, j9object_t rece
 	return componentType;
 }
 
-/* java.lang.Class public native boolean isRecord(); */
+/* java.lang.Class public native boolean isRecordImpl(); */
 jboolean JNICALL
-Fast_java_lang_Class_isRecord(J9VMThread *currentThread, j9object_t receiverObject)
+Fast_java_lang_Class_isRecordImpl(J9VMThread *currentThread, j9object_t receiverObject)
 {
 	J9Class *receiverClazz = J9VM_J9CLASS_FROM_HEAPCLASS(currentThread, receiverObject);
 	return J9ROMCLASS_IS_RECORD(receiverClazz->romClass) ? JNI_TRUE : JNI_FALSE;
@@ -237,6 +251,14 @@ J9_FAST_JNI_METHOD_TABLE(java_lang_Class)
 	J9_FAST_JNI_METHOD("isPrimitive", "()Z", Fast_java_lang_Class_isPrimitive,
 		J9_FAST_JNI_RETAIN_VM_ACCESS | J9_FAST_JNI_NOT_GC_POINT | J9_FAST_JNI_NO_NATIVE_METHOD_FRAME | J9_FAST_JNI_NO_EXCEPTION_THROW |
 		J9_FAST_JNI_NO_SPECIAL_TEAR_DOWN | J9_FAST_JNI_DO_NOT_WRAP_OBJECTS)
+#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+	J9_FAST_JNI_METHOD("isPrimitiveClass", "()Z", Fast_java_lang_Class_isPrimitiveClass,
+		J9_FAST_JNI_RETAIN_VM_ACCESS | J9_FAST_JNI_NOT_GC_POINT | J9_FAST_JNI_NO_NATIVE_METHOD_FRAME | J9_FAST_JNI_NO_EXCEPTION_THROW |
+		J9_FAST_JNI_NO_SPECIAL_TEAR_DOWN | J9_FAST_JNI_DO_NOT_WRAP_OBJECTS)
+	J9_FAST_JNI_METHOD("isIdentity", "()Z", Fast_java_lang_Class_isIdentity,
+		J9_FAST_JNI_RETAIN_VM_ACCESS | J9_FAST_JNI_NOT_GC_POINT | J9_FAST_JNI_NO_NATIVE_METHOD_FRAME | J9_FAST_JNI_NO_EXCEPTION_THROW |
+		J9_FAST_JNI_NO_SPECIAL_TEAR_DOWN | J9_FAST_JNI_DO_NOT_WRAP_OBJECTS)
+#endif /* J9VM_OPT_VALHALLA_VALUE_TYPES */
 	J9_FAST_JNI_METHOD("isInstance", "(Ljava/lang/Object;)Z", Fast_java_lang_Class_isInstance,
 		J9_FAST_JNI_RETAIN_VM_ACCESS | J9_FAST_JNI_NOT_GC_POINT | J9_FAST_JNI_NO_NATIVE_METHOD_FRAME | J9_FAST_JNI_NO_EXCEPTION_THROW |
 		J9_FAST_JNI_NO_SPECIAL_TEAR_DOWN | J9_FAST_JNI_DO_NOT_WRAP_OBJECTS)
@@ -248,7 +270,7 @@ J9_FAST_JNI_METHOD_TABLE(java_lang_Class)
 		J9_FAST_JNI_NO_SPECIAL_TEAR_DOWN | J9_FAST_JNI_DO_NOT_WRAP_OBJECTS)
 	J9_FAST_JNI_METHOD("arrayTypeImpl", "()Ljava/lang/Class;", Fast_java_lang_Class_arrayTypeImpl,
 		J9_FAST_JNI_RETAIN_VM_ACCESS | J9_FAST_JNI_DO_NOT_WRAP_OBJECTS)
-	J9_FAST_JNI_METHOD("isRecord", "()Z", Fast_java_lang_Class_isRecord,
+	J9_FAST_JNI_METHOD("isRecordImpl", "()Z", Fast_java_lang_Class_isRecordImpl,
 		J9_FAST_JNI_RETAIN_VM_ACCESS | J9_FAST_JNI_NOT_GC_POINT | J9_FAST_JNI_NO_NATIVE_METHOD_FRAME | J9_FAST_JNI_NO_EXCEPTION_THROW |
 		J9_FAST_JNI_NO_SPECIAL_TEAR_DOWN | J9_FAST_JNI_DO_NOT_WRAP_OBJECTS)
 	J9_FAST_JNI_METHOD("isSealed", "()Z", Fast_java_lang_Class_isSealed,

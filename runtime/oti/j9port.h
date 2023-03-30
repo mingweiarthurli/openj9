@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -233,6 +233,7 @@
 #define J9SH_BASEDIR "javasharedresources\\"
 #else
 #define J9SH_BASEDIR "javasharedresources/"
+#define J9SH_HIDDENDIR ".cache/"
 #endif
 
 /**
@@ -780,6 +781,7 @@ typedef struct J9CacheInfoQuery {
 #define J9PORT_CTLDATA_VECTOR_REGS_SUPPORT_ON OMRPORT_CTLDATA_VECTOR_REGS_SUPPORT_ON
 #define J9PORT_CTLDATA_VMEM_ADVISE_HUGEPAGE OMRPORT_CTLDATA_VMEM_ADVISE_HUGEPAGE
 #define J9PORT_CTLDATA_VMEM_HUGE_PAGES_MMAP_ENABLED OMRPORT_CTLDATA_VMEM_HUGE_PAGES_MMAP_ENABLED
+#define J9PORT_CTLDATA_CRIU_SUPPORT_FLAGS "CRIU_SUPPORT_FLAGS"
 
 #define J9PORT_CPU_ONLINE OMRPORT_CPU_ONLINE
 #define J9PORT_CPU_TARGET OMRPORT_CPU_TARGET
@@ -983,5 +985,8 @@ typedef struct J9CacheInfoQuery {
 
 #define J9PORT_PROCINFO_PROC_ONLINE OMRPORT_PROCINFO_PROC_ONLINE
 #define J9PORT_PROCINFO_NOT_AVAILABLE OMRPORT_PROCINFO_NOT_AVAILABLE
+
+#define J9OMRPORT_CRIU_SUPPORT_ENABLED OMRPORT_CRIU_SUPPORT_ENABLED
+#define J9OMRPORT_CRIU_SUPPORT_FINAL_RESTORE OMRPORT_CRIU_SUPPORT_FINAL_RESTORE
 
 #endif /* !defined(OTI_J9PORT_H_) */

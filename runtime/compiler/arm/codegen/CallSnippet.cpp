@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -64,7 +64,7 @@ static uint8_t *flushArgumentsToStack(uint8_t *buffer, TR::Node *callNode, int32
                offset -= 4;
             if (intArgNum < linkageProperties.getNumIntArgRegs())
                {
-               buffer = storeArgumentItem(ARMOp_str, buffer, machine->getRealRegister(linkageProperties.getIntegerArgumentRegister(intArgNum)), offset, cg);
+               buffer = storeArgumentItem(TR::InstOpCode::str, buffer, machine->getRealRegister(linkageProperties.getIntegerArgumentRegister(intArgNum)), offset, cg);
                }
             intArgNum++;
             if (linkageProperties.getRightToLeft())
@@ -78,10 +78,10 @@ static uint8_t *flushArgumentsToStack(uint8_t *buffer, TR::Node *callNode, int32
                offset -= 8;
             if (intArgNum < linkageProperties.getNumIntArgRegs())
                {
-               buffer = storeArgumentItem(ARMOp_str, buffer, machine->getRealRegister(linkageProperties.getIntegerArgumentRegister(intArgNum)), offset, cg);
+               buffer = storeArgumentItem(TR::InstOpCode::str, buffer, machine->getRealRegister(linkageProperties.getIntegerArgumentRegister(intArgNum)), offset, cg);
                if (intArgNum < linkageProperties.getNumIntArgRegs()-1)
            	  {
-           	  buffer = storeArgumentItem(ARMOp_str, buffer, machine->getRealRegister(linkageProperties.getIntegerArgumentRegister(intArgNum+1)), offset+4, cg);
+           	  buffer = storeArgumentItem(TR::InstOpCode::str, buffer, machine->getRealRegister(linkageProperties.getIntegerArgumentRegister(intArgNum+1)), offset+4, cg);
            	  }
                }
             intArgNum += 2;
@@ -95,7 +95,7 @@ static uint8_t *flushArgumentsToStack(uint8_t *buffer, TR::Node *callNode, int32
                offset -= 4;
                if (floatArgNum < linkageProperties.getNumFloatArgRegs())
                {
-               buffer = storeArgumentItem(ARMOp_stfs, buffer, machine->getRealRegister(linkageProperties.getFloatArgumentRegister(floatArgNum)), offset, cg);
+               buffer = storeArgumentItem(TR::InstOpCode::stfs, buffer, machine->getRealRegister(linkageProperties.getFloatArgumentRegister(floatArgNum)), offset, cg);
                }
                floatArgNum++;
                if (linkageProperties.getRightToLeft())
@@ -108,7 +108,7 @@ static uint8_t *flushArgumentsToStack(uint8_t *buffer, TR::Node *callNode, int32
                offset -= 8;
                if (floatArgNum < linkageProperties.getNumFloatArgRegs())
                {
-               buffer = storeArgumentItem(ARMOp_stfd, buffer, machine->getRealRegister(linkageProperties.getFloatArgumentRegister(floatArgNum)), offset, cg);
+               buffer = storeArgumentItem(TR::InstOpCode::stfd, buffer, machine->getRealRegister(linkageProperties.getFloatArgumentRegister(floatArgNum)), offset, cg);
                }
                floatArgNum++;
                if (linkageProperties.getRightToLeft())
@@ -262,7 +262,7 @@ uint8_t *TR::ARMCallSnippet::emitSnippetBody()
    // Flush in-register arguments back to the stack for interpreter
    cursor = flushArgumentsToStack(cursor, callNode, getSizeOfArguments(), cg());
 
-   glueRef = cg()->symRefTab()->findOrCreateRuntimeHelper(getHelper(), false, false, false);
+   glueRef = cg()->symRefTab()->findOrCreateRuntimeHelper(getHelper());
 
    // bl glueRef
    *(int32_t *)cursor = encodeHelperBranchAndLink(glueRef, cursor, callNode, cg());
@@ -395,7 +395,7 @@ uint8_t *TR::ARMVirtualUnresolvedSnippet::emitSnippetBody()
    {
    uint8_t            *cursor = cg()->getBinaryBufferCursor();
    TR::SymbolReference *methodSymRef = getNode()->getSymbolReference();
-   TR::SymbolReference *glueRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_ARMvirtualUnresolvedHelper, false, false, false);
+   TR::SymbolReference *glueRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_ARMvirtualUnresolvedHelper);
 
    TR::Compilation* comp = cg()->comp();
 
@@ -439,7 +439,7 @@ uint8_t *TR::ARMInterfaceCallSnippet::emitSnippetBody()
    {
    uint8_t            *cursor = cg()->getBinaryBufferCursor();
    TR::SymbolReference *methodSymRef = getNode()->getSymbolReference();
-   TR::SymbolReference *glueRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_ARMinterfaceCallHelper, false, false, false);
+   TR::SymbolReference *glueRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_ARMinterfaceCallHelper);
 
    getSnippetLabel()->setCodeLocation(cursor);
 
@@ -543,7 +543,7 @@ uint8_t *TR::ARMCallSnippet::generateVIThunk(TR::Node *callNode, int32_t argSize
                   cg->getDebug()->getName(dataType));
       }
 
-   dispatcher = (intptr_t)cg->symRefTab()->findOrCreateRuntimeHelper(helper, false, false, false)->getMethodAddress();
+   dispatcher = (intptr_t)cg->symRefTab()->findOrCreateRuntimeHelper(helper)->getMethodAddress();
 
    buffer = flushArgumentsToStack(buffer, callNode, argSize, cg);
 
@@ -606,7 +606,7 @@ TR_J2IThunk *TR::ARMCallSnippet::generateInvokeExactJ2IThunk(TR::Node *callNode,
                   cg->getDebug()->getName(dataType));
       }
 
-   dispatcher = (intptr_t)cg->symRefTab()->findOrCreateRuntimeHelper(helper, false, false, false)->getMethodAddress();
+   dispatcher = (intptr_t)cg->symRefTab()->findOrCreateRuntimeHelper(helper)->getMethodAddress();
 
    buffer = flushArgumentsToStack(buffer, callNode, argSize, cg);
 

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -1703,6 +1703,7 @@ j9vmem_test_reserveExecutableMemory(struct J9PortLibrary *portLibrary)
 				outputComment(PORTLIB, "function length = %d\n",length);
 
 				memcpy(memPtr, (void *)&myFunction1, length);
+				j9cpu_flush_icache(memPtr, length);
 
 				outputComment(PORTLIB, "*memPtr: 0x%zx\n",*memPtr);
 
@@ -2418,9 +2419,15 @@ j9vmem_testFindValidPageSize_impl(struct J9PortLibrary *portLibrary, char *testN
 
 	j9vmem_find_valid_page_size(mode, &requestedPageSize, &requestedPageFlags, &isSizeSupported);
 
-	expectedPageSize = dataSegmentPageSize;
-	expectedPageFlags = J9PORT_VMEM_PAGE_FLAG_NOT_USED;
-	expectedIsSizeSupported = (16 * FOUR_KB == dataSegmentPageSize) ? TRUE : FALSE;
+	if (TRUE == sixtyFourKBPageSize) {
+		expectedPageSize = 16 * FOUR_KB;
+		expectedPageFlags = J9PORT_VMEM_PAGE_FLAG_NOT_USED;
+		expectedIsSizeSupported = TRUE;
+	} else {
+		expectedPageSize = dataSegmentPageSize;
+		expectedPageFlags = J9PORT_VMEM_PAGE_FLAG_NOT_USED;
+		expectedIsSizeSupported = (16 * FOUR_KB == dataSegmentPageSize) ? TRUE : FALSE;
+	}
 
 	verifyFindValidPageSizeOutput(portLibrary, testName,
 								expectedPageSize, expectedPageFlags, expectedIsSizeSupported,
@@ -2444,9 +2451,15 @@ j9vmem_testFindValidPageSize_impl(struct J9PortLibrary *portLibrary, char *testN
 	/* unset the environment variable TR_ppcCodeCacheConsolidationEnabled */
 	unsetenv("TR_ppcCodeCacheConsolidationEnabled");
 
-	expectedPageSize = dataSegmentPageSize;
-	expectedPageFlags = J9PORT_VMEM_PAGE_FLAG_NOT_USED;
-	expectedIsSizeSupported = (16 * FOUR_KB == dataSegmentPageSize) ? TRUE : FALSE;
+	if (TRUE == sixtyFourKBPageSize) {
+		expectedPageSize = 16 * FOUR_KB;
+		expectedPageFlags = J9PORT_VMEM_PAGE_FLAG_NOT_USED;
+		expectedIsSizeSupported = TRUE;
+	} else {
+		expectedPageSize = dataSegmentPageSize;
+		expectedPageFlags = J9PORT_VMEM_PAGE_FLAG_NOT_USED;
+		expectedIsSizeSupported = (16 * FOUR_KB == dataSegmentPageSize) ? TRUE : FALSE;
+	}
 
 	verifyFindValidPageSizeOutput(portLibrary, testName,
 								expectedPageSize, expectedPageFlags, expectedIsSizeSupported,

@@ -1,10 +1,6 @@
-/*[INCLUDE-IF Sidecar16]*/
-package java.lang;
-
-import com.ibm.oti.util.Util;
-
+/*[INCLUDE-IF JAVA_SPEC_VERSION >= 8]*/
 /*******************************************************************************
- * Copyright (c) 2002, 2019 IBM Corp. and others
+ * Copyright (c) 2002, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -20,10 +16,13 @@ import com.ibm.oti.util.Util;
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
+package java.lang;
+
+import com.ibm.oti.util.Util;
 
 /**
  * StackTraceElement represents a stack frame.
@@ -32,11 +31,13 @@ import com.ibm.oti.util.Util;
  */
 public final class StackTraceElement implements java.io.Serializable {
 	private static final long serialVersionUID = 6992337162326171013L;
-	/*[IF Sidecar19-SE]*/	
+	/*[IF JAVA_SPEC_VERSION >= 11]*/
 	private final String moduleName;
 	private final String moduleVersion;
 	private final String classLoaderName;
-	/*[ENDIF]*/
+	private transient boolean includeClassLoaderName;
+	private transient boolean includeModuleVersion;
+	/*[ENDIF] JAVA_SPEC_VERSION >= 11*/
 	private final String declaringClass;
 	private final String methodName;
 	private final String fileName;
@@ -53,18 +54,25 @@ public final class StackTraceElement implements java.io.Serializable {
  */
 public StackTraceElement(String cls, String method, String file, int line) {
 	if (cls == null || method == null) throw new NullPointerException();
-	/*[IF Sidecar19-SE]*/
+	/*[IF JAVA_SPEC_VERSION >= 11]*/
 	moduleName = null;
 	moduleVersion = null;
 	classLoaderName = null;
-	/*[ENDIF]*/	
+	/**
+	 * includeClassLoaderName and includeModuleVersion are initialized to
+	 * true for publicly constructed StackTraceElements, as this information
+	 * is to be included when the element is printed.
+	 */
+	includeClassLoaderName = true;
+	includeModuleVersion = true;
+	/*[ENDIF] JAVA_SPEC_VERSION >= 11*/
 	declaringClass = cls;
 	methodName = method;
 	fileName = file;
 	lineNumber = line;
 }
 
-/*[IF Sidecar19-SE]*/
+/*[IF JAVA_SPEC_VERSION >= 11]*/
 /**
  * Create a StackTraceElement from the parameters.
  * 
@@ -86,6 +94,13 @@ public StackTraceElement(String classLoaderName, String module, String version, 
 	fileName = file;
 	lineNumber = line;
 	this.classLoaderName = classLoaderName;
+	/**
+	 * includeClassLoaderName and includeModuleVersion are initialized to
+	 * true for publicly constructed StackTraceElements, as this information
+	 * is to be included when the element is printed.
+	 */
+	includeClassLoaderName = true;
+	includeModuleVersion = true;
 }
 
 /**
@@ -96,15 +111,22 @@ public StackTraceElement(String classLoaderName, String module, String version, 
 public String getClassLoaderName() {
 	return classLoaderName;
 }
-/*[ENDIF]*/
+/*[ENDIF] JAVA_SPEC_VERSION >= 11*/
 
 @SuppressWarnings("unused")
 private StackTraceElement() {
-	/*[IF Sidecar19-SE]*/
+	/*[IF JAVA_SPEC_VERSION >= 11]*/
 	moduleName = null;
 	moduleVersion = null;
 	classLoaderName = null;
-	/*[ENDIF]*/	
+	/**
+	 * includeClassLoaderName and includeModuleVersion are initialized to
+	 * false for internally constructed StackTraceElements, as these fields
+	 * are to be set natively.
+	 */
+	includeClassLoaderName = false;
+	includeModuleVersion = false;
+	/*[ENDIF] JAVA_SPEC_VERSION >= 11*/
 	declaringClass = null;
 	methodName = null;
 	fileName = null;
@@ -118,9 +140,7 @@ private StackTraceElement() {
  * @param obj the object to compare to
  * 
  */
-/*[IF AnnotateOverride]*/
 @Override
-/*[ENDIF]*/
 public boolean equals(Object obj) {
 	if (!(obj instanceof StackTraceElement)) return false;
 	StackTraceElement castObj = (StackTraceElement) obj;
@@ -141,7 +161,7 @@ public boolean equals(Object obj) {
 	return true;
 }
 
-/*[IF Sidecar19-SE]*/
+/*[IF JAVA_SPEC_VERSION >= 11]*/
 /**
  * Answers the name of the module to which the execution point represented by this stack trace element belongs.
  * 
@@ -159,8 +179,57 @@ public String getModuleName() {
 public String getModuleVersion() {
 	return moduleVersion;
 }
-/*[ENDIF]*/
- 
+
+/**
+ * Returns whether the classloader name should be included in the stack trace for the provided StackTraceElement.
+ *
+ * @return true if the classloader name should be included, false otherwise.
+ */
+boolean getIncludeClassLoaderName() {
+	return includeClassLoaderName;
+}
+
+/**
+ * Returns whether the module version should be included in the stack trace for the provided StackTraceElement.
+ *
+ * @return true if the module version should be included, false otherwise.
+ */
+boolean getIncludeModuleVersion() {
+	return includeModuleVersion;
+}
+
+/**
+ * Set the includeClassLoaderName and includeModuleVersion fields for this StackTraceElement.
+ *
+ * @param classLoader the classloader for the StackTraceElement.
+ */
+void setIncludeInfoFlags(ClassLoader classLoader) {
+	/**
+	 * If the classloader is one of the Platform or Bootstrap built-in classloaders,
+	 * don't include its name or module version in the stack trace. If it is the
+	 * Application/System built-in classloader, don't include the class name, but
+	 * include the module version.
+	 */
+	if ((null == classLoader)
+		|| (ClassLoader.getPlatformClassLoader() == classLoader) // VM: Extension ClassLoader
+		|| (ClassLoader.bootstrapClassLoader == classLoader) // VM: System ClassLoader
+	) {
+		includeClassLoaderName = false;
+		includeModuleVersion = false;
+	} else if ((ClassLoader.getSystemClassLoader() == classLoader)) { // VM: Application ClassLoader
+		includeClassLoaderName = false;
+	}
+}
+
+/**
+ * Disable including the classloader name and the module version for this StackTraceElement.
+ */
+void disableIncludeInfoFlags() {
+	includeClassLoaderName = false;
+	includeModuleVersion = false;
+}
+/*[ENDIF] JAVA_SPEC_VERSION >= 11*/
+
 /**
  * Returns the full name (i.e. including package) of the class where this
  * stack trace element is executing.
@@ -213,21 +282,19 @@ public String getMethodName() {
 /**
  * Returns a hash code value for this stack trace element.
  */
-/*[IF AnnotateOverride]*/
 @Override
-/*[ENDIF]*/
 public int hashCode() {
 	// either both methodName and declaringClass are null, or neither are null
 	if (methodName == null) return 0;	// all unknown methods hash the same
 	int hashCode = methodName.hashCode() ^ declaringClass.hashCode();	// declaringClass never null if methodName is non-null
-	/*[IF Sidecar19-SE]*/	
+	/*[IF JAVA_SPEC_VERSION >= 11]*/
 	if (null != moduleName) {
 		hashCode ^= moduleName.hashCode();
 	}
 	if (null != moduleVersion) {
 		hashCode ^= moduleVersion.hashCode();
 	}
-	/*[ENDIF]*/
+	/*[ENDIF] JAVA_SPEC_VERSION >= 11*/
 	return hashCode;
 }
  
@@ -244,13 +311,36 @@ public boolean isNativeMethod() {
 /**
  * Returns a string representation of this stack trace element.
  */
-/*[IF AnnotateOverride]*/
 @Override
-/*[ENDIF]*/
 public String toString() {
 	StringBuilder buf = new StringBuilder(80);
-	Util.printStackTraceElement(this, source, buf, false);
+	boolean includeExtendedInfo = false;
+	/*[IF JAVA_SPEC_VERSION >= 11]*/
+	/**
+	 * includeExtendedInfo is essentially a check to see if this StackTraceElement
+	 * was created using a public constructor. Both includeClassLoaderName and
+	 * includeModuleVersion are initialized to true in the public constructors,
+	 * since these pieces of information are to be included in the stack trace.
+	 *
+	 * It's also possible that both of these flags are set to true natively,
+	 * in which case we still want to include extended info when printing the
+	 * stack trace.
+	 */
+	includeExtendedInfo = includeClassLoaderName && includeModuleVersion;
+	/*[ENDIF] JAVA_SPEC_VERSION >= 11*/
+	Util.printStackTraceElement(this, source, buf, includeExtendedInfo);
 	return buf.toString();
 }
 
+/*[IF JAVA_SPEC_VERSION >= 19]*/
+static StackTraceElement[] of(StackTraceElement[] stackTrace) {
+	// TODO: determine need action before return
+	return stackTrace;
+}
+
+static StackTraceElement of(StackFrameInfo s) {
+	// TODO: initialize StackTraceElement with StackFrameInfo data
+	return new StackTraceElement();
+}
+/*[ENDIF] JAVA_SPEC_VERSION >= 19 */
 }

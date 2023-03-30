@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -63,6 +63,7 @@ private:
 	 * @param ownableSynchronizerCleared number of ownable synchronizer candidates cleared.
 	 */
 	void outputOwnableSynchronizerInfo(MM_EnvironmentBase *env, UDATA indent, UDATA ownableSynchronizerCandidates, UDATA ownableSynchronizerCleared);
+	void outputContinuationInfo(MM_EnvironmentBase *env, UDATA indent, UDATA continuationCandidates, UDATA continuationCleared);
 
 	/**
 	 * Output reference processing summary.
@@ -93,7 +94,7 @@ private:
 
 
 protected:
-	virtual void handleInitializedInnerStanzas(J9HookInterface** hook, UDATA eventNum, void* eventData);
+	virtual void outputInitializedInnerStanza(MM_EnvironmentBase *env, MM_VerboseBuffer *buffer);
 
 	/**
 	 * @returns true if memory-info staza is multiline. Caller than format first and last line accordingly.
@@ -103,6 +104,8 @@ protected:
 	 * The actual body (excluding first and last line) of memory-info stanza.
 	 */
 	virtual void outputMemoryInfoInnerStanza(MM_EnvironmentBase *env, UDATA indent, MM_CollectionStatistics *stats);
+
+	virtual const char *getSubSpaceType(uintptr_t typeFlags);
 	
 	/* Print out allocations statistics
 	 * @param current Env
@@ -120,7 +123,7 @@ protected:
 	virtual void tearDown(MM_EnvironmentBase *env);
 
 	virtual bool getThreadName(char *buf, UDATA bufLen, OMR_VMThread *vmThread);
-	virtual void writeVmArgs(MM_EnvironmentBase* env);
+	virtual void writeVmArgs(MM_EnvironmentBase* env, MM_VerboseBuffer* buffer);
 
 	MM_VerboseHandlerOutputVLHGC(MM_GCExtensions *extensions)
 		: MM_VerboseHandlerOutput(extensions)
@@ -156,7 +159,7 @@ public:
 	
 	virtual	void handleConcurrentStartInternal(J9HookInterface** hook, UDATA eventNum, void* eventData);
 	virtual void handleConcurrentEndInternal(J9HookInterface** hook, UDATA eventNum, void* eventData);
-	virtual const char *getConcurrentTypeString() { return "GMP work packet processing"; }
+	virtual const char *getConcurrentTypeString(uintptr_t type) { return "GMP work packet processing"; }
 
 	/**
 	 * Write the verbose stanza for the GMP mark start event.
@@ -249,6 +252,12 @@ public:
 	virtual void enableVerbose();
 	virtual void disableVerbose();
 
+	/**
+	 * Return termination reason for concurrent collection.
+	 * @param stats concurrent stats
+	 * @return string representing the reason for termination
+	 */ 
+	const char *getConcurrentTerminationReason(MM_ConcurrentPhaseStatsBase *stats);
 };
 
 #endif /* VERBOSEHANDLEROUTPUTVLHGC_HPP_ */

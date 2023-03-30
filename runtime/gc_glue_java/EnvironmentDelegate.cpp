@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2017, 2020 IBM Corp. and others
+ * Copyright (c) 2017, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -30,6 +30,9 @@
 #include "OwnableSynchronizerObjectBufferRealtime.hpp"
 #include "OwnableSynchronizerObjectBufferStandard.hpp"
 #include "OwnableSynchronizerObjectBufferVLHGC.hpp"
+#include "ContinuationObjectBufferRealtime.hpp"
+#include "ContinuationObjectBufferStandard.hpp"
+#include "ContinuationObjectBufferVLHGC.hpp"
 #include "ReferenceObjectBufferRealtime.hpp"
 #include "ReferenceObjectBufferStandard.hpp"
 #include "ReferenceObjectBufferVLHGC.hpp"
@@ -47,6 +50,7 @@ bool
 MM_EnvironmentDelegate::initialize(MM_EnvironmentBase *env)
 {
 	_env = env;
+	_extensions = _env->getExtensions();
 	_vmThread = (J9VMThread *)_env->getOmrVMThread()->_language_vmthread;
 
 	MM_GCExtensions *extensions = MM_GCExtensions::getExtensions(env);
@@ -55,18 +59,21 @@ MM_EnvironmentDelegate::initialize(MM_EnvironmentBase *env)
 		_gcEnv._referenceObjectBuffer = MM_ReferenceObjectBufferStandard::newInstance(env);
 		_gcEnv._unfinalizedObjectBuffer = MM_UnfinalizedObjectBufferStandard::newInstance(env);
 		_gcEnv._ownableSynchronizerObjectBuffer = MM_OwnableSynchronizerObjectBufferStandard::newInstance(env);
+		_gcEnv._continuationObjectBuffer = MM_ContinuationObjectBufferStandard::newInstance(env);
 #endif /* defined(OMR_GC_MODRON_STANDARD) */
 	} else if (extensions->isMetronomeGC()) {
 #if defined(OMR_GC_REALTIME)
 		_gcEnv._referenceObjectBuffer = MM_ReferenceObjectBufferRealtime::newInstance(env);
 		_gcEnv._unfinalizedObjectBuffer = MM_UnfinalizedObjectBufferRealtime::newInstance(env);
 		_gcEnv._ownableSynchronizerObjectBuffer = MM_OwnableSynchronizerObjectBufferRealtime::newInstance(env);
+		_gcEnv._continuationObjectBuffer = MM_ContinuationObjectBufferRealtime::newInstance(env);
 #endif /* defined(OMR_GC_REALTIME) */
 	} else if (extensions->isVLHGC()) {
 #if defined(OMR_GC_VLHGC)
 		_gcEnv._referenceObjectBuffer = MM_ReferenceObjectBufferVLHGC::newInstance(env);
 		_gcEnv._unfinalizedObjectBuffer = MM_UnfinalizedObjectBufferVLHGC::newInstance(env);
 		_gcEnv._ownableSynchronizerObjectBuffer = MM_OwnableSynchronizerObjectBufferVLHGC::newInstance(env);
+		_gcEnv._continuationObjectBuffer = MM_ContinuationObjectBufferVLHGC::newInstance(env);
 #endif /* defined(OMR_GC_VLHGC) */
 	} else {
 		Assert_MM_unreachable();
@@ -74,6 +81,7 @@ MM_EnvironmentDelegate::initialize(MM_EnvironmentBase *env)
 
 	if ((NULL == _gcEnv._referenceObjectBuffer) ||
 			(NULL == _gcEnv._unfinalizedObjectBuffer) ||
+			(NULL == _gcEnv._continuationObjectBuffer) ||
 			(NULL == _gcEnv._ownableSynchronizerObjectBuffer)) {
 		return false;
 	}
@@ -101,6 +109,10 @@ MM_EnvironmentDelegate::tearDown()
 		_gcEnv._ownableSynchronizerObjectBuffer->kill(_env);
 		_gcEnv._ownableSynchronizerObjectBuffer = NULL;
 	}
+	if (NULL != _gcEnv._continuationObjectBuffer) {
+		_gcEnv._continuationObjectBuffer->kill(_env);
+		_gcEnv._continuationObjectBuffer = NULL;
+	}
 }
 
 OMR_VMThread *
@@ -114,7 +126,7 @@ MM_EnvironmentDelegate::attachVMThread(OMR_VM *omrVM, const char  *threadName, u
 
 #if defined(J9VM_OPT_JAVA_OFFLOAD_SUPPORT)
 	if ((MM_EnvironmentBase::ATTACH_THREAD != reason) &&  (NULL != javaVM->javaOffloadSwitchOnWithReasonFunc)) {
-		(*javaVM->javaOffloadSwitchOnWithReasonFunc)(vmThread, J9_JNI_OFFLOAD_SWITCH_FINALIZE_SLAVE_THREAD + reason);
+		(*javaVM->javaOffloadSwitchOnWithReasonFunc)(vmThread, J9_JNI_OFFLOAD_SWITCH_FINALIZE_WORKER_THREAD + reason);
 		vmThread->javaOffloadState = 1;
 	}
 #endif /* J9VM_OPT_JAVA_OFFLOAD_SUPPORT */
@@ -150,15 +162,16 @@ MM_EnvironmentDelegate::flushNonAllocationCaches()
 #endif /* J9VM_GC_FINALIZATION */
 
 	_gcEnv._ownableSynchronizerObjectBuffer->flush(_env);
+	_gcEnv._continuationObjectBuffer->flush(_env);
 }
 
 void
-MM_EnvironmentDelegate::setGCMasterThread(bool isMasterThread)
+MM_EnvironmentDelegate::setGCMainThread(bool isMainThread)
 {
-	if (isMasterThread) {
-		_vmThread->privateFlags |= J9_PRIVATE_FLAGS_GC_MASTER_THREAD;
+	if (isMainThread) {
+		_vmThread->privateFlags |= J9_PRIVATE_FLAGS_GC_MAIN_THREAD;
 	} else {
-		_vmThread->privateFlags &= ~J9_PRIVATE_FLAGS_GC_MASTER_THREAD;
+		_vmThread->privateFlags &= ~J9_PRIVATE_FLAGS_GC_MAIN_THREAD;
 	}
 }
 
@@ -233,7 +246,6 @@ MM_EnvironmentDelegate::assumeExclusiveVMAccess(uintptr_t exclusiveCount)
 void
 MM_EnvironmentDelegate::releaseCriticalHeapAccess(uintptr_t *data)
 {
-	VM_VMAccess::setPublicFlags(_vmThread, J9_PUBLIC_FLAGS_NOT_AT_SAFE_POINT);
 	MM_JNICriticalRegion::releaseAccess(_vmThread, data);
 }
 
@@ -241,7 +253,6 @@ void
 MM_EnvironmentDelegate::reacquireCriticalHeapAccess(uintptr_t data)
 {
 	MM_JNICriticalRegion::reacquireAccess(_vmThread, data);
-	VM_VMAccess::clearPublicFlags(_vmThread, J9_PUBLIC_FLAGS_NOT_AT_SAFE_POINT);
 }
 
 void

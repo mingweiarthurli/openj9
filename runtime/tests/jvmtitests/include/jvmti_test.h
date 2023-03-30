@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2020 IBM Corp. and others
+ * Copyright (c) 2001, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -149,7 +149,6 @@ void printHelp(void);
 
 /* version.c */
 jboolean ensureVersion(agentEnv * agent_env, jint version);
-const char * getVersionName(agentEnv * agent_env, jint version);
 
 /* util.c */
 void jvmtitest_usleep(UDATA millis);
@@ -188,6 +187,7 @@ jint JNICALL rc018(agentEnv * env, char * args);
 jint JNICALL rc019a(agentEnv * env, char * args);
 jint JNICALL rc019b(agentEnv * env, char * args);
 jint JNICALL rc020(agentEnv * env, char * args);
+jint JNICALL rc021(agentEnv * env, char * args);
 jint JNICALL re001(agentEnv * env, char * args);
 jint JNICALL re002(agentEnv * env, char * args);
 jint JNICALL fr001(agentEnv * env, char * args);
@@ -232,6 +232,8 @@ jint JNICALL fw001(agentEnv * env, char * args);
 jint JNICALL vmd001(agentEnv * env, char * args);
 jint JNICALL glc001(agentEnv * env, char * args);
 jint JNICALL rtc001(agentEnv * env, char * args);
+jint JNICALL rtc002(agentEnv * env, char * args);
+jint JNICALL rtc003(agentEnv * env, char * args);
 jint JNICALL att001(agentEnv * env, char * args);
 jint JNICALL log001(agentEnv * env, char * args);
 jint JNICALL jlm001(agentEnv * env, char * args);
@@ -254,5 +256,6 @@ jint JNICALL snmp001(agentEnv * agent_env, char * args);
 jint JNICALL soae001(agentEnv * agent_env, char * args);
 jint JNICALL gsp001(agentEnv *agent_env, char *args);
 jint JNICALL ee001(agentEnv *agent_env, char *args);
+jint JNICALL vmstart001(agentEnv* agent_env, char* args);
 
 #endif /*JVMTI_TEST_H_*/

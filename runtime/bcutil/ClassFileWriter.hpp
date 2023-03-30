@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2020 IBM Corp. and others
+ * Copyright (c) 2001, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -35,6 +35,10 @@
 
 #include "BuildResult.hpp"
 #include "VMHelpers.hpp"
+
+#if defined(J9VM_OPT_OPENJDK_METHODHANDLE)
+J9_DECLARE_CONSTANT_UTF8(injectedInvokerClassname, "InjectedInvoker");
+#endif /* defined(J9VM_OPT_OPENJDK_METHODHANDLE) */
 
 class ClassFileWriter {
 /*
@@ -72,8 +76,12 @@ private:
 	U_32 _bsmAttributeLength;
 	UDATA _classFileSize;
 	bool _isAnon;
+	bool _isInjectedInvoker;
 	J9UTF8* _anonClassName;
 	J9UTF8* _originalClassName;
+#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+	U_32 _numOfInjectedInterfaces;
+#endif /* J9VM_OPT_VALHALLA_VALUE_TYPES */
 	
 protected:
 
@@ -334,24 +342,44 @@ public:
 		, _bsmAttributeLength(0)
 		, _classFileSize(0)
 		, _isAnon(FALSE)
+		, _isInjectedInvoker(FALSE)
 		, _anonClassName(NULL)
 		, _originalClassName(NULL)
+#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+		, _numOfInjectedInterfaces(0)
+#endif /* J9VM_OPT_VALHALLA_VALUE_TYPES */
 	{
 		/* anonClasses have the following name format: '[originalName]/[ROMSegmentAddress]' */
-		if (J9_ARE_ALL_BITS_SET(_romClass->extraModifiers, J9AccClassAnonClass)) {
+		if (J9_ARE_ANY_BITS_SET(_romClass->extraModifiers, J9AccClassAnonClass | J9AccClassHidden)) {
 			PORT_ACCESS_FROM_JAVAVM(_javaVM);
 			_isAnon = true;
 			_anonClassName = J9ROMCLASS_CLASSNAME(_romClass);
 			U_16 anonNameLength = J9UTF8_LENGTH(_anonClassName);
 			U_16 originalNameLength = anonNameLength - ROM_ADDRESS_LENGTH - 1;
+			U_8 *anonClassNameData = J9UTF8_DATA(_anonClassName);
+#if defined(J9VM_OPT_OPENJDK_METHODHANDLE)
+			/* ROM class format: <HOST_NAME>/InjectedInvoker/<ROM_ADDRESS_LENGTH>.
+			 * Search for InjectedInvoker in _anonClassName using the above format.
+			 * If found, reset the class name to "InjectedInvoker" in the class file.
+			 */
+			IDATA startIndex = anonNameLength - J9UTF8_LENGTH(&injectedInvokerClassname) - ROM_ADDRESS_LENGTH - 1;
+			U_8 *start = anonClassNameData + startIndex;
+			if ((startIndex >= 0)
+			&& (0 == memcmp(start, J9UTF8_DATA(&injectedInvokerClassname), J9UTF8_LENGTH(&injectedInvokerClassname)))
+			) {
+				_isInjectedInvoker = TRUE;
+				originalNameLength = J9UTF8_LENGTH(&injectedInvokerClassname);
+				anonClassNameData = J9UTF8_DATA(&injectedInvokerClassname);
+			}
+#endif /* defined(J9VM_OPT_OPENJDK_METHODHANDLE) */
 			/* nameLength field + nameBytes field + NULL terminator */
-			_originalClassName = (J9UTF8*) j9mem_allocate_memory(sizeof(U_16) + originalNameLength + 1, J9MEM_CATEGORY_CLASSES);
+			_originalClassName = (J9UTF8 *)j9mem_allocate_memory(sizeof(U_16) + originalNameLength + 1, J9MEM_CATEGORY_CLASSES);
 			if (NULL == _originalClassName) {
 				_buildResult = OutOfMemory;
 			} else {
 				J9UTF8_SET_LENGTH(_originalClassName, originalNameLength);
-				memcpy(((U_8*) J9UTF8_DATA(_originalClassName)), J9UTF8_DATA(_anonClassName), originalNameLength);
-				*(((U_8*) J9UTF8_DATA(_originalClassName)) + originalNameLength) = '\0';
+				memcpy(((U_8 *)J9UTF8_DATA(_originalClassName)), anonClassNameData, originalNameLength);
+				*(((U_8 *)J9UTF8_DATA(_originalClassName)) + originalNameLength) = '\0';
 			}
 		}
 		if (isOK()) {
@@ -382,7 +410,8 @@ public:
 			j9mem_free_memory(_classFileBuffer);
 			_classFileBuffer = NULL;
 		}
-		if (_isAnon) {
+		/* Don't free if name is InjectedInvoker since it is static */
+		if (_isAnon && !_isInjectedInvoker) {
 			PORT_ACCESS_FROM_JAVAVM(_javaVM);
 			j9mem_free_memory(_originalClassName);
 		}

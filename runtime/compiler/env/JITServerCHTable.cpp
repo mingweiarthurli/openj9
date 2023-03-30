@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2020 IBM Corp. and others
+ * Copyright (c) 2018, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -28,6 +28,7 @@
 #include "il/SymbolReference.hpp"              // for SymbolReference
 #include "codegen/CodeGenerator.hpp"           // for CodeGenerator
 #include "env/VMAccessCriticalSection.hpp"     // for VMAccessCriticalSection
+#include "env/VerboseLog.hpp"
 
 void
 JITClientCommitVirtualGuard(const VirtualGuardInfoForCHTable *info, std::vector<TR_VirtualGuardSite> &sites,
@@ -101,7 +102,7 @@ bool JITClientCHTableCommit(
    std::vector<TR_OpaqueClassBlock*> &classesForStaticFinalFieldModification = std::get<8>(data);
    uint8_t *serverStartPC = std::get<9>(data);
    uint8_t *startPC = (uint8_t*) metaData->startPC;
-   
+
    if (vguards.empty() && sideEffectPatchSites.empty() && preXMethods.empty() && classes.empty() && classesThatShouldNotBeNewlyExtended.empty())
       return true;
 
@@ -243,7 +244,7 @@ bool JITClientCHTableCommit(
          for (auto &inner : innerAssumptions)
             JITClientCommitVirtualGuard(&inner, sites, table, comp);
          }
-      
+
       // osr guards need to be processed after all the guards, because sites' location/destination
       // need to be patched first
       static bool dontGroupOSRAssumptions = (feGetEnv("TR_DontGroupOSRAssumptions") != NULL);
@@ -317,12 +318,12 @@ JITClientCommitOSRVirtualGuards(TR::Compilation *comp, std::vector<VirtualGuardF
          auto &info = std::get<0>(guard);
          auto &sites = std::get<1>(guard);
          if (info._kind == TR_OSRGuard || info._mergedWithOSRGuard)
-            { 
+            {
             for (auto &site : sites)
                points->add(site.getLocation(), site.getDestination());
             }
          }
- 
+
       for (int i = 0; i < clazzesForOSRRedefinition->size(); ++i)
          TR_PatchMultipleNOPedGuardSitesOnClassRedefinition
             ::make(comp->fe(), comp->trPersistentMemory(), (*clazzesForOSRRedefinition)[i], points, comp->getMetadataAssumptionList());
@@ -429,11 +430,7 @@ JITClientCommitVirtualGuard(const VirtualGuardInfoForCHTable *info, std::vector<
             // However, JITClientCHTableCommit() is called at the end of compilation,
             // and therefore it cannot cause any issues.
             TR::VMAccessCriticalSection invalidateMCSTargetGuards(fej9);
-            // TODO: Code duplication with TR_InlinerBase::findInlineTargets
-            currentIndex = TR::KnownObjectTable::UNKNOWN;
-            uintptr_t currentEpoch = fej9->getVolatileReferenceField(*mcsReferenceLocation, "epoch", "Ljava/lang/invoke/MethodHandle;");
-            if (currentEpoch)
-               currentIndex = knot->getOrCreateIndex(currentEpoch);
+            currentIndex = fej9->mutableCallSiteEpoch(comp, *mcsReferenceLocation);
             if (info->_mutableCallSiteEpoch == currentIndex)
                cookie = fej9->mutableCallSiteCookie(*mcsReferenceLocation, potentialCookie);
             else
@@ -467,11 +464,16 @@ JITClientCommitVirtualGuard(const VirtualGuardInfoForCHTable *info, std::vector<
       TR_ResolvedMethod *breakpointedMethod = info->_inlinedResolvedMethod;
       TR_OpaqueMethodBlock *method = breakpointedMethod->getPersistentIdentifier();
       if (comp->fej9()->isMethodBreakpointed(method))
-         nopAssumptionIsValid = false;
-      for (TR_VirtualGuardSite &site : sites)
          {
-         TR_PatchNOPedGuardSiteOnMethodBreakPoint
-            ::make(comp->fe(), comp->trPersistentMemory(), method, site.getLocation(), site.getDestination(), comp->getMetadataAssumptionList());
+         nopAssumptionIsValid = false;
+         }
+      else
+         {
+         for (TR_VirtualGuardSite &site : sites)
+            {
+            TR_PatchNOPedGuardSiteOnMethodBreakPoint
+               ::make(comp->fe(), comp->trPersistentMemory(), method, site.getLocation(), site.getDestination(), comp->getMetadataAssumptionList());
+            }
          }
       }
    else if (info->_kind == TR_ArrayStoreCheckGuard)
@@ -485,7 +487,7 @@ JITClientCommitVirtualGuard(const VirtualGuardInfoForCHTable *info, std::vector<
       TR_ASSERT(info->_isInterface && info->_kind == TR_InterfaceGuard, "assertion failure");
       TR_OpaqueClassBlock *thisClass = info->_thisClass;
       TR_ASSERT(thisClass, "assertion failure");
-      
+
       TR_ResolvedMethod *implementer = table->findSingleImplementer(thisClass, cpIndex, owningMethod, comp, true, TR_yes);
       if (!implementer ||
           (info->_testType == TR_VftTest && comp->fe()->classHasBeenExtended(implementer->containingClass())))

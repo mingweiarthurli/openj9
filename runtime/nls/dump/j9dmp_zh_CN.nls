@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2000, 2020 IBM Corp. and others
+# Copyright (c) 2000, 2021 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
 # OpenJDK Assembly Exception [2].
 #
 # [1] https://www.gnu.org/software/classpath/license.html
-# [2] http://openjdk.java.net/legal/assembly-exception.html
+# [2] https://openjdk.org/legal/assembly-exception.html
 #
 # SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 #
@@ -27,14 +27,14 @@
 # New messages MUST be added at the end of this file.
 # DO NOT delete messages from this file, as it will change their indices.
 # If you wish to remove a message, delete its text, but leave the key in place
-# Important: the NLS messages are shared between all releases including branched SRs. 
+# Important: the NLS messages are shared between all releases including branched SRs.
 # This makes changing the meaning of any message highly dangerous.
 #
 # Note to translators:
 #
 # This file uses printf style substitutions. Sequences such as %s, %.*s, %10d
 # etc. will be substituted at runtime. The special case of %% is not a substitution.
-# It indicates a single percent sign. Please do not modify the format specifiers, or 
+# It indicates a single percent sign. Please do not modify the format specifiers, or
 # change their order. For instance, in a message like "from %d to %s", %d
 # MUST appear before %s in any translated message, or a run-time crash
 # could occur. This is a known limitation of the product.
@@ -48,7 +48,7 @@ J9NLS.HEADER=j9dmpnls.h
 
 J9NLS_DMP_UNRECOGNISED_OPTION_STR=\u8f6c\u50a8\u9009\u9879\u65e0\u6cd5\u8bc6\u522b\uff1a-Xdump:%s
 # START NON-TRANSLATABLE
-J9NLS_DMP_UNRECOGNISED_OPTION_STR.explanation=An option used with the -Xdump parameter is unknown. 
+J9NLS_DMP_UNRECOGNISED_OPTION_STR.explanation=An option used with the -Xdump parameter is unknown.
 J9NLS_DMP_UNRECOGNISED_OPTION_STR.system_action=The JVM terminates.
 J9NLS_DMP_UNRECOGNISED_OPTION_STR.user_response=Use -Xdump:help to find the correct syntax for the -Xdump options.
 J9NLS_DMP_UNRECOGNISED_OPTION_STR.sample_input_1=java:...events=bogus
@@ -161,7 +161,7 @@ J9NLS_DMP_SPAWNED_DUMP_STR=%1$s \u8f6c\u50a8\u5df2\u521b\u5efa\u8fdb\u7a0b %2$d
 # START NON-TRANSLATABLE
 J9NLS_DMP_SPAWNED_DUMP_STR.explanation=A tool dump process has been created.
 J9NLS_DMP_SPAWNED_DUMP_STR.system_action=The JVM runs the executable process specified for the tool dump. Any parameters are passed to the process.
-J9NLS_DMP_SPAWNED_DUMP_STR.user_response=Refer to the documentation for the tool creating the dump process. 
+J9NLS_DMP_SPAWNED_DUMP_STR.user_response=Refer to the documentation for the tool creating the dump process.
 J9NLS_DMP_SPAWNED_DUMP_STR.sample_input_1=Tool
 J9NLS_DMP_SPAWNED_DUMP_STR.sample_input_2=1234
 J9NLS_DMP_SPAWNED_DUMP_STR.link=dita:///diag/tools/dumpagents_tool.dita
@@ -276,16 +276,16 @@ J9NLS_DMP_INVALID_HEAP_COMPACTION_REQUEST=\u7531\u4e8e\u672a\u8bf7\u6c42\u6216\u
 # START NON-TRANSLATABLE
 J9NLS_DMP_INVALID_HEAP_COMPACTION_REQUEST.explanation=The garbage collector could not run because the gc thread did not have exclusive access to the heap.
 J9NLS_DMP_INVALID_HEAP_COMPACTION_REQUEST.system_action=The dump file is not produced.
-J9NLS_DMP_INVALID_HEAP_COMPACTION_REQUEST.user_response=Modify the -Xdump option to request exclusive access. See the Java diagnostic information for valid dump request types. 
+J9NLS_DMP_INVALID_HEAP_COMPACTION_REQUEST.user_response=Modify the -Xdump option to request exclusive access. See the Java diagnostic information for valid dump request types.
 J9NLS_DMP_INVALID_HEAP_COMPACTION_REQUEST.link=
 
 # END NON-TRANSLATABLE
 
 J9NLS_DMP_INVALID_HEAP_PREPARATION_REQUEST=\u7531\u4e8e\u672a\u8bf7\u6c42\u6216\u65e0\u6cd5\u83b7\u53d6 exclusive \u5b58\u53d6\uff0c\u56e0\u6b64\u672a\u6267\u884c\u8bf7\u6c42\u7684\u5806\u51c6\u5907\u3002
 # START NON-TRANSLATABLE
-J9NLS_DMP_INVALID_HEAP_PREPARATION_REQUEST.explanation=The dump thread must lock the heap to prevent changes while the dump is taken. Either no attempt was made to obtain the lock or the lock could not be obtained 
+J9NLS_DMP_INVALID_HEAP_PREPARATION_REQUEST.explanation=The dump thread must lock the heap to prevent changes while the dump is taken. Either no attempt was made to obtain the lock or the lock could not be obtained
 J9NLS_DMP_INVALID_HEAP_PREPARATION_REQUEST.system_action=The JVM does not produce the specified dump.
-J9NLS_DMP_INVALID_HEAP_PREPARATION_REQUEST.user_response=Modify the -Xdump option to request exclusive access. See the Java diagnostic information for valid dump request types. 
+J9NLS_DMP_INVALID_HEAP_PREPARATION_REQUEST.user_response=Modify the -Xdump option to request exclusive access. See the Java diagnostic information for valid dump request types.
 J9NLS_DMP_INVALID_HEAP_PREPARATION_REQUEST.link=
 
 # END NON-TRANSLATABLE
@@ -294,7 +294,7 @@ J9NLS_DMP_MULTIPLE_DUMP_OVERWRITE=\u5df2\u8bf7\u6c42\u591a\u4e2a heapdump\uff0c\
 # START NON-TRANSLATABLE
 J9NLS_DMP_MULTIPLE_DUMP_OVERWRITE.explanation=The JVM replaces the %%id insertion point with a unique number. Because %%id is missing the replacement cannot take place, causing a potential file name clash and file overwrite.
 J9NLS_DMP_MULTIPLE_DUMP_OVERWRITE.system_action=The JVM informs the user and produces dumps as requested.
-J9NLS_DMP_MULTIPLE_DUMP_OVERWRITE.user_response=If you do not want files overwritten, specify a file label that includes the %%id. 
+J9NLS_DMP_MULTIPLE_DUMP_OVERWRITE.user_response=If you do not want files overwritten, specify a file label that includes the %%id.
 J9NLS_DMP_MULTIPLE_DUMP_OVERWRITE.link=
 
 # END NON-TRANSLATABLE
@@ -303,9 +303,9 @@ J9NLS_DMP_MULTIPLE_DUMP_OVERWRITE.link=
 J9NLS_DMP_IEATDUMP_FAILURE=IEATDUMP \u5931\u8d25\uff1aDSN='%s' RC=0x%08X RSN=0x%08X
 # START NON-TRANSLATABLE
 J9NLS_DMP_IEATDUMP_FAILURE.explanation=An IEATDUMP was requested but could not be produced.
-J9NLS_DMP_IEATDUMP_FAILURE.system_action=No action. The JVM cannot produce the dump. 
-J9NLS_DMP_IEATDUMP_FAILURE.user_response=Check the response code provided. See Java diagnostic information or the z/OS V1R7.0 MVS Authorized Assembler Services Reference, 36.1.10 Return and Reason Codes. 
-J9NLS_DMP_IEATDUMP_FAILURE.link=dita:///diag/problem_determination/zos_setup_dumps.dita 
+J9NLS_DMP_IEATDUMP_FAILURE.system_action=No action. The JVM cannot produce the dump.
+J9NLS_DMP_IEATDUMP_FAILURE.user_response=Check the response code provided. See Java diagnostic information or the z/OS V1R7.0 MVS Authorized Assembler Services Reference, 36.1.10 Return and Reason Codes.
+J9NLS_DMP_IEATDUMP_FAILURE.link=dita:///diag/problem_determination/zos_setup_dumps.dita
 
 J9NLS_DMP_IEATDUMP_FAILURE.sample_input_1=J9BUILD.J9VM.TDUMP.S123334
 J9NLS_DMP_IEATDUMP_FAILURE.sample_input_2=12341234
@@ -327,16 +327,16 @@ J9NLS_DMP_HEAP_DUMP_EXCLUSIVE_FAILED=\u7531\u4e8e\u53e6\u4e00\u4e2a\u7ec4\u4ef6\
 # START NON-TRANSLATABLE
 J9NLS_DMP_HEAP_DUMP_EXCLUSIVE_FAILED.explanation=The exclusive VM lock must be held to produce a usable heapdump. Although the VM exclusive lock was requested by the user, the VM could not obtain the lock in a reasonable time. This behavior avoids risking a deadlock.
 J9NLS_DMP_HEAP_DUMP_EXCLUSIVE_FAILED.system_action=The VM does not produce a heapdump.
-J9NLS_DMP_HEAP_DUMP_EXCLUSIVE_FAILED.user_response=Wait for one minute and try taking the heapdump again when the VM exclusive lock might be free. 
+J9NLS_DMP_HEAP_DUMP_EXCLUSIVE_FAILED.user_response=Wait for one minute and try taking the heapdump again when the VM exclusive lock might be free.
 J9NLS_DMP_HEAP_DUMP_EXCLUSIVE_FAILED.link=
 
 # END NON-TRANSLATABLE
 
 J9NLS_DMP_SYSTEM_DUMP_EXCLUSIVE_FAILED=\u5728\u8fdb\u884c\u7cfb\u7edf\u8f6c\u50a8\u4e4b\u524d\u65e0\u6cd5\u83b7\u53d6 VM exclusive \u9501\u5b9a\u3002
 # START NON-TRANSLATABLE
-J9NLS_DMP_SYSTEM_DUMP_EXCLUSIVE_FAILED.explanation=Although the VM exclusive lock was requested by the user, the VM could not obtain the lock in a reasonable time before taking the system dump. This behavior avoids risking a deadlock. 
+J9NLS_DMP_SYSTEM_DUMP_EXCLUSIVE_FAILED.explanation=Although the VM exclusive lock was requested by the user, the VM could not obtain the lock in a reasonable time before taking the system dump. This behavior avoids risking a deadlock.
 J9NLS_DMP_SYSTEM_DUMP_EXCLUSIVE_FAILED.system_action=The VM produces a system dump without taking the VM exclusive lock. The dump might show an inconsistent view of the VM data structures and heap.
-J9NLS_DMP_SYSTEM_DUMP_EXCLUSIVE_FAILED.user_response=Wait for one minute and try taking the system dump again when the VM exclusive lock might be free. 
+J9NLS_DMP_SYSTEM_DUMP_EXCLUSIVE_FAILED.user_response=Wait for one minute and try taking the system dump again when the VM exclusive lock might be free.
 J9NLS_DMP_SYSTEM_DUMP_EXCLUSIVE_FAILED.link=
 
 # END NON-TRANSLATABLE
@@ -354,7 +354,7 @@ J9NLS_DMP_SYSTEM_DUMP_COMPACT_PREPWALK_WITHOUT_EXCLUSIVE.link=
 J9NLS_DMP_MAKEPATH_CANNOT_USE_DMP_LABEL=\u65e0\u6cd5\u5c06\u8f6c\u50a8\u5199\u5165\u6587\u4ef6 %s\uff1a%s
 # START NON-TRANSLATABLE
 J9NLS_DMP_MAKEPATH_CANNOT_USE_DMP_LABEL.explanation=The JVM was unable to write a dump to the specified file. There might be multiple causes, including insufficient file system permissions or specifying a file that already exists.
-J9NLS_DMP_MAKEPATH_CANNOT_USE_DMP_LABEL.system_action=The JVM uses a default file name. The name and location of the file are indicated by the messages produced when the dump is written. 
+J9NLS_DMP_MAKEPATH_CANNOT_USE_DMP_LABEL.system_action=The JVM uses a default file name. The name and location of the file are indicated by the messages produced when the dump is written.
 J9NLS_DMP_MAKEPATH_CANNOT_USE_DMP_LABEL.user_response=Correct the problem with the specified file path or change the target dump file with the file= option.
 J9NLS_DMP_MAKEPATH_CANNOT_USE_DMP_LABEL.sample_input_1=/home/andhall/javacore.20081212.164512.4356.txt
 J9NLS_DMP_MAKEPATH_CANNOT_USE_DMP_LABEL.sample_input_2=Permission denied
@@ -364,7 +364,7 @@ J9NLS_DMP_MAKEPATH_CANNOT_USE_DMP_LABEL.link=
 
 J9NLS_DMP_HEAP_DUMP_EXCLUSIVE_NOT_REQUESTED=\u7531\u4e8e\u672a\u8bf7\u6c42 VM exclusive \u9501\u5b9a\uff0c\u56e0\u6b64\u672a\u751f\u6210\u8bf7\u6c42\u7684 heapdump\u3002\u5c06 request=exclusive+prepwalk+compact \u6dfb\u52a0\u5230\u60a8\u7684 -Xdump:heap: \u547d\u4ee4\u884c\u9009\u9879\u3002
 # START NON-TRANSLATABLE
-J9NLS_DMP_HEAP_DUMP_EXCLUSIVE_NOT_REQUESTED.explanation=A heapdump dump agent was configured using the -Xdump option or JVMTI without requesting that the exclusive VM lock. 
+J9NLS_DMP_HEAP_DUMP_EXCLUSIVE_NOT_REQUESTED.explanation=A heapdump dump agent was configured using the -Xdump option or JVMTI without requesting that the exclusive VM lock.
 J9NLS_DMP_HEAP_DUMP_EXCLUSIVE_NOT_REQUESTED.system_action=The JVM does not take the heapdump because the dump might be corrupt without the VM exclusive lock in place.
 J9NLS_DMP_HEAP_DUMP_EXCLUSIVE_NOT_REQUESTED.user_response=Change the -Xdump:heap: option to include the request=exclusive option. For example, -Xdump:heap:events=user,request=exclusive.
 J9NLS_DMP_HEAP_DUMP_EXCLUSIVE_NOT_REQUESTED.link=
@@ -396,7 +396,7 @@ J9NLS_DMP_EVENT_TRIGGERED_DUMP_STR_NOFILE.link=dita:///diag/tools/dump_agents.di
 J9NLS_DMP_USER_REQUESTED_DUMP_STR=\u7528\u6237\u901a\u8fc7 %3$s \u4f7f\u7528\u201c%2$s\u201d\u6765\u8bf7\u6c42 %1$s \u8f6c\u50a8
 # START NON-TRANSLATABLE
 J9NLS_DMP_USER_REQUESTED_DUMP_STR.explanation=The JVM will write a dump in response to a request through an API, such as JVMTI, or through the -Xtrace:trigger option.
-J9NLS_DMP_USER_REQUESTED_DUMP_STR.system_action=The JVM attempts to write the dump. A second message is produced when the dump is complete. 
+J9NLS_DMP_USER_REQUESTED_DUMP_STR.system_action=The JVM attempts to write the dump. A second message is produced when the dump is complete.
 J9NLS_DMP_USER_REQUESTED_DUMP_STR.user_response=Review the dump and take appropriate action.
 
 # javacore.txt is not translatable
@@ -421,8 +421,8 @@ J9NLS_DMP_USER_REQUESTED_DUMP_STR_NOFILE.link=dita:///diag/tools/dump_agents.dit
 J9NLS_DMP_INVALID_OR_MISSING_FILTER=-Xdump \u8fc7\u6ee4\u5668\u65e0\u6548\u6216\u7f3a\u5931
 # START NON-TRANSLATABLE
 J9NLS_DMP_INVALID_OR_MISSING_FILTER.explanation=A valid -Xdump filter must be supplied.
-J9NLS_DMP_INVALID_OR_MISSING_FILTER.system_action=The dump agent is not loaded. 
-J9NLS_DMP_INVALID_OR_MISSING_FILTER.user_response=Modify the dump option to include a valid filter. 
+J9NLS_DMP_INVALID_OR_MISSING_FILTER.system_action=The dump agent is not loaded.
+J9NLS_DMP_INVALID_OR_MISSING_FILTER.user_response=Modify the dump option to include a valid filter.
 J9NLS_DMP_INVALID_OR_MISSING_FILTER.link=dita:///diag/tools/dump_agents.dita
 
 # END NON-TRANSLATABLE
@@ -476,15 +476,15 @@ J9NLS_DMP_WRITTEN_DUMP_STR_ZOS.link=
 J9NLS_DMP_INCORRECT_USE_MSG_FILTER=-Xdump msg_filter \u4f7f\u7528\u9519\u8bef
 # START NON-TRANSLATABLE
 J9NLS_DMP_INCORRECT_USE_MSG_FILTER.explanation=The suboption msg_filter is only applicable to events throw, systhrow, catch and uncaught.
-J9NLS_DMP_INCORRECT_USE_MSG_FILTER.system_action=The dump agent is not loaded. 
-J9NLS_DMP_INCORRECT_USE_MSG_FILTER.user_response=Modify the dump option to apply the msg_filter to applicable events. 
+J9NLS_DMP_INCORRECT_USE_MSG_FILTER.system_action=The dump agent is not loaded.
+J9NLS_DMP_INCORRECT_USE_MSG_FILTER.user_response=Modify the dump option to apply the msg_filter to applicable events.
 J9NLS_DMP_INCORRECT_USE_MSG_FILTER.link=dita:///diag/tools/dump_agents.dita
 # END NON-TRANSLATABLE
 
 J9NLS_DMP_ABORT_ON_JAVA_STACK=\u5728 Java \u5806\u6808\u4e0a\u8fd0\u884c\u65f6\u6536\u5230\u5f02\u5e38\u4e2d\u6b62\u4fe1\u53f7\u3002JVM \u8f6c\u50a8\u4ee3\u7406\u65e0\u6cd5\u8fd0\u884c\u3002
 # START NON-TRANSLATABLE
 J9NLS_DMP_ABORT_ON_JAVA_STACK.explanation=The JVM abort signal handler was called on a thread that is running on a Java stack. The JVM dump agents are not run to avoid further problems.
-J9NLS_DMP_ABORT_ON_JAVA_STACK.system_action=The JVM terminates. The abort signal is passed on to the operating system. 
+J9NLS_DMP_ABORT_ON_JAVA_STACK.system_action=The JVM terminates. The abort signal is passed on to the operating system.
 J9NLS_DMP_ABORT_ON_JAVA_STACK.user_response=No specific action is required. Look for other messages that are produced to assist you with problem determination. Refer to operating system documentation for information on obtaining dumps on abort signals.
 J9NLS_DMP_ABORT_ON_JAVA_STACK.link=dita:///diag/tools/dump_agents.dita
 # END NON-TRANSLATABLE
@@ -529,4 +529,73 @@ J9NLS_DMP_EXIT_SHUTDOWN_UNKNOWN.explanation=User requested to exit
 J9NLS_DMP_EXIT_SHUTDOWN_UNKNOWN.system_action=The JVM exits.
 J9NLS_DMP_EXIT_SHUTDOWN_UNKNOWN.user_response=This exit was requested by the user.
 J9NLS_DMP_EXIT_SHUTDOWN_UNKNOWN.link=
+# END NON-TRANSLATABLE
+
+J9NLS_DMP_JIT_ORDINARY_METHOD=\u6b63\u5728\u7f16\u8bd1\u7684 JIT \u8f6c\u50a8\u65b9\u6cd5\u662f\u666e\u901a\u65b9\u6cd5
+# START NON-TRANSLATABLE
+J9NLS_DMP_JIT_ORDINARY_METHOD.explanation=The dump has reported that the method the unhandled exception occurred in is an ordinary method.
+J9NLS_DMP_JIT_ORDINARY_METHOD.system_action=The JVM continues.
+J9NLS_DMP_JIT_ORDINARY_METHOD.user_response=Diagnostic information, provide this information to your service representative.
+J9NLS_DMP_JIT_ORDINARY_METHOD.link=
+
+# END NON-TRANSLATABLE
+
+J9NLS_DMP_JIT_NOTIFIED_WAITING_THREADS=JIT \u8f6c\u50a8\u901a\u77e5\u5f53\u524d\u65b9\u6cd5\u7684\u8981\u7f16\u8bd1\u7684\u6240\u6709\u7b49\u5f85\u7ebf\u7a0b
+# START NON-TRANSLATABLE
+J9NLS_DMP_JIT_NOTIFIED_WAITING_THREADS.explanation=The compilation threads waiting on the method to be compiled monitor will be notified.
+J9NLS_DMP_JIT_NOTIFIED_WAITING_THREADS.system_action=The JVM continues.
+J9NLS_DMP_JIT_NOTIFIED_WAITING_THREADS.user_response=Diagnostic information, provide this information to your service representative.
+J9NLS_DMP_JIT_NOTIFIED_WAITING_THREADS.link=
+
+# END NON-TRANSLATABLE
+
+J9NLS_DMP_JIT_OPTIMIZATION_PLAN=JIT \u8f6c\u50a8\u65e0\u6cd5\u5206\u914d\u65b0\u7684\u4f18\u5316\u8ba1\u5212
+# START NON-TRANSLATABLE
+J9NLS_DMP_JIT_OPTIMIZATION_PLAN.explanation=The dump could not allocate a new optimization plan for recompilation.
+J9NLS_DMP_JIT_OPTIMIZATION_PLAN.system_action=The JVM will not recompile the current method and will continue.
+J9NLS_DMP_JIT_OPTIMIZATION_PLAN.user_response=Diagnostic information, provide this information to your service representative.
+J9NLS_DMP_JIT_OPTIMIZATION_PLAN.link=
+
+# END NON-TRANSLATABLE
+
+J9NLS_DMP_OCCURRED_THREAD_NAME_ID=%1$s \u8f6c\u50a8\u51fa\u73b0\u5728 '%2$s' \u7ebf\u7a0b 0x%3$p \u4e2d
+# START NON-TRANSLATABLE
+J9NLS_DMP_OCCURRED_THREAD_NAME_ID.explanation=The dump is reporting which thread caused the unhandled exception.
+J9NLS_DMP_OCCURRED_THREAD_NAME_ID.system_action=The JVM continues.
+J9NLS_DMP_OCCURRED_THREAD_NAME_ID.user_response=Diagnostic information, provide this information to your service representative.
+J9NLS_DMP_OCCURRED_THREAD_NAME_ID.sample_input_1=JIT
+J9NLS_DMP_OCCURRED_THREAD_NAME_ID.sample_input_2=main
+J9NLS_DMP_OCCURRED_THREAD_NAME_ID.sample_input_3=1280FF00
+J9NLS_DMP_OCCURRED_THREAD_NAME_ID.link=
+
+# END NON-TRANSLATABLE
+
+J9NLS_DMP_JIT_RECURSIVE_CRASH=\u8bca\u65ad\u7ebf\u7a0b\u4e0a\u53d1\u751f JIT \u8f6c\u50a8\u9012\u5f52\u5d29\u6e83
+# START NON-TRANSLATABLE
+J9NLS_DMP_JIT_RECURSIVE_CRASH.explanation=The dump is reporting a reproduction of the original unhandled exception, with tracing.
+J9NLS_DMP_JIT_RECURSIVE_CRASH.system_action=The JVM continues.
+J9NLS_DMP_JIT_RECURSIVE_CRASH.user_response=Diagnostic information, provide this information to your service representative.
+J9NLS_DMP_JIT_RECURSIVE_CRASH.link=
+
+# END NON-TRANSLATABLE
+
+J9NLS_DMP_JIT_RECOMPILING_METHOD=JIT \u8f6c\u50a8\u6b63\u5728\u91cd\u65b0\u7f16\u8bd1 %.*s.%.*s%.*s
+# START NON-TRANSLATABLE
+J9NLS_DMP_JIT_RECOMPILING_METHOD.explanation=The dump is recompiling the specified method signature.
+J9NLS_DMP_JIT_RECOMPILING_METHOD.system_action=The JVM continues.
+J9NLS_DMP_JIT_RECOMPILING_METHOD.user_response=Diagnostic information, provide this information to your service representative.
+J9NLS_DMP_JIT_RECOMPILING_METHOD.sample_input_1=java/lang/String
+J9NLS_DMP_JIT_RECOMPILING_METHOD.sample_input_2=equals
+J9NLS_DMP_JIT_RECOMPILING_METHOD.sample_input_3=(Ljava/lang/Object;)Z
+J9NLS_DMP_JIT_RECOMPILING_METHOD.link=
+
+# END NON-TRANSLATABLE
+
+J9NLS_DMP_JIT_TRACE_IL_CRASHED_THREAD=JIT \u8f6c\u50a8\u6b63\u5728\u8ddf\u8e2a\u5df2\u5d29\u6e83\u7f16\u8bd1\u7ebf\u7a0b\u4e0a\u7684\u65b9\u6cd5\u7684 IL
+# START NON-TRANSLATABLE
+J9NLS_DMP_JIT_TRACE_IL_CRASHED_THREAD.explanation=The dump is tracing the IL of the crashed thread in its current state before recompiling the method for tracing.
+J9NLS_DMP_JIT_TRACE_IL_CRASHED_THREAD.system_action=The JVM continues.
+J9NLS_DMP_JIT_TRACE_IL_CRASHED_THREAD.user_response=Diagnostic information, provide this information to your service representative.
+J9NLS_DMP_JIT_TRACE_IL_CRASHED_THREAD.link=
+
 # END NON-TRANSLATABLE

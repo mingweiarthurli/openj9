@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -31,13 +31,13 @@
 #include "GCExtensions.hpp"
 #include "TgcExtensions.hpp"
 
-#include "Dispatcher.hpp"
 #include "EnvironmentBase.hpp"
 #include "HashTableIterator.hpp"
 #include "HeapMapIterator.hpp"
 #include "HeapRegionDescriptorVLHGC.hpp"
 #include "HeapRegionIteratorVLHGC.hpp"
 #include "HeapRegionManager.hpp"
+#include "ParallelDispatcher.hpp"
 #include "ParallelTask.hpp"
 
 struct ClassTableEntry {
@@ -67,7 +67,7 @@ public:
 	virtual UDATA getVMStateID(void) { return OMRVMSTATE_GC_TGC; }
 	virtual void run(MM_EnvironmentBase *env);
 
-	TgcParallelHeapWalkTask(MM_EnvironmentBase *env, MM_Dispatcher *dispatcher)
+	TgcParallelHeapWalkTask(MM_EnvironmentBase *env, MM_ParallelDispatcher *dispatcher)
 		: MM_ParallelTask(env, dispatcher)
 	{
 		_typeId = __FUNCTION__;
@@ -166,7 +166,7 @@ reportInterRegionRememberedSetDemographics(MM_EnvironmentBase *env)
 	
 	tgcExtensions->printf("<rememberedSetDemographics increment=\"%zu\">\n", tgcExtensions->_interRegionRememberedSetDemographics.incrementCount);
 
-	MM_Dispatcher *dispatcher = extensions->dispatcher;
+	MM_ParallelDispatcher *dispatcher = extensions->dispatcher;
 	TgcParallelHeapWalkTask heapWalkTask(env, dispatcher);
 	dispatcher->run(env, &heapWalkTask);
 	

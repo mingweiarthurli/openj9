@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2018 IBM Corp. and others
+ * Copyright (c) 2001, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -89,6 +89,7 @@ public class VmArgumentTests {
 	private static final String XPROD = "-Xprod";
 	private static final String HELLO_WORLD_SCRIPT = "#!/bin/sh\n"+ "echo hello, world\n";
 
+	private static final String JAVA_OPTIONS = "_JAVA_OPTIONS"; //$NON-NLS-1$
 	private static final String IBM_JAVA_OPTIONS = "IBM_JAVA_OPTIONS"; //$NON-NLS-1$
 	private static final String JAVA_TOOL_OPTIONS = "JAVA_TOOL_OPTIONS"; //$NON-NLS-1$
 	private static final String OPENJ9_JAVA_OPTIONS = "OPENJ9_JAVA_OPTIONS"; //$NON-NLS-1$
@@ -117,6 +118,7 @@ public class VmArgumentTests {
 	private static final String JAVA_COMPILER_VALUE=System.getProperty("java.compiler");
 	private static final String SYSPROP_DJAVA_COMPILER_EQUALS = "-Djava.compiler="+JAVA_COMPILER_VALUE;
 
+	private static final boolean isIBM;
 	private static final boolean isJava8;
 
 	private static final String IBM_NOSIGHANDLER = "IBM_NOSIGHANDLER";
@@ -130,9 +132,9 @@ public class VmArgumentTests {
 	protected static Logger logger = Logger.getLogger(VmArgumentTests.class);
 
 	static {
-		boolean isIbm = System.getProperty("java.vm.vendor").equals("IBM Corporation");
+		isIBM = System.getProperty("java.vm.vendor").equals("IBM Corporation");
 		mandatoryArgumentsJava8 = new String[] {
-				isIbm?XOPTIONSFILE:null,
+				isIBM ? XOPTIONSFILE : null,
 						"-Xlockword:mode",
 						"-Xjcl:",
 						"-Dcom.ibm.oti.vm.bootstrap.library.path",
@@ -148,7 +150,7 @@ public class VmArgumentTests {
 		};
 
 		mandatoryArguments = new String[] {
-				isIbm?XOPTIONSFILE:null,
+				isIBM ? XOPTIONSFILE : null,
 						"-Xlockword:mode",
 						"-Xjcl:",
 						"-Dcom.ibm.oti.vm.bootstrap.library.path",
@@ -334,7 +336,27 @@ public class VmArgumentTests {
 		assertTrue(IBM_JAVA_OPTIONS+ " should come last", argumentPositions.get(ibmJavaOptionsArg).intValue() > argumentPositions.get(DJAVA_HOME).intValue());
 	}
 
-	/* test OPENJ9_JAVA_OPTIONS environment variableS */
+	/* test _JAVA_OPTIONS environment variable */
+	@Test
+	public void testJavaOptions() {
+		ProcessBuilder pb = makeProcessBuilder(new String[] {}, CLASSPATH);
+		Map<String, String> env = pb.environment();
+		String javaOptionsArg = "-Dtest.name=testJavaOptions"; //$NON-NLS-1$
+		env.put(JAVA_OPTIONS, javaOptionsArg);
+		ArrayList<String> actualArguments = runAndGetArgumentList(pb);
+		HashMap<String, Integer> argumentPositions = checkArguments(actualArguments, new String[] {javaOptionsArg});
+		if (isJava8 && isIBM) {
+			assertFalse("Unexpected: " + javaOptionsArg, argumentPositions.containsKey(javaOptionsArg));
+		} else {
+			assertTrue(MISSING_ARGUMENT + javaOptionsArg, argumentPositions.containsKey(javaOptionsArg));
+			/* environment variables should come after implicit arguments */
+			assertTrue(JAVA_OPTIONS + SHOULD_COME_AFTER + DJAVA_HOME, 
+					argumentPositions.get(javaOptionsArg).intValue() > argumentPositions.get(DJAVA_HOME).intValue());
+		}
+	}
+
+
+	/* test OPENJ9_JAVA_OPTIONS environment variable */
 	@Test
 	public void testOpenJ9Options() {
 		ProcessBuilder pb = makeProcessBuilder(new String[] {}, CLASSPATH);
@@ -666,30 +688,43 @@ public class VmArgumentTests {
 		}
 	}
 
-	/* IBM_JAVA_OPTIONS should take priority over JAVA_TOOL_OPTIONS */
+	/* IBM_JAVA_OPTIONS should take priority over JAVA_TOOL_OPTIONS, and JAVA_OPTIONS */
 	@Test
 	public void testEnvironmentVariableOrdering() {
 		ProcessBuilder pb = makeProcessBuilder(new String[] {}, CLASSPATH);
 		Map<String, String> env = pb.environment();
-		String javaToolOptionsArg = "-Dtest.name1=javaToolOptionsArg";
-		String ibmJavaOptionsArg = "-Dtest.name2=ibmJavaOptionsArg";
-		String openJ9JavaOptionsArg = "-Dtest.name2=openJ9JavaOptionsArg";
-		env.put(JAVA_TOOL_OPTIONS, javaToolOptionsArg);
+		String ibmJavaOptionsArg = "-Dtest.name1=ibmJavaOptionsArg";
+		String javaOptionsArg = "-Dtest.name2=javaOptionsArg";
+		String javaToolOptionsArg = "-Dtest.name3=javaToolOptionsArg";
+		String openJ9JavaOptionsArg = "-Dtest.name4=openJ9JavaOptionsArg";
 		env.put(IBM_JAVA_OPTIONS, ibmJavaOptionsArg);
+		env.put(JAVA_OPTIONS, javaOptionsArg);
+		env.put(JAVA_TOOL_OPTIONS, javaToolOptionsArg);
 		env.put(OPENJ9_JAVA_OPTIONS, openJ9JavaOptionsArg);
 		ArrayList<String> actualArguments = runAndGetArgumentList(pb);
 		HashMap<String, Integer> argumentPositions = checkArguments(actualArguments, 
-				new String[] {ibmJavaOptionsArg, javaToolOptionsArg, openJ9JavaOptionsArg});
+				new String[] {ibmJavaOptionsArg, javaOptionsArg, javaToolOptionsArg, openJ9JavaOptionsArg});
 		assertTrue(MISSING_ARGUMENT+ibmJavaOptionsArg, 
 				argumentPositions.containsKey(ibmJavaOptionsArg));
+		if (!isJava8 || !isIBM) {
+			assertTrue(MISSING_ARGUMENT + javaOptionsArg, 
+					argumentPositions.containsKey(javaOptionsArg));
+		} else {
+			assertFalse("unexpected: " + javaOptionsArg, 
+					argumentPositions.containsKey(javaOptionsArg));
+		}
 		assertTrue(MISSING_ARGUMENT+javaToolOptionsArg, 
 				argumentPositions.containsKey(javaToolOptionsArg));
 		assertTrue(MISSING_ARGUMENT+openJ9JavaOptionsArg, 
 				argumentPositions.containsKey(openJ9JavaOptionsArg));
 		assertTrue(IBM_JAVA_OPTIONS+ SHOULD_COME_AFTER+OPENJ9_JAVA_OPTIONS, 
 				argumentPositions.get(ibmJavaOptionsArg).intValue() > argumentPositions.get(openJ9JavaOptionsArg).intValue());
-		assertTrue(OPENJ9_JAVA_OPTIONS+ SHOULD_COME_AFTER+JAVA_TOOL_OPTIONS, 
+		assertTrue(OPENJ9_JAVA_OPTIONS + SHOULD_COME_AFTER + JAVA_TOOL_OPTIONS, 
 				argumentPositions.get(openJ9JavaOptionsArg).intValue() > argumentPositions.get(javaToolOptionsArg).intValue());
+		if (!(isJava8 && isIBM)) {
+			assertTrue(JAVA_OPTIONS + SHOULD_COME_AFTER + IBM_JAVA_OPTIONS, 
+					argumentPositions.get(javaOptionsArg).intValue() > argumentPositions.get(ibmJavaOptionsArg).intValue());
+		}
 	}
 
 	/*
@@ -1278,7 +1313,7 @@ public class VmArgumentTests {
 							":/opt/IBM/WebSphere/AppServer80/lib/urlprotocols.jar:/opt/IBM/WebSphere/AppServer80/deploytool/itp/batchboot.jar:/opt/IBM/WebSphere/AppServer80/deploytool/itp/batch2.jar" +
 							":/opt/IBM/WebSphere/AppServer80/java/lib/tools.jar"+":"+CLASSPATH;
 
-			String[] initalCmdLineArgs = {"-Declipse.security",
+			String[] initialCmdLineArgs = {"-Declipse.security",
 					"-Dosgi.install.area=/opt/IBM/WebSphere/AppServer80",
 					"-Dosgi.configuration.area=/opt/IBM/WebSphere/AppServer80/profiles/AppSrv01/servers/server1/configuration",
 					"-Djava.awt.headless=true",
@@ -1304,10 +1339,9 @@ public class VmArgumentTests {
 					"-Dcom.ibm.security.jgss.debug=off",
 					"-Dcom.ibm.security.krb5.Krb5Debug=off",
 					"-Djava.library.path=/opt/IBM/WebSphere/AppServer80/lib/native/linux/x86_64/:/opt/IBM/WebSphere/AppServer80/java/jre/lib/amd64/default:/opt/IBM/WebSphere/AppServer80/java/jre/lib/amd64:/opt/IBM/WebSphere/AppServer80/lib/native/linux/x86_64/:/opt/IBM/WebSphere/AppServer80/bin:.:/usr/lib:",
-					"-Djava.security.auth.login.config=/opt/IBM/WebSphere/AppServer80/profiles/AppSrv01/properties/wsjaas.conf",
-			"-Djava.security.policy=/opt/IBM/WebSphere/AppServer80/profiles/AppSrv01/properties/server.policy"};
+					"-Djava.security.auth.login.config=/opt/IBM/WebSphere/AppServer80/profiles/AppSrv01/properties/wsjaas.conf"};
 
-			String[] initalExpectedArgs = {"-Declipse.security",
+			String[] initialExpectedArgs = {"-Declipse.security",
 					"-Dosgi.install.area=/opt/IBM/WebSphere/AppServer80",
 					"-Dosgi.configuration.area=/opt/IBM/WebSphere/AppServer80/profiles/AppSrv01/servers/server1/configuration",
 					"-Djava.awt.headless=true",
@@ -1332,27 +1366,41 @@ public class VmArgumentTests {
 					"-Dcom.ibm.security.jgss.debug=off",
 					"-Dcom.ibm.security.krb5.Krb5Debug=off",
 					"-Djava.library.path=/opt/IBM/WebSphere/AppServer80/lib/native/linux/x86_64/:/opt/IBM/WebSphere/AppServer80/java/jre/lib/amd64/default:/opt/IBM/WebSphere/AppServer80/java/jre/lib/amd64:/opt/IBM/WebSphere/AppServer80/lib/native/linux/x86_64/:/opt/IBM/WebSphere/AppServer80/bin:.:/usr/lib:",
-					"-Djava.security.auth.login.config=/opt/IBM/WebSphere/AppServer80/profiles/AppSrv01/properties/wsjaas.conf",
-			"-Djava.security.policy=/opt/IBM/WebSphere/AppServer80/profiles/AppSrv01/properties/server.policy"};
+					"-Djava.security.auth.login.config=/opt/IBM/WebSphere/AppServer80/profiles/AppSrv01/properties/wsjaas.conf"};
 
-
-			/*
-			 * This test should only run for Java 1.8.0. For Java
-			 * 1.9.0 and above, we do not support java.ext.dirs property.
-			 */
 			String[] cmdLineArgs;
 			String[] expectedArgs;
-			if (isJava8) {
-				cmdLineArgs = new String[initalCmdLineArgs.length + 1];
-				System.arraycopy(initalCmdLineArgs, 0, cmdLineArgs, 0, initalCmdLineArgs.length);
-				cmdLineArgs[initalCmdLineArgs.length] = "-Djava.ext.dirs=/opt/IBM/WebSphere/AppServer80/tivoli/tam:/opt/IBM/WebSphere/AppServer80/java/jre/lib/ext";
+			if (VersionCheck.major() < 19) {
+				final String policy = "-Djava.security.policy=/opt/IBM/WebSphere/AppServer80/profiles/AppSrv01/properties/server.policy";
+				if (isJava8) {
+					/*
+					 * This test should only run for Java 1.8.0. For Java
+					 * 1.9.0 and above, we do not support java.ext.dirs property.
+					 */
+					final String dirs = "-Djava.ext.dirs=/opt/IBM/WebSphere/AppServer80/tivoli/tam:/opt/IBM/WebSphere/AppServer80/java/jre/lib/ext";
 
-				expectedArgs = new String[initalExpectedArgs.length + 1];
-				System.arraycopy(initalExpectedArgs, 0, expectedArgs, 0, initalExpectedArgs.length);
-				expectedArgs[initalExpectedArgs.length] = "-Djava.ext.dirs=/opt/IBM/WebSphere/AppServer80/tivoli/tam:/opt/IBM/WebSphere/AppServer80/java/jre/lib/ext";
+					cmdLineArgs = new String[initialCmdLineArgs.length + 2];
+					System.arraycopy(initialCmdLineArgs, 0, cmdLineArgs, 0, initialCmdLineArgs.length);
+					cmdLineArgs[initialCmdLineArgs.length] = policy;
+					cmdLineArgs[initialCmdLineArgs.length + 1] = dirs;
+
+					expectedArgs = new String[initialExpectedArgs.length + 2];
+					System.arraycopy(initialExpectedArgs, 0, expectedArgs, 0, initialExpectedArgs.length);
+					expectedArgs[initialExpectedArgs.length] = policy;
+					expectedArgs[initialExpectedArgs.length + 1] = dirs;
+				} else {
+					cmdLineArgs = new String[initialCmdLineArgs.length + 1];
+					System.arraycopy(initialCmdLineArgs, 0, cmdLineArgs, 0, initialCmdLineArgs.length);
+					cmdLineArgs[initialCmdLineArgs.length] = policy;
+
+					expectedArgs = new String[initialExpectedArgs.length + 1];
+					System.arraycopy(initialExpectedArgs, 0, expectedArgs, 0, initialExpectedArgs.length);
+					expectedArgs[initialExpectedArgs.length] = policy;
+				}
 			} else {
-				cmdLineArgs = initalCmdLineArgs.clone();
-				expectedArgs = initalExpectedArgs.clone();
+				/* SecurityManager and related classes have been removed. */
+				cmdLineArgs = initialCmdLineArgs.clone();
+				expectedArgs = initialExpectedArgs.clone();
 			}
 
 			try {
@@ -1651,7 +1699,7 @@ public class VmArgumentTests {
 			int p = 0;
 			for (String a: actualArguments) {
 				if (a.startsWith(op)) {
-					argPositions.put(op, new Integer(p));
+					argPositions.put(op, Integer.valueOf(p));
 					break;
 				} else {
 					++p;

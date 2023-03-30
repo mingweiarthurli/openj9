@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2018 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -100,7 +100,7 @@ IDATA j9bcutil_dumpBytecodes(J9PortLibrary * portLib, J9ROMClass * romClass,
 	IDATA result;
 	U_32 resultArray[8192];
 	U_32 localsCount = J9_ARG_COUNT_FROM_ROM_METHOD(romMethod) + J9_TEMP_COUNT_FROM_ROM_METHOD(romMethod);
-	char environment[128] = "\0";
+	char environment[128];
 	BOOLEAN envVarDefined = FALSE;
 
 	if (0 == j9sysinfo_get_env("j9bcutil_dumpBytecodes", environment, sizeof(environment))) {
@@ -472,7 +472,7 @@ IDATA j9bcutil_dumpBytecodes(J9PortLibrary * portLib, J9ROMClass * romClass,
 		case JBcheckcast:
 		case JBinstanceof:
 #if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
-		case JBdefaultvalue:
+		case JBaconst_init:
 #endif
 			_GETNEXT_U16(index, bcIndex);
 			info = &constantPool[index];
@@ -592,7 +592,3 @@ static void cfdumpBytecodePrintFunction(void *userData, char *format, ...)
 
 	j9tty_printf(PORTLIB, "%s", outputBuffer);
 }
-
-
-
-

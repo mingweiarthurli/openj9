@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2018, 2020 IBM Corp. and others
+# Copyright (c) 2018, 2021 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
 # OpenJDK Assembly Exception [2].
 #
 # [1] https://www.gnu.org/software/classpath/license.html
-# [2] http://openjdk.java.net/legal/assembly-exception.html
+# [2] https://openjdk.org/legal/assembly-exception.html
 #
 # SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 ################################################################################
@@ -150,6 +150,8 @@ j9vm_add_library(jvmti_test_src STATIC
 	com/ibm/jvmti/tests/redefineClasses/rc019a.c
 	com/ibm/jvmti/tests/redefineClasses/rc019b.c
 	com/ibm/jvmti/tests/redefineClasses/rc020.c
+	com/ibm/jvmti/tests/redefineClasses/rc021.c
+	com/ibm/jvmti/tests/redefineClasses/rtc003.c
 
 	com/ibm/jvmti/tests/registerNativesWithRetransformation/rnwr001.c
 
@@ -162,6 +164,7 @@ j9vm_add_library(jvmti_test_src STATIC
 	com/ibm/jvmti/tests/retransformationIncapableAgent/ria001.c
 
 	com/ibm/jvmti/tests/retransformClasses/rtc001.c
+	com/ibm/jvmti/tests/retransformClasses/rtc002.c
 
 	com/ibm/jvmti/tests/retransformRedefineCombo/rrc001.c
 
@@ -183,8 +186,9 @@ j9vm_add_library(jvmti_test_src STATIC
 	com/ibm/jvmti/tests/eventException/ee001.c
 
 	com/ibm/jvmti/tests/fieldwatch/fw001.c
-)
 
+	com/ibm/jvmti/tests/eventVMStart/vmstart001.c
+)
 
 target_link_libraries(jvmti_test_src
 	PRIVATE
@@ -192,3 +196,7 @@ target_link_libraries(jvmti_test_src
 		j9vm_jvmtitest_includes
 		jvmti_test_agent
 )
+
+if(OMR_OS_ZOS)
+	target_compile_options(jvmti_test_src PRIVATE -Wc,DLL,EXPORTALL)
+endif()

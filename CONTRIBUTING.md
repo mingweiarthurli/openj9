@@ -1,5 +1,5 @@
 <!--
-Copyright (c) 2017, 2020 IBM Corp. and others
+Copyright (c) 2017, 2021 IBM Corp. and others
 
 This program and the accompanying materials are made available under
 the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@ Exception [1] and GNU General Public License, version 2 with the
 OpenJDK Assembly Exception [2].
 
 [1] https://www.gnu.org/software/classpath/license.html
-[2] http://openjdk.java.net/legal/assembly-exception.html
+[2] https://openjdk.org/legal/assembly-exception.html
 
 SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 -->
@@ -27,9 +27,9 @@ Thank you for your interest in Eclipse OpenJ9!
 We welcome and encourage all kinds of contributions to the project, not only
 code. This includes bug reports, user experience feedback, assistance in
 reproducing issues and more. Contributions to the website
-(https://github.com/eclipse/openj9-website), to the user documentation
-(https://github.com/eclipse/openj9-docs), to the system verification tests
-(https://github.com/eclipse/openj9-systemtest), or to Eclipse OMR
+(https://github.com/eclipse-openj9/openj9-website), to the user documentation
+(https://github.com/eclipse-openj9/openj9-docs), to the system verification tests
+(https://github.com/eclipse-openj9/openj9-systemtest), or to Eclipse OMR
 (https://github.com/eclipse/omr), which is an integral part of OpenJ9 are all
 also welcome.
 
@@ -53,29 +53,40 @@ Following these guidelines will help us merge your pull requests smoothly:
 
 4. If your contribution introduces an external change that requires an update
    to the [user documentation](https://www.eclipse.org/openj9/docs/), add the
-   label `doc:externals` and open an  [issue](https://github.com/eclipse/openj9-docs/issues/new?template=new-documentation-change.md)
-   at the user documentation repository. Examples of an external change include
+   label `doc:externals` to the OpenJ9 issue, or request a committer to do it,
+   and open an [issue](https://github.com/eclipse-openj9/openj9-docs/issues/new?template=new-documentation-change.md)
+   at the user documentation repository. The OpenJ9 pull request should be labeled with `depends:doc` as well. Committers
+   should not merge the OpenJ9 pull request until at least a doc issue is created, and ideally not until the doc pull
+   request is ready for merge. Rather than doing it separately, the pull request should add or update the
+   [release notes](https://github.com/eclipse-openj9/openj9/tree/master/doc/release-notes) for the next release with a
+   short summary of the change. Examples of an external change include
    a new command line option, a change in behavior, or a restriction.
+
+   A [pull request](https://github.com/eclipse-openj9/openj9-docs/pulls) to update the documentation is required. Do your best
+   to make appropriate updates, and the reviewers will help guide the necessary doc changes.
 
 5. Please carefully read and adhere to the legal considerations and
    copyright/license requirements outlined below.
-   
-   
+
+6. Ensure your changes are compatible with the checks that will be applied to your pull request.
+   - The second year in each copyright notice should be the current year.
+   - Text files should use the proper line-endings and there should be no unwanted whitespace. You can enable the sample `pre-commit` hook created by `git init` to ensure you adhere to expectations.
+
 ## Building and testing
 
-In order to build OpenJ9, see the [build instructions](https://github.com/eclipse/openj9/tree/master/doc/build-instructions).
+In order to build OpenJ9, see the [build instructions](https://github.com/eclipse-openj9/openj9/tree/master/doc/build-instructions).
 Once the build system is prepared, building consists of a few simple steps. If
-building the original source fails, check the [level of the compiler](https://eclipse.github.io/openj9-docs/openj9_support/)
-being used. 
+building the original source fails, check the [level of the compiler](https://eclipse-openj9.github.io/openj9-docs/openj9_support/)
+being used.
 
 
 There are a large number of test cases that are run automatically as part of
 the Eclipse OpenJ9 build and test pipeline. The tests can be triggered by
 committers from pull requests. You can see the latest results on the
-[Eclipse OpenJ9 Jenkins instance](https://ci.eclipse.org/openj9/).
+[Eclipse OpenJ9 Jenkins instance](https://openj9-jenkins.osuosl.org/).
 
 The tests can also be run manually on your own machine, refer to the
-[OpenJ9 test quick start guide](https://github.com/eclipse/openj9/blob/master/test/README.md).
+[OpenJ9 test quick start guide](https://github.com/eclipse-openj9/openj9/blob/master/test/README.md).
 
 
 ## Commit Guidelines
@@ -83,7 +94,7 @@ The tests can also be run manually on your own machine, refer to the
 The first line describes the change made. It is written in the imperative mood,
 and should say what happens when the patch is applied. Keep it short and
 simple. The first line should be less than 70 characters, where reasonable,
-and should be written in sentence case preferably not ending in a period.
+and should be written in sentence case (capitalize the first letter) preferably not ending in a period.
 Leave a blank line between the first line and the message body.
 
 The body should be wrapped at 72 characters, where reasonable.
@@ -229,7 +240,7 @@ The template for the copyright notice and dual-license is as follows:
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/

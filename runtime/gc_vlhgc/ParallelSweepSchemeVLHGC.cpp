@@ -1,7 +1,7 @@
 
 
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -17,7 +17,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -33,13 +33,11 @@
 #include <string.h>
 
 #include "ParallelSweepSchemeVLHGC.hpp"
-#include "SweepPoolManagerAddressOrderedList.hpp"
 
 #include "AllocateDescription.hpp"
 #include "Bits.hpp"
 #include "CardTable.hpp"
 #include "Debug.hpp"
-#include "Dispatcher.hpp"
 #include "EnvironmentVLHGC.hpp"
 #include "GCExtensions.hpp"
 #include "Heap.hpp"
@@ -52,14 +50,15 @@
 #include "MarkMap.hpp"
 #include "Math.hpp"
 #include "MemoryPool.hpp"
-#include "MemoryPoolBumpPointer.hpp"
 #include "MemorySpace.hpp"
 #include "MemorySubSpace.hpp"
 #include "ObjectModel.hpp"
+#include "ParallelDispatcher.hpp"
 #include "ParallelSweepChunk.hpp"
 #include "ParallelTask.hpp"
 #include "SweepHeapSectioningVLHGC.hpp"
 #include "SweepPoolManagerVLHGC.hpp"
+#include "SweepPoolManagerAddressOrderedList.hpp"
 #include "SweepPoolState.hpp"
 
 
@@ -91,7 +90,7 @@ void
 MM_ParallelSweepVLHGCTask::setup(MM_EnvironmentBase *envBase)
 {
 	MM_EnvironmentVLHGC *env = MM_EnvironmentVLHGC::getEnvironment(envBase);
-	if (!env->isMasterThread()) {
+	if (!env->isMainThread()) {
 		Assert_MM_true(NULL == env->_cycleState);
 		env->_cycleState = _cycleState;
 	} else {
@@ -102,6 +101,8 @@ MM_ParallelSweepVLHGCTask::setup(MM_EnvironmentBase *envBase)
 	
 	/* record that this thread is participating in this cycle */
 	env->_sweepVLHGCStats._gcCount = MM_GCExtensions::getExtensions(env)->globalVLHGCStats.gcCount;
+
+	env->_freeEntrySizeClassStats.resetCounts();
 }
 
 /**
@@ -114,30 +115,31 @@ MM_ParallelSweepVLHGCTask::cleanup(MM_EnvironmentBase *envBase)
 	PORT_ACCESS_FROM_ENVIRONMENT(env);
 
 	static_cast<MM_CycleStateVLHGC*>(env->_cycleState)->_vlhgcIncrementStats._sweepStats.merge(&env->_sweepVLHGCStats);
-	if(!env->isMasterThread()) {
+	if(!env->isMainThread()) {
 		env->_cycleState = NULL;
 	}
 	
 	Trc_MM_ParallelSweepVLHGCTask_parallelStats(
 		env->getLanguageVMThread(),
-		(U_32)env->getSlaveID(), 
+		(U_32)env->getWorkerID(), 
 		(U_32)j9time_hires_delta(0, env->_sweepVLHGCStats.idleTime, J9PORT_TIME_DELTA_IN_MILLISECONDS), 
 		env->_sweepVLHGCStats.sweepChunksProcessed, 
 		(U_32)j9time_hires_delta(0, env->_sweepVLHGCStats.mergeTime, J9PORT_TIME_DELTA_IN_MILLISECONDS));
 }
 
 void
-MM_ParallelSweepVLHGCTask::masterSetup(MM_EnvironmentBase *env)
+MM_ParallelSweepVLHGCTask::mainSetup(MM_EnvironmentBase *env)
 {
 	_sweepScheme->setCycleState(_cycleState);
 }
 
 void
-MM_ParallelSweepVLHGCTask::masterCleanup(MM_EnvironmentBase *envBase)
+MM_ParallelSweepVLHGCTask::mainCleanup(MM_EnvironmentBase *envBase)
 {
 	/* now that sweep is finished, walk the list of regions and recycle any which are completely empty */
 	MM_EnvironmentVLHGC *env = MM_EnvironmentVLHGC::getEnvironment(envBase);
 	_sweepScheme->recycleFreeRegions(env);
+	_cycleState->_noCompactionAfterSweep = false;
 	_sweepScheme->clearCycleState();
 }
 
@@ -160,12 +162,12 @@ MM_ParallelSweepVLHGCTask::synchronizeGCThreads(MM_EnvironmentBase *envBase, con
  * Stats gathering for synchronizing threads during sweep.
  */
 bool
-MM_ParallelSweepVLHGCTask::synchronizeGCThreadsAndReleaseMaster(MM_EnvironmentBase *envBase, const char *id)
+MM_ParallelSweepVLHGCTask::synchronizeGCThreadsAndReleaseMain(MM_EnvironmentBase *envBase, const char *id)
 {
 	MM_EnvironmentVLHGC *env = MM_EnvironmentVLHGC::getEnvironment(envBase);
 	PORT_ACCESS_FROM_ENVIRONMENT(env);
 	U_64 startTime = j9time_hires_clock();
-	bool result = MM_ParallelTask::synchronizeGCThreadsAndReleaseMaster(env, id);
+	bool result = MM_ParallelTask::synchronizeGCThreadsAndReleaseMain(env, id);
 	U_64 endTime = j9time_hires_clock();
 	env->_sweepVLHGCStats.addToIdleTime(startTime, endTime);
 	
@@ -366,7 +368,7 @@ MM_ParallelSweepSchemeVLHGC::heapReconfigured(MM_EnvironmentVLHGC *env)
 /**
  * Initialize all internal structures in order to perform a parallel sweep.
  * 
- * @note called by the master thread only
+ * @note called by the main thread only
  */
 void
 MM_ParallelSweepSchemeVLHGC::setupForSweep(MM_EnvironmentVLHGC *env)
@@ -716,6 +718,7 @@ MM_ParallelSweepSchemeVLHGC::sweepAllChunks(MM_EnvironmentVLHGC *env, UDATA tota
 #endif /* J9MODRON_TGC_PARALLEL_STATISTICS */
 
 	MM_ParallelSweepChunk *chunk;
+	MM_ParallelSweepChunk *prevChunk = NULL;
 	MM_SweepHeapSectioningIterator sectioningIterator(_sweepHeapSectioning);
 
 	for (UDATA chunkNum = 0; chunkNum < totalChunkCount; chunkNum++) {
@@ -729,9 +732,20 @@ if(J9MODRON_HANDLE_NEXT_WORK_UNIT(env)) {
 #if defined(J9MODRON_TGC_PARALLEL_STATISTICS)                           
 			chunksProcessed += 1;
 #endif /* J9MODRON_TGC_PARALLEL_STATISTICS */
- 
+
+ 			/* if we are changing memory pool, flush the thread local stats to appropriate (previous) pool */
+			if ((NULL != prevChunk) && (prevChunk->memoryPool != chunk->memoryPool)) {
+				prevChunk->memoryPool->getLargeObjectAllocateStats()->getFreeEntrySizeClassStats()->mergeLocked(&env->_freeEntrySizeClassStats);
+			}
+
+ 			/* if we are starting or changing memory pool, setup frequent allocation sizes in free entry stats for the pool we are about to sweep */
+			if ((NULL == prevChunk) || (prevChunk->memoryPool != chunk->memoryPool)) {
+				env->_freeEntrySizeClassStats.initializeFrequentAllocation(chunk->memoryPool->getLargeObjectAllocateStats());
+			}
+
 			/* Sweep the chunk */
 			sweepChunk(env, chunk);
+			prevChunk = chunk;
 		}	
 	}
 
@@ -739,6 +753,11 @@ if(J9MODRON_HANDLE_NEXT_WORK_UNIT(env)) {
 	env->_sweepVLHGCStats.sweepChunksProcessed = chunksProcessed;
 	env->_sweepVLHGCStats.sweepChunksTotal = totalChunkCount;
 #endif /* J9MODRON_TGC_PARALLEL_STATISTICS */
+
+	/* flush the remaining stats (since the the last pool switch) */
+	if (NULL != prevChunk) {
+		prevChunk->memoryPool->getLargeObjectAllocateStats()->getFreeEntrySizeClassStats()->mergeLocked(&env->_freeEntrySizeClassStats);
+	}
 	
 }
 
@@ -754,8 +773,7 @@ if(J9MODRON_HANDLE_NEXT_WORK_UNIT(env)) {
 void
 MM_ParallelSweepSchemeVLHGC::connectChunk(MM_EnvironmentVLHGC *env, MM_ParallelSweepChunk *chunk)
 {
-	MM_MemoryPoolBumpPointer *memoryPool = (MM_MemoryPoolBumpPointer *)chunk->memoryPool;
-	MM_SweepPoolManager *sweepPoolManager = memoryPool->getSweepPoolManager();
+	MM_SweepPoolManager *sweepPoolManager = chunk->memoryPool->getSweepPoolManager();
 	sweepPoolManager->connectChunk(env, chunk);
 }
 
@@ -831,6 +849,7 @@ MM_ParallelSweepSchemeVLHGC::flushAllFinalChunks(MM_EnvironmentBase *env)
 				/* Find any unaccounted for free entries and flush them to the free list */
 				sweepPoolManager->flushFinalChunk(env, memoryPool);
 				sweepPoolManager->connectFinalChunk(env, memoryPool);
+
 				/* clear card table if empty */
 				if (region->getSize() == memoryPool->getActualFreeMemorySize()) {
 					void *low = region->getLowAddress();
@@ -854,14 +873,14 @@ MM_ParallelSweepSchemeVLHGC::flushAllFinalChunks(MM_EnvironmentBase *env)
 void
 MM_ParallelSweepSchemeVLHGC::internalSweep(MM_EnvironmentVLHGC *env)
 {
-	/* master thread does initialization */
-	if (env->_currentTask->synchronizeGCThreadsAndReleaseMaster(env, UNIQUE_ID)) {
+	/* main thread does initialization */
+	if (env->_currentTask->synchronizeGCThreadsAndReleaseMain(env, UNIQUE_ID)) {
 		/* Reset all memory pools within the sweep set as a precursor to sweeping. */
 		GC_HeapRegionIteratorVLHGC regionIterator(_regionManager);
 		MM_HeapRegionDescriptorVLHGC *region = NULL;
 		while (NULL != (region = regionIterator.nextRegion())) {
 			if (!region->_sweepData._alreadySwept && region->hasValidMarkMap()) {
-				((MM_MemoryPoolBumpPointer *)region->getMemoryPool())->reset(MM_MemoryPool::forSweep);
+				region->getMemoryPool()->reset(MM_MemoryPool::forSweep);
 			}
 		}
 
@@ -877,8 +896,8 @@ MM_ParallelSweepSchemeVLHGC::internalSweep(MM_EnvironmentVLHGC *env)
 	/* ..all threads now join in to do actual sweep */
 	sweepAllChunks(env, _chunksPrepared);
 	
-	/* ..and then master thread finishes off by connecting all the chunks */
-	if (env->_currentTask->synchronizeGCThreadsAndReleaseMaster(env, UNIQUE_ID)) {
+	/* ..and then main thread finishes off by connecting all the chunks */
+	if (env->_currentTask->synchronizeGCThreadsAndReleaseMain(env, UNIQUE_ID)) {
 #if defined(J9MODRON_TGC_PARALLEL_STATISTICS)
 		U_64 mergeStartTime, mergeEndTime;
 		PORT_ACCESS_FROM_ENVIRONMENT(env);
@@ -907,7 +926,7 @@ MM_ParallelSweepSchemeVLHGC::internalSweep(MM_EnvironmentVLHGC *env)
  * 
  * @param cycleState Cycle state used for any operation relative to the current collection cycle.
  *
- * @note Expect to have the dispatcher and slave threads available for work
+ * @note Expect to have the dispatcher and worker threads available for work
  * @note Expect to have exclusive access
  * @note Expect to have a valid mark map for all live objects
  */
@@ -926,7 +945,7 @@ MM_ParallelSweepSchemeVLHGC::sweep(MM_EnvironmentVLHGC *env)
  * Complete any sweep work after a basic sweep operation.
  * Completing the sweep is a noop - the basic sweep operation consists of a full sweep.
  * 
- * @note Expect to have the dispatcher and slave threads available for work
+ * @note Expect to have the dispatcher and worker threads available for work
  * @note Expect to have exclusive access
  * @note Expect to have a valid mark map for all live objects
  * @note Expect basic sweep work to have been completed
@@ -990,7 +1009,7 @@ MM_ParallelSweepSchemeVLHGC::recycleFreeRegions(MM_EnvironmentVLHGC *env)
 	while(NULL != (region = regionIterator.nextRegion())) {
 		/* Region must be marked for sweep */
 		if (!region->_sweepData._alreadySwept && region->hasValidMarkMap()) {
-			MM_MemoryPoolBumpPointer *regionPool = (MM_MemoryPoolBumpPointer *)region->getMemoryPool();
+			MM_MemoryPool *regionPool = region->getMemoryPool();
 			Assert_MM_true(NULL != regionPool);
 			MM_HeapRegionDescriptorVLHGC *walkRegion = region;
 			MM_HeapRegionDescriptorVLHGC *next = walkRegion->_allocateData.getNextArrayletLeafRegion();
@@ -1032,8 +1051,7 @@ MM_ParallelSweepSchemeVLHGC::updateProjectedLiveBytesAfterSweep(MM_EnvironmentVL
 	
 	while (NULL != (region = regionIterator.nextRegion())) {
 		if (region->containsObjects() && !region->_sweepData._alreadySwept) {
-			MM_MemoryPoolBumpPointer *memoryPool = (MM_MemoryPoolBumpPointer *)region->getMemoryPool();
-			UDATA actualLiveBytes = regionSize - memoryPool->getFreeMemoryAndDarkMatterBytes();
+			UDATA actualLiveBytes = regionSize - region->getMemoryPool()->getFreeMemoryAndDarkMatterBytes();
 			region->_projectedLiveBytesDeviation = actualLiveBytes - region->_projectedLiveBytes;
 			region->_projectedLiveBytes = actualLiveBytes;
 		}

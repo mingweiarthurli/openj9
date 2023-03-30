@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -70,9 +70,6 @@ public:
 	UDATA _regionSize;  			/**< Cached region size */
 
 	bool _shouldFlushBuffersForDecommitedRegions;			/**< set to true at the end of a GC, if contraction occured. this is a signal for the next GC to perform flush buffers from regions contracted */
-#if defined(OMR_GC_COMPRESSED_POINTERS) && defined(OMR_GC_FULL_POINTERS)
-	bool _compressObjectReferences;
-#endif /* defined(OMR_GC_COMPRESSED_POINTERS) && defined(OMR_GC_FULL_POINTERS) */
 
 	volatile UDATA _overflowedRegionCount;					/**< count of regions overflowed as full */
 	UDATA _stableRegionCount;								/**< count of regions overflowed as stable */
@@ -85,7 +82,12 @@ public:
 	UDATA _cardToRegionDisplacement;						/**< the displacement value to use against RememberedSetcards to determine the corresponding region index */
 	MM_CardTable *_cardTable;								/**< cached copy of card table */
 
-	MM_RememberedSetCardBucket *_rememberedSetCardBucketPool; /**< RS bucket pool (for all regions) for Master thread or any other thread that caused GC in absence of Master thread */
+	MM_RememberedSetCardBucket *_rememberedSetCardBucketPool; /**< RS bucket pool (for all regions) for Main thread or any other thread that caused GC in absence of Main thread */
+
+protected:
+#if defined(OMR_GC_COMPRESSED_POINTERS) && defined(OMR_GC_FULL_POINTERS)
+	bool _compressObjectReferences;
+#endif /* defined(OMR_GC_COMPRESSED_POINTERS) && defined(OMR_GC_FULL_POINTERS) */
 
 private:
 
@@ -231,15 +233,7 @@ public:
 	MMINLINE bool
 	compressObjectReferences()
 	{
-#if defined(OMR_GC_COMPRESSED_POINTERS)
-#if defined(OMR_GC_FULL_POINTERS)
-		return _compressObjectReferences;
-#else /* OMR_GC_FULL_POINTERS */
-		return true;
-#endif /* OMR_GC_FULL_POINTERS */
-#else /* OMR_GC_COMPRESSED_POINTERS */
-		return false;
-#endif /* OMR_GC_COMPRESSED_POINTERS */
+		return OMR_COMPRESS_OBJECT_REFERENCES(_compressObjectReferences);
 	}
 
 	/**
@@ -584,7 +578,7 @@ public:
 
 	/**
 	 * Initialize Thread local resources for RS CardLists for all threads
-	 * @param env master GC thread
+	 * @param env main GC thread
 	 */
 	void threadLocalInitialize(MM_EnvironmentVLHGC* env);
 
@@ -604,10 +598,10 @@ public:
 	}
 	
 	/**
-	 * set RememberedSetCardBucketPool for gcMasterThread or the thread acting as gcMasterThread
+	 * set RememberedSetCardBucketPool for gcMainThread or the thread acting as gcMainThread
 	 * @param env[in] the current thread
 	 */
-	MMINLINE void setRememberedSetCardBucketPoolForMasterThread(MM_EnvironmentVLHGC *env)
+	MMINLINE void setRememberedSetCardBucketPoolForMainThread(MM_EnvironmentVLHGC *env)
 	{
 		env->_rememberedSetCardBucketPool = &_rememberedSetCardBucketPool[0];
 	}

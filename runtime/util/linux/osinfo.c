@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2012, 2014 IBM Corp. and others
+ * Copyright (c) 2012, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -36,15 +36,11 @@ char
 j9util_sched_compat_yield_value(J9JavaVM *javaVM)
 {
 	char value = ' ';
-	IDATA fd = -1;
 	PORT_ACCESS_FROM_JAVAVM(javaVM);
-
-	fd = j9file_open("/proc/sys/kernel/sched_compat_yield", EsOpenRead, 0);
+	IDATA fd = j9file_open("/proc/sys/kernel/sched_compat_yield", EsOpenRead, 0);
 	if (fd != -1) {
-		char buf[3] = "\0\0\0";
-		IDATA bytesread = 0;
-
-		bytesread = j9file_read(fd, buf, 3);
+		char buf[3];
+		IDATA bytesread = j9file_read(fd, buf, 3);
 		if ((bytesread == 2) && (buf[1] == '\n')) {
 			value = buf[0];
 		}
@@ -53,4 +49,3 @@ j9util_sched_compat_yield_value(J9JavaVM *javaVM)
 
 	return value;
 }
-

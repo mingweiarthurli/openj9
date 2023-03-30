@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -62,21 +62,21 @@ public class StaleMarkingTest {
 		}
 		
 		String clc = props.getProperty("NumberOfClassloaders");
-		Integer c = new Integer(clc);
+		Integer c = Integer.valueOf(clc);
 		int classloaderCount = c.intValue();
 		String [] classLoaderPaths = new String[classloaderCount];
 		int maxClassesToLoad =0;
 		for(int index = 0; index < classloaderCount; index++){
 			classLoaderPaths[index] = props.getProperty("ClassPath"+index);
 			String ctl = props.getProperty("NumberOfClassesToLoad"+index);
-			Integer intctl = new Integer(ctl);
+			Integer intctl = Integer.valueOf(ctl);
 			maxClassesToLoad = ((intctl.intValue() > maxClassesToLoad) ? intctl.intValue() : maxClassesToLoad);
 		}
 
 		String [][] classesToLoad = new String[classloaderCount][maxClassesToLoad];
 		for(int loaderIndex = 0; loaderIndex < classloaderCount; loaderIndex++){
 			String nctls = props.getProperty("NumberOfClassesToLoad"+loaderIndex);
-			Integer i = new Integer(nctls);
+			Integer i = Integer.valueOf(nctls);
 			int classesToLoadCount = i.intValue();
 			String classesString = props.getProperty("ClassesToLoad"+loaderIndex);
 			for (int classesIndex = 0; classesIndex < classesToLoadCount; classesIndex++){
@@ -86,7 +86,7 @@ public class StaleMarkingTest {
 		
 		String findPath = props.getProperty("FindPath");
 		String ctf = props.getProperty("NumberOfClassesToFind");
-		Integer intctf = new Integer(ctf);
+		Integer intctf = Integer.valueOf(ctf);
 		int numberOfClassesToFind = intctf.intValue();
 		
 		String classesString = props.getProperty("FindClasses");

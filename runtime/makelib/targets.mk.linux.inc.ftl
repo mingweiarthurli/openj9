@@ -15,7 +15,7 @@ Exception [1] and GNU General Public License, version 2 with the
 OpenJDK Assembly Exception [2].
 
 [1] https://www.gnu.org/software/classpath/license.html
-[2] http://openjdk.java.net/legal/assembly-exception.html
+[2] https://openjdk.org/legal/assembly-exception.html
 
 SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 -->
@@ -273,7 +273,7 @@ CPPFLAGS += -DLINUX -D_REENTRANT
 </#if>
 
 <#-- Add Position Independent compile flag -->
-<#if uma.spec.processor.amd64 || uma.spec.processor.arm || uma.spec.processor.s390 || uma.spec.processor.riscv64>
+<#if uma.spec.processor.amd64 || uma.spec.processor.arm || uma.spec.processor.aarch64 || uma.spec.processor.s390 || uma.spec.processor.riscv64>
   CFLAGS += -fPIC
   CXXFLAGS += -fPIC
 <#elseif uma.spec.processor.ppc>
@@ -309,9 +309,9 @@ endif
   CXXFLAGS += -DJ9HAMMER -m64 -fstack-protector
   CPPFLAGS += -DJ9HAMMER -m64
 <#elseif uma.spec.processor.arm>
-  CFLAGS += -DJ9ARM -DARMGNU -DARM -DFIXUP_UNALIGNED -I$(XCOMP_TOOLCHAIN_BASEDIR)/arm-bcm2708/arm-bcm2708hardfp-linux-gnueabi/arm-bcm2708hardfp-linux-gnueabi/include -fstack-protector
-  CXXFLAGS += -DJ9ARM -DARMGNU -DARM -DFIXUP_UNALIGNED -I$(XCOMP_TOOLCHAIN_BASEDIR)/arm-bcm2708/arm-bcm2708hardfp-linux-gnueabi/arm-bcm2708hardfp-linux-gnueabi/include -fno-threadsafe-statics -fstack-protector
-  CPPFLAGS += -DJ9ARM -DARMGNU -DARM -DFIXUP_UNALIGNED-I$(XCOMP_TOOLCHAIN_BASEDIR)/arm-bcm2708/arm-bcm2708hardfp-linux-gnueabi/arm-bcm2708hardfp-linux-gnueabi/include
+  CFLAGS += -DJ9ARM -DARMGNU -DARM -DFIXUP_UNALIGNED -D__STDC_LIMIT_MACROS -I$(XCOMP_TOOLCHAIN_BASEDIR)/arm-bcm2708/arm-bcm2708hardfp-linux-gnueabi/arm-bcm2708hardfp-linux-gnueabi/include -fstack-protector
+  CXXFLAGS += -DJ9ARM -DARMGNU -DARM -DFIXUP_UNALIGNED -D__STDC_LIMIT_MACROS -I$(XCOMP_TOOLCHAIN_BASEDIR)/arm-bcm2708/arm-bcm2708hardfp-linux-gnueabi/arm-bcm2708hardfp-linux-gnueabi/include -fno-threadsafe-statics -fstack-protector
+  CPPFLAGS += -DJ9ARM -DARMGNU -DARM -DFIXUP_UNALIGNED -D__STDC_LIMIT_MACROS -I$(XCOMP_TOOLCHAIN_BASEDIR)/arm-bcm2708/arm-bcm2708hardfp-linux-gnueabi/arm-bcm2708hardfp-linux-gnueabi/include
 <#elseif uma.spec.processor.aarch64>
   CFLAGS += -DJ9AARCH64 -fstack-protector
   CXXFLAGS += -DJ9AARCH64 -fstack-protector
@@ -331,8 +331,9 @@ endif
       CPPFLAGS += -m32
     endif
   <#else>
-    CFLAGS += -qalias=noansi -qxflag=LTOL:LTOL0 -qxflag=selinux
-    CXXFLAGS += -qalias=noansi -qxflag=LTOL:LTOL0 -qxflag=selinux -qsuppress=1540-1087:1540-1088:1540-1090
+    CFLAGS += -qalias=noansi -qxflag=LTOL:LTOL0 -qxflag=selinux -D__STDC_LIMIT_MACROS
+    CXXFLAGS += -qalias=noansi -qxflag=LTOL:LTOL0 -qxflag=selinux -qsuppress=1540-1087:1540-1088:1540-1090 -D__STDC_LIMIT_MACROS
+    CPPFLAGS += -D__STDC_LIMIT_MACROS
     ifdef j9vm_env_data64
     <#if uma.spec.flags.env_littleEndian.enabled>
       CFLAGS += -qarch=pwr7
@@ -516,9 +517,16 @@ endif
 </#if>
 
 <#if uma.spec.processor.ppc && !uma.spec.type.aix>
+
+<#if uma.spec.flags.env_littleEndian.enabled && uma.spec.flags.env_gcc.enabled>
+# special handling bcverify.c to deal with ppcle64-specific crash when compiling with gcc 7.5
+bcverify$(UMA_DOT_O) : bcverify.c
+	$(CC) $(CFLAGS) -O2 -c -o $@ $<
+</#if>
+
 ifdef USE_PPC_GCC
 
-# special handling BytecodeInterpreterFull.cpp, BytecodeInterpreterCompressed.cpp, DebugBytecodeInterpreterFull.cpp and DebugBytecodeInterpreterCompressed.cpp
+# special handling MHInterpreterFull.cpp, MHInterpreterCompressed.cpp, BytecodeInterpreterFull.cpp, BytecodeInterpreterCompressed.cpp, DebugBytecodeInterpreterFull.cpp and DebugBytecodeInterpreterCompressed.cpp
 
 BytecodeInterpreterFull$(UMA_DOT_O) : BytecodeInterpreterFull.cpp
 	$(PPC_GCC_CXX) $(PPC_GCC_CXXFLAGS) -c $<
@@ -532,7 +540,10 @@ DebugBytecodeInterpreterFull$(UMA_DOT_O) : DebugBytecodeInterpreterFull.cpp
 DebugBytecodeInterpreterCompressed$(UMA_DOT_O) : DebugBytecodeInterpreterCompressed.cpp
 	$(PPC_GCC_CXX) $(PPC_GCC_CXXFLAGS) -c $<
 
-MHInterpreter$(UMA_DOT_O) : MHInterpreter.cpp
+MHInterpreterFull$(UMA_DOT_O) : MHInterpreterFull.cpp
+	$(PPC_GCC_CXX) $(PPC_GCC_CXXFLAGS) -c $<
+
+MHInterpreterCompressed$(UMA_DOT_O) : MHInterpreterCompressed.cpp
 	$(PPC_GCC_CXX) $(PPC_GCC_CXXFLAGS) -c $<
 
 endif

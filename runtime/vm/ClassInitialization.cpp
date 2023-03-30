@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -76,10 +76,10 @@ compareRAMClasses(void *item, J9StackElement *currentElement)
 }
 
 static BOOLEAN
-checkForCyclicalVerification(J9VMThread *currentThread, J9ClassLoader *classLoader, J9Class *ramClass)
+isCyclePresentInVerification(J9VMThread *currentThread, J9ClassLoader *classLoader, J9Class *ramClass)
 {
 	J9JavaVM *javaVM = currentThread->javaVM;
-	return verifyLoadingOrLinkingStack(currentThread, classLoader, ramClass, &currentThread->verificationStack, &compareRAMClasses, javaVM->verificationMaxStack, javaVM->valueTypeVerificationStackPool, FALSE, FALSE);
+	return !verifyLoadingOrLinkingStack(currentThread, classLoader, ramClass, &currentThread->verificationStack, &compareRAMClasses, javaVM->verificationMaxStack, javaVM->valueTypeVerificationStackPool, FALSE, FALSE);
 }
 
 static void
@@ -161,7 +161,9 @@ performVerification(J9VMThread *currentThread, J9Class *clazz)
 		 * - Verify every class whose bytecodes have been modified
 		 * - Do not verify bootstrap classes if the appropriate runtime flag is set
 		 */
-		if (!J9CLASS_IS_EXEMPT_FROM_VALIDATION(clazz) && J9_ARE_NO_BITS_SET(romClass->optionalFlags, J9_ROMCLASS_OPTINFO_VERIFY_EXCLUDE)) {
+		if ((!J9CLASS_IS_EXEMPT_FROM_VALIDATION(clazz))
+			&& J9_ARE_NO_BITS_SET(romClass->optionalFlags, J9_ROMCLASS_OPTINFO_VERIFY_EXCLUDE)
+		) {
 			J9BytecodeVerificationData * bcvd = vm->bytecodeVerificationData;
 			if ((J9ROMCLASS_HAS_MODIFIED_BYTECODES(romClass) ||
 				(0 == (bcvd->verificationFlags & J9_VERIFY_SKIP_BOOTSTRAP_CLASSES)) ||
@@ -279,9 +281,16 @@ enterInitializationLock(J9VMThread *currentThread, j9object_t initializationLock
 		Trc_VM_enterInitializationLock_async(currentThread);
 		VM_ObjectMonitor::exitObjectMonitor(currentThread, initializationLock);
 		initializationLock = NULL;
-	} else if (NULL == initializationLock) {
-		Trc_VM_enterInitializationLock_OOM(currentThread);
-		setNativeOutOfMemoryError(currentThread, J9NLS_VM_FAILED_TO_ALLOCATE_MONITOR);
+	} else if (J9_OBJECT_MONITOR_ENTER_FAILED(initializationLock)) {
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+		if (J9_OBJECT_MONITOR_CRIU_SINGLE_THREAD_MODE_THROW == (UDATA)initializationLock) {
+			setCRIUSingleThreadModeJVMCRIUException(currentThread, 0, 0);
+		} else
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
+		if (J9_OBJECT_MONITOR_OOM == (UDATA)initializationLock) {
+			Trc_VM_enterInitializationLock_OOM(currentThread);
+			setNativeOutOfMemoryError(currentThread, J9NLS_VM_FAILED_TO_ALLOCATE_MONITOR);
+		}
 	}
 	return initializationLock;
 }
@@ -305,7 +314,7 @@ setInitStatus(J9VMThread *currentThread, J9Class *clazz, UDATA status, j9object_
 			STATE_NAME(status)
 	);
 	initializationLock = (j9object_t)VM_ObjectMonitor::enterObjectMonitor(currentThread, initializationLock);
-	Assert_VM_false(NULL == initializationLock);
+	Assert_VM_false(J9_OBJECT_MONITOR_ENTER_FAILED(initializationLock));
 	clazz = VM_VMHelpers::currentClass(clazz);
 	do {
 		clazz->initializeStatus = status;
@@ -370,10 +379,10 @@ classInitStateMachine(J9VMThread *currentThread, J9Class *clazz, J9ClassInitStat
 				goto done;
 			case J9ClassInitUnverified: {
 				initializationLock = enterInitializationLock(currentThread, initializationLock);
-				clazz = VM_VMHelpers::currentClass(clazz);
-				if (NULL == initializationLock) {
+				if (J9_OBJECT_MONITOR_ENTER_FAILED(initializationLock)) {
 					goto done;
 				}
+				clazz = VM_VMHelpers::currentClass(clazz);
 				if (J9ClassInitUnverified != clazz->initializeStatus) {
 					Trc_VM_classInitStateMachine_stateChanged(currentThread);
 					VM_ObjectMonitor::exitObjectMonitor(currentThread, initializationLock);
@@ -448,7 +457,7 @@ doVerify:
 
 						if (isStatic) {
 							omrthread_monitor_enter(vm->valueTypeVerificationMutex);
-							BOOLEAN cycleDetected = checkForCyclicalVerification(currentThread, entryClazz->classLoader, entryClazz);
+							BOOLEAN cycleDetected = isCyclePresentInVerification(currentThread, entryClazz->classLoader, entryClazz);
 							omrthread_monitor_exit(vm->valueTypeVerificationMutex);
 
 							/* It is legal for verification cycles to occur when verifying static flattenable fields
@@ -504,10 +513,10 @@ doVerify:
 					goto done;
 				}
 				initializationLock = enterInitializationLock(currentThread, initializationLock);
-				clazz = VM_VMHelpers::currentClass(clazz);
-				if (NULL == initializationLock) {
+				if (J9_OBJECT_MONITOR_ENTER_FAILED(initializationLock)) {
 					goto done;
 				}
+				clazz = VM_VMHelpers::currentClass(clazz);
 #if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
 				if (J9_IS_J9CLASS_VALUETYPE(clazz)) {
 					PUSH_OBJECT_IN_SPECIAL_FRAME(currentThread, initializationLock);
@@ -592,12 +601,10 @@ doVerify:
 
 						if (isStatic) {
 							initializationLock = enterInitializationLock(currentThread, initializationLock);
-							clazz = VM_VMHelpers::currentClass(clazz);
-
-							if (NULL == initializationLock) {
+							if (J9_OBJECT_MONITOR_ENTER_FAILED(initializationLock)) {
 								goto done;
 							}
-
+							clazz = VM_VMHelpers::currentClass(clazz);
 							clazz->initializeStatus = (UDATA)currentThread | J9ClassInitUnprepared;
 							VM_ObjectMonitor::exitObjectMonitor(currentThread, initializationLock);
 						}
@@ -613,12 +620,10 @@ doVerify:
 						if (isStatic) {
 							PUSH_OBJECT_IN_SPECIAL_FRAME(currentThread, exception);
 							initializationLock = enterInitializationLock(currentThread, initializationLock);
-							clazz = VM_VMHelpers::currentClass(clazz);
-
-							if (NULL == initializationLock) {
+							if (J9_OBJECT_MONITOR_ENTER_FAILED(initializationLock)) {
 								goto done;
 							}
-
+							clazz = VM_VMHelpers::currentClass(clazz);
 							clazz->initializeStatus = J9ClassInitUnprepared;
 							VM_ObjectMonitor::exitObjectMonitor(currentThread, initializationLock);
 							exception = POP_OBJECT_IN_SPECIAL_FRAME(currentThread);
@@ -639,10 +644,10 @@ doVerify:
 
 				/* Prepare this class */
 				initializationLock = enterInitializationLock(currentThread, initializationLock);
-				clazz = VM_VMHelpers::currentClass(clazz);
-				if (NULL == initializationLock) {
+				if (J9_OBJECT_MONITOR_ENTER_FAILED(initializationLock)) {
 					goto done;
 				}
+				clazz = VM_VMHelpers::currentClass(clazz);
 				if (J9ClassInitUnprepared != clazz->initializeStatus) {
 					VM_ObjectMonitor::exitObjectMonitor(currentThread, initializationLock);
 					break;
@@ -673,10 +678,10 @@ doVerify:
 					goto done;
 				}
 				initializationLock = enterInitializationLock(currentThread, initializationLock);
-				clazz = VM_VMHelpers::currentClass(clazz);
-				if (NULL == initializationLock) {
+				if (J9_OBJECT_MONITOR_ENTER_FAILED(initializationLock)) {
 					goto done;
 				}
+				clazz = VM_VMHelpers::currentClass(clazz);
 				if (J9ClassInitNotInitialized != clazz->initializeStatus) {
 					Trc_VM_classInitStateMachine_stateChanged(currentThread);
 					VM_ObjectMonitor::exitObjectMonitor(currentThread, initializationLock);
@@ -781,10 +786,10 @@ initFailed:
 			}
 			default: { // IN PROGRESS (status contains a thread in the high bits)
 				initializationLock = enterInitializationLock(currentThread, initializationLock);
-				clazz = VM_VMHelpers::currentClass(clazz);
-				if (NULL == initializationLock) {
+				if (J9_OBJECT_MONITOR_ENTER_FAILED(initializationLock)) {
 					goto done;
 				}
+				clazz = VM_VMHelpers::currentClass(clazz);
 				UDATA const status = clazz->initializeStatus;
 				J9VMThread *initializingThread = (J9VMThread*)(status & ~(UDATA)J9ClassInitStatusMask);
 				if (NULL == initializingThread) {

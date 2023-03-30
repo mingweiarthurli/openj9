@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -41,7 +41,7 @@ TR::S390ForceRecompilationSnippet::emitSnippetBody()
    TR_J9VMBase *fej9 = (TR_J9VMBase *)(comp->fe());
 
    uint32_t rEP = (uint32_t) cg()->getEntryPointRegister() - 1;
-   TR::SymbolReference * glueRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_S390induceRecompilation, false, false, false);
+   TR::SymbolReference * glueRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_S390induceRecompilation);
 
    // Set up the start of data constants and jump to helper.
    // We generate:
@@ -58,10 +58,8 @@ TR::S390ForceRecompilationSnippet::emitSnippetBody()
    *(int32_t *) cursor = 0xDEADBEEF;
    cursor += sizeof(int32_t);
 
-#if !defined(PUBLIC_BUILD)
    // Generate RIOFF if RI is supported.
    cursor = generateRuntimeInstrumentationOnOffInstruction(cg(), cursor, TR::InstOpCode::RIOFF);
-#endif
 
    // BRCL
    *(int16_t *) cursor = 0xC0F4;
@@ -78,7 +76,7 @@ TR::S390ForceRecompilationSnippet::emitSnippetBody()
    if (comp->getOption(TR_EnableRMODE64))
 #endif
       {
-      if (NEEDS_TRAMPOLINE(destAddr, cursor, cg()))
+      if (cg()->directCallRequiresTrampoline(destAddr, reinterpret_cast<intptr_t>(cursor)))
          {
          // Destination is beyond our reachable jump distance, we'll find the trampoline.
          destAddr = TR::CodeCacheManager::instance()->findHelperTrampoline(glueRef->getReferenceNumber(), (void *)cursor);
@@ -92,7 +90,6 @@ TR::S390ForceRecompilationSnippet::emitSnippetBody()
 
    *(int32_t *) cursor = (int32_t)((destAddr - (intptr_t)(cursor - 2)) / 2);
 
-   AOTcgDiag1(comp, "add TR_HelperAddress cursor=%x\n", cursor);
    cg()->addExternalRelocation(new (cg()->trHeapMemory()) TR::ExternalRelocation(cursor, (uint8_t*) glueRef, TR_HelperAddress, cg()),
                              __FILE__, __LINE__, getNode());
 
@@ -107,11 +104,7 @@ uint32_t
 TR::S390ForceRecompilationSnippet::getLength(int32_t  estimatedSnippetStart)
    {
    uint32_t length = 12;  // LARL + BRCL
-
-#if !defined(PUBLIC_BUILD)
    length += getRuntimeInstrumentationOnOffInstructionLength(cg());
-#endif
-
    return length;
    }
 
@@ -151,7 +144,6 @@ TR::S390ForceRecompilationDataSnippet::emitSnippetBody()
    {
    TR::Compilation *comp = cg()->comp();
    uint8_t * cursor = cg()->getBinaryBufferCursor();
-   AOTcgDiag1(comp, "TR::S390ForceRecompilationDataSnippet::emitSnippetBody cursor=%x\n", cursor);
    getSnippetLabel()->setCodeLocation(cursor);
 
    /** IMPORTANT **/
@@ -161,14 +153,12 @@ TR::S390ForceRecompilationDataSnippet::emitSnippetBody()
 
    // Return Address
    *(intptr_t *) cursor = (intptr_t)getRestartLabel()->getCodeLocation();
-   AOTcgDiag1(comp, "add TR_AbsoluteMethodAddress cursor=%x\n", cursor);
    cg()->addExternalRelocation(new (cg()->trHeapMemory()) TR::ExternalRelocation(cursor, NULL, TR_AbsoluteMethodAddress, cg()),
                              __FILE__, __LINE__, getNode());
    cursor += sizeof(intptr_t);
 
    // Start PC
    *(intptr_t *) cursor = (intptr_t)cg()->getCodeStart();
-   AOTcgDiag1(comp, "add TR_AbsoluteMethodAddress cursor=%x\n", cursor);
    cg()->addExternalRelocation(new (cg()->trHeapMemory()) TR::ExternalRelocation(cursor, NULL, TR_AbsoluteMethodAddress, cg()),
                              __FILE__, __LINE__, getNode());
    cursor += sizeof(intptr_t);

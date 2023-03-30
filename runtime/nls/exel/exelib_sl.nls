@@ -15,7 +15,7 @@
 # OpenJDK Assembly Exception [2].
 #
 # [1] https://www.gnu.org/software/classpath/license.html
-# [2] http://openjdk.java.net/legal/assembly-exception.html
+# [2] https://openjdk.org/legal/assembly-exception.html
 #
 # SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 #
@@ -625,7 +625,7 @@ J9NLS_EXELIB_INTERNAL_HELP_XSSI_GROWABLE.system_action=
 J9NLS_EXELIB_INTERNAL_HELP_XSSI_GROWABLE.user_response=
 # END NON-TRANSLATABLE
 
-J9NLS_EXELIB_INTERNAL_HELP_XSHARECLASSES=\  -Xshareclasses[:options]  Onemogo\u010di podatke razreda v skupni rabi (za podrobnosti uporabite pomo\u010d)\n
+J9NLS_EXELIB_INTERNAL_HELP_XSHARECLASSES=\  -Xshareclasses[:options]  Omogo\u010di podatke razreda v skupni rabi (za podrobnosti uporabite pomo\u010d)\n
 # START NON-TRANSLATABLE
 J9NLS_EXELIB_INTERNAL_HELP_XSHARECLASSES.explanation=NOTAG
 J9NLS_EXELIB_INTERNAL_HELP_XSHARECLASSES.system_action=
@@ -946,3 +946,18 @@ J9NLS_EXELIB_INTERNAL_HELP_XXDISABLEUSEGCSTARTUPHINTS.explanation=NOTAG
 J9NLS_EXELIB_INTERNAL_HELP_XXDISABLEUSEGCSTARTUPHINTS.system_action=
 J9NLS_EXELIB_INTERNAL_HELP_XXDISABLEUSEGCSTARTUPHINTS.user_response=
 # END NON-TRANSLATABLE
+
+J9NLS_EXELIB_INTERNAL_HELP_XXPORTABLESHAREDCACHE=\  -XX:+PortableSharedCache   omogo\u010di funkcijo, ki posku\u0161a maksimirati prenosljivost predpomnilnika v skupni rabi v ve\u010d ra\u010dunalnikih
+# START NON-TRANSLATABLE
+J9NLS_EXELIB_INTERNAL_HELP_XXPORTABLESHAREDCACHE.explanation=NOTAG
+J9NLS_EXELIB_INTERNAL_HELP_XXPORTABLESHAREDCACHE.system_action=
+J9NLS_EXELIB_INTERNAL_HELP_XXPORTABLESHAREDCACHE.user_response=
+# END NON-TRANSLATABLE
+
+J9NLS_EXELIB_INTERNAL_HELP_XXNOPORTABLESHAREDCACHE=\  -XX:-PortableShareCache   onemogo\u010di funkcijo, ki posku\u0161a maksimirati prenosljivost predpomnilnika v skupni rabi v ve\u010d ra\u010dunalnikih
+J9NLS_EXELIB_INTERNAL_HELP_XXNOPORTABLESHAREDCACHE.explanation=NOTAG
+J9NLS_EXELIB_INTERNAL_HELP_XXNOPORTABLESHAREDCACHE.system_action=
+J9NLS_EXELIB_INTERNAL_HELP_XXNOPORTABLESHAREDCACHE.user_response=
+# END NON-TRANSLATABLE
+
+

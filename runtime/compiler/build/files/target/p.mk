@@ -1,4 +1,4 @@
-# Copyright (c) 2000, 2019 IBM Corp. and others
+# Copyright (c) 2000, 2021 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@
 # OpenJDK Assembly Exception [2].
 #
 # [1] https://www.gnu.org/software/classpath/license.html
-# [2] http://openjdk.java.net/legal/assembly-exception.html
+# [2] https://openjdk.org/legal/assembly-exception.html
 #
 # SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 
@@ -28,8 +28,10 @@ JIT_PRODUCT_BACKEND_SOURCES+=\
     omr/compiler/p/codegen/OMRInstOpCode.cpp \
     omr/compiler/p/codegen/OMRInstruction.cpp \
     omr/compiler/p/codegen/OMRLinkage.cpp \
+    omr/compiler/p/codegen/OMRLoadStoreHandler.cpp \
     omr/compiler/p/codegen/OMRMachine.cpp \
     omr/compiler/p/codegen/OMRMemoryReference.cpp \
+    omr/compiler/p/codegen/OMRPeephole.cpp \
     omr/compiler/p/codegen/OMRRealRegister.cpp \
     omr/compiler/p/codegen/OMRRegisterDependency.cpp \
     omr/compiler/p/codegen/OMRSnippet.cpp \
@@ -48,7 +50,6 @@ JIT_PRODUCT_BACKEND_SOURCES+=\
 
 JIT_PRODUCT_SOURCE_FILES+=\
     compiler/p/codegen/CallSnippet.cpp \
-    compiler/p/codegen/DFPTreeEvaluator.cpp \
     compiler/p/codegen/ForceRecompilationSnippet.cpp \
     compiler/p/codegen/GenerateInstructions.cpp \
     compiler/p/codegen/InterfaceCastSnippet.cpp \
@@ -56,8 +57,6 @@ JIT_PRODUCT_SOURCE_FILES+=\
     compiler/p/codegen/J9CodeGenerator.cpp \
     compiler/p/codegen/J9PPCInstruction.cpp \
     compiler/p/codegen/J9PPCSnippet.cpp \
-    compiler/p/codegen/J9PPCWatchedInstanceFieldSnippet.cpp \
-    compiler/p/codegen/J9PPCWatchedStaticFieldSnippet.cpp \
     compiler/p/codegen/J9TreeEvaluator.cpp \
     compiler/p/codegen/J9UnresolvedDataSnippet.cpp \
     compiler/p/codegen/PPCJNILinkage.cpp \

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2013, 2020 IBM Corp. and others
+ * Copyright (c) 2013, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -186,7 +186,7 @@ getX86Description(struct J9PortLibrary *portLibrary, J9ProcessorDesc *desc)
  *							Hypervisor Vendor String
  *              cpuInfo[2] 	For EAX = 0x1, the 31st bit of ECX tells if its
  *              			running on Hypervisor or not,For EAX = 0x40000000 holds the second
- *							4 characters of the the Hypervisor Vendor String
+ *							4 characters of the Hypervisor Vendor String
  *              cpuInfo[3]	For EAX = 0x40000000 hold the last 4 characters of the
  *              			Hypervisor Vendor String
  *

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -29,6 +29,7 @@
 #include "control/Options.hpp"
 #include "compile/SymbolReferenceTable.hpp"
 #include "env/VMJ9.h"
+#include "env/VerboseLog.hpp"
 #include "runtime/J9Profiler.hpp"
 #include "exceptions/RuntimeFailure.hpp"
 #if defined(J9VM_OPT_JITSERVER)
@@ -208,6 +209,12 @@ J9::Recompilation::findOrCreateProfileInfo()
    return profileInfo;
    }
 
+TR_PersistentProfileInfo *
+J9::Recompilation::getProfileInfo()
+   {
+   return _bodyInfo->getProfileInfo();
+   }
+
 void
 J9::Recompilation::startOfCompilation()
    {
@@ -328,6 +335,10 @@ J9::Recompilation::endOfCompilation()
          _bodyInfo->setDisableSampling(true);
          }
       }
+
+   // If we disallow recompilation then disable sampling
+   if (!_compilation->allowRecompilation())
+      _bodyInfo->setDisableSampling(true);
    }
 
 
@@ -382,10 +393,8 @@ J9::Recompilation::switchToProfiling(uint32_t f, uint32_t c)
       return false;
       }
 
-   if (_compilation->isOptServer() && !TR::Options::getCmdLineOptions()->getOption(TR_AggressiveOpts))
+   if (_compilation->isOptServer() && !_compilation->getOption(TR_AggressiveSwitchingToProfiling))
       {
-      // can afford to switch to profiling under aggressive; needed for BigDecimal opt
-      //
       return false;
       }
 

@@ -1,6 +1,6 @@
 
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -42,12 +42,14 @@
 #include "HeapRegionManager.hpp"
 #include "MarkMap.hpp"
 #include "ParallelTask.hpp"
+#include "ContinuationObjectBufferVLHGC.hpp"
+#include "ContinuationObjectList.hpp"
 
 #if defined(J9VM_GC_MODRON_COMPACTION)
 
 class MM_AllocateDescription;
 class MM_WriteOnceCompactor;
-class MM_Dispatcher;
+class MM_ParallelDispatcher;
 class MM_Heap;
 class MM_HeapRegionDescriptorVLHGC;
 class MM_MemoryPool;
@@ -75,13 +77,13 @@ public:
 	virtual void setup(MM_EnvironmentBase *env);
 	virtual void cleanup(MM_EnvironmentBase *env);
 
-	void masterSetup(MM_EnvironmentBase *env);
-	void masterCleanup(MM_EnvironmentBase *env);
+	void mainSetup(MM_EnvironmentBase *env);
+	void mainCleanup(MM_EnvironmentBase *env);
 
 	/**
 	 * Create an ParallelCompactTask object.
 	 */
-	MM_ParallelWriteOnceCompactTask(MM_EnvironmentBase *env, MM_Dispatcher *dispatcher, MM_WriteOnceCompactor *compactScheme, MM_CycleState *cycleState, MM_MarkMap *nextMarkMap)
+	MM_ParallelWriteOnceCompactTask(MM_EnvironmentBase *env, MM_ParallelDispatcher *dispatcher, MM_WriteOnceCompactor *compactScheme, MM_CycleState *cycleState, MM_MarkMap *nextMarkMap)
 		: MM_ParallelTask(env, dispatcher)
 		, _compactScheme(compactScheme)
 		, _cycleState(cycleState)
@@ -99,29 +101,30 @@ class MM_WriteOnceCompactor : public MM_BaseVirtual
 {
 	/* Data Members */
 private:
-    J9JavaVM * const _javaVM;	/**< Cached pointer to the common JavaVM instance */
-    MM_GCExtensions * const _extensions;	/**< Cached pointer to the common GCExtensions instance */
-    MM_Heap * const _heap;	/**< Cached pointer to the common Heap instance */
-    MM_Dispatcher * const _dispatcher;	/**< Cached pointer to the common Dispatcher instance */
+	J9JavaVM * const _javaVM;  /**< Cached pointer to the common JavaVM instance */
+	MM_GCExtensions * const _extensions;  /**< Cached pointer to the common GCExtensions instance */
+	MM_Heap * const _heap;	/**< Cached pointer to the common Heap instance */
+	MM_ParallelDispatcher * const _dispatcher;  /**< Cached pointer to the common Dispatcher instance */
 	MM_HeapRegionManager * const _regionManager; /**< The region manager which holds the MM_HeapRegionDescriptor instances which manage the properties of the regions */
-    void * const _heapBase;	/**< The cached value of the lowest byte address which can be occupied by the heap */
-    void * const _heapTop;	/**< The cached value of the lowest byte address after the heap */
-    class WriteOnceCompactTableEntry *_compactTable;
+	void * const _heapBase;	/**< The cached value of the lowest byte address which can be occupied by the heap */
+	void * const _heapTop;	/**< The cached value of the lowest byte address after the heap */
+	class WriteOnceCompactTableEntry *_compactTable;
 	MM_CycleState _cycleState;  /**< Current cycle state information used to formulate receiver state for any operations  */
-	MM_MarkMap *_nextMarkMap;	/**< The next mark map (used as temporary storage for fixup data) */
+	MM_MarkMap *_nextMarkMap;  /**< The next mark map (used as temporary storage for fixup data) */
 	MM_InterRegionRememberedSet *_interRegionRememberedSet;	/**< A cached pointer to the  inter-region reference tracking  */
-	omrthread_monitor_t _workListMonitor;	/**< The monitor used to control work sharing of object movement/fixup tasks */
-	MM_HeapRegionDescriptorVLHGC *_readyWorkList;	/**< The root of the list of regions which can have some work done on them */
-	MM_HeapRegionDescriptorVLHGC *_readyWorkListHighPriority;	/**< Like _readyWorkList but is higher priority as it only contains regions which are compact destinations (that is, they block other move operations) */
-	MM_HeapRegionDescriptorVLHGC *_fixupOnlyWorkList;	/**< The root of the list of regions which must have their cards cleaned in order to fixup references into the compact set */
-	MM_HeapRegionDescriptorVLHGC *_rebuildWorkList;	/**< The root of the list of regions which must have their previous mark map extents rebuilt (this list is built as the object movement phase completes) */
+	omrthread_monitor_t _workListMonitor;  /**< The monitor used to control work sharing of object movement/fixup tasks */
+	MM_HeapRegionDescriptorVLHGC *_readyWorkList;  /**< The root of the list of regions which can have some work done on them */
+	MM_HeapRegionDescriptorVLHGC *_readyWorkListHighPriority;  /**< Like _readyWorkList but is higher priority as it only contains regions which are compact destinations (that is, they block other move operations) */
+	MM_HeapRegionDescriptorVLHGC *_fixupOnlyWorkList;  /**< The root of the list of regions which must have their cards cleaned in order to fixup references into the compact set */
+	MM_HeapRegionDescriptorVLHGC *_rebuildWorkList;  /**< The root of the list of regions which must have their previous mark map extents rebuilt (this list is built as the object movement phase completes) */
 	MM_HeapRegionDescriptorVLHGC *_rebuildWorkListHighPriority;	/**< Like _rebuildWorkList but is higher priority as it only contains regions which are compact destinations (that is, they block other rebuild operations) */
-	UDATA _threadsWaiting;	/**< The number of threads waiting for work on _workListMonitor */
-	bool _moveFinished;	/**< A flag set when all move work is done to allow all threads waiting for work to exit the monitor */
-	bool _rebuildFinished;	/**< A flag set when all mark map rebuilding work is done to allow all threads waiting for work to exit the monitor */
-	UDATA _lockCount; /**< Number of locks initialized for compact groups, based on NUMA. Stored for control to make sure that we deallocate same number that we allocated in initialize. */
+	UDATA _threadsWaiting;  /**< The number of threads waiting for work on _workListMonitor */
+	bool _moveFinished;  /**< A flag set when all move work is done to allow all threads waiting for work to exit the monitor */
+	bool _rebuildFinished;  /**< A flag set when all mark map rebuilding work is done to allow all threads waiting for work to exit the monitor */
+	UDATA _lockCount;  /**< Number of locks initialized for compact groups, based on NUMA. Stored for control to make sure that we deallocate same number that we allocated in initialize. */
 
-	class MM_CompactGroupDestinations {
+	class MM_CompactGroupDestinations
+	{
 		/* Fields */
 	public:
 		MM_HeapRegionDescriptorVLHGC *head; /**< Compact Group Destinations list header */
@@ -141,12 +144,12 @@ private:
 
 protected:
 public:
-    /*
-     * Page represents space can be marked by one slot(UDATA) of Compressed Mark Map
-     * In Compressed Mark Map one bit represents twice more space then one bit of regular Mark Map
-     * So, sizeof_page should be double of number of bytes represented by one UDATA in Mark Map
-     */
-    enum { sizeof_page = 2 * J9MODRON_HEAP_BYTES_PER_HEAPMAP_SLOT };
+	/*
+	 * Page represents space can be marked by one slot(UDATA) of Compressed Mark Map
+	 * In Compressed Mark Map one bit represents twice more space then one bit of regular Mark Map
+	 * So, sizeof_page should be double of number of bytes represented by one UDATA in Mark Map
+	 */
+	enum { sizeof_page = 2 * J9MODRON_HEAP_BYTES_PER_HEAPMAP_SLOT };
 
 	/* Member Functions */
 private:
@@ -185,11 +188,11 @@ private:
 	 * Note that this method is executed on only one thread while other initialization is being run by other threads.
 	 * @param env[in] A GC thread
 	 */
-    void initRegionCompactDataForCompactSet(MM_EnvironmentVLHGC *env);
+	void initRegionCompactDataForCompactSet(MM_EnvironmentVLHGC *env);
 
-    void saveForwardingPtr(J9Object* objectPtr, J9Object* forwardingPtr);
+	void saveForwardingPtr(J9Object* objectPtr, J9Object* forwardingPtr);
 
-    void fixupRoots(MM_EnvironmentVLHGC *env);
+	void fixupRoots(MM_EnvironmentVLHGC *env);
 
 	/** flush RS Lists for Compact Set and dirty card table
 	 */
@@ -197,7 +200,11 @@ private:
 	/**
 	 * Perform fixup for a single object.
 	 */
+	MMINLINE void preObjectMove(MM_EnvironmentVLHGC* env, J9Object *objectPtr, UDATA *objectSizeAfterMove);
+	MMINLINE void postObjectMove(MM_EnvironmentVLHGC* env, J9Object *newLocation, J9Object *objectPtr);
 	void fixupMixedObject(MM_EnvironmentVLHGC* env, J9Object *objectPtr, J9MM_FixupCache *cache);
+	void fixupContinuationNativeSlots(MM_EnvironmentVLHGC* env, J9Object *objectPtr, J9MM_FixupCache *cache);
+	void fixupContinuationObject(MM_EnvironmentVLHGC* env, J9Object *objectPtr, J9MM_FixupCache *cache);
 	void fixupClassObject(MM_EnvironmentVLHGC* env, J9Object *classObject, J9MM_FixupCache *cache);
 	void fixupClassLoaderObject(MM_EnvironmentVLHGC* env, J9Object *classLoaderObject, J9MM_FixupCache *cache);
 	void fixupPointerArrayObject(MM_EnvironmentVLHGC* env, J9Object *objectPtr, J9MM_FixupCache *cache);
@@ -206,35 +213,34 @@ private:
 	void fixupStacks(MM_EnvironmentVLHGC *env);
 	void fixupRememberedSet(MM_EnvironmentVLHGC *env);
 	void fixupMonitorReferences(MM_EnvironmentVLHGC *env);
-	void updateInternalLeafPointersAfterCopy(J9IndexableObject *destinationPtr, J9IndexableObject *sourcePtr);
 
 	/**
-     * Return the page index for an object.
-     * long int, always positive (in particular, -1 is an invalid value)
-     */
-    MMINLINE IDATA pageIndex(J9Object* objectPtr) const
-    {
-        UDATA markIndex = (UDATA)objectPtr - (UDATA)_heapBase;
-        return markIndex / sizeof_page;
-    }
+	 * Return the page index for an object.
+	 * long int, always positive (in particular, -1 is an invalid value)
+	 */
+	MMINLINE IDATA pageIndex(J9Object* objectPtr) const
+	{
+		UDATA markIndex = (UDATA)objectPtr - (UDATA)_heapBase;
+		return markIndex / sizeof_page;
+	}
 
 	/**
 	 * Return the start of a page
 	 */
-    MMINLINE J9Object* pageStart(UDATA i) const
-    {
-        return (J9Object*) ((UDATA)_heapBase + (i * sizeof_page));
-    }
+	MMINLINE J9Object* pageStart(UDATA i) const
+	{
+		return (J9Object*) ((UDATA)_heapBase + (i * sizeof_page));
+	}
 
-    void rebuildMarkbits(MM_EnvironmentVLHGC *env);
+	void rebuildMarkbits(MM_EnvironmentVLHGC *env);
     
-    /**
-     * Rebuild mark bits within the given region
-     * 
-     * @param env[in] the current thread
-     * @param region[in] the region of the heap to be rebuilt
-     * @return If the region was fully rebuilt, this will be NULL.  Otherwise, it is the address, in another region, which must be rebuilt before rebuilding this region can proceed
-     */
+	/**
+	 * Rebuild mark bits within the given region
+	 *
+	 * @param env[in] the current thread
+	 * @param region[in] the region of the heap to be rebuilt
+	 * @return If the region was fully rebuilt, this will be NULL.  Otherwise, it is the address, in another region, which must be rebuilt before rebuilding this region can proceed
+	 */
 	void *rebuildMarkbitsInRegion(MM_EnvironmentVLHGC *env, MM_HeapRegionDescriptorVLHGC *region);
     
 	/**
@@ -308,7 +314,7 @@ private:
 	 * Called to rebuild the given mark map from references in the given work packets.  Any packet slot which points into
 	 * the compact set is marked in the given mark map.
 	 * 
-	 * @param env[in] The master GC thread
+	 * @param env[in] The main GC thread
 	 * @param packets[in] The work packets for the in-progress GMP cycle
 	 * @param markMap[in] The mark map for the in-progress GMP cycle
 	 */
@@ -318,7 +324,7 @@ private:
 	 * Part of planning refactoring (JAZZ 21595).
 	 * This function is analogous to moveObjects.  It is meant to be the non-moving equivalent which only performs planning actions
 	 * but does not move objects or write to the heap.
-	 * @param env[in] The master GC thread
+	 * @param env[in] The main GC thread
 	 * @param objectCount[in/out] The number of objects the receiver planned to move
 	 * @param byteCount[in/out] The number of bytes the receiver planned to move
 	 * @param skippedObjectCount[in/out] The number of objects the receiver planned to skip
@@ -352,7 +358,7 @@ private:
 	 * Part of planning refactoring (JAZZ 21595).
 	 * This function is analogous to doCompact.  It is meant to be the non-moving equivalent which only performs planning actions
 	 * but does not move objects or write to the heap.
-	 * @param env[in] The master GC thread
+	 * @param env[in] The main GC thread
 	 * @param copyDestinationBase[in/out] The base address of object copy destinations.  This is updated to the byte after the space consumed by the copy before this method returns
 	 * @param copyDestinationTop[in] The end address of object copy destinations
 	 * @param firstTopCopy[in] The first object to try to copy
@@ -365,7 +371,7 @@ private:
 	 * Part of planning refactoring (JAZZ 21595).
 	 * This function is analogous to doCompact.  It is meant to be the non-moving equivalent which only performs planning actions
 	 * but does not move objects or write to the heap.
-	 * @param env[in] The master GC thread
+	 * @param env[in] The main GC thread
 	 * @param copyDestinationBase[in] The base address of object copy destinations
 	 * @param firstTopCopy[in] The first object to try to copy
 	 * @param endOfCopyBlock[in] The first byte after the last object which should be copied
@@ -385,7 +391,7 @@ private:
 	/**
 	 * Walks the previous mark map to find all objects in regions to be compacted and then, using forwarding pointer data,
 	 * finds their new locations and copies them.
-	 * @param env[in] The master GC thread
+	 * @param env[in] The main GC thread
 	 */
 	void moveObjects(MM_EnvironmentVLHGC *env);
 
@@ -415,8 +421,8 @@ private:
 	UDATA movedPageSize(MM_EnvironmentVLHGC *env, void *page);
 
 	/**
-	 * Called in the master thread to do the initial population of the move work stack.  This call must be made prior to moveObjects().
-	 * @param env[in] The master GC thread
+	 * Called in the main thread to do the initial population of the move work stack.  This call must be made prior to moveObjects().
+	 * @param env[in] The main GC thread
 	 */
 	void setupMoveWorkStack(MM_EnvironmentVLHGC *env);
 
@@ -553,7 +559,7 @@ public:
 	static MM_WriteOnceCompactor *newInstance(MM_EnvironmentVLHGC *env);
 	void kill(MM_EnvironmentVLHGC *env);
 
-	void masterSetupForGC(MM_EnvironmentVLHGC *env);
+	void mainSetupForGC(MM_EnvironmentVLHGC *env);
 	void compact(MM_EnvironmentVLHGC *env);
 
 	J9Object *getForwardingPtr(J9Object *objectPtr) const;
@@ -594,12 +600,19 @@ public:
 	 * @param workStackBaseHighPriority[in/out] The "high priority" work stack base.  This reference parameter will be updated before the function returns is region is high priority
 	 */
 	void pushRegionOntoWorkStack(MM_HeapRegionDescriptorVLHGC **workStackBase, MM_HeapRegionDescriptorVLHGC **workStackBaseHighPriority, MM_HeapRegionDescriptorVLHGC *region);
+	void doStackSlot(MM_EnvironmentVLHGC *env, J9Object *fromObject, J9Object** slot);
 
 	friend class MM_WriteOnceCompactFixupRoots;
 	friend class MM_ParallelWriteOnceCompactTask;
 };
 
 #endif /* J9VM_GC_MODRON_COMPACTION */
+
+typedef struct StackIteratorData4WriteOnceCompactor {
+	MM_WriteOnceCompactor *writeOnceCompactor;
+	MM_EnvironmentVLHGC *env;
+	J9Object *fromObject;
+} StackIteratorData4WriteOnceCompactor;
 
 #endif /* COMPACTSCHEMEVLHGC_HPP_ */
 

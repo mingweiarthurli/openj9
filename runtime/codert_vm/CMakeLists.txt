@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2017, 2020 IBM Corp. and others
+# Copyright (c) 2017, 2021 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
 # OpenJDK Assembly Exception [2].
 #
 # [1] https://www.gnu.org/software/classpath/license.html
-# [2] http://openjdk.java.net/legal/assembly-exception.html
+# [2] https://openjdk.org/legal/assembly-exception.html
 #
 # SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 ################################################################################
@@ -32,7 +32,6 @@ j9vm_add_library(j9codert_vm STATIC
 	fsdcsup.c
 	jitavl.c
 	jithash.cpp
-	jsr292.c
 	jswalk.c
 	thunkcrt.c
 
@@ -88,6 +87,11 @@ elseif(OMR_ARCH_AARCH64)
 	target_sources(j9codert_vm PRIVATE
 		arm64nathelp.s
 	)
+elseif(OMR_ARCH_RISCV)
+	j9vm_gen_asm(riscvnathelp.m4)
+	target_sources(j9codert_vm PRIVATE
+		riscvnathelp.s
+	)	
 else()
 	message(SEND_ERROR "Unsupported platform")
 endif()

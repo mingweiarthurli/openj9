@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -29,10 +29,12 @@ J9MemoryManagerFunctions MemoryManagerFunctions = {
 	J9AllocateObject,
 	J9AllocateIndexableObjectNoGC,
 	J9AllocateObjectNoGC,
-	J9WriteBarrierStore,
-	J9WriteBarrierBatchStore,
-	J9WriteBarrierJ9ClassStore,
-	J9WriteBarrierJ9ClassBatchStore,
+	J9WriteBarrierPost,
+	J9WriteBarrierBatch,
+	J9WriteBarrierPostClass,
+	J9WriteBarrierClassBatch,
+	preMountContinuation,
+	postUnmountContinuation,
 	allocateMemoryForSublistFragment,
 	j9gc_heap_free_memory,
 	j9gc_heap_total_memory,
@@ -79,6 +81,8 @@ J9MemoryManagerFunctions MemoryManagerFunctions = {
 	j9gc_scavenger_enabled,
 	j9gc_concurrent_scavenger_enabled,
 	j9gc_software_read_barrier_enabled,
+	j9gc_hot_reference_field_required,
+	j9gc_max_hot_field_list_length,
 #if defined(J9VM_GC_HEAP_CARD_TABLE)
 	j9gc_concurrent_getCardSize,
 	j9gc_concurrent_getHeapBase,
@@ -99,10 +103,10 @@ J9MemoryManagerFunctions MemoryManagerFunctions = {
 	j9gc_ext_reachable_objects_do,
 	j9gc_ext_reachable_from_object_do,
 	j9gc_jit_isInlineAllocationSupported,
-	J9MetronomeWriteBarrierStore,
-	J9MetronomeWriteBarrierJ9ClassStore,
+	J9WriteBarrierPre,
+	J9WriteBarrierPreClass,
 	J9ReadBarrier,
-	J9ReadBarrierJ9Class,
+	J9ReadBarrierClass,
 	j9gc_weakRoot_readObject,
 	j9gc_weakRoot_readObjectVM,
 	j9gc_ext_check_is_valid_heap_object,
@@ -183,10 +187,9 @@ J9MemoryManagerFunctions MemoryManagerFunctions = {
 	j9gc_objaccess_structuralCompareFlattenedObjects,
 	j9gc_objaccess_cloneIndexableObject,
 	j9gc_objaccess_asConstantPoolObject,
-#if defined(J9VM_GC_REALTIME)
 	j9gc_objaccess_referenceGet,
+	j9gc_objaccess_referenceReprocess,
 	j9gc_objaccess_jniDeleteGlobalReference,
-#endif /* J9VM_GC_REALTIME */
 	j9gc_objaccess_compareAndSwapObject,
 	j9gc_objaccess_staticCompareAndSwapObject,
 	j9gc_objaccess_compareAndExchangeObject,
@@ -210,9 +213,6 @@ J9MemoryManagerFunctions MemoryManagerFunctions = {
 	j9mm_iterate_region_objects,
 	j9mm_find_region_for_pointer,
 	j9mm_iterate_object_slots,
-#if defined(J9VM_GC_REALTIME)
-	j9gc_objaccess_checkStringConstantsLive,
-#endif /* J9VM_GC_REALTIME */
 	j9mm_initialize_object_descriptor,
 	j9mm_iterate_all_objects,
 	j9gc_modron_isFeatureSupported,
@@ -228,15 +228,12 @@ J9MemoryManagerFunctions MemoryManagerFunctions = {
 	j9gc_objaccess_postStoreClassToClassLoader,
 	j9gc_objaccess_getObjectHashCode,
 	j9gc_createJavaLangString,
+	j9gc_createJavaLangStringWithUTFCache,
 	j9gc_internString,
-#if defined(J9VM_GC_FINALIZATION)
-	j9gc_runFinalizersOnExit,
-#endif /* J9VM_GC_FINALIZATION */
 	j9gc_objaccess_jniGetPrimitiveArrayCritical,
 	j9gc_objaccess_jniReleasePrimitiveArrayCritical,
 	j9gc_objaccess_jniGetStringCritical,
 	j9gc_objaccess_jniReleaseStringCritical,
-	j9gc_finalizer_completeFinalizersOnExit,
 	j9gc_get_CPU_times,
 	omrgc_walkLWNRLockTracePool,
 #if defined(J9VM_GC_OBJECT_ACCESS_BARRIER)
@@ -253,9 +250,12 @@ J9MemoryManagerFunctions MemoryManagerFunctions = {
 #endif /* J9VM_GC_OBJECT_ACCESS_BARRIER */
 	j9gc_get_bytes_allocated_by_thread,
 	j9mm_iterate_all_ownable_synchronizer_objects,
+	j9mm_iterate_all_continuation_objects,
 	ownableSynchronizerObjectCreated,
+	continuationObjectCreated,
 	j9gc_notifyGCOfClassReplacement,
 	j9gc_get_jit_string_dedup_policy,
 	j9gc_stringHashFn,
-	j9gc_stringHashEqualFn
+	j9gc_stringHashEqualFn,
+	j9gc_ensureLockedSynchronizersIntegrity
 };

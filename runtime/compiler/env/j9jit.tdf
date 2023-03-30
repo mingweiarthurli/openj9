@@ -1,4 +1,4 @@
-// Copyright (c) 2000, 2020 IBM Corp. and others
+// Copyright (c) 2000, 2021 IBM Corp. and others
 //
 // This program and the accompanying materials are made available under
 // the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@
 // OpenJDK Assembly Exception [2].
 //
 // [1] https://www.gnu.org/software/classpath/license.html
-// [2] http://openjdk.java.net/legal/assembly-exception.html
+// [2] https://openjdk.org/legal/assembly-exception.html
 //
 // SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 
@@ -127,3 +127,10 @@ TraceEvent=Trc_JITServerStreamMessageTypeMismatch    Overhead=1 Level=1 Test Tem
 TraceEvent=Trc_JITServerStreamConnectionTerminate    Overhead=1 Level=1 Test Template="JITServer: compThreadID=%d (%s) stream connection terminated by JITClient on stream %p: %s"
 TraceEvent=Trc_JITServerStreamClientSessionTerminate Overhead=1 Level=1 Test Template="JITServer: compThreadID=%d (%s) stream client session terminated by JITClient: %s"
 TraceEvent=Trc_JITServerStreamInterrupted            Overhead=1 Level=1 Test Template="JITServer: compThreadID=%d (%s) stream interrupted by JITClient (compiling %s @ %s): %s"
+
+TraceEvent=Trc_JIT_portableSharedCache_enabled_or_disabled Overhead=1 Level=3 Test Template="PortableSharedCache is %d"
+
+TraceEvent=Trc_JITServerClientSessionData1   Overhead=1 Level=1 Test Template="JITServer: compThreadID=%d %s clientSessionData=%p for clientUID=%llu seqNo=%u (isCritical=%d) (expectedSeqNo=%u lastProcessedCriticalSeqNo=%u)"
+TraceEvent=Trc_JITServerOutOfSequenceMsg1    Overhead=1 Level=1 Test Template="JITServer: compThreadID=%d clientSessionData=%p clientUID=%llu (entry=%p) (seqNo=%u, expectedSeqNo=%u, numActiveThreads=%d) out-of-sequence msg detected (lastProcessedCriticalSeqNo=%u). Parking this thread"
+TraceEvent=Trc_JITServerCompThreadCrashed    Overhead=1 Level=1 Test Template="JITClient: compThreadID=%d server compilation thread crashed while compiling %s @ %s. Requesting JitDump recompilation and switching to local compilations."
+TraceEvent=Trc_JITServerClearCaches    Overhead=1 Level=1 Test Template="JITServer: compThreadID=%d clientSessionData=%p clientUID=%llu clearing all the caches due to class redefinition."

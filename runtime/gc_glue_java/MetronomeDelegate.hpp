@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2019, 2020 IBM Corp. and others
+ * Copyright (c) 2019, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -35,6 +35,7 @@
 #include "RealtimeMarkingScheme.hpp"
 #include "ReferenceObjectBuffer.hpp"
 #include "Scheduler.hpp"
+#include "StackSlotValidator.hpp"
 
 class MM_HeapRegionDescriptorRealtime;
 class MM_RealtimeMarkingSchemeRootMarker;
@@ -81,13 +82,14 @@ public:
 	bool allocateAndInitializeReferenceObjectLists(MM_EnvironmentBase *env);
 	bool allocateAndInitializeUnfinalizedObjectLists(MM_EnvironmentBase *env);
 	bool allocateAndInitializeOwnableSynchronizerObjectLists(MM_EnvironmentBase *env);
+	bool allocateAndInitializeContinuationObjectLists(MM_EnvironmentBase *env);
 
 #if defined(J9VM_GC_FINALIZATION)	
 	bool isFinalizationRequired() { return _finalizationRequired; }
 #endif /* J9VM_GC_FINALIZATION */
 
-	void masterSetupForGC(MM_EnvironmentBase *env);
-	void masterCleanupAfterGC(MM_EnvironmentBase *env);
+	void mainSetupForGC(MM_EnvironmentBase *env);
+	void mainCleanupAfterGC(MM_EnvironmentBase *env);
 	void incrementalCollectStart(MM_EnvironmentRealtime *env);
 	void incrementalCollect(MM_EnvironmentRealtime *env);
 	void doAuxiliaryGCWork(MM_EnvironmentBase *env);
@@ -112,7 +114,7 @@ public:
 	 * The J9_GC_CLASS_LOADER_DEAD bit is set for each class loader that will be unloaded.
 	 * J9HOOK_VM_CLASSES_UNLOAD is triggered if any classes will be unloaded.
 	 *
-	 * @param env[in] the master GC thread
+	 * @param env[in] the main GC thread
 	 * @param classUnloadCountResult[out] returns the number of classes about to be unloaded
 	 * @param anonymousClassUnloadCount[out] returns the number of anonymous classes about to be unloaded
 	 * @param classLoaderUnloadCountResult[out] returns the number of class loaders about to be unloaded
@@ -140,6 +142,7 @@ public:
 
 	UDATA getUnfinalizedObjectListCount(MM_EnvironmentBase *env) { return _extensions->gcThreadCount; }
 	UDATA getOwnableSynchronizerObjectListCount(MM_EnvironmentBase *env) { return _extensions->gcThreadCount; }
+	UDATA getContinuationObjectListCount(MM_EnvironmentBase *env) { return _extensions->gcThreadCount; }
 	UDATA getReferenceObjectListCount(MM_EnvironmentBase *env) { return _extensions->gcThreadCount; }
 
 	void defaultMemorySpaceAllocated(MM_GCExtensionsBase *extensions, void* defaultMemorySpace);
@@ -172,6 +175,10 @@ public:
 	void checkReferenceBuffer(MM_EnvironmentRealtime *env);
 	void setUnmarkedImpliesCleared();
 	void unsetUnmarkedImpliesCleared();
+
+	void  scanContinuationNativeSlots(MM_EnvironmentRealtime *env, J9Object *objectPtr);
+	UDATA scanContinuationObject(MM_EnvironmentRealtime *env, J9Object *objectPtr);
+
 #if defined(J9VM_GC_DYNAMIC_CLASS_UNLOADING)
 	MMINLINE void
 	markClassOfObject(MM_EnvironmentRealtime *env, J9Object *objectPtr)
@@ -217,6 +224,9 @@ public:
 		case GC_ObjectModel::SCAN_CLASS_OBJECT:
 		case GC_ObjectModel::SCAN_CLASSLOADER_OBJECT:
 			pointersScanned = scanMixedObject(env, objectPtr);
+			break;
+		case GC_ObjectModel::SCAN_CONTINUATION_OBJECT:
+			pointersScanned = scanContinuationObject(env, objectPtr);
 			break;
 		case GC_ObjectModel::SCAN_POINTER_ARRAY_OBJECT:
 			pointersScanned = scanPointerArrayObject(env, (J9IndexableObject *)objectPtr);
@@ -516,6 +526,12 @@ public:
 	 */
 	void scanOwnableSynchronizerObjects(MM_EnvironmentRealtime *env);
 
+	/**
+	 * Wraps the MM_RootScanner::scanContinuationObjects method to disable yielding during the scan
+	 * then yield after scanning.
+	 * @see MM_RootScanner::scanContinuationObjects()
+	 */
+	void scanContinuationObjects(MM_EnvironmentRealtime *env);
 private:
 	/**
 	 * Called by the root scanner to scan all WeakReference objects discovered by the mark phase,
@@ -553,6 +569,12 @@ private:
 	friend class MM_RealtimeGC;
 	friend class MM_RealtimeMarkingSchemeRootClearer;
 };
+
+typedef struct StackIteratorData4RealtimeMarkingScheme {
+	MM_RealtimeMarkingScheme *realtimeMarkingScheme;
+	MM_EnvironmentRealtime *env;
+	J9Object *fromObject;
+} StackIteratorData4RealtimeMarkingScheme;
 
 #endif /* defined(J9VM_GC_REALTIME) */
 

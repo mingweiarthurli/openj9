@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2020 IBM Corp. and others
+ * Copyright (c) 2018, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -29,10 +29,6 @@
 #include "control/CompilationThread.hpp" // for TR::compInfoPT->getCompThreadId()
 #include "control/Options.hpp"
 #include "runtime/JITClientSession.hpp"
-#include <openssl/ssl.h>
-
-class SSLOutputStream;
-class SSLInputStream;
 
 namespace JITServer
 {
@@ -89,6 +85,7 @@ public:
       {
       if (isReadingClassUnload() &&
           isClassUnloadingAttempted() &&
+          TR::compInfoPT->compilationCanBeInterrupted() &&
           (MessageType::compilationFailure != type) &&
           (MessageType::compilationCode != type))
          {
@@ -124,7 +121,11 @@ public:
          {
          case MessageType::compilationInterrupted:
             {
-            throw StreamInterrupted();
+            // If we are inside an uninterruptible operation on the server,
+            // but the corresponding operation hasn't yet started on the client,
+            // ignore the request to interrupt a compilation
+            if (TR::compInfoPT->compilationCanBeInterrupted())
+               throw StreamInterrupted();
             }
          case MessageType::connectionTerminate:
             {
@@ -217,14 +218,14 @@ public:
    /**
       @brief Function invoked by server when compilation is aborted
    */
-   void writeError(uint32_t statusCode)
+   void writeError(uint32_t statusCode, uint64_t otherData = -1)
       {
       try
          {
          if (TR::Options::getVerboseOption(TR_VerboseJITServer))
             TR_VerboseLog::writeLineLocked(TR_Vlog_JITServer, "compThreadID=%d MessageType::compilationFailure: statusCode %u",
                   TR::compInfoPT->getCompThreadId(), statusCode);
-         write(MessageType::compilationFailure, statusCode);
+         write(MessageType::compilationFailure, statusCode, otherData);
          }
       catch (std::exception &e)
          {
@@ -261,13 +262,19 @@ public:
    static int getNumConnectionsOpened() { return _numConnectionsOpened; }
    static int getNumConnectionsClosed() { return _numConnectionsClosed; }
 
+   /**
+      @brief Create an SSL_CTX suitable for a server
+   */
+   static bool createSSLContext(SSL_CTX *&ctx, const char *sessionContextID, size_t sessionContextIDLen,
+                                const PersistentVector<std::string> &sslKeys, const PersistentVector<std::string> &sslCerts,
+                                const std::string &sslRootCerts);
+
 private:
    static int _numConnectionsOpened;
    static int _numConnectionsClosed;
    uint64_t _clientId;  // UID of client connected to this communication stream
    ClientSessionData *_pClientSessionData;
    };
-
 
 }
 

@@ -1,4 +1,4 @@
-# Copyright (c) 2000, 2020 IBM Corp. and others
+# Copyright (c) 2000, 2021 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@
 # OpenJDK Assembly Exception [2].
 #
 # [1] https://www.gnu.org/software/classpath/license.html
-# [2] http://openjdk.java.net/legal/assembly-exception.html
+# [2] https://openjdk.org/legal/assembly-exception.html
 #
 # SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 
@@ -183,7 +183,7 @@ ifeq ($(HOST_ARCH),z)
 endif
 
 ifeq ($(HOST_ARCH),arm)
-    CX_DEFINES+=ARMGNU ARMGNUEABI FIXUP_UNALIGNED HARDHAT
+    CX_DEFINES+=ARMGNU ARMGNUEABI FIXUP_UNALIGNED HARDHAT __STDC_LIMIT_MACROS
     CX_FLAGS+=-fPIC -mfloat-abi=hard -mfpu=vfp -march=armv6 -marm
 endif
 
@@ -226,7 +226,7 @@ S_DEFINES+=$(HOST_DEFINES) $(TARGET_DEFINES)
 S_DEFINES_DEBUG+=DEBUG
 
 S_FLAGS+=--noexecstack
-S_FLAGS_DEBUG+=--gstabs
+S_FLAGS_DEBUG+=--gstabs+ -g
 
 ifeq ($(HOST_ARCH),p)
     S_FLAGS+=-maltivec
@@ -358,8 +358,6 @@ ifeq ($(HOST_ARCH),z)
     M4_INCLUDES=$(PRODUCT_INCLUDES)
 
     M4_DEFINES+=$(HOST_DEFINES) $(TARGET_DEFINES)
-
-
 
     ifeq ($(BUILD_CONFIG),debug)
         M4_DEFINES+=$(M4_DEFINES_DEBUG)
@@ -518,7 +516,8 @@ ifeq ($(BUILD_CONFIG),debug)
 endif
 
 ifeq ($(OS),linux)
-SOLINK_EXTRA_ARGS+=-Wl,--version-script=$(SOLINK_VERSION_SCRIPT)
+    SOLINK_EXTRA_ARGS+=-Wl,-soname=libj9jit29.so
+    SOLINK_EXTRA_ARGS+=-Wl,--version-script=$(SOLINK_VERSION_SCRIPT)
 endif
 
 SOLINK_FLAGS+=$(SOLINK_FLAGS_EXTRA)

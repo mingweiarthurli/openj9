@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2017, 2020 IBM Corp. and others
+ * Copyright (c) 2017, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -39,7 +39,6 @@
 #include "CollectorLanguageInterfaceImpl.hpp"
 #endif /* defined(J9VM_GC_FINALIZATION) */
 #include "ConfigurationDelegate.hpp"
-#include "Dispatcher.hpp"
 #include "EnvironmentDelegate.hpp"
 #include "FinalizableReferenceBuffer.hpp"
 #include "GlobalCollector.hpp"
@@ -50,6 +49,9 @@
 #include "MarkingSchemeRootMarker.hpp"
 #include "MarkingSchemeRootClearer.hpp"
 #include "OwnableSynchronizerObjectList.hpp"
+#include "ContinuationObjectList.hpp"
+#include "VMHelpers.hpp"
+#include "ParallelDispatcher.hpp"
 #include "ReferenceObjectBuffer.hpp"
 #include "RootScanner.hpp"
 #include "StackSlotValidator.hpp"
@@ -113,7 +115,7 @@ MM_MarkingDelegate::clearClassLoadersScannedFlag(MM_EnvironmentBase *env)
 #endif /* J9VM_GC_DYNAMIC_CLASS_UNLOADING */
 
 void
-MM_MarkingDelegate::masterSetupForWalk(MM_EnvironmentBase *env)
+MM_MarkingDelegate::mainSetupForWalk(MM_EnvironmentBase *env)
 {
 #if defined(J9VM_GC_DYNAMIC_CLASS_UNLOADING)
 	_markMap = NULL;
@@ -132,6 +134,8 @@ MM_MarkingDelegate::workerSetupForGC(MM_EnvironmentBase *env)
 	if (_extensions->scavengerEnabled) {
 		/* clear scavenger stats for correcting the ownableSynchronizerObjects stats, only in generational gc */
 		gcEnv->_scavengerJavaStats.clearOwnableSynchronizerCounts();
+		/* clear scavenger stats for correcting the continuationObjects stats, only in generational gc */
+		gcEnv->_scavengerJavaStats.clearContinuationCounts();
 	}
 #endif /* defined(J9VM_GC_MODRON_SCAVENGER) */
 #if defined(OMR_GC_MODRON_STANDARD) || defined(OMR_GC_REALTIME)
@@ -168,12 +172,14 @@ MM_MarkingDelegate::workerCleanupAfterGC(MM_EnvironmentBase *env)
 	if (_extensions->scavengerEnabled) {
 		/* merge scavenger ownableSynchronizerObjects stats, only in generational gc */
 		_extensions->scavengerJavaStats.mergeOwnableSynchronizerCounts(&gcEnv->_scavengerJavaStats);
+		/* merge scavenger continuationObjects stats, only in generational gc */
+		_extensions->scavengerJavaStats.mergeContinuationCounts(&gcEnv->_scavengerJavaStats);
 	}
 #endif /* defined(J9VM_GC_MODRON_SCAVENGER) */
 }
 
 void
-MM_MarkingDelegate::masterSetupForGC(MM_EnvironmentBase *env)
+MM_MarkingDelegate::mainSetupForGC(MM_EnvironmentBase *env)
 {
 #if defined(J9VM_GC_DYNAMIC_CLASS_UNLOADING)
 	clearClassLoadersScannedFlag(env);
@@ -184,7 +190,7 @@ MM_MarkingDelegate::masterSetupForGC(MM_EnvironmentBase *env)
 }
 
 void
-MM_MarkingDelegate::masterCleanupAfterGC(MM_EnvironmentBase *env)
+MM_MarkingDelegate::mainCleanupAfterGC(MM_EnvironmentBase *env)
 {
 #if defined(J9VM_GC_DYNAMIC_CLASS_UNLOADING)
 	_markMap = (_extensions->dynamicClassUnloading != MM_GCExtensions::DYNAMIC_CLASS_UNLOADING_NEVER) ? _markingScheme->getMarkMap() : NULL;
@@ -192,17 +198,19 @@ MM_MarkingDelegate::masterCleanupAfterGC(MM_EnvironmentBase *env)
 }
 
 void
-MM_MarkingDelegate::scanRoots(MM_EnvironmentBase *env)
+MM_MarkingDelegate::startRootListProcessing(MM_EnvironmentBase *env)
 {
 	/* Start unfinalized object and ownable synchronizer processing */
 	if (J9MODRON_HANDLE_NEXT_WORK_UNIT(env)) {
 		_shouldScanUnfinalizedObjects = false;
 		_shouldScanOwnableSynchronizerObjects = false;
+		_shouldScanContinuationObjects = false;
+
 		MM_HeapRegionDescriptorStandard *region = NULL;
 		GC_HeapRegionIteratorStandard regionIterator(_extensions->heap->getHeapRegionManager());
 		while (NULL != (region = regionIterator.nextRegion())) {
 			MM_HeapRegionDescriptorStandardExtension *regionExtension = MM_ConfigurationDelegate::getHeapRegionDescriptorStandardExtension(env, region);
-			for (UDATA i = 0; i < regionExtension->_maxListIndex; i++) {
+			for (uintptr_t i = 0; i < regionExtension->_maxListIndex; i++) {
 				/* Start unfinalized object processing for region */
 				MM_UnfinalizedObjectList *unfinalizedObjectList = &(regionExtension->_unfinalizedObjectLists[i]);
 				unfinalizedObjectList->startUnfinalizedProcessing();
@@ -215,8 +223,66 @@ MM_MarkingDelegate::scanRoots(MM_EnvironmentBase *env)
 				if (!ownableSynchronizerObjectList->wasEmpty()) {
 					_shouldScanOwnableSynchronizerObjects = true;
 				}
+				/* Start continuation processing for region */
+				MM_ContinuationObjectList *continuationObjectList = &(regionExtension->_continuationObjectLists[i]);
+				continuationObjectList->startProcessing();
+				if (!continuationObjectList->wasEmpty()) {
+					_shouldScanContinuationObjects = true;
+				}
 			}
 		}
+	}
+}
+
+void
+MM_MarkingDelegate::doStackSlot(MM_EnvironmentBase *env, omrobjectptr_t objectPtr, omrobjectptr_t *slotPtr)
+{
+	omrobjectptr_t object = *slotPtr;
+	if (_markingScheme->isHeapObject(object) && !_extensions->heap->objectIsInGap(object)) {
+		if (_extensions->isConcurrentScavengerEnabled() && _extensions->isScavengerBackOutFlagRaised()) {
+			_markingScheme->fixupForwardedSlot(slotPtr);
+		}
+		_markingScheme->inlineMarkObject(env, *slotPtr);
+	}
+}
+
+/**
+ * @todo Provide function documentation
+ */
+void
+stackSlotIteratorForMarkingDelegate(J9JavaVM *javaVM, J9Object **slotPtr, void *localData, J9StackWalkState *walkState, const void *stackLocation)
+{
+	StackIteratorData4MarkingDelegate *data = (StackIteratorData4MarkingDelegate *)localData;
+	data->markingDelegate->doStackSlot(data->env, data->fromObject, slotPtr);
+}
+
+
+void
+MM_MarkingDelegate::scanContinuationNativeSlots(MM_EnvironmentBase *env, omrobjectptr_t objectPtr)
+{
+	J9VMThread *currentThread = (J9VMThread *)env->getLanguageVMThread();
+	if (VM_VMHelpers::needScanStacksForContinuation(currentThread, objectPtr)) {
+		StackIteratorData4MarkingDelegate localData;
+		localData.markingDelegate = this;
+		localData.env = env;
+		localData.fromObject = objectPtr;
+
+		bool stackFrameClassWalkNeeded = false;
+#if defined(J9VM_GC_DYNAMIC_CLASS_UNLOADING)
+		stackFrameClassWalkNeeded = isDynamicClassUnloadingEnabled();
+#endif /* J9VM_GC_DYNAMIC_CLASS_UNLOADING */
+
+		/* In STW GC there are no racing carrier threads doing mount and no need for the synchronization. */
+		bool syncWithContinuationMounting = J9_ARE_ANY_BITS_SET(currentThread->privateFlags, J9_PRIVATE_FLAGS_CONCURRENT_MARK_ACTIVE);
+		GC_VMThreadStackSlotIterator::scanSlots(currentThread, objectPtr, (void *)&localData, stackSlotIteratorForMarkingDelegate, stackFrameClassWalkNeeded, false, syncWithContinuationMounting);
+	}
+}
+
+void
+MM_MarkingDelegate::scanRoots(MM_EnvironmentBase *env, bool processLists)
+{
+	if (processLists) {
+		startRootListProcessing(env);
 	}
 
 	/* Reset MM_RootScanner base class for scanning */
@@ -230,7 +296,7 @@ MM_MarkingDelegate::scanRoots(MM_EnvironmentBase *env)
 		/* Setting the permanent class loaders to scanned without a locked operation is safe
 		 * Class loaders will not be rescanned until a thread synchronize is executed
 		 */
-		if (env->isMasterThread()) {
+		if (env->isMainThread()) {
 			J9JavaVM * javaVM = (J9JavaVM*)env->getLanguageVM();
 			((J9ClassLoader *)javaVM->systemClassLoader)->gcFlags |= J9_GC_CLASS_LOADER_SCANNED;
 			_markingScheme->markObject(env, (omrobjectptr_t )((J9ClassLoader *)javaVM->systemClassLoader)->classLoaderObject);
@@ -314,7 +380,7 @@ MM_MarkingDelegate::completeMarking(MM_EnvironmentBase *env)
 								 * so, if this pointer happened to be NULL at this point let it crash here
 								 */
 								Assert_MM_true(NULL != classLoader->classHashTable);
-								clazz = javaVM->internalVMFunctions->hashClassTableStartDo(classLoader, &walkState);
+								clazz = javaVM->internalVMFunctions->hashClassTableStartDo(classLoader, &walkState, 0);
 								while (NULL != clazz) {
 									_markingScheme->markObjectNoCheck(env, (omrobjectptr_t )clazz->classObject);
 									_anotherClassMarkPass = true;
@@ -335,6 +401,10 @@ MM_MarkingDelegate::completeMarking(MM_EnvironmentBase *env)
 											_markingScheme->markObjectNoCheck(env, (omrobjectptr_t )module->version);
 										}
 										modulePtr = (J9Module**)hashTableNextDo(&moduleWalkState);
+									}
+
+									if (classLoader == javaVM->systemClassLoader) {
+										_markingScheme->markObjectNoCheck(env, (omrobjectptr_t )javaVM->unamedModuleForSystemLoader->moduleObject);
 									}
 								}
 							}
@@ -386,47 +456,10 @@ MM_MarkingDelegate::scanClass(MM_EnvironmentBase *env, J9Class *clazz)
 
 #if defined(J9VM_GC_DYNAMIC_CLASS_UNLOADING)
 	if (isDynamicClassUnloadingEnabled()) {
-		UDATA classDepth = GC_ClassModel::getClassDepth(clazz);
-		/* Superclasses - if the depth is 0, don't bother - no superclasses */
-		if (0 < classDepth) {
-			J9Class** superclassScanPtr = clazz->superclasses;
-			J9Class** superclassEndScanPtr = superclassScanPtr + classDepth;
-			while (superclassScanPtr < superclassEndScanPtr) {
-				J9Class *clazzPtr = *superclassScanPtr++;
-				_markingScheme->markObject(env, clazzPtr->classObject);
-			}
-		}
-
-		if (NULL != clazz->arrayClass) {
-			J9Class *clazzPtr = clazz->arrayClass;
-			_markingScheme->markObject(env, clazzPtr->classObject);
-		}
-
-		/* Component type and Leaf Component type for indexable */
-		if (_extensions->objectModel.isIndexable(clazz)) {
-			J9ArrayClass *indexableClass = (J9ArrayClass *)clazz;
-			J9Class *clazzPtr = indexableClass->componentType;
-			_markingScheme->markObject(env, clazzPtr->classObject);
-
-			/*
-			 * There is no mandatory need to scan leafComponentType here because this class
-			 * would be discovered at the end componentType chain eventually
-			 * However it is a performance optimization because an early class discovery
-			 * might reduce number of loops to scan
-			 */
-			clazzPtr = indexableClass->leafComponentType;
-			_markingScheme->markObject(env, clazzPtr->classObject);
-		}
-
-		/* ITable */
-		J9JavaVM *javaVM = (J9JavaVM *)env->getLanguageVM();
-		if (!GC_ClassModel::usesSharedITable(javaVM, clazz)) {
-			J9ITable *clazzITable = (J9ITable *)clazz->iTable;
-			J9ITable *endITable = (0 != classDepth) ? (J9ITable *)(clazz->superclasses[classDepth - 1]->iTable) : NULL;
-			while (clazzITable != endITable) {
-				_markingScheme->markObject(env, clazzITable->interfaceClass->classObject);
-				clazzITable = clazzITable->next;
-			}
+		GC_ClassIteratorClassSlots classSlotIterator((J9JavaVM*)env->getLanguageVM(), clazz);
+		J9Class *classPtr;
+		while (NULL != (classPtr = classSlotIterator.nextSlot())) {
+			_markingScheme->markObject(env, classPtr->classObject);
 		}
 	}
 #endif /* J9VM_GC_DYNAMIC_CLASS_UNLOADING */
@@ -436,8 +469,8 @@ void
 MM_MarkingDelegate::processReferenceList(MM_EnvironmentBase *env, MM_HeapRegionDescriptorStandard* region, omrobjectptr_t headOfList, MM_ReferenceStats *referenceStats)
 {
 	/* no list can possibly contain more reference objects than there are bytes in a region. */
-	const UDATA maxObjects = region->getSize();
-	UDATA objectsVisited = 0;
+	const uintptr_t maxObjects = region->getSize();
+	uintptr_t objectsVisited = 0;
 	GC_FinalizableReferenceBuffer buffer(_extensions);
 #if defined(J9VM_GC_FINALIZATION)
 	bool finalizationRequired = false;
@@ -459,7 +492,7 @@ MM_MarkingDelegate::processReferenceList(MM_EnvironmentBase *env, MM_HeapRegionD
 			_markingScheme->fixupForwardedSlot(&referentSlotObject);
 			omrobjectptr_t referent = referentSlotObject.readReferenceFromSlot();
 
-			UDATA referenceObjectType = J9CLASS_FLAGS(J9GC_J9OBJECT_CLAZZ(referenceObj, env)) & J9AccClassReferenceMask;
+			uintptr_t referenceObjectType = J9CLASS_FLAGS(J9GC_J9OBJECT_CLAZZ(referenceObj, env)) & J9AccClassReferenceMask;
 			if (_markingScheme->isMarked(referent)) {
 				if (J9AccClassReferenceSoft == referenceObjectType) {
 					U_32 age = J9GC_J9VMJAVALANGSOFTREFERENCE_AGE(env, referenceObj);
@@ -474,15 +507,7 @@ MM_MarkingDelegate::processReferenceList(MM_EnvironmentBase *env, MM_HeapRegionD
 				J9GC_J9VMJAVALANGREFERENCE_STATE(env, referenceObj) = GC_ObjectModel::REF_STATE_CLEARED;
 
 				referenceStats->_cleared += 1;
-
-				/* Phantom references keep it's referent alive in Java 8 and doesn't in Java 9 and later */
-				J9JavaVM * javaVM = (J9JavaVM*)env->getLanguageVM();
-				if ((J9AccClassReferencePhantom == referenceObjectType) && ((J2SE_VERSION(javaVM) & J2SE_VERSION_MASK) <= J2SE_18)) {
-					/* Phantom objects keep their referent - scanning will be done after the enqueuing */
-					_markingScheme->inlineMarkObject(env, referent);
-				} else {
-					referentSlotObject.writeReferenceToSlot(NULL);
-				}
+				referentSlotObject.writeReferenceToSlot(NULL);
 
 				/* Check if the reference has a queue */
 				if (0 != J9GC_J9VMJAVALANGREFERENCE_QUEUE(env, referenceObj)) {
@@ -527,7 +552,7 @@ MM_MarkingDelegate::getReferenceStatus(MM_EnvironmentBase *env, omrobjectptr_t o
 	 * during concurrent gc, the cycleState of the mutator thread might not be set,
 	 * but if the cycleState of the thread is not set, we know it is in concurrent mode(not clearable phase).
 	 */
-	UDATA referenceObjectOptions = MM_CycleState::references_default;
+	uintptr_t referenceObjectOptions = MM_CycleState::references_default;
 	if (NULL != env->_cycleState) {
 		referenceObjectOptions = env->_cycleState->_referenceObjectOptions;
 	}
@@ -537,7 +562,7 @@ MM_MarkingDelegate::getReferenceStatus(MM_EnvironmentBase *env, omrobjectptr_t o
 	*referentMustBeMarked = *isReferenceCleared;
 	bool referentMustBeCleared = false;
 
-	UDATA referenceObjectType = J9CLASS_FLAGS(J9GC_J9OBJECT_CLAZZ(objectPtr, env)) & J9AccClassReferenceMask;
+	uintptr_t referenceObjectType = J9CLASS_FLAGS(J9GC_J9OBJECT_CLAZZ(objectPtr, env)) & J9AccClassReferenceMask;
 	switch (referenceObjectType) {
 	case J9AccClassReferenceWeak:
 		referentMustBeCleared = (0 != (referenceObjectOptions & MM_CycleState::references_clear_weak));
@@ -546,7 +571,8 @@ MM_MarkingDelegate::getReferenceStatus(MM_EnvironmentBase *env, omrobjectptr_t o
 		referentMustBeCleared = (0 != (referenceObjectOptions & MM_CycleState::references_clear_soft));
 		*referentMustBeMarked = *referentMustBeMarked || (
 			((0 == (referenceObjectOptions & MM_CycleState::references_soft_as_weak))
-			&& ((UDATA)J9GC_J9VMJAVALANGSOFTREFERENCE_AGE(env, objectPtr) < _extensions->getDynamicMaxSoftReferenceAge())));
+			/* TODO: MaxAge should be u32 not udata */
+			&& ((uintptr_t)J9GC_J9VMJAVALANGSOFTREFERENCE_AGE(env, objectPtr) < _extensions->getDynamicMaxSoftReferenceAge())));
 		break;
 	case J9AccClassReferencePhantom:
 		referentMustBeCleared = (0 != (referenceObjectOptions & MM_CycleState::references_clear_phantom));

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2019 IBM Corp. and others
+ * Copyright (c) 2001, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -44,7 +44,6 @@ import com.ibm.j9ddr.tools.ddrinteractive.CommandUtils;
 import com.ibm.j9ddr.tools.ddrinteractive.Context;
 import com.ibm.j9ddr.tools.ddrinteractive.DDRInteractiveCommandException;
 import com.ibm.j9ddr.vm29.j9.DataType;
-import com.ibm.j9ddr.vm29.j9.J9ConstantHelper;
 import com.ibm.j9ddr.vm29.pointer.*;
 import com.ibm.j9ddr.vm29.pointer.generated.*;
 import com.ibm.j9ddr.vm29.pointer.helper.*;
@@ -78,9 +77,6 @@ public class ShrCCommand extends Command
 	
 	private static final String rangeDelim = "..";
 	private static long cacheTotalSize = 0;
-	private static final long TYPE_PREREQ_CACHE = J9ConstantHelper.getLong(ShcdatatypesConstants.class, "TYPE_PREREQ_CACHE", -1);
-	private static final long J9SHR_DATA_TYPE_STARTUP_HINTS = J9ConstantHelper.getLong(ShCFlags.class, "J9SHR_DATA_TYPE_STARTUP_HINTS", -1);
-
 
 	public ShrCCommand()
 	{
@@ -986,7 +982,7 @@ public class ShrCCommand extends Command
 				} else if (itemType.eq(TYPE_SCOPE)) {
 					utf8 = J9UTF8Pointer.cast(ShcItemHelper.ITEMDATA(it));
 					scopeMetaLen += ShcItem.SIZEOF + ShcItemHdr.SIZEOF;
-					scopeDataLen += J9UTF8.SIZEOF + utf8.length().longValue();
+					scopeDataLen += J9UTF8Helper.J9UTF8_HEADER_SIZE + utf8.length().longValue();
 					if ((statTypes & SCOPE_STATS) != 0) {
 						entryFound = true;
 						CommandUtils.dbgPrint(out, "%d: %s SCOPE !j9utf8 %s %s\n", it.jvmID().longValue(), it.getHexAddress(), utf8.getHexAddress(), J9UTF8Helper.stringValue(utf8));
@@ -1077,10 +1073,10 @@ public class ShrCCommand extends Command
 						++numCacheletsNoSegments;
 					}
 					++numCachelets;
-				} else if (itemType.eq(TYPE_PREREQ_CACHE)) { 
+				} else if (itemType.eq(TYPE_PREREQ_CACHE)) {
 					utf8 = J9UTF8Pointer.cast(ShcItemHelper.ITEMDATA(it));
 					scopeMetaLen += ShcItem.SIZEOF + ShcItemHdr.SIZEOF;
-					scopeDataLen += J9UTF8.SIZEOF + utf8.length().longValue();
+					scopeDataLen += J9UTF8Helper.J9UTF8_HEADER_SIZE + utf8.length().longValue();
 					if ((statTypes & PREREQ_CACHE_STATS) != 0) {
 						entryFound = true;
 						CommandUtils.dbgPrint(out, "%d: %s PREREQ CACHE UNIQUE ID !j9utf8 %s %s\n", it.jvmID().longValue(), it.getHexAddress(), utf8.getHexAddress(), J9UTF8Helper.stringValue(utf8));
@@ -1201,14 +1197,19 @@ public class ShrCCommand extends Command
 			 * If cacheStartAddress could not get on third try, then return since shared cache is not initialized enough.
 			 */
 			if (cacheStartAddress[layer].isNull()) {
-				
 				if (cacheMap.notNull()) {
 					/*  _ccHead -------------> ccNext ---------> ccNext --------> ........---------> ccTail
 					 * (top layer)         (middle layer)     (middle layer)      ........         (layer 0)
 					 */
-					SH_CompositeCacheImplPointer compositeCacheImpl = cacheMap._ccTail();
-					for (int tmplayer = 0; tmplayer < layer; tmplayer++) {
-						compositeCacheImpl = compositeCacheImpl._previous();
+					SH_CompositeCacheImplPointer compositeCacheImpl;
+					try {
+						compositeCacheImpl = cacheMap._ccTail();
+						for (int tmplayer = 0; tmplayer < layer; tmplayer++) {
+							compositeCacheImpl = compositeCacheImpl._previous();
+						}
+					} catch (NoSuchFieldException e) {
+						// the VM that produced this core predates the addition of the _ccTail and _previous fields
+						compositeCacheImpl = cacheMap._cc();
 					}
 					if (compositeCacheImpl.notNull()) {
 						cacheStartAddress[layer] = compositeCacheImpl._theca();

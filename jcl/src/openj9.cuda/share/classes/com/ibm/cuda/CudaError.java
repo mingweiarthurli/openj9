@@ -1,6 +1,6 @@
 /*[INCLUDE-IF Sidecar18-SE]*/
 /*******************************************************************************
- * Copyright (c) 2013, 2018 IBM Corp. and others
+ * Copyright (c) 2013, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -309,8 +309,8 @@ public interface CudaError {
 	 * either because the Driver context was created using an older version
 	 * of the API, because the Runtime API call expects a primary driver
 	 * context and the Driver context is not primary, or because the Driver
-	 * context has been destroyed. Please see \ref CUDART_DRIVER "Interactions
-	 * with the CUDA Driver API" for more information.
+	 * context has been destroyed. Please see CUDART_DRIVER <q>Interactions
+	 * with the CUDA Driver API</q> for more information.
 	 */
 	int IncompatibleDriverContext = 49;
 
@@ -405,7 +405,7 @@ public interface CudaError {
 	/**
 	 * This error indicates that a call to ::cudaDeviceSynchronize made from
 	 * the device runtime failed because the call was made at grid depth greater
-	 * than than either the default (2 levels of grids) or user specified device
+	 * than either the default (2 levels of grids) or user specified device
 	 * limit ::cudaLimitDevRuntimeSyncDepth. To be able to synchronize on
 	 * launched grids at a greater depth successfully, the maximum nested
 	 * depth at which ::cudaDeviceSynchronize will be called must be specified

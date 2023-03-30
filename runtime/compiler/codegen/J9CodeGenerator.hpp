@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,19 +15,19 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
 
-#ifndef TR_J9_CODEGENERATORBASE_INCL
-#define TR_J9_CODEGENERATORBASE_INCL
+#ifndef J9_CODEGENERATOR_INCL
+#define J9_CODEGENERATOR_INCL
 
 /*
  * The following #define and typedef must appear before any #includes in this file
  */
-#ifndef TRJ9_CODEGENERATORBASE_CONNECTOR
-#define TRJ9_CODEGENERATORBASE_CONNECTOR
+#ifndef J9_CODEGENERATOR_CONNECTOR
+#define J9_CODEGENERATOR_CONNECTOR
 
 namespace J9 { class CodeGenerator; }
 namespace J9 { typedef J9::CodeGenerator CodeGeneratorConnector; }
@@ -63,9 +63,14 @@ namespace J9
 
 class OMR_EXTENSIBLE CodeGenerator : public OMR::CodeGeneratorConnector
    {
+
+protected:
+
+   CodeGenerator(TR::Compilation *comp);
+
 public:
 
-   CodeGenerator();
+   void initialize();
 
    TR_J9VMBase *fej9();
 
@@ -79,16 +84,7 @@ public:
 
    void lowerTreeIfNeeded(TR::Node *node, int32_t childNumber, TR::Node *parent, TR::TreeTop *tt);
 
-   void lowerNonhelperCallIfNeeded(TR::Node *node, TR::TreeTop *tt);
-   void fastpathAcmpHelper(TR::Node *node, TR::TreeTop *tt, bool trace);
-
    void lowerDualOperator(TR::Node *parent, int32_t childNumber, TR::TreeTop *treeTop);
-
-private:
-
-   void lowerArrayStoreCHK(TR::Node *node, TR::TreeTop *tt);
-
-   void findArrayStoreCHKOperands(TR::Node *node, TR::Node *&destination, TR::Node *&source);
 
 public:
 
@@ -321,14 +317,15 @@ public:
 
    /*
     * \brief
-    *    Whether a monitor object is of value type
+    *    Whether a monitor object is of value based class type or value type.
+    *    This API checks if value based or value type is enabled first.
     *
     * \return
-    *    TR_yes The monitor object is definitely value type
-    *    TR_no The monitor object is definitely identity type
-    *    TR_maybe It is unknown whether the monitor object is identity type or value type
+    *    TR_yes The monitor object is definitely value based class type or value type
+    *    TR_no The monitor object is definitely not value based class type or value type
+    *    TR_maybe It is unknown whether the monitor object is value based class type or value type
     */
-   TR_YesNoMaybe isMonitorValueType(TR::Node* monNode);
+   TR_YesNoMaybe isMonitorValueBasedOrValueType(TR::Node* monNode);
 
 protected:
 
@@ -503,6 +500,16 @@ public:
    void setSupportsInlineStringHashCode() { _j9Flags.set(SupportsInlineStringHashCode); }
 
    /** \brief
+   *    Determines whether the code generator supports inlining of java/lang/StringLatin1.inflate
+   */
+   bool getSupportsInlineStringLatin1Inflate() { return _j9Flags.testAny(SupportsInlineStringLatin1Inflate); }
+
+   /** \brief
+   *    The code generator supports inlining of java/lang/StringLatin1.inflate
+   */
+   void setSupportsInlineStringLatin1Inflate() { _j9Flags.set(SupportsInlineStringLatin1Inflate); }
+
+   /** \brief
    *    Determines whether the code generator supports inlining of java_util_concurrent_ConcurrentLinkedQueue_tm*
    *    methods
    */
@@ -512,6 +519,16 @@ public:
    *    The code generator supports inlining of java_util_concurrent_ConcurrentLinkedQueue_tm* methods
    */
    void setSupportsInlineConcurrentLinkedQueue() { _j9Flags.set(SupportsInlineConcurrentLinkedQueue); }
+
+   /** \brief
+	*   Determines whether the code generator supports inlining of java/lang/StringCoding.encodeASCII
+	*/
+   bool getSupportsInlineEncodeASCII() { return _j9Flags.testAny(SupportsInlineEncodeASCII); }
+
+   /** \brief
+	*   The code generator supports inlining of java/lang/StringCoding.encodeASCII
+	*/
+   void setSupportsInlineEncodeASCII() { _j9Flags.set(SupportsInlineEncodeASCII); }
 
    /**
     * \brief
@@ -573,6 +590,77 @@ public:
     */
    bool supportVMInternalNatives();
 
+
+   /**
+    * \brief Determines whether the code generator supports stack allocations
+    */
+   bool supportsStackAllocations() { return false; }
+
+   /**
+    * \brief Initializes the Linkage Info word found before the interpreter entry point.
+    *
+    * \param[in] linkageInfo : pointer to the linkage info word
+    *
+    * \return Linkage Info word
+    */
+   uint32_t initializeLinkageInfo(void *linkageInfoPtr);
+
+   /**
+    * \brief Check if a profiled class is compatible with the call site
+    *
+    * \param[in] profiledClass : The J9Class obtained from profiling data
+    * \param[in] callSiteMethodClass : The J9Class from the J9Method of the call site target
+    *
+    * \return True if it can be determined that the profiled class is compatible, otherwise False
+    */
+   bool isProfiledClassAndCallSiteCompatible(TR_OpaqueClassBlock *profiledClass, TR_OpaqueClassBlock *callSiteMethodClass);
+
+   /** \brief
+   *    Determines whether the code generator supports inlining of java/lang/Integer.stringSize() or java/lang/Long.stringSize()
+   */
+   bool getSupportsIntegerStringSize() { return _j9Flags.testAny(SupportsIntegerStringSize); }
+
+   /** \brief
+   *    The code generator supports inlining of java/lang/Integer.stringSize() or java/lang/Long.stringSize()
+   */
+   void setSupportsIntegerStringSize() {_j9Flags.set(SupportsIntegerStringSize); }
+
+   /** \brief
+   *    Determines whether the code generator supports inlining of
+   *       - Integer.getChars,
+   *       - Long.getChars,
+   *       - StringUTF16.getChars(JI[B)I,
+   *       - StringUTF16.getChars(II[B)I
+   */
+   bool getSupportsIntegerToChars() { return _j9Flags.testAny(SupportsIntegerToChars); }
+
+   /** \brief
+   *    The code generator supports inlining of
+   *       - Integer.getChars,
+   *       - Long.getChars,
+   *       - StringUTF16.getChars(JI[B)I,
+   *       - StringUTF16.getChars(II[B)I
+   */
+   void setSupportsIntegerToChars() {_j9Flags.set(SupportsIntegerToChars); }
+
+   /**
+    * \brief Determine whether this code generator guarantees resolved direct
+    * dispatch under AOT with SVM.
+    *
+    * \return true if resolved direct dispatch is guaranteed, false otherwise
+    * \see TR_J9VMBase::isResolvedDirectDispatchGuaranteed
+    */
+   bool guaranteesResolvedDirectDispatchForSVM() { return false; } // safe default
+
+   /**
+    * \brief Determine whether this code generator guarantees resolved virtual
+    * dispatch under AOT with SVM.
+    *
+    * \return true if resolved virtual dispatch is guaranteed, false otherwise
+    * \see TR_J9VMBase::isResolvedVirtualDispatchGuaranteed
+    */
+   bool guaranteesResolvedVirtualDispatchForSVM() { return false; } // safe default
+
 private:
 
    enum // Flags
@@ -584,6 +672,10 @@ private:
       SupportsInlineStringHashCode                        = 0x00000010, /*! codegen inlining of Java string hash code */
       SupportsInlineConcurrentLinkedQueue                 = 0x00000020,
       SupportsBigDecimalLongLookasideVersioning           = 0x00000040,
+      SupportsInlineStringLatin1Inflate                   = 0x00000080, /*! codegen inlining of Java StringLatin1.inflate */
+      SupportsIntegerStringSize                           = 0x00000100,
+      SupportsIntegerToChars                              = 0x00000200,
+      SupportsInlineEncodeASCII                           = 0x00000400,
       };
 
    flags32_t _j9Flags;

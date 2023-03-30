@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -34,23 +34,10 @@
 
 namespace TR { class PersistentInfo; }
 
-#if defined(TR_TARGET_64BIT)
-#define TRAMPOLINE_SIZE       28
-#define OFFSET_IPIC_TO_CALL   36
-#else
-#define TRAMPOLINE_SIZE       16
-#define OFFSET_IPIC_TO_CALL   32
-#endif
-
 extern "C"
    {
    extern   int __j9_smp_flag;
-   int32_t  ppcTrampolineInitByCodeCache(TR_FrontEnd *, uint8_t *, uintptr_t);
    };
-
-#ifdef TR_HOST_POWER
-extern void     ppcCodeSync(uint8_t *, uint32_t);
-#endif
 
 void * ppcPicTrampInit(TR_FrontEnd *vm, TR::PersistentInfo * persistentInfo)
    {
@@ -65,7 +52,8 @@ void * ppcPicTrampInit(TR_FrontEnd *vm, TR::PersistentInfo * persistentInfo)
 
 #ifdef TR_TARGET_64BIT
    TR_J9VMBase *fej9 = (TR_J9VMBase *)vm;
-   if (!fej9->isAOT_DEPRECATED_DO_NOT_USE()) // don't init TOC if it is jar2jxe AOT compile
+   if (!fej9->isAOT_DEPRECATED_DO_NOT_USE() &&  // don't init TOC if it is jar2jxe AOT compile
+       !TR::Options::getCmdLineOptions()->getOption(TR_DisableTOC))
       {
       retVal = TR_PPCTableOfConstants::initTOC(fej9, persistentInfo, 0);
       }

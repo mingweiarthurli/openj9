@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2019 IBM Corp. and others
+ * Copyright (c) 2001, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -45,10 +45,6 @@ class SH_SharedCache
 {
 public:
 	typedef char* BlockPtr;
-
-#if defined(J9SHR_CACHELET_SUPPORT)
-	virtual bool serializeSharedCache(J9VMThread* currentThread) = 0;
-#endif
 
 	virtual const J9ROMClass* findROMClass(J9VMThread* currentThread, const char* path, ClasspathItem* classpath, const J9UTF8* partition, const J9UTF8* modContext, IDATA confirmedEntries, IDATA* foundAtIndex) = 0;
 
@@ -103,11 +99,7 @@ public:
 	virtual void notifyClasspathEntryStateChange(J9VMThread* currentThread, const char* path, UDATA newState) = 0;
 
 	virtual SH_CompositeCache* getCompositeCacheAPI() = 0;
-	
-#if defined(J9SHR_CACHELET_SUPPORT)
-	virtual IDATA startupCachelet(J9VMThread* currentThread, SH_CompositeCache* cachelet) = 0;
-#endif
-	
+
 	virtual IDATA getAndStartManagerForType(J9VMThread* currentThread, UDATA dataType, SH_Manager** startedManager) = 0;
 	
 	virtual void getRomClassAreaBounds(void ** romClassAreaStart, void ** romClassAreaEnd) = 0;

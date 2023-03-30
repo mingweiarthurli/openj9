@@ -1,4 +1,4 @@
-// Copyright (c) 2006, 2020 IBM Corp. and others
+// Copyright (c) 2006, 2022 IBM Corp. and others
 //
 // This program and the accompanying materials are made available under
 // the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@
 // OpenJDK Assembly Exception [2].
 //
 // [1] https://www.gnu.org/software/classpath/license.html
-// [2] http://openjdk.java.net/legal/assembly-exception.html
+// [2] https://openjdk.org/legal/assembly-exception.html
 //
 // SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 
@@ -185,7 +185,7 @@ TraceExit=Trc_SC_Listen_Exit NoEnv Overhead=1 Level=1 Template="JVM_Listen -- re
 
 TraceEntry=Trc_SC_LoadLibrary_Entry NoEnv Overhead=1 Level=2 Template="JVM_LoadLibrary(name=%s)"
 TraceExit-Exception=Trc_SC_LoadLibrary_Error Obsolete NoEnv Overhead=1 Level=1 Template="JVM_LoadLibrary -- error. Return %d"
-TraceExit=Trc_SC_LoadLibrary_Exit NoEnv Overhead=1 Level=2 Template="JVM_LoadLibrary -- return %d"
+TraceExit=Trc_SC_LoadLibrary_Exit Obsolete NoEnv Overhead=1 Level=2 Template="JVM_LoadLibrary -- return %d"
 
 TraceEntry=Trc_SC_Lseek_Entry NoEnv Overhead=1 Level=3 Template="JVM_Lseek(descriptor=%d, bytesToSeek=%lld, origin=%d)"
 TraceExit-Exception=Trc_SC_Lseek_bad_descriptor NoEnv Overhead=1 Level=1 Template="invalid descriptor"
@@ -343,3 +343,24 @@ TraceEntry=Trc_SC_GetExtendedNPEMessage_Entry Overhead=1 Level=3 Template="JVM_G
 TraceEntry=Trc_SC_GetExtendedNPEMessage_Entry2 Overhead=1 Level=1 Template="JVM_GetExtendedNPEMessage - throwableObj(0x%p)"
 TraceEvent=Trc_SC_GetExtendedNPEMessage_Null_NPE_MSG Overhead=1 Level=1 Template="JVM_GetExtendedNPEMessage - returns a NULL NPE message : romClass (0x%p) && romMethod (0x%p) bytecodeOffset (%d)"
 TraceExit=Trc_SC_GetExtendedNPEMessage_Exit Overhead=1 Level=3 Template="JVM_GetExtendedNPEMessage - returns msgObjectRef(0x%p)"
+
+TraceEntry=Trc_SC_UnloadLibrary_Entry NoEnv Overhead=1 Level=2 Template="JVM_UnloadLibrary(handle=%p)"
+TraceEvent=Trc_SC_LoadLibrary_BootStrap NoEnv Overhead=1 Level=3 Template="JVM_LoadLibrary(name=%s) Bootstrap library"
+TraceEvent=Trc_SC_LoadLibrary_OpenShared NoEnv Overhead=1 Level=3 Template="JVM_LoadLibrary(name=%s) j9sl_open_shared_library"
+TraceEvent=Trc_SC_LoadLibrary_OpenShared_Decorate NoEnv Overhead=1 Level=3 Template="JVM_LoadLibrary(name=%s) j9sl_open_shared_library J9PORT_SLOPEN_DECORATE"
+
+TraceExit=Trc_SC_LoadLibrary_Exit NoEnv Overhead=1 Level=2 Template="JVM_LoadLibrary -- return 0x%zx"
+
+TraceEntry=Trc_SC_VirtualThreadMountBegin_Entry Overhead=1 Level=3 Template="thread = 0x%p, firstMount = %d"
+TraceExit=Trc_SC_VirtualThreadMountBegin_Exit Overhead=1 Level=3 Template="thread = 0x%p, firstMount = %d"
+
+TraceEntry=Trc_SC_VirtualThreadMountEnd_Entry Overhead=1 Level=3 Template="thread = 0x%p, firstMount = %d"
+TraceExit=Trc_SC_VirtualThreadMountEnd_Exit Overhead=1 Level=3 Template="thread = 0x%p, firstMount = %d"
+
+TraceEntry=Trc_SC_VirtualThreadUnmountBegin_Entry Overhead=1 Level=3 Template="thread = 0x%p, lastUnmount = %d"
+TraceExit=Trc_SC_VirtualThreadUnmountBegin_Exit Overhead=1 Level=3 Template="thread = 0x%p, lastUnmount = %d"
+
+TraceEntry=Trc_SC_VirtualThreadUnmountEnd_Entry Overhead=1 Level=3 Template="thread = 0x%p, lastUnmount = %d"
+TraceExit=Trc_SC_VirtualThreadUnmountEnd_Exit Overhead=1 Level=3 Template="thread = 0x%p, lastUnmount = %d"
+
+TraceEvent=Trc_SC_VirtualThread_Info Overhead=1 Level=3 Test Template="virtualThreadObj = 0x%p, virtualThreadState = 0x%p, virtualThreadInspectorCount = %lld, carrierThreadObj = 0x%p, continuationObj = 0x%p, J9VMContinuation = 0x%p"

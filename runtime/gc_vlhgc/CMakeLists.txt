@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2017, 2020 IBM Corp. and others
+# Copyright (c) 2017, 2022 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,12 +15,12 @@
 # OpenJDK Assembly Exception [2].
 #
 # [1] https://www.gnu.org/software/classpath/license.html
-# [2] http://openjdk.java.net/legal/assembly-exception.html
+# [2] https://openjdk.org/legal/assembly-exception.html
 #
 # SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 ################################################################################
 
-j9vm_add_library(j9gcvlhgc STATIC
+set(gc_vlhgc_sources
 	AllocationContextBalanced.cpp
 	AllocationContextTarok.cpp
 	CardListFlushTask.cpp
@@ -39,6 +39,7 @@ j9vm_add_library(j9gcvlhgc STATIC
 	CopyScanCacheChunkVLHGCInHeap.cpp
 	CopyScanCacheListVLHGC.cpp
 	CopyScanCacheVLHGC.cpp
+	ContinuationObjectBufferVLHGC.cpp
 	CycleStateVLHGC.cpp
 	EnvironmentVLHGC.cpp
 	GlobalAllocationManagerTarok.cpp
@@ -60,10 +61,6 @@ j9vm_add_library(j9gcvlhgc STATIC
 	MemorySubSpaceTarok.cpp
 	OwnableSynchronizerObjectBufferVLHGC.cpp
 	ParallelSweepSchemeVLHGC.cpp
-	PartialMarkDelegate.cpp
-	PartialMarkGMPCardCleaner.cpp
-	PartialMarkingScheme.cpp
-	PartialMarkNoGMPCardCleaner.cpp
 	ProjectedSurvivalCollectionSetDelegate.cpp
 	ReclaimDelegate.cpp
 	ReferenceObjectBufferVLHGC.cpp
@@ -83,8 +80,12 @@ j9vm_add_library(j9gcvlhgc STATIC
 	WorkPacketsVLHGC.cpp
 	WriteOnceCompactor.cpp
 	WriteOnceFixupCardCleaner.cpp
-
 )
+
+j9vm_add_library(j9gcvlhgc STATIC
+	${gc_vlhgc_sources}
+)
+
 target_link_libraries(j9gcvlhgc
 	PRIVATE
 		j9vm_interface
@@ -93,3 +94,18 @@ target_link_libraries(j9gcvlhgc
 		j9gcstructs
 		j9gcbase
 )
+
+if(OMR_MIXED_REFERENCES_MODE_STATIC)
+	j9vm_add_library(j9gcvlhgc_full STATIC
+		${gc_vlhgc_sources}
+	)
+
+	target_link_libraries(j9gcvlhgc_full
+		PRIVATE
+			j9vm_interface
+
+			omrgc_full
+			j9gcstructs_full
+			j9gcbase_full
+	)
+endif()

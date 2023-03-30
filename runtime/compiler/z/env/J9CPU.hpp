@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -47,29 +47,34 @@ namespace Z
 
 class OMR_EXTENSIBLE CPU : public J9::CPU
    {
-   protected:
+protected:
 
    CPU() : J9::CPU() {}
    CPU(const OMRProcessorDesc& processorDescription) : J9::CPU(processorDescription) {}
 
-   public:
+public:
+
+   /** 
+    * @brief A factory method used to construct a CPU object for portable AOT compilations
+    * @param[in] omrPortLib : the port library
+    * @return TR::CPU
+    */
+   static TR::CPU detectRelocatable(OMRPortLibrary * const omrPortLib);
+
+   /** 
+    * @brief A factory method used to construct a CPU object based on user customized processorDescription
+    * @param[in] OMRProcessorDesc : the processor description
+    * @return TR::CPU
+    */
+   static TR::CPU customize(OMRProcessorDesc processorDescription);
+
+   /**
+    * @brief Intialize _supportedFeatureMasks to the list of processor features that will be exploited by the compiler and set _isSupportedFeatureMasksEnabled to true
+    * @return void
+    */
+   static void enableFeatureMasks();
    
-   static int32_t TO_PORTLIB_get390MachineId();
-   static bool TO_PORTLIB_get390_supportsZNext();
-   static bool TO_PORTLIB_get390_supportsZ15();
-   static bool TO_PORTLIB_get390_supportsZ14();
-   static bool TO_PORTLIB_get390_supportsZ13();
-   static bool TO_PORTLIB_get390_supportsZ6();
-   static bool TO_PORTLIB_get390_supportsZGryphon();
-   static bool TO_PORTLIB_get390_supportsZHelix();
-
-   void applyUserOptions();
-   void initializeS390ProcessorFeatures();
    bool isCompatible(const OMRProcessorDesc& processorDescription);
-   OMRProcessorDesc getProcessorDescription();
-
-   bool is_at_least_test(OMRProcessorArchitecture p);
-   bool supports_feature_test(uint32_t feature);
    };
 
 }

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -46,7 +46,7 @@ TR::X86RecompilationSnippet::X86RecompilationSnippet(TR::LabelSymbol    *lab,
                                                          TR::CodeGenerator *cg)
    : TR::Snippet(cg, node, lab, true)
    {
-   setDestination(cg->symRefTab()->findOrCreateRuntimeHelper(cg->comp()->target().is64Bit()? TR_AMD64countingRecompileMethod : TR_IA32countingRecompileMethod, false, false, false));
+   setDestination(cg->symRefTab()->findOrCreateRuntimeHelper(cg->comp()->target().is64Bit()? TR_AMD64countingRecompileMethod : TR_IA32countingRecompileMethod));
    }
 
 uint32_t TR::X86RecompilationSnippet::getLength(int32_t estimatedSnippetStart)
@@ -92,8 +92,8 @@ uint8_t *TR::X86RecompilationSnippet::emitSnippetBody()
    getSnippetLabel()->setCodeLocation(buffer);
 
    intptr_t helperAddress = (intptr_t)_destination->getMethodAddress();
-   *buffer++ = 0xe8; // CallImm4
-   if (NEEDS_TRAMPOLINE(helperAddress, buffer+4, cg()))
+   *buffer = 0xe8; // CallImm4
+   if (cg()->directCallRequiresTrampoline(helperAddress, reinterpret_cast<intptr_t>(buffer++)))
       {
       helperAddress = TR::CodeCacheManager::instance()->findHelperTrampoline(_destination->getReferenceNumber(), (void *)buffer);
       TR_ASSERT(IS_32BIT_RIP(helperAddress, buffer+4), "Local helper trampoline should be reachable directly.\n");

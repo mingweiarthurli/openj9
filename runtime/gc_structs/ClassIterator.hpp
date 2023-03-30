@@ -1,6 +1,6 @@
 
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -51,7 +51,9 @@ enum {
 	classiterator_state_slots,
 	classiterator_state_callsites,
 	classiterator_state_methodtypes,
+#if defined(J9VM_OPT_METHOD_HANDLE)
 	classiterator_state_varhandlemethodtypes,
+#endif /* defined(J9VM_OPT_METHOD_HANDLE) */
 	classiterator_state_valuetypes,
 	classiterator_state_end
 };
@@ -73,7 +75,9 @@ protected:
 	GC_ConstantPoolObjectSlotIterator _constantPoolObjectSlotIterator;
 	GC_CallSitesIterator _callSitesIterator;
 	GC_MethodTypesIterator _methodTypesIterator;
+#if defined(J9VM_OPT_METHOD_HANDLE)
 	GC_MethodTypesIterator _varHandlesMethodTypesIterator;
+#endif /* defined(J9VM_OPT_METHOD_HANDLE) */
 	GC_ValueTypesIterator _valueTypesIterator;
 	const bool _shouldScanClassObject; /**< Boolean needed for balanced GC to prevent ClassObject from being scanned twice  */
 
@@ -85,8 +89,12 @@ public:
 		, _classStaticsIterator(env, clazz)
 		, _constantPoolObjectSlotIterator((J9JavaVM *)env->getLanguageVM(), clazz)
 		, _callSitesIterator(clazz)
+#if defined(J9VM_OPT_OPENJDK_METHODHANDLE)
+		, _methodTypesIterator(clazz->romClass->invokeCacheCount, clazz->invokeCache)
+#else /* defined(J9VM_OPT_OPENJDK_METHODHANDLE) */
 		, _methodTypesIterator(clazz->romClass->methodTypeCount, clazz->methodTypes)
 		, _varHandlesMethodTypesIterator(clazz->romClass->varHandleMethodTypeCount, clazz->varHandleMethodTypes)
+#endif /* defined(J9VM_OPT_OPENJDK_METHODHANDLE) */
 		, _valueTypesIterator(clazz)
 		, _shouldScanClassObject(shouldScanClassObject)
 	{}
@@ -98,8 +106,12 @@ public:
 		, _classStaticsIterator(extensions, clazz)
 		, _constantPoolObjectSlotIterator((J9JavaVM *)extensions->getOmrVM()->_language_vm, clazz)
 		, _callSitesIterator(clazz)
+#if defined(J9VM_OPT_OPENJDK_METHODHANDLE)
+		, _methodTypesIterator(clazz->romClass->invokeCacheCount, clazz->invokeCache)
+#else /* defined(J9VM_OPT_OPENJDK_METHODHANDLE) */
 		, _methodTypesIterator(clazz->romClass->methodTypeCount, clazz->methodTypes)
 		, _varHandlesMethodTypesIterator(clazz->romClass->varHandleMethodTypeCount, clazz->varHandleMethodTypes)
+#endif /* defined(J9VM_OPT_OPENJDK_METHODHANDLE) */
 		, _valueTypesIterator(clazz)
 		, _shouldScanClassObject(true)
 	{}

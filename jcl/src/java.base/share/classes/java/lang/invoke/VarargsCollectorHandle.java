@@ -1,6 +1,6 @@
-/*[INCLUDE-IF Sidecar17]*/
+/*[INCLUDE-IF Sidecar17 & !OPENJDK_METHODHANDLES]*/
 /*******************************************************************************
- * Copyright (c) 2009, 2019 IBM Corp. and others
+ * Copyright (c) 2009, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,18 +16,22 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
 package java.lang.invoke;
 
 import java.lang.invoke.MethodHandles.Lookup;
-/*[IF Java11]*/
+/*[IF JAVA_SPEC_VERSION >= 11]*/
 import java.lang.reflect.Array;
 import java.util.Arrays;
 import java.util.Objects;
-/*[ENDIF]*/
+/*[ENDIF] JAVA_SPEC_VERSION >= 11 */
+
+/*[IF JAVA_SPEC_VERSION >= 15]*/
+import java.util.List;
+/*[ENDIF] JAVA_SPEC_VERSION >= 15 */
 
 import com.ibm.oti.util.Msg;
 
@@ -109,7 +113,7 @@ final class VarargsCollectorHandle extends MethodHandle {
 		if (args != null) {
 			argsLength = args.length;
 		}
-		/*[IF Java11]*/
+		/*[IF JAVA_SPEC_VERSION >= 11]*/
 		/*
 		 * If argument count exceeds the parameter count of the MethodHandle, special handling is required to
 		 * store the additional arguments in the trailing array.
@@ -136,7 +140,7 @@ final class VarargsCollectorHandle extends MethodHandle {
 
 			return this.asFixedArity().invokeWithArguments(newArgs);
 		} else
-		/*[ENDIF]*/
+		/*[ENDIF] JAVA_SPEC_VERSION >= 11 */
 		{
 			if (argsLength < 253) {
 				MethodHandle mh = IWAContainer.getMH(argsLength);
@@ -223,7 +227,15 @@ final class VarargsCollectorHandle extends MethodHandle {
 	boolean canRevealDirect() {
 		return isPrimitiveVarargs;
 	}
-	
+
+/*[IF JAVA_SPEC_VERSION >= 15]*/
+	@Override
+	boolean addRelatedMHs(List<MethodHandle> relatedMHs) {
+		relatedMHs.add(next);
+		return true;
+	}
+/*[ENDIF] JAVA_SPEC_VERSION >= 15 */
+
 	// {{{ JIT support
 
 	private static final ThunkTable _thunkTable = new ThunkTable();
@@ -260,4 +272,3 @@ final class VarargsCollectorHandle extends MethodHandle {
 		c.compareChildHandle(left.next, this.next);
 	}
 }
-

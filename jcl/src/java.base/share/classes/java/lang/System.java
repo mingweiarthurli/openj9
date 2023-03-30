@@ -1,6 +1,6 @@
 /*[INCLUDE-IF Sidecar18-SE]*/
 /*******************************************************************************
- * Copyright (c) 1998, 2020 IBM Corp. and others
+ * Copyright (c) 1998, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,26 +16,32 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
 package java.lang;
 
+import com.ibm.oti.util.Msg;
+
 import java.io.*;
+/*[IF Sidecar18-SE-OpenJ9 | JAVA_SPEC_VERSION >= 11]*/
+import java.nio.charset.Charset;
+/*[ENDIF] Sidecar18-SE-OpenJ9 | JAVA_SPEC_VERSION >= 11 */
 import java.util.Map;
 import java.util.Properties;
 import java.util.PropertyPermission;
 import java.security.*;
 import java.lang.reflect.Method;
+import java.lang.reflect.Constructor;
 
 /*[IF Sidecar19-SE]*/
 import jdk.internal.misc.Unsafe;
-/*[IF Java12]*/
+/*[IF JAVA_SPEC_VERSION >= 12]*/
 import jdk.internal.access.SharedSecrets;
-/*[ELSE]
+/*[ELSE] JAVA_SPEC_VERSION >= 12
 import jdk.internal.misc.SharedSecrets;
-/*[ENDIF] Java12 */
+/*[ENDIF] JAVA_SPEC_VERSION >= 12 */
 import jdk.internal.misc.VM;
 import java.lang.StackWalker.Option;
 import jdk.internal.reflect.Reflection;
@@ -52,6 +58,9 @@ import sun.reflect.CallerSensitive;
 import com.ibm.gpu.spi.GPUAssist;
 import com.ibm.gpu.spi.GPUAssistHolder;
 /*[ENDIF] Sidecar19-SE */
+/*[IF PLATFORM-mz31 | PLATFORM-mz64 | !Sidecar18-SE-OpenJ9]*/
+import com.ibm.jvm.io.ConsolePrintStream;
+/*[ENDIF] PLATFORM-mz31 | PLATFORM-mz64 | !Sidecar18-SE-OpenJ9 */
 
 /**
  * Class System provides a standard place for programs
@@ -78,6 +87,20 @@ public final class System {
 	 * Default error output stream
 	 */
 	public static final PrintStream err = null;
+	/*[IF JAVA_SPEC_VERSION >= 17] */
+	// The initial err to print SecurityManager related warning messages
+	static PrintStream initialErr;
+	// Show only one setSecurityManager() warning message for each caller
+	private static Map<Class<?>, Object> setSMCallers;
+	/*[ENDIF] JAVA_SPEC_VERSION >= 17 */
+
+	/*[IF JAVA_SPEC_VERSION > 11] */
+	/**
+	 * setSecurityManager() should throw UnsupportedOperationException
+	 * if throwUOEFromSetSM is set to true.
+	 */
+	private static boolean throwUOEFromSetSM;
+	/*[ENDIF] JAVA_SPEC_VERSION > 11 */
 
 	//Get a ref to the Runtime instance for faster lookup
 	private static final Runtime RUNTIME = Runtime.getRuntime();
@@ -95,29 +118,58 @@ public final class System {
 	private static volatile boolean consoleInitialized;
 
 	private static String lineSeparator;
-		
-	private static boolean propertiesInitialized = false;
+
+	private static boolean propertiesInitialized;
 
 	private static String platformEncoding;
 	private static String fileEncoding;
 	private static String osEncoding;
 
+	private static final int sysPropID_PlatformEncoding = 1;
+	private static final int sysPropID_FileEncoding = 2;
+	private static final int sysPropID_OSEncoding = 3;
+	/*[IF JAVA_SPEC_VERSION >= 17]*/
+	private static final int sysPropID_OSVersion = 0;
+	private static final String sysPropOSVersion;
+	/*[ENDIF] JAVA_SPEC_VERSION >= 17 */
+
+	/*[IF JAVA_SPEC_VERSION >= 11]*/
+	private static boolean hasSetErrEncoding;
+	private static boolean hasSetOutEncoding;
+	private static String consoleDefaultEncoding;
+	/* The consoleDefaultCharset is different from the default console encoding when the encoding
+	 * doesn't exist, or isn't available at startup. Some character sets are not available in the
+	 * java.base module, there are more in the jdk.charsets module, and so are not used at startup.
+	 */
+	private static Charset consoleDefaultCharset;
+	/*[ENDIF] JAVA_SPEC_VERSION >= 11 */
+	/*[IF JAVA_SPEC_VERSION >= 19]*/
+	private static String stdoutProp;
+	private static String stderrProp;
+	/*[ENDIF] JAVA_SPEC_VERSION >= 19 */
+
 /*[IF Sidecar19-SE]*/
 	static java.lang.ModuleLayer	bootLayer;
 /*[ENDIF]*/
-	
+
 	// Initialize all the slots in System on first use.
 	static {
-		initEncodings();		
-	}
-	
-	//	get following system properties in clinit and make it available via static variables 
-	//	at early boot stage in which System is not fully initialized
-	//	os.encoding, ibm.system.encoding/sun.jnu.encoding, file.encoding
-	private static void initEncodings() {
-		platformEncoding = getEncoding(PlatformEncoding);
-		String definedFileEncoding = getEncoding(FileEncoding);
-		String definedOSEncoding = getEncoding(OSEncoding);
+		/* Get following system properties in clinit and make it available via static variables
+		 * at early boot stage in which System is not fully initialized
+		 * os.version, os.encoding, ibm.system.encoding/sun.jnu.encoding, file.encoding
+		 */
+		/*[IF JAVA_SPEC_VERSION >= 17]*/
+		sysPropOSVersion = getSysPropBeforePropertiesInitialized(sysPropID_OSVersion);
+		/*[ENDIF] JAVA_SPEC_VERSION >= 17 */
+		platformEncoding = getSysPropBeforePropertiesInitialized(sysPropID_PlatformEncoding);
+		String definedOSEncoding = getSysPropBeforePropertiesInitialized(sysPropID_OSEncoding);
+		/*[IF JAVA_SPEC_VERSION >= 18]*/
+		/* -Dfile.encoding=COMPAT is mapped to platform encoding within getSysPropBeforePropertiesInitialized.
+		 * During early VM boot stage, JITHelpers hasn't been initialized yet, COMPACT_STRINGS related APIs
+		 * might not work properly.
+		 */
+		/*[ENDIF] JAVA_SPEC_VERSION >= 18 */
+		String definedFileEncoding = getSysPropBeforePropertiesInitialized(sysPropID_FileEncoding);
 		if (definedFileEncoding != null) {
 			fileEncoding = definedFileEncoding;
 			// if file.encoding is defined, and os.encoding is not, use the detected
@@ -129,71 +181,272 @@ public final class System {
 			fileEncoding = platformEncoding;
 		}
 		// if os.encoding is not defined, file.encoding will be used
-		if (osEncoding == null)
+		if (osEncoding == null) {
 			osEncoding = definedOSEncoding;
-	}	
-		
+		}
+	}
+
+	/*[IF JAVA_SPEC_VERSION >= 11]*/
+	/*
+	 * Return the Charset of the primary or when fallback is true, the default console encoding,
+	 * if different from the default console Charset.
+	 *
+	 * consoleDefaultCharset must be initialized before calling.
+	 * consoleDefaultEncoding must be initialized before calling with fallback set to true.
+	 */
+	static Charset getCharset(boolean isStdout, boolean fallback) {
+		/*[IF JAVA_SPEC_VERSION >= 19]*/
+		String primary = isStdout ? stdoutProp : stderrProp;
+		/*[ELSE] JAVA_SPEC_VERSION >= 19 */
+		String primary = internalGetProperties().getProperty(isStdout ? "sun.stdout.encoding" : "sun.stderr.encoding"); //$NON-NLS-1$  //$NON-NLS-2$
+		/*[ENDIF] JAVA_SPEC_VERSION >= 19 */
+		if (primary != null) {
+			try {
+				Charset newCharset = Charset.forName(primary);
+				if (newCharset.equals(consoleDefaultCharset)) {
+					return null;
+				} else {
+					return newCharset;
+				}
+			} catch (IllegalArgumentException e) {
+				// ignore unsupported or invalid encodings
+			}
+		}
+		if (fallback && (consoleDefaultEncoding != null)) {
+			try {
+				Charset newCharset = Charset.forName(consoleDefaultEncoding);
+				if (newCharset.equals(consoleDefaultCharset)) {
+					return null;
+				} else {
+					return newCharset;
+				}
+			} catch (IllegalArgumentException e) {
+				// ignore unsupported or invalid encodings
+			}
+		}
+		return null;
+	}
+
+	/*
+	 * Return the appropriate System console using the requested Charset.
+	 * If the Charset is null use the default console Charset.
+	 *
+	 * consoleDefaultCharset must be initialized before calling.
+	 */
+	static PrintStream createConsole(FileDescriptor desc, Charset charset) {
+		BufferedOutputStream bufStream = new BufferedOutputStream(new FileOutputStream(desc));
+		Charset consoleCharset = charset == null ? consoleDefaultCharset : charset;
+
+		/*[IF JAVA_SPEC_VERSION >= 19]*/
+		Properties props = internalGetProperties();
+		// If the user didn't set the encoding property, set it now.
+		if (FileDescriptor.out == desc) {
+			if (null == stdoutProp) {
+				props.put("stdout.encoding", consoleCharset.name()); //$NON-NLS-1$
+			}
+		} else if (FileDescriptor.err == desc) {
+			if (null == stderrProp) {
+				props.put("stderr.encoding", consoleCharset.name()); //$NON-NLS-1$
+			}
+		}
+		/*[ENDIF] JAVA_SPEC_VERSION >= 19 */
+
+		/*[IF PLATFORM-mz31 | PLATFORM-mz64]*/
+		return ConsolePrintStream.localize(bufStream, true, consoleCharset);
+		/*[ELSE]*/
+		return new PrintStream(bufStream, true, consoleCharset);
+		/*[ENDIF] PLATFORM-mz31 | PLATFORM-mz64 */
+	}
+
+	static void finalizeConsoleEncoding() {
+		/* Some character sets are not available in the java.base module and so are not used at startup. There
+		 * are additional character sets in the jdk.charsets module, which is only loaded later. This means the
+		 * default character set may not be the same as the desired encoding. When all modules and character sets
+		 * are available, check if the desired encodings can be used for System.err and System.out.
+		 */
+		// If the encoding property was already set, don't change the encoding.
+		if (!hasSetErrEncoding) {
+			Charset stderrCharset = getCharset(false, true);
+			if (stderrCharset != null) {
+				err.flush();
+				setErr(createConsole(FileDescriptor.err, stderrCharset));
+			}
+		}
+
+		// If the encoding property was already set, don't change the encoding.
+		if (!hasSetOutEncoding) {
+			Charset stdoutCharset = getCharset(true, true);
+			if (stdoutCharset != null) {
+				out.flush();
+				setOut(createConsole(FileDescriptor.out, stdoutCharset));
+			}
+		}
+
+		/*[IF JAVA_SPEC_VERSION >= 19]*/
+		// Cache the final system property values so they can be restored if ensureProperties(false) is called.
+		stdoutProp = systemProperties.getProperty("stdout.encoding"); //$NON-NLS-1$
+		stderrProp = systemProperties.getProperty("stderr.encoding"); //$NON-NLS-1$
+		/*[ENDIF] JAVA_SPEC_VERSION >= 19 */
+	}
+	/*[ELSE]*/
+	/*[IF Sidecar18-SE-OpenJ9]*/
+	/*
+	 * Return the Charset name of the primary encoding, if different from the default.
+	 */
+	private static String getCharsetName(String primary, Charset defaultCharset) {
+		if (primary != null) {
+			try {
+				Charset newCharset = Charset.forName(primary);
+				if (newCharset.equals(defaultCharset)) {
+					return null;
+				} else {
+					return newCharset.name();
+				}
+			} catch (IllegalArgumentException e) {
+				// ignore unsupported or invalid encodings
+			}
+		}
+		return null;
+	}
+
+	/*
+	 * Return the appropriate System console using the pre-validated encoding.
+	 */
+	private static PrintStream createConsole(FileDescriptor desc, String encoding) {
+		BufferedOutputStream bufStream = new BufferedOutputStream(new FileOutputStream(desc));
+		if (encoding == null) {
+			return new PrintStream(bufStream, true);
+		} else {
+			try {
+				return new PrintStream(bufStream, true, encoding);
+			} catch (UnsupportedEncodingException e) {
+				// not possible when the Charset name is validated first
+				throw new InternalError("For encoding " + encoding, e); //$NON-NLS-1$
+			}
+		}
+	}
+	/*[ELSE]*/
+	/*
+	 * Return the appropriate System console.
+	 */
+	private static PrintStream createConsole(FileDescriptor desc) {
+		return ConsolePrintStream.localize(new BufferedOutputStream(new FileOutputStream(desc)), true);
+	}
+	/*[ENDIF] Sidecar18-SE-OpenJ9 */
+	/*[ENDIF] JAVA_SPEC_VERSION >= 11 */
+
 	static void afterClinitInitialization() {
 		/*[PR CMVC 189091] Perf: EnumSet.allOf() is slow */
 		/*[PR CMVC 191554] Provide access to ClassLoader methods to improve performance */
-		/* Multitenancy change: only initialize VMLangAccess once as it's non-isolated */ 
+		/* Multitenancy change: only initialize VMLangAccess once as it's non-isolated */
 		if (null == com.ibm.oti.vm.VM.getVMLangAccess()) {
 			com.ibm.oti.vm.VM.setVMLangAccess(new VMAccess());
 		}
+		SharedSecrets.setJavaLangAccess(new Access());
 
 		// Fill in the properties from the VM information.
 		ensureProperties(true);
 
-		/*[PR CMVC 150472] sun.misc.SharedSecrets needs access to java.lang. */
-		SharedSecrets.setJavaLangAccess(new Access());
-		
+		/*[IF JAVA_SPEC_VERSION >= 11]*/
+		initJCLPlatformEncoding();
+		/*[ENDIF] JAVA_SPEC_VERSION >= 11 */
+
 		/*[REM] Initialize the JITHelpers needed in J9VMInternals since the class can't do it itself */
 		try {
 			java.lang.reflect.Field f1 = J9VMInternals.class.getDeclaredField("jitHelpers"); //$NON-NLS-1$
 			java.lang.reflect.Field f2 = String.class.getDeclaredField("helpers"); //$NON-NLS-1$
-			
+
 			Unsafe unsafe = Unsafe.getUnsafe();
-			
+
 			unsafe.putObject(unsafe.staticFieldBase(f1), unsafe.staticFieldOffset(f1), com.ibm.jit.JITHelpers.getHelpers());
 			unsafe.putObject(unsafe.staticFieldBase(f2), unsafe.staticFieldOffset(f2), com.ibm.jit.JITHelpers.getHelpers());
 		} catch (NoSuchFieldException e) { }
-		
+
+		/*[IF JAVA_SPEC_VERSION < 17]*/
 		/**
-		 * When the System Property == true, then disable sharing (i.e. arraycopy the underlying value array) in 
-		 * String.substring(int) and String.substring(int, int) methods whenever offset is zero. Otherwise, enable 
+		 * When the System Property == true, then disable sharing (i.e. arraycopy the underlying value array) in
+		 * String.substring(int) and String.substring(int, int) methods whenever offset is zero. Otherwise, enable
 		 * sharing of the underlying value array.
 		 */
 		String enableSharingInSubstringWhenOffsetIsZeroProperty = internalGetProperties().getProperty("java.lang.string.substring.nocopy"); //$NON-NLS-1$
 		String.enableSharingInSubstringWhenOffsetIsZero = enableSharingInSubstringWhenOffsetIsZeroProperty == null || enableSharingInSubstringWhenOffsetIsZeroProperty.equalsIgnoreCase("false"); //$NON-NLS-1$
-		
+
 		// Set up standard in, out, and err.
 		/*[PR CMVC 193070] - OTT:Java 8 Test_JITHelpers test_getSuperclass NoSuchMet*/
 		/*[PR JAZZ 58297] - continue with the rules defined by JAZZ 57070 - Build a Java 8 J9 JCL using the SIDECAR18 preprocessor configuration */
 		// Check the default encoding
 		/*[Bug 102075] J2SE Setting -Dfile.encoding=junk fails to run*/
-		/*[IF Sidecar19-SE]*/
+		/*[IF JAVA_SPEC_VERSION >= 11]*/
 		StringCoding.encode(String.LATIN1, new byte[1]);
 		/*[ELSE]*/
 		StringCoding.encode(new char[1], 0, 1);
-		/*[ENDIF]*/
-		/*[IF (Sidecar18-SE-OpenJ9|Sidecar19-SE)&!(PLATFORM-mz31|PLATFORM-mz64)]*/
-		setErr(new PrintStream(new BufferedOutputStream(new FileOutputStream(FileDescriptor.err)), true));
-		setOut(new PrintStream(new BufferedOutputStream(new FileOutputStream(FileDescriptor.out)), true));
+		/*[ENDIF] JAVA_SPEC_VERSION >= 11 */
+		/*[ENDIF] JAVA_SPEC_VERSION < 17 */
+
+		/*[IF Sidecar18-SE-OpenJ9]*/
+		Properties props = internalGetProperties();
+		/*[IF JAVA_SPEC_VERSION >= 11]*/
+		/*[IF JAVA_SPEC_VERSION >= 18]*/
+		consoleDefaultEncoding = props.getProperty("native.encoding"); //$NON-NLS-1$
+		consoleDefaultCharset = Charset.forName(consoleDefaultEncoding, sun.nio.cs.US_ASCII.INSTANCE);
+		/*[ELSE] JAVA_SPEC_VERSION >= 18 */
+		consoleDefaultCharset = Charset.defaultCharset();
+		/*[IF PLATFORM-mz31|PLATFORM-mz64]*/
+		try {
+			consoleDefaultEncoding = props.getProperty("console.encoding"); //$NON-NLS-1$
+			if (consoleDefaultEncoding == null) {
+				consoleDefaultEncoding = props.getProperty("ibm.system.encoding"); //$NON-NLS-1$
+			}
+			consoleDefaultCharset = Charset.forName(consoleDefaultEncoding); //$NON-NLS-1$
+		} catch (IllegalArgumentException e) {
+			// use the defaultCharset()
+		}
+		/*[ELSE] PLATFORM-mz31|PLATFORM-mz64 */
+		consoleDefaultEncoding = props.getProperty("file.encoding"); //$NON-NLS-1$
+		/*[ENDIF] PLATFORM-mz31|PLATFORM-mz64 */
+		/*[ENDIF] JAVA_SPEC_VERSION >= 18 */
+		/* consoleDefaultCharset must be initialized before calling getCharset() */
+		Charset stdoutCharset = getCharset(true, false);
+		Charset stderrCharset = getCharset(false, false);
+		/*[ELSE] JAVA_SPEC_VERSION >= 11 */
+		Charset consoleCharset = Charset.defaultCharset();
+		String stdoutCharset = getCharsetName(props.getProperty("sun.stdout.encoding"), consoleCharset); //$NON-NLS-1$
+		String stderrCharset = getCharsetName(props.getProperty("sun.stderr.encoding"), consoleCharset); //$NON-NLS-1$
+		/*[ENDIF] JAVA_SPEC_VERSION >= 11 */
+		/*[ENDIF] Sidecar18-SE-OpenJ9 */
+
+		/*[IF Sidecar18-SE-OpenJ9]*/
+		/*[IF JAVA_SPEC_VERSION >= 11]*/
+		hasSetErrEncoding = stderrCharset != null;
+		hasSetOutEncoding = stdoutCharset != null;
+		/* consoleDefaultCharset must be initialized before calling createConsole() */
+		/*[ENDIF] JAVA_SPEC_VERSION >= 11 */
+		/*[IF JAVA_SPEC_VERSION >= 17] */
+		initialErr = createConsole(FileDescriptor.err, stderrCharset);
+		setErr(initialErr);
+		/*[ELSE] JAVA_SPEC_VERSION >= 17 */
+		setErr(createConsole(FileDescriptor.err, stderrCharset));
+		/*[ENDIF] JAVA_SPEC_VERSION >= 17 */
+		setOut(createConsole(FileDescriptor.out, stdoutCharset));
 		/*[IF Sidecar19-SE_RAWPLUSJ9]*/
 		setIn(new BufferedInputStream(new FileInputStream(FileDescriptor.in)));
-		/*[ENDIF]*/
+		/*[ENDIF] Sidecar19-SE_RAWPLUSJ9 */
 		/*[ELSE]*/
 		/*[PR s66168] - ConsoleInputStream initialization may write to System.err */
 		/*[PR s73550, s74314] ConsolePrintStream incorrectly initialized */
-		setErr(com.ibm.jvm.io.ConsolePrintStream.localize(new BufferedOutputStream(new FileOutputStream(FileDescriptor.err)), true));
-		setOut(com.ibm.jvm.io.ConsolePrintStream.localize(new BufferedOutputStream(new FileOutputStream(FileDescriptor.out)), true));
-		/*[ENDIF]*/
+		setErr(createConsole(FileDescriptor.err));
+		setOut(createConsole(FileDescriptor.out));
+		/*[ENDIF] Sidecar18-SE-OpenJ9 */
+
+		/*[IF JAVA_SPEC_VERSION >= 17] */
+		setSMCallers = Collections.synchronizedMap(new WeakHashMap<>());
+		/*[ENDIF] JAVA_SPEC_VERSION >= 17 */
 	}
 
 native static void startSNMPAgent();
-	
+
 static void completeInitialization() {
-	/*[IF !Sidecar19-SE_RAWPLUSJ9]*/	
+	/*[IF !Sidecar19-SE_RAWPLUSJ9]*/
 	/*[IF !Sidecar18-SE-OpenJ9]*/
 	Class<?> systemInitialization = null;
 	Method hook;
@@ -208,7 +461,7 @@ static void completeInitialization() {
 		// Assume this is a raw configuration and suppress the exception
 	} catch (Exception e) {
 		throw new InternalError(e.toString());
-	} 	
+	}
 	try {
 		if (null != systemInitialization) {
 			hook = systemInitialization.getMethod("firstChanceHook");	//$NON-NLS-1$
@@ -218,7 +471,7 @@ static void completeInitialization() {
 		throw new InternalError(e.toString());
 	}
 	/*[ENDIF]*/ // Sidecar18-SE-OpenJ9
-	
+
 	/*[IF (Sidecar18-SE-OpenJ9|Sidecar19-SE)&!(PLATFORM-mz31|PLATFORM-mz64)]*/
 	setIn(new BufferedInputStream(new FileInputStream(FileDescriptor.in)));
 	/*[ELSE]*/
@@ -226,13 +479,9 @@ static void completeInitialization() {
 	setIn(com.ibm.jvm.io.ConsoleInputStream.localize(new BufferedInputStream(new FileInputStream(FileDescriptor.in))));
 	/*[ENDIF]*/ //Sidecar18-SE-OpenJ9|Sidecar19-SE
 	/*[ENDIF]*/ //!Sidecar19-SE_RAWPLUSJ9
-		
+
 	/*[PR 102344] call Terminator.setup() after Thread init */
 	Terminator.setup();
-
-	/*[IF Sidecar19-SE]*/
-	initGPUAssist();
-	/*[ENDIF] Sidecar19-SE */
 
 	/*[IF !Sidecar19-SE_RAWPLUSJ9&!Sidecar18-SE-OpenJ9]*/
 	try {
@@ -247,7 +496,7 @@ static void completeInitialization() {
 }
 
 /*[IF Sidecar19-SE]*/
-private static void initGPUAssist() {
+static void initGPUAssist() {
 	Properties props = internalGetProperties();
 
 	if ((props.getProperty("com.ibm.gpu.enable") == null) //$NON-NLS-1$
@@ -288,11 +537,12 @@ private static void initGPUAssist() {
  * @param		newIn 		the new value for in.
  */
 public static void setIn(InputStream newIn) {
+	@SuppressWarnings("removal")
 	SecurityManager security = System.getSecurityManager();
 	if (security != null)	{
 		security.checkPermission(com.ibm.oti.util.RuntimePermissions.permissionSetIO);
 	}
-	
+
 	setFieldImpl("in", newIn); //$NON-NLS-1$
 }
 
@@ -303,6 +553,7 @@ public static void setIn(InputStream newIn) {
  * @param		newOut 		the new value for out.
  */
 public static void setOut(java.io.PrintStream newOut) {
+	@SuppressWarnings("removal")
 	SecurityManager security = System.getSecurityManager();
 	if (security != null)	{
 		security.checkPermission(com.ibm.oti.util.RuntimePermissions.permissionSetIO);
@@ -317,14 +568,15 @@ public static void setOut(java.io.PrintStream newOut) {
  * @param		newErr  	the new value for err.
  */
 public static void setErr(java.io.PrintStream newErr) {
+	@SuppressWarnings("removal")
 	SecurityManager security = System.getSecurityManager();
 	if (security != null)	{
 		security.checkPermission(com.ibm.oti.util.RuntimePermissions.permissionSetIO);
 	}
-	
+
 	setFieldImpl("err", newErr); //$NON-NLS-1$
 }
-	
+
 /**
  * Prevents this class from being instantiated.
  */
@@ -350,10 +602,10 @@ public static native void arraycopy(Object array1, int start1, Object array2, in
 private static void arraycopy(Object[] A1, int offset1, Object[] A2, int offset2, int length) {
 	if (A1 == null || A2 == null) throw new NullPointerException();
 	if (offset1 >= 0 && offset2 >= 0 && length >= 0 &&
-		length <= A1.length - offset1 && length <= A2.length - offset2) 
+		length <= A1.length - offset1 && length <= A2.length - offset2)
 	{
 		// Check if this is a forward or backwards arraycopy
-		if (A1 != A2 || offset1 > offset2 || offset1+length <= offset2) { 
+		if (A1 != A2 || offset1 > offset2 || offset1+length <= offset2) {
 			for (int i = 0; i < length; ++i) {
 				A2[offset2+i] = A1[offset1+i];
 			}
@@ -374,12 +626,6 @@ private static void arraycopy(Object[] A1, int offset1, Object[] A2, int offset2
  */
 public static native long currentTimeMillis();
 
-
-private static final int InitLocale = 0;
-private static final int PlatformEncoding = 1;
-private static final int FileEncoding = 2;
-private static final int OSEncoding = 3;
-
 /*[IF OpenJ9-RawBuild]*/
 	/* This is a JCL native required only by OpenJ9 raw build.
 	 * OpenJ9 raw build is a combination of OpenJ9 and OpenJDK binaries without JCL patches within extension repo.
@@ -391,7 +637,7 @@ private static native Properties initProperties(Properties props);
 /*[ENDIF] OpenJ9-RawBuild */
 
 /**
- * If systemProperties is unset, then create a new one based on the values 
+ * If systemProperties is unset, then create a new one based on the values
  * provided by the virtual machine.
  */
 @SuppressWarnings("nls")
@@ -400,12 +646,16 @@ private static void ensureProperties(boolean isInitialization) {
 	// invoke JCL native to initialize platform encoding
 	initProperties(new Properties());
 /*[ENDIF] OpenJ9-RawBuild */
-	
-/*[IF Java12]*/
+
+/*[IF JAVA_SPEC_VERSION >= 12]*/
 	Map<String, String> initializedProperties = new Hashtable<String, String>();
-/*[ELSE]
+/*[ELSE] JAVA_SPEC_VERSION >= 12
 	Properties initializedProperties = new Properties();
-/*[ENDIF] Java12 */
+/*[ENDIF] JAVA_SPEC_VERSION >= 12 */
+
+	/*[IF JAVA_SPEC_VERSION >= 17]*/
+	initializedProperties.put("os.version", sysPropOSVersion); //$NON-NLS-1$
+	/*[ENDIF] JAVA_SPEC_VERSION >= 17 */
 
 	if (osEncoding != null) {
 		initializedProperties.put("os.encoding", osEncoding); //$NON-NLS-1$
@@ -413,14 +663,17 @@ private static void ensureProperties(boolean isInitialization) {
 	/*[PR The launcher apparently needs sun.jnu.encoding property or it does not work]*/
 	initializedProperties.put("ibm.system.encoding", platformEncoding); //$NON-NLS-1$
 	initializedProperties.put("sun.jnu.encoding", platformEncoding); //$NON-NLS-1$
-	initializedProperties.put("file.encoding", fileEncoding); //$NON-NLS-1$
 	initializedProperties.put("file.encoding.pkg", "sun.io"); //$NON-NLS-1$ //$NON-NLS-2$
-	/*[IF !Java12]*/
+	/*[IF JAVA_SPEC_VERSION < 12]*/
 	/* System property java.specification.vendor is set via VersionProps.init(systemProperties) since JDK12 */
 	initializedProperties.put("java.specification.vendor", "Oracle Corporation"); //$NON-NLS-1$ //$NON-NLS-2$
-	/*[ENDIF] !Java12 */
+	/*[ENDIF] JAVA_SPEC_VERSION < 12 */
 	initializedProperties.put("java.specification.name", "Java Platform API Specification"); //$NON-NLS-1$ //$NON-NLS-2$
 	initializedProperties.put("com.ibm.oti.configuration", "scar"); //$NON-NLS-1$
+
+	/*[IF CRIU_SUPPORT]*/
+	initializedProperties.put("org.eclipse.openj9.criu.isCRIUCapable", "true"); //$NON-NLS-1$ //$NON-NLS-2$
+	/*[ENDIF] CRIU_SUPPORT*/
 
 	String[] list = getPropertyList();
 	for (int i = 0; i < list.length; i += 2) {
@@ -431,13 +684,46 @@ private static void ensureProperties(boolean isInitialization) {
 		}
 		initializedProperties.put(key, list[i+1]);
 	}
-	
+	initializedProperties.put("file.encoding", fileEncoding); //$NON-NLS-1$
+
+	/*[IF JAVA_SPEC_VERSION >= 17]*/
+	/* Set native.encoding after setting all the defined properties, it can't be modified by using -D on the command line */
+	initializedProperties.put("native.encoding", platformEncoding); //$NON-NLS-1$
+	/*[ENDIF] JAVA_SPEC_VERSION >= 17 */
+
+	/*[IF JAVA_SPEC_VERSION >= 19]*/
+	if (null != stdoutProp) {
+		// Reinitialize required properties if ensureProperties(false) is called.
+		initializedProperties.put("stdout.encoding", stdoutProp); //$NON-NLS-1$
+	} else {
+		stdoutProp = initializedProperties.get("stdout.encoding"); //$NON-NLS-1$
+		if (null == stdoutProp) {
+			stdoutProp = initializedProperties.get("sun.stdout.encoding"); //$NON-NLS-1$
+			if (null != stdoutProp) {
+				initializedProperties.put("stdout.encoding", stdoutProp); //$NON-NLS-1$
+			}
+		}
+	}
+	if (null != stderrProp) {
+		// Reinitialize required properties if ensureProperties(false) is called.
+		initializedProperties.put("stderr.encoding", stderrProp); //$NON-NLS-1$
+	} else {
+		stderrProp = initializedProperties.get("stderr.encoding");
+		if (null == stderrProp) { //$NON-NLS-1$
+			stderrProp = initializedProperties.get("sun.stderr.encoding"); //$NON-NLS-1$
+			if (null != stderrProp) {
+				initializedProperties.put("stderr.encoding", stderrProp); //$NON-NLS-1$
+			}
+		}
+	}
+	/*[ENDIF] JAVA_SPEC_VERSION >= 19 */
+
 	/* java.lang.VersionProps.init() eventually calls into System.setProperty() where propertiesInitialized needs to be true */
 	propertiesInitialized = true;
 
-/*[IF Java12]*/
+/*[IF JAVA_SPEC_VERSION >= 12]*/
 	java.lang.VersionProps.init(initializedProperties);
-/*[ELSE]
+/*[ELSE] JAVA_SPEC_VERSION >= 12
 	/* VersionProps.init requires systemProperties to be set */
 	systemProperties = initializedProperties;
 
@@ -449,53 +735,53 @@ private static void ensureProperties(boolean isInitialization) {
 	StringBuffer.initFromSystemProperties(systemProperties);
 	StringBuilder.initFromSystemProperties(systemProperties);
 /*[ENDIF] Sidecar19-SE */
-/*[ENDIF] Java12 */
+/*[ENDIF] JAVA_SPEC_VERSION >= 12 */
 
-/*[IF Java12]*/
+/*[IF JAVA_SPEC_VERSION >= 12]*/
 	String javaRuntimeVersion = initializedProperties.get("java.runtime.version"); //$NON-NLS-1$
-/*[ELSE]
+/*[ELSE] JAVA_SPEC_VERSION >= 12
 	String javaRuntimeVersion = initializedProperties.getProperty("java.runtime.version"); //$NON-NLS-1$
-/*[ENDIF] Java12 */
+/*[ENDIF] JAVA_SPEC_VERSION >= 12 */
 	if (null != javaRuntimeVersion) {
-	/*[IF Java12]*/
+	/*[IF JAVA_SPEC_VERSION >= 12]*/
 		String fullVersion = initializedProperties.get("java.fullversion"); //$NON-NLS-1$
-	/*[ELSE]
+	/*[ELSE] JAVA_SPEC_VERSION >= 12
 		String fullVersion = initializedProperties.getProperty("java.fullversion"); //$NON-NLS-1$
-	/*[ENDIF] Java12 */
+	/*[ENDIF] JAVA_SPEC_VERSION >= 12 */
 		if (null != fullVersion) {
 			initializedProperties.put("java.fullversion", (javaRuntimeVersion + "\n" + fullVersion)); //$NON-NLS-1$ //$NON-NLS-2$
 		}
 		rasInitializeVersion(javaRuntimeVersion);
 	}
 
-/*[IF Java12]*/
+/*[IF JAVA_SPEC_VERSION >= 12]*/
 	lineSeparator = initializedProperties.getOrDefault("line.separator", "\n"); //$NON-NLS-1$
-/*[ELSE]
+/*[ELSE] JAVA_SPEC_VERSION >= 12
 	lineSeparator = initializedProperties.getProperty("line.separator", "\n"); //$NON-NLS-1$
-/*[ENDIF] Java12 */
+/*[ENDIF] JAVA_SPEC_VERSION >= 12 */
 
 	if (isInitialization) {
 		/*[PR CMVC 179976] System.setProperties(null) throws IllegalStateException */
-		/*[IF Java12]*/
+		/*[IF JAVA_SPEC_VERSION >= 12]*/
 		VM.saveProperties(initializedProperties);
-		/*[ELSE]
+		/*[ELSE] JAVA_SPEC_VERSION >= 12
 		VM.saveAndRemoveProperties(initializedProperties);
-		/*[ENDIF] Java12 */
+		/*[ENDIF] JAVA_SPEC_VERSION >= 12 */
 	}
 
 	/* create systemProperties from properties Map */
-/*[IF Java12]*/
+/*[IF JAVA_SPEC_VERSION >= 12]*/
 	initializeSystemProperties(initializedProperties);
-/*[ELSE]
+/*[ELSE] JAVA_SPEC_VERSION >= 12
 	systemProperties = initializedProperties;
-/*[ENDIF] Java12 */
-	
+/*[ENDIF] JAVA_SPEC_VERSION >= 12 */
+
 	/* Preload system property jdk.serialFilter to prevent later modification */
 	jdk.internal.util.StaticProperty.jdkSerialFilter();
 }
 
 /* Converts a Map<String, String> to a properties object.
- * 
+ *
  * The system properties will be initialized as a Map<String, String> type to be compatible
  * with jdk.internal.misc.VM and java.lang.VersionProps APIs.
  */
@@ -510,9 +796,8 @@ private static native void rasInitializeVersion(String javaRuntimeVersion);
 
 /**
  * Causes the virtual machine to stop running, and the
- * program to exit. If runFinalizersOnExit(true) has been
- * invoked, then all finalizers will be run first.
- * 
+ * program to exit.
+ *
  * @param		code		the return code.
  *
  * @throws		SecurityException 	if the running thread is not allowed to cause the vm to exit.
@@ -535,17 +820,18 @@ public static void gc() {
 /*[PR 127013] [JCL Desktop]VM throws runtime exception(no such method signature) when calling System.getenv() function (SPR MXZU76W5R5)*/
 /**
  * Returns an environment variable.
- * 
+ *
  * @param 		var			the name of the environment variable
  * @return		the value of the specified environment variable
  */
 @SuppressWarnings("dep-ann")
 public static String getenv(String var) {
 	if (var == null) throw new NullPointerException();
+	@SuppressWarnings("removal")
 	SecurityManager security = System.getSecurityManager();
 	if (security != null)
 		security.checkPermission(new RuntimePermission("getenv." + var)); //$NON-NLS-1$
-	
+
 	return ProcessEnvironment.getenv(var);
 }
 
@@ -553,7 +839,7 @@ public static String getenv(String var) {
  * Answers the system properties. Note that this is
  * not a copy, so that changes made to the returned
  * Properties object will be reflected in subsequent
- * calls to getProperty and getProperties.
+ * calls to {@code getProperty()} and {@code getProperties()}.
  * <p>
  * Security managers should restrict access to this
  * API if possible.
@@ -562,10 +848,11 @@ public static String getenv(String var) {
  */
 public static Properties getProperties() {
 	if (!propertiesInitialized) throw new Error("bootstrap error, system property access before init"); //$NON-NLS-1$
+	@SuppressWarnings("removal")
 	SecurityManager security = System.getSecurityManager();
 	if (security != null)
 		security.checkPropertiesAccess();
-	
+
 	return systemProperties;
 }
 
@@ -582,29 +869,29 @@ static Properties internalGetProperties() {
 }
 /**
  * Answers the value of a particular system property.
- * Answers null if no such property exists, 
+ * Answers null if no such property exists.
  * <p>
  * The properties currently provided by the virtual
  * machine are:
  * <pre>
-/*[IF !Java12]
+ *     file.separator
+ *     java.class.path
+ *     java.class.version
+ *     java.home
+/*[IF JAVA_SPEC_VERSION < 12]
  *     java.vendor
  *     java.vendor.url
- /*[ENDIF] Java12
- *     java.class.path
- *     user.home
- *     java.class.version
- *     os.version
- *     user.dir
- *     user.timezone
- *     path.separator
- *     os.name
- *     os.arch
- *     line.separator
- *     file.separator
- *     user.name
+/*[ENDIF] JAVA_SPEC_VERSION < 12
  *     java.version
- *     java.home
+ *     line.separator
+ *     os.arch
+ *     os.name
+ *     os.version
+ *     path.separator
+ *     user.dir
+ *     user.home
+ *     user.name
+ *     user.timezone
  * </pre>
  *
  * @param		prop		the system property to look up
@@ -626,14 +913,21 @@ public static String getProperty(String prop) {
 public static String getProperty(String prop, String defaultValue) {
 	if (prop.length() == 0) throw new IllegalArgumentException();
 
+	@SuppressWarnings("removal")
 	SecurityManager security = System.getSecurityManager();
 	if (security != null)
 		security.checkPropertyAccess(prop);
 
-	if (!propertiesInitialized 
+	if (!propertiesInitialized
 			&& !prop.equals("com.ibm.IgnoreMalformedInput") //$NON-NLS-1$
 			&& !prop.equals("file.encoding.pkg") //$NON-NLS-1$
-			&& !prop.equals("sun.nio.cs.map")) { //$NON-NLS-1$
+			&& !prop.equals("sun.nio.cs.map") //$NON-NLS-1$
+	) {
+		/*[IF JAVA_SPEC_VERSION >= 17]*/
+		if (prop.equals("os.version")) { //$NON-NLS-1$
+			return sysPropOSVersion;
+		} else
+		/*[ENDIF] JAVA_SPEC_VERSION >= 17 */
 		if (prop.equals("os.encoding")) { //$NON-NLS-1$
 			return osEncoding;
 		} else if (prop.equals("ibm.system.encoding")) { //$NON-NLS-1$
@@ -643,7 +937,7 @@ public static String getProperty(String prop, String defaultValue) {
 		}
 		throw new Error("bootstrap error, system property access before init: " + prop); //$NON-NLS-1$
 	}
-		
+
 	return systemProperties.getProperty(prop, defaultValue);
 }
 
@@ -651,20 +945,21 @@ public static String getProperty(String prop, String defaultValue) {
  * Sets the value of a particular system property.
  *
  * @param		prop		the system property to change
- * @param		value		the value to associate with prop 
+ * @param		value		the value to associate with prop
  * @return		the old value of the property, or null
  */
 public static String setProperty(String prop, String value) {
 	if (!propertiesInitialized) throw new Error("bootstrap error, system property access before init: " + prop); //$NON-NLS-1$
-	
+
 	/*[PR CMVC 80288] should check for empty key */
 	if (prop.length() == 0) throw new IllegalArgumentException();
-	
+
+	@SuppressWarnings("removal")
 	SecurityManager security = System.getSecurityManager();
 	if (security != null)
 		security.checkPermission(
 			new PropertyPermission(prop, "write")); //$NON-NLS-1$
-	
+
 	return (String)systemProperties.setProperty(prop, value);
 }
 
@@ -678,21 +973,32 @@ public static String setProperty(String prop, String value) {
  */
 private static native String [] getPropertyList();
 
+/*[IF JAVA_SPEC_VERSION >= 11]*/
+/**
+ * Invoke JCL native to initialize platform encoding explicitly.
+ */
+private static native void initJCLPlatformEncoding();
+/*[ENDIF] JAVA_SPEC_VERSION >= 11 */
 
 /**
- * Return the requested encoding.
- * 		0 - initialize locale
- * 		1 - detected platform encoding
- * 		2 - command line defined file.encoding
- * 		3 - command line defined os.encoding
+ * Before propertiesInitialized is set to true,
+ * this returns the requested system property according to sysPropID:
+ *   0 - os.version
+ *   1 - platform encoding
+ *   2 - file.encoding
+ *   3 - os.encoding
+ *   Reserved for future
  */
-private static native String getEncoding(int type);
+private static native String getSysPropBeforePropertiesInitialized(int sysPropID);
 
 /**
  * Answers the active security manager.
  *
  * @return		the system security manager object.
  */
+/*[IF (JAVA_SPEC_VERSION >= 17) & OPENJDK_METHODHANDLES] */
+@Deprecated(since="17", forRemoval=true)
+/*[ENDIF] (JAVA_SPEC_VERSION >= 17) & OPENJDK_METHODHANDLES */
 public static SecurityManager getSecurityManager() {
 	return security;
 }
@@ -718,15 +1024,27 @@ public static int identityHashCode(Object anObject) {
 
 /**
  * Loads the specified file as a dynamic library.
- * 
+ *
  * @param 		pathName	the path of the file to be loaded
  */
 @CallerSensitive
 public static void load(String pathName) {
+	@SuppressWarnings("removal")
 	SecurityManager smngr = System.getSecurityManager();
-	if (smngr != null)
+	if (smngr != null) {
 		smngr.checkLink(pathName);
+	}
+/*[IF JAVA_SPEC_VERSION >= 15]*/
+	File fileName = new File(pathName);
+	if (fileName.isAbsolute()) {
+		ClassLoader.loadLibrary(getCallerClass(), fileName);
+	} else {
+		/*[MSG "K0648", "Not an absolute path: {0}"]*/
+		throw new UnsatisfiedLinkError(Msg.getString("K0648", pathName));//$NON-NLS-1$
+	}
+/*[ELSE]
 	ClassLoader.loadLibraryWithPath(pathName, ClassLoader.callerClassLoader(), null);
+/*[ENDIF] JAVA_SPEC_VERSION >= 15 */
 }
 
 /**
@@ -739,7 +1057,27 @@ public static void load(String pathName) {
  */
 @CallerSensitive
 public static void loadLibrary(String libName) {
+	if (libName.indexOf(File.pathSeparator) >= 0) {
+		/*[MSG "K0B01", "Library name must not contain a file path: {0}"]*/
+		throw new UnsatisfiedLinkError(Msg.getString("K0B01", libName)); //$NON-NLS-1$
+	}
+	if (internalGetProperties().getProperty("os.name").startsWith("Windows")) { //$NON-NLS-1$ //$NON-NLS-2$
+		if ((libName.indexOf('/') >= 0) || ((libName.length() > 1) && (libName.charAt(1) == ':'))) {
+			/*[MSG "K0B01", "Library name must not contain a file path: {0}"]*/
+			throw new UnsatisfiedLinkError(Msg.getString("K0B01", libName)); //$NON-NLS-1$
+		}
+	}
+
+	@SuppressWarnings("removal")
+	SecurityManager smngr = System.getSecurityManager();
+	if (smngr != null) {
+		smngr.checkLink(libName);
+	}
+/*[IF JAVA_SPEC_VERSION >= 15]*/
+	ClassLoader.loadLibrary(getCallerClass(), libName);
+/*[ELSE]*/
 	ClassLoader.loadLibraryWithClassLoader(libName, ClassLoader.callerClassLoader());
+/*[ENDIF] JAVA_SPEC_VERSION >= 15 */
 }
 
 /**
@@ -747,43 +1085,37 @@ public static void loadLibrary(String libName) {
  * be useful to attempt to perform any outstanding
  * object finalizations.
  */
+/*[IF JAVA_SPEC_VERSION >= 18] */
+@Deprecated(forRemoval=true, since="18")
+/*[ENDIF] JAVA_SPEC_VERSION >= 18 */
 public static void runFinalization() {
 	RUNTIME.runFinalization();
 }
 
-/*[IF !Java11]*/
+/*[IF JAVA_SPEC_VERSION < 11]*/
 /**
- * Ensure that, when the virtual machine is about to exit,
- * all objects are finalized. Note that all finalization
- * which occurs when the system is exiting is performed
- * after all running threads have been terminated.
- *
- * @param 		flag 		true means finalize all on exit.
+ * Throws {@code UnsupportedOperationException}.
  *
  * @deprecated 	This method is unsafe.
  */
-/*[IF Sidecar19-SE]*/
-@Deprecated(forRemoval=true, since="1.2")
-/*[ELSE]
 @Deprecated
-/*[ENDIF]*/
 public static void runFinalizersOnExit(boolean flag) {
 	Runtime.runFinalizersOnExit(flag);
 }
-/*[ENDIF]*/
+/*[ENDIF] JAVA_SPEC_VERSION < 11 */
 
 /**
- * Answers the system properties. Note that the object
- * which is passed in not copied, so that subsequent 
- * changes made to the object will be reflected in
- * calls to getProperty and getProperties.
+ * Sets the system properties. Note that the object which is passed in
+ * is not copied, so that subsequent changes made to it will be reflected
+ * in calls to {@code getProperty()} and {@code getProperties()}.
  * <p>
  * Security managers should restrict access to this
  * API if possible.
- * 
- * @param		p			the property to set
+ *
+ * @param		p			the properties to set
  */
 public static void setProperties(Properties p) {
+	@SuppressWarnings("removal")
 	SecurityManager security = System.getSecurityManager();
 	if (security != null)
 		security.checkPropertiesAccess();
@@ -794,6 +1126,39 @@ public static void setProperties(Properties p) {
 	}
 }
 
+static void initSecurityManager(ClassLoader applicationClassLoader) {
+	String javaSecurityManager = internalGetProperties().getProperty("java.security.manager"); //$NON-NLS-1$
+	/*[IF JAVA_SPEC_VERSION > 11]*/
+	if ("allow".equals(javaSecurityManager)) {
+		/* Do nothing. */
+	} else if ("disallow".equals(javaSecurityManager) //$NON-NLS-1$
+		/*[IF JAVA_SPEC_VERSION >= 18]*/
+		|| (null == javaSecurityManager)
+		/*[ENDIF] JAVA_SPEC_VERSION >= 18 */
+	) {
+		throwUOEFromSetSM = true;
+	} else
+	/*[ENDIF] JAVA_SPEC_VERSION > 11 */
+	if (null != javaSecurityManager) {
+		/*[IF JAVA_SPEC_VERSION >= 17]*/
+		initialErr.println("WARNING: A command line option has enabled the Security Manager"); //$NON-NLS-1$
+		initialErr.println("WARNING: The Security Manager is deprecated and will be removed in a future release"); //$NON-NLS-1$
+		/*[ENDIF] JAVA_SPEC_VERSION >= 17 */
+		if (javaSecurityManager.isEmpty() || "default".equals(javaSecurityManager)) { //$NON-NLS-1$
+			setSecurityManager(new SecurityManager());
+		} else {
+			try {
+				Constructor<?> constructor = Class.forName(javaSecurityManager, true, applicationClassLoader).getConstructor();
+				constructor.setAccessible(true);
+				setSecurityManager((SecurityManager)constructor.newInstance());
+			} catch (Throwable e) {
+				/*[MSG "K0631", "JVM can't set custom SecurityManager due to {0}"]*/
+				throw new Error(Msg.getString("K0631", e.toString()), e); //$NON-NLS-1$
+			}
+		}
+	}
+}
+
 /**
  * Sets the active security manager. Note that once
  * the security manager has been set, it can not be
@@ -801,46 +1166,74 @@ public static void setProperties(Properties p) {
  * exception.
  *
  * @param		s			the new security manager
- * 
+ *
  * @throws		SecurityException 	if the security manager has already been set and its checkPermission method doesn't allow it to be replaced.
- /*[IF Java12]
+/*[IF JAVA_SPEC_VERSION >= 12]
  * @throws		UnsupportedOperationException 	if s is non-null and a special token "disallow" has been set for system property "java.security.manager"
  * 												which indicates that a security manager is not allowed to be set dynamically.
- /*[ENDIF] Java12
+/*[ENDIF] JAVA_SPEC_VERSION >= 12
  */
+/*[IF JAVA_SPEC_VERSION >= 17] */
+/*[IF OPENJDK_METHODHANDLES] */
+@Deprecated(since="17", forRemoval=true)
+/*[ENDIF] OPENJDK_METHODHANDLES */
+@CallerSensitive
+/*[ENDIF] JAVA_SPEC_VERSION >= 17 */
 public static void setSecurityManager(final SecurityManager s) {
 	/*[PR 113606] security field could be modified by another Thread */
+	@SuppressWarnings("removal")
 	final SecurityManager currentSecurity = security;
-	
-	if (s != null) {
-		/*[IF Java12]*/
-		if ("disallow".equals(systemProperties.getProperty("java.security.manager"))) { //$NON-NLS-1$ //$NON-NLS-2$
-			/*[MSG "K0B00", "`-Djava.security.manager=disallow` has been specified"]*/
-			throw new UnsupportedOperationException(com.ibm.oti.util.Msg.getString("K0B00")); //$NON-NLS-1$
+
+	/*[IF JAVA_SPEC_VERSION > 11]*/
+	if (throwUOEFromSetSM) {
+		/* The security manager is not allowed to be set dynamically. Return if the
+		 * argument is null. UnsupportedOperationException should only be thrown for
+		 * a non-null argument.
+		 */
+		if (s == null) {
+			return;
 		}
-		/*[ENDIF] Java12 */
+		/*[MSG "K0B00", "The Security Manager is deprecated and will be removed in a future release"]*/
+		throw new UnsupportedOperationException(Msg.getString("K0B00")); //$NON-NLS-1$
+	}
+	/*[ENDIF] JAVA_SPEC_VERSION > 11 */
+
+	/*[IF JAVA_SPEC_VERSION >= 17] */
+	Class<?> callerClz = getCallerClass();
+	if (setSMCallers.putIfAbsent(callerClz, Boolean.TRUE) == null) {
+		String callerName = callerClz.getName();
+		CodeSource cs = callerClz.getProtectionDomainInternal().getCodeSource();
+		String codeSource = (cs == null) ? callerName : callerName + " (" + cs.getLocation() + ")"; //$NON-NLS-1$ //$NON-NLS-2$
+		initialErr.println("WARNING: A terminally deprecated method in java.lang.System has been called"); //$NON-NLS-1$
+		initialErr.printf("WARNING: System::setSecurityManager has been called by %s" + lineSeparator(), codeSource); //$NON-NLS-1$
+		initialErr.printf("WARNING: Please consider reporting this to the maintainers of %s" + lineSeparator(), callerName); //$NON-NLS-1$
+		initialErr.println("WARNING: System::setSecurityManager will be removed in a future release"); //$NON-NLS-1$
+	}
+	/*[ENDIF] JAVA_SPEC_VERSION >= 17 */
+
+	if (s != null) {
 		if (currentSecurity == null) {
 			// only preload classes when current security manager is null
 			// not adding an extra static field to preload only once
 			try {
 				/*[PR 95057] preload classes required for checkPackageAccess() */
 				// Preload classes used for checkPackageAccess(),
-				// otherwise we could go recursive 
+				// otherwise we could go recursive
 				s.checkPackageAccess("java.lang"); //$NON-NLS-1$
 			} catch (Exception e) {
 				// ignore any potential exceptions
 			}
 		}
-		
+
 		try {
 			/*[PR 97686] Preload the policy permission */
 			AccessController.doPrivileged(new PrivilegedAction<Void>() {
 				@Override
 				public Void run() {
 					if (currentSecurity == null) {
-						// initialize external messages and 
-						// also load security sensitive classes 
-						com.ibm.oti.util.Msg.getString("K002c"); //$NON-NLS-1$
+						// initialize external messages and
+						// also load security sensitive classes
+						Msg.getString("K002c"); //$NON-NLS-1$
 					}
 					ProtectionDomain pd = s.getClass().getPDImpl();
 					if (pd != null) {
@@ -861,11 +1254,11 @@ public static void setSecurityManager(final SecurityManager s) {
 }
 
 /**
- * Answers the platform specific file name format for the shared
+ * Answers the platform-specific filename for the shared
  * library named by the argument.
  *
  * @param		userLibName 	the name of the library to look up.
- * @return		the platform specific filename for the library
+ * @return		the platform-specific filename for the library
  */
 public static native String mapLibraryName(String userLibName);
 
@@ -885,10 +1278,10 @@ static Class getCallerClass() {
 
 /**
  * Return the channel inherited by the invocation of the running vm. The channel is
- * obtained by calling SelectorProvider.inheritedChannel(). 
- * 
+ * obtained by calling SelectorProvider.inheritedChannel().
+ *
  * @return the inherited channel or null
- * 
+ *
  * @throws IOException if an IO error occurs getting the inherited channel
  */
 public static java.nio.channels.Channel inheritedChannel() throws IOException {
@@ -898,21 +1291,22 @@ public static java.nio.channels.Channel inheritedChannel() throws IOException {
 /**
  * Returns the current tick count in nanoseconds. The tick count
  * only reflects elapsed time.
- * 
+ *
  * @return		the current nanosecond tick count, which may be negative
  */
 public static native long nanoTime();
 
 /**
  * Removes the property.
- * 
+ *
  * @param 		prop		the name of the property to remove
  * @return		the value of the property removed
  */
 public static String clearProperty(String prop) {
 	if (!propertiesInitialized) throw new Error("bootstrap error, system property access before init: " + prop); //$NON-NLS-1$
-	
+
 	if (prop.length() == 0) throw new IllegalArgumentException();
+	@SuppressWarnings("removal")
 	SecurityManager security = System.getSecurityManager();
 	if (security != null)
 		security.checkPermission(new PropertyPermission(prop, "write")); //$NON-NLS-1$
@@ -921,20 +1315,21 @@ public static String clearProperty(String prop) {
 
 /**
  * Returns all of the system environment variables in an unmodifiable Map.
- * 
+ *
  * @return	an unmodifiable Map containing all of the system environment variables.
  */
 public static Map<String, String> getenv() {
+	@SuppressWarnings("removal")
 	SecurityManager security = System.getSecurityManager();
 	if (security != null)
 		security.checkPermission(new RuntimePermission("getenv.*")); //$NON-NLS-1$
-		
+
 	return ProcessEnvironment.getenv();
 }
 
 /**
  * Return the Console or null.
- * 
+ *
  * @return the Console or null
  */
 public static Console console() {
@@ -983,7 +1378,7 @@ private static void longMultiLeafArrayCopy(Object src, int srcPos,
 
 	srcLeafPos = newSrcPos % numOfElemsPerLeaf;
 	destLeafPos = newDestPos % numOfElemsPerLeaf;
-	if (srcLeafPos < destLeafPos) 
+	if (srcLeafPos < destLeafPos)
 	{
 		if (isFwd)
 		{
@@ -996,8 +1391,8 @@ private static void longMultiLeafArrayCopy(Object src, int srcPos,
 			L1 = srcLeafPos + 1;
 			L2 = destLeafPos - srcLeafPos;
 		}
-	} 
-	else 
+	}
+	else
 	{
 		if (isFwd)
 		{
@@ -1057,17 +1452,17 @@ private static void longMultiLeafArrayCopy(Object src, int srcPos,
 /**
  * JIT Helper method
  */
-private static void simpleMultiLeafArrayCopy(Object src, int srcPos, 
-		Object dest, int destPos, int length, int elementSize, int leafSize) 
+private static void simpleMultiLeafArrayCopy(Object src, int srcPos,
+		Object dest, int destPos, int length, int elementSize, int leafSize)
 {
 	int count = 0;
 
 	// Check if this is a forward or backwards arraycopy
 	boolean isFwd;
-	if (src != dest || srcPos > destPos || srcPos+length <= destPos) 
+	if (src != dest || srcPos > destPos || srcPos+length <= destPos)
 		isFwd = true;
 	else
-		isFwd = false; 
+		isFwd = false;
 
 	int newSrcPos;
 	int newDestPos;
@@ -1134,29 +1529,29 @@ private static void simpleMultiLeafArrayCopy(Object src, int srcPos,
 /**
  * JIT Helper method
  */
-private static void multiLeafArrayCopy(Object src, int srcPos, Object dest, 
+private static void multiLeafArrayCopy(Object src, int srcPos, Object dest,
 		int destPos, int length, int elementSize, int leafSize) {
 	int count = 0;
 
 	// Check if this is a forward or backwards arraycopy
 	boolean isFwd;
-	if (src != dest || srcPos > destPos || srcPos+length <= destPos) 
+	if (src != dest || srcPos > destPos || srcPos+length <= destPos)
 		isFwd = true;
 	else
-		isFwd = false; 
+		isFwd = false;
 
 	int newSrcPos;
 	int newDestPos;
 	int numOfElemsPerLeaf = leafSize / elementSize;
 	int srcLeafPos;
 	int destLeafPos;
-	
-	if (isFwd) 
+
+	if (isFwd)
 	{
 		newSrcPos = srcPos;
 		newDestPos = destPos;
-	} 
-	else 
+	}
+	else
 	{
 		 newSrcPos = srcPos + length - 1;
 		 newDestPos = destPos + length - 1;
@@ -1164,7 +1559,7 @@ private static void multiLeafArrayCopy(Object src, int srcPos, Object dest,
 
 	int iterLength1 = 0;
 	int iterLength2 = 0;
-	while (count < length) 
+	while (count < length)
 	{
 		srcLeafPos = (newSrcPos % numOfElemsPerLeaf);
 		destLeafPos = (newDestPos % numOfElemsPerLeaf);
@@ -1172,12 +1567,12 @@ private static void multiLeafArrayCopy(Object src, int srcPos, Object dest,
 		int firstPos, secondPos;
 
 		if ((isFwd && (srcLeafPos >= destLeafPos)) ||
-				(!isFwd && (srcLeafPos < destLeafPos))) 
+				(!isFwd && (srcLeafPos < destLeafPos)))
 		{
 			firstPos = srcLeafPos;
 			secondPos = newDestPos;
-		} 
-		else 
+		}
+		else
 		{
 			firstPos = destLeafPos;
 			secondPos = newSrcPos;
@@ -1194,7 +1589,7 @@ private static void multiLeafArrayCopy(Object src, int srcPos, Object dest,
 
 		if (isFwd)
 			iterLength2 = numOfElemsPerLeaf - ((secondPos + iterLength1) % numOfElemsPerLeaf);
-		else 
+		else
 		{
 			iterLength2 = ((secondPos - iterLength1) % numOfElemsPerLeaf) + 1;
 			offset = iterLength1 - 1;
@@ -1206,12 +1601,12 @@ private static void multiLeafArrayCopy(Object src, int srcPos, Object dest,
 		System.arraycopy(src, newSrcPos - offset, dest, newDestPos - offset, iterLength1);
 
 		offset = 0;
-		if (isFwd) 
+		if (isFwd)
 		{
 			newSrcPos += iterLength1;
 			newDestPos += iterLength1;
-		} 
-		else 
+		}
+		else
 		{
 			newSrcPos -= iterLength1;
 			newDestPos -= iterLength1;
@@ -1222,12 +1617,12 @@ private static void multiLeafArrayCopy(Object src, int srcPos, Object dest,
 
 		System.arraycopy(src, newSrcPos - offset, dest, newDestPos - offset, iterLength2);
 
-		if (isFwd) 
+		if (isFwd)
 		{
 			newSrcPos += iterLength2;
 			newDestPos += iterLength2;
-		} 
-		else 
+		}
+		else
 		{
 			newSrcPos -= iterLength2;
 			newDestPos -= iterLength2;
@@ -1239,12 +1634,12 @@ private static void multiLeafArrayCopy(Object src, int srcPos, Object dest,
 
 
 /**
- * Return platform specific line separator character(s)
- * Unix is \n while Windows is \r\n as per the prop set by the VM 
- * Refer to Jazz 30875
- *  
- * @return platform specific line separator character(s)
+ * Return platform specific line separator character(s).
+ * Unix is \n while Windows is \r\n as per the prop set by the VM.
+ *
+ * @return platform specific line separator string
  */
+//  Refer to Jazz 30875
 public static String lineSeparator() {
 	 return lineSeparator;
 }
@@ -1252,29 +1647,30 @@ public static String lineSeparator() {
 /*[IF Sidecar19-SE]*/
 /**
  * Return an instance of Logger.
- * 
+ *
  * @param loggerName The name of the logger to return
  * @return An instance of the logger.
  * @throws NullPointerException if the loggerName is null
  */
 @CallerSensitive
 public static Logger getLogger(String loggerName) {
-	loggerName = Objects.requireNonNull(loggerName);
+	Objects.requireNonNull(loggerName);
 	Class<?> caller = Reflection.getCallerClass();
 	return jdk.internal.logger.LazyLoggers.getLogger(loggerName, caller.getModule());
 }
 
 /**
- * Return an instance of Logger that is localized based on the ResourceBundle
+ * Return an instance of Logger that is localized based on the ResourceBundle.
+ *
  * @param loggerName The name of the logger to return
  * @param bundle The ResourceBundle to use for localization
  * @return An instance of the logger localized to 'bundle'
  * @throws NullPointerException if the loggerName or bundle is null
  */
 @CallerSensitive
-public static Logger getLogger(String loggerName, ResourceBundle bundle) { 
-	loggerName = Objects.requireNonNull(loggerName);
-	bundle = Objects.requireNonNull(bundle);
+public static Logger getLogger(String loggerName, ResourceBundle bundle) {
+	Objects.requireNonNull(loggerName);
+	Objects.requireNonNull(bundle);
 	Class<?> caller = Reflection.getCallerClass();
 	return LoggerFinder.getLoggerFinder().getLocalizedLogger(loggerName, bundle, caller.getModule());
 }
@@ -1284,11 +1680,11 @@ public static Logger getLogger(String loggerName, ResourceBundle bundle) {
  * to the underlying framework it uses.
  */
 public abstract static class LoggerFinder {
-	private static volatile LoggerFinder loggerFinder = null;
-	
+	private static volatile LoggerFinder loggerFinder;
+
 	/**
 	 * Checks needed runtime permissions
-	 * 
+	 *
 	 * @throws SecurityException if RuntimePermission("loggerFinder") is not allowed
 	 */
 	protected LoggerFinder() {
@@ -1297,7 +1693,7 @@ public abstract static class LoggerFinder {
 
 	/**
 	 * Returns a localizable instance of Logger for the given module
-	 * 
+	 *
 	 * @param loggerName The name of the logger
 	 * @param bundle A resource bundle; can be null
 	 * @param callerModule The module for which the logger is being requested
@@ -1307,16 +1703,16 @@ public abstract static class LoggerFinder {
 	 */
 	public Logger getLocalizedLogger(String loggerName, ResourceBundle bundle, Module callerModule) {
 		verifyPermissions();
-		loggerName = Objects.requireNonNull(loggerName);
-		callerModule = Objects.requireNonNull(callerModule);
+		Objects.requireNonNull(loggerName);
+		Objects.requireNonNull(callerModule);
 		Logger logger = this.getLogger(loggerName, callerModule);
 		Logger localizedLogger = new jdk.internal.logger.LocalizedLoggerWrapper(logger, bundle);
 		return localizedLogger;
 	}
-	
+
 	/**
 	 * Returns an instance of Logger for the given module
-	 * 
+	 *
 	 * @param loggerName The name of the logger
 	 * @param callerModule The module for which the logger is being requested
 	 * @return a Logger suitable for use within the given module
@@ -1327,7 +1723,7 @@ public abstract static class LoggerFinder {
 
 	/**
 	 * Returns the LoggerFinder instance
-	 * 
+	 *
 	 * @return the LoggerFinder instance.
 	 * @throws SecurityException if RuntimePermission("loggerFinder") is not allowed
 	 */
@@ -1341,8 +1737,9 @@ public abstract static class LoggerFinder {
 		}
 		return loggerFinder;
 	}
-	
+
 	private static void verifyPermissions() {
+		@SuppressWarnings("removal")
 		SecurityManager securityManager = System.getSecurityManager();
 		if (securityManager != null)	{
 			securityManager.checkPermission(com.ibm.oti.util.RuntimePermissions.permissionLoggerFinder);
@@ -1351,7 +1748,7 @@ public abstract static class LoggerFinder {
 }
 
 /**
- * Logger logs messages that will be routed to the underlying logging framework 
+ * Logger logs messages that will be routed to the underlying logging framework
  * that LoggerFinder uses.
  */
 public interface Logger {
@@ -1385,137 +1782,137 @@ public interface Logger {
 		ERROR(1000),
 		/**
 		 *
-		 * Disable logging 
+		 * Disable logging
 		 */
 		OFF(Integer.MAX_VALUE);
-		
+
 		final int severity;
 		Level(int value) {
 			severity = value;
 		}
-	
+
 		/**
 		 * Returns the name of this level
-		 * 
+		 *
 		 * @return name of this level
 		 */
 		public final java.lang.String getName() {
 			return name();
 		}
-		
+
 		/**
 		 * Returns severity of this level
-		 * 
-		 * @return severity of this level 
+		 *
+		 * @return severity of this level
 		 */
 		public final int getSeverity() {
 			return severity;
 		}
 	}
-	
+
 	/**
 	 * Returns the name of this logger
-	 * 
+	 *
 	 * @return the logger name
 	 */
 	public String getName();
-	
+
 	/**
 	 * Checks if a message of the given level will be logged
-	 * 
+	 *
 	 * @param level The log message level
 	 * @return true if the given log message level is currently being logged
 	 * @throws NullPointerException if level is null
 	 */
 	public boolean isLoggable(Level level);
-	
+
 	/**
 	 * Logs a message
-	 * 
+	 *
 	 * @param level The log message level
 	 * @param msg The log message
 	 * @throws NullPointerException if level is null
 	 */
 	public default void log(Level level, String msg) {
-		level = Objects.requireNonNull(level);
+		Objects.requireNonNull(level);
 		log(level, (ResourceBundle)null, msg, (Object[])null);
 	}
-	
+
 	/**
 	 * Logs a lazily supplied message
-	 * 
+	 *
 	 * @param level The log message level
 	 * @param supplier Supplier function that produces a message
 	 * @throws NullPointerException if level or supplier is null
 	 */
 	public default void log(Level level, Supplier<String> supplier) {
-		level = Objects.requireNonNull(level);
-		supplier = Objects.requireNonNull(supplier);
+		Objects.requireNonNull(level);
+		Objects.requireNonNull(supplier);
 		if (isLoggable(level)) {
 			log(level, (ResourceBundle)null, supplier.get(), (Object[])null);
 		}
 	}
-	
+
 	/**
 	 * Logs a message produced from the give object
-	 * 
+	 *
 	 * @param level The log message level
 	 * @param value The object to log
 	 * @throws NullPointerException if level or value is null
 	 */
 	public default void log(Level level, Object value) {
-		level = Objects.requireNonNull(level);
-		value = Objects.requireNonNull(value);
+		Objects.requireNonNull(level);
+		Objects.requireNonNull(value);
 		if (isLoggable(level)) {
 			log(level, (ResourceBundle)null, value.toString(), (Object[])null);
 		}
 	}
-	
+
 	/**
 	 * Log a message associated with a given throwable
-	 * 
+	 *
 	 * @param level The log message level
 	 * @param msg The log message
 	 * @param throwable Throwable associated with the log message
 	 * @throws NullPointerException if level is null
 	 */
 	public default void log(Level level, String msg, Throwable throwable) {
-		level = Objects.requireNonNull(level);
+		Objects.requireNonNull(level);
 		log(level, (ResourceBundle)null, msg, throwable);
 	}
-	
+
 	/**
 	 * Logs a lazily supplied message associated with a given throwable
-	 * 
+	 *
 	 * @param level The log message level
 	 * @param supplier Supplier function that produces a message
 	 * @param throwable Throwable associated with the log message
 	 * @throws NullPointerException if level or supplier is null
 	 */
 	public default void log(Level level, Supplier<String> supplier, Throwable throwable) {
-		level = Objects.requireNonNull(level);
-		supplier = Objects.requireNonNull(supplier);
+		Objects.requireNonNull(level);
+		Objects.requireNonNull(supplier);
 		if (isLoggable(level)) {
 			log(level, (ResourceBundle)null, supplier.get(), throwable);
 		}
 	}
-	
+
 	/**
 	 * Logs a message with an optional list of parameters
-	 * 
+	 *
 	 * @param level The log message level
 	 * @param msg The log message
 	 * @param values Optional list of parameters
 	 * @throws NullPointerException if level is null
 	 */
 	public default void log(Level level, String msg, Object... values) {
-		level = Objects.requireNonNull(level);
+		Objects.requireNonNull(level);
 		log(level, (ResourceBundle)null, msg, values);
 	}
-	
+
 	/**
 	 * Logs a localized message associated with a given throwable
-	 * 
+	 *
 	 * @param level The log message level
 	 * @param bundle A resource bundle to localize msg
 	 * @param msg The log message
@@ -1523,10 +1920,10 @@ public interface Logger {
 	 * @throws NullPointerException if level is null
 	 */
 	public void log(Level level, ResourceBundle bundle, String msg, Throwable throwable);
-	
+
 	/**
 	 * Logs a message with resource bundle and an optional list of parameters
-	 * 
+	 *
 	 * @param level The log message level
 	 * @param bundle A resource bundle to localize msg
 	 * @param msg The log message

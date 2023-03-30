@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -51,6 +51,7 @@ class GC_VMClassSlotIterator;
 class MM_HeapRegionDescriptor;
 class MM_HeapRegionManager;
 class MM_OwnableSynchronizerObjectList;
+class MM_ContinuationObjectList;
 class MM_UnfinalizedObjectList;
 
 #define TEMP_RCW_STACK_SIZE (10 * 1024 * 1024)
@@ -72,7 +73,7 @@ j9gc_ext_reachable_objects_do(
 	J9VMThread *vmThread,
 	J9MODRON_REFERENCE_CHAIN_WALKER_CALLBACK userCallback,
 	void *userData,
-	UDATA walkFlags)
+	uintptr_t walkFlags)
 {
 	MM_EnvironmentBase *env = MM_EnvironmentBase::getEnvironment(vmThread->omrVMThread);
 
@@ -108,7 +109,7 @@ j9gc_ext_reachable_from_object_do(
 	J9Object *objectPtr,
 	J9MODRON_REFERENCE_CHAIN_WALKER_CALLBACK userCallback,
 	void *userData,
-	UDATA walkFlags)
+	uintptr_t walkFlags)
 {
 	MM_EnvironmentBase *env = MM_EnvironmentBase::getEnvironment(vmThread->omrVMThread);
 
@@ -153,7 +154,7 @@ MM_ReferenceChainWalker::initialize(MM_EnvironmentBase *env)
 
 	if (result) {
 		_queue = (J9Object **)env->getForge()->allocate(_queueSlots * sizeof(J9Object **), MM_AllocationCategory::REFERENCES, J9_GET_CALLSITE());
-		if(NULL != _queue) {
+		if (NULL != _queue) {
 			_queueEnd = _queue + _queueSlots;
 			_queueCurrent = _queue;
 		} else {
@@ -218,16 +219,16 @@ MM_ReferenceChainWalker::doSlot(J9Object **slotPtr, IDATA type, IDATA index, J9O
  * @param sourceObj the object which contains this slot, or NULL if a root
  */
 void
-MM_ReferenceChainWalker::doClassSlot(J9Class **slotPtr, IDATA type, IDATA index, J9Object *sourceObj)
+MM_ReferenceChainWalker::doClassSlot(J9Class *classPtr, IDATA type, IDATA index, J9Object *sourceObj)
 {
-	if (*slotPtr != NULL) {
+	if (NULL != classPtr) {
 		/* NOTE: this "O-slot" is actually a pointer to a local variable in this
 		 * function. As such, any changes written back into it will be lost.
 		 * Since no-one writes back into the slot in classes-on-heap VMs this is
 		 * OK. We should simplify this code once classes-on-heap is enabled
 		 * everywhere.
 		 */
-		J9Object* clazzObject = J9VM_J9CLASS_TO_HEAPCLASS(*slotPtr);
+		J9Object* clazzObject = J9VM_J9CLASS_TO_HEAPCLASS(classPtr);
 		doSlot(&clazzObject, type, index, sourceObj);
 	}
 }
@@ -280,7 +281,7 @@ MM_ReferenceChainWalker::pushObject(J9Object *objectPtr)
 			/* if we overflow, dump half the objects from the queue and tag them for finding later */
 			_hasOverflowed = true;
 			setOverflow(objectPtr);
-			for (UDATA i = _queueSlots / 2; i > 0; i--) {
+			for (uintptr_t i = _queueSlots / 2; i > 0; i--) {
 				J9Object *objPtr = popObject();
 				setOverflow(objPtr);
 			}
@@ -344,13 +345,14 @@ MM_ReferenceChainWalker::scanObject(J9Object *objectPtr)
 {
 	/* add the object's class for scanning */
 	J9Class* clazz = J9GC_J9OBJECT_CLAZZ(objectPtr, _extensions);
-	doClassSlot(&clazz, J9GC_REFERENCE_TYPE_CLASS, -1, objectPtr);
+	doClassSlot(clazz, J9GC_REFERENCE_TYPE_CLASS, -1, objectPtr);
 
 	switch(_extensions->objectModel.getScanType(objectPtr)) {
 	case GC_ObjectModel::SCAN_MIXED_OBJECT_LINKED:
 	case GC_ObjectModel::SCAN_ATOMIC_MARKABLE_REFERENCE_OBJECT:
 	case GC_ObjectModel::SCAN_MIXED_OBJECT:
 	case GC_ObjectModel::SCAN_OWNABLESYNCHRONIZER_OBJECT:
+	case GC_ObjectModel::SCAN_CONTINUATION_OBJECT:
 	case GC_ObjectModel::SCAN_CLASS_OBJECT:
 	case GC_ObjectModel::SCAN_CLASSLOADER_OBJECT:
 		scanMixedObject(objectPtr);
@@ -381,7 +383,7 @@ MM_ReferenceChainWalker::scanMixedObject(J9Object *objectPtr)
 {
 	GC_MixedObjectDeclarationOrderIterator objectIterator(static_cast<J9JavaVM*>(_omrVM->_language_vm), objectPtr, _shouldPreindexInterfaceFields);
 
-	while(GC_SlotObject *slotObject = objectIterator.nextSlot()) {
+	while (GC_SlotObject *slotObject = objectIterator.nextSlot()) {
 		doFieldSlot(slotObject, J9GC_REFERENCE_TYPE_FIELD, objectIterator.getIndex(), objectPtr);
 	}
 }
@@ -394,7 +396,7 @@ MM_ReferenceChainWalker::scanPointerArrayObject(J9IndexableObject *objectPtr)
 {
 	GC_PointerArrayIterator pointerArrayIterator(static_cast<J9JavaVM*>(_omrVM->_language_vm), (J9Object *)objectPtr);
 
-	while(GC_SlotObject *slotObject = pointerArrayIterator.nextSlot()) {
+	while (GC_SlotObject *slotObject = pointerArrayIterator.nextSlot()) {
 		doFieldSlot(slotObject, J9GC_REFERENCE_TYPE_ARRAY, pointerArrayIterator.getIndex(), (J9Object *)objectPtr);
 	}
 }
@@ -407,7 +409,7 @@ MM_ReferenceChainWalker::scanReferenceMixedObject(J9Object *objectPtr)
 {
 	GC_MixedObjectDeclarationOrderIterator objectIterator(static_cast<J9JavaVM*>(_omrVM->_language_vm), objectPtr, _shouldPreindexInterfaceFields);
 
-	while(GC_SlotObject *slotObject = objectIterator.nextSlot()) {
+	while (GC_SlotObject *slotObject = objectIterator.nextSlot()) {
 		doFieldSlot(slotObject, J9GC_REFERENCE_TYPE_WEAK_REFERENCE, objectIterator.getIndex(), objectPtr);
 	}
 }
@@ -421,7 +423,7 @@ MM_ReferenceChainWalker::scanClass(J9Class *clazz)
 	J9Object* referrer = J9VM_J9CLASS_TO_HEAPCLASS(clazz);
 
 	GC_ClassIteratorDeclarationOrder classIterator(static_cast<J9JavaVM*>(_omrVM->_language_vm), clazz, _shouldPreindexInterfaceFields);
-	while(volatile j9object_t *slot = classIterator.nextSlot()) {
+	while (volatile j9object_t *slot = classIterator.nextSlot()) {
 		IDATA refType = classIterator.getSlotReferenceType();
 		IDATA index = classIterator.getIndex();
 
@@ -429,23 +431,26 @@ MM_ReferenceChainWalker::scanClass(J9Class *clazz)
 		doSlot((j9object_t*)slot, refType, index, referrer);
 	}
 
-	GC_ClassIteratorClassSlots classIteratorClassSlots(clazz);
-	while(J9Class **slot = classIteratorClassSlots.nextSlot()) {
+	GC_ClassIteratorClassSlots classIteratorClassSlots(static_cast<J9JavaVM*>(_omrVM->_language_vm), clazz);
+	while (J9Class *classPtr = classIteratorClassSlots.nextSlot()) {
 		switch (classIteratorClassSlots.getState()) {
 		case classiteratorclassslots_state_constant_pool:
-			doClassSlot(slot, J9GC_REFERENCE_TYPE_CONSTANT_POOL, classIteratorClassSlots.getIndex(), referrer);
+			doClassSlot(classPtr, J9GC_REFERENCE_TYPE_CONSTANT_POOL, classIteratorClassSlots.getIndex(), referrer);
 			break;
 		case classiteratorclassslots_state_superclasses:
-			doClassSlot(slot, J9GC_REFERENCE_TYPE_SUPERCLASS, classIteratorClassSlots.getIndex(), referrer);
+			doClassSlot(classPtr, J9GC_REFERENCE_TYPE_SUPERCLASS, classIteratorClassSlots.getIndex(), referrer);
 			break;
 		case classiteratorclassslots_state_interfaces:
-			doClassSlot(slot, J9GC_REFERENCE_TYPE_INTERFACE, classIteratorClassSlots.getIndex(), referrer);
+			doClassSlot(classPtr, J9GC_REFERENCE_TYPE_INTERFACE, classIteratorClassSlots.getIndex(), referrer);
 			break;
 		case classiteratorclassslots_state_array_class_slots:
-			doClassSlot(slot, J9GC_REFERENCE_TYPE_CLASS_ARRAY_CLASS, classIteratorClassSlots.getIndex(), referrer);
+			doClassSlot(classPtr, J9GC_REFERENCE_TYPE_CLASS_ARRAY_CLASS, classIteratorClassSlots.getIndex(), referrer);
+			break;
+		case classiteratorclassslots_state_flattened_class_cache_slots:
+			doClassSlot(classPtr, J9GC_REFERENCE_TYPE_CLASS_FCC, classIteratorClassSlots.getIndex(), referrer);
 			break;
 		default:
-			doClassSlot(slot, J9GC_REFERENCE_TYPE_UNKNOWN, classIteratorClassSlots.getIndex(), referrer);
+			doClassSlot(classPtr, J9GC_REFERENCE_TYPE_UNKNOWN, classIteratorClassSlots.getIndex(), referrer);
 			break;
 		}
 	}
@@ -466,11 +471,11 @@ MM_ReferenceChainWalker::findOverflowObjects()
 	GC_HeapRegionIterator regionIterator(regionManager);
 
 	MM_HeapRegionDescriptor *region = NULL;
-	while(NULL != (region = regionIterator.nextRegion())) {
+	while (NULL != (region = regionIterator.nextRegion())) {
 		GC_ObjectHeapBufferedIterator objectHeapIterator(_extensions, region); 
 
 		J9Object *object = NULL;
-		while((object = objectHeapIterator.nextObject()) != NULL) {
+		while ((object = objectHeapIterator.nextObject()) != NULL) {
 			if (isOverflow(object)) {
 				clearOverflow(object);
 				pushObject(object);
@@ -493,9 +498,9 @@ MM_ReferenceChainWalker::doSlot(J9Object **slotPtr) {
  * @param slotPtr a pointer to a class slot
  */
 void
-MM_ReferenceChainWalker::doClassSlot(J9Class** slotPtr)
+MM_ReferenceChainWalker::doClassSlot(J9Class *classPtr)
 {
-	doClassSlot(slotPtr, J9GC_ROOT_TYPE_CLASS, -1, NULL);
+	doClassSlot(classPtr, J9GC_ROOT_TYPE_CLASS, -1, NULL);
 }
 
 /**
@@ -503,7 +508,7 @@ MM_ReferenceChainWalker::doClassSlot(J9Class** slotPtr)
  */
 void
 MM_ReferenceChainWalker::doClass(J9Class *clazz) {
-	doClassSlot(&clazz);
+	doClassSlot(clazz);
 }
 
 
@@ -533,6 +538,13 @@ MM_ReferenceChainWalker::doOwnableSynchronizerObject(J9Object *objectPtr, MM_Own
 {
 	J9Object *object = objectPtr;
 	doSlot(&object, J9GC_ROOT_TYPE_OWNABLE_SYNCHRONIZER_OBJECT, -1, NULL);
+}
+
+void
+MM_ReferenceChainWalker::doContinuationObject(J9Object *objectPtr, MM_ContinuationObjectList *list)
+{
+	J9Object *object = objectPtr;
+	doSlot(&object, J9GC_ROOT_TYPE_CONTINUATION_OBJECT, -1, NULL);
 }
 
 /**
@@ -578,9 +590,9 @@ MM_ReferenceChainWalker::doStringTableSlot(J9Object **slotPtr, GC_StringTableIte
  * @todo Provide function documentation
  */
 void
-MM_ReferenceChainWalker::doVMClassSlot(J9Class **slotPtr, GC_VMClassSlotIterator *vmClassSlotIterator)
+MM_ReferenceChainWalker::doVMClassSlot(J9Class *classPtr)
 {
-	doClassSlot(slotPtr, J9GC_ROOT_TYPE_VM_CLASS_SLOT, -1, NULL);
+	doClassSlot(classPtr, J9GC_ROOT_TYPE_VM_CLASS_SLOT, -1, NULL);
 }
 
 /**

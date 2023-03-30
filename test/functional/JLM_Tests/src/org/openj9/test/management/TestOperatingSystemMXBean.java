@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2019 IBM Corp. and others
+ * Copyright (c) 2001, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -29,9 +29,11 @@ import org.testng.log4testng.Logger;
 import java.io.File;
 import java.io.IOException;
 import java.io.BufferedReader;
+import java.io.FileInputStream;
 import java.io.InputStreamReader;
 import java.net.MalformedURLException;
 import java.util.ArrayList;
+import java.util.Optional;
 import javax.management.JMX;
 import javax.management.MBeanServer;
 import javax.management.MBeanServerConnection;
@@ -63,6 +65,44 @@ public class TestOperatingSystemMXBean {
 	private static final int SLEEPINTERVAL = 5;
 	private static final int NTHREADS = 1;
 	private static final int NITERATIONS = 10;
+
+	private enum ContainerStatus {
+		UNINITIALIZED,
+		NOT_FOUND,
+		FOUND
+	}
+	private static ContainerStatus inContainer = ContainerStatus.UNINITIALIZED;
+
+	private static boolean isPhysicalMemoryTestExcluded() {
+		/* Exclude when running in a docker container
+		 * https://github.com/eclipse-openj9/openj9/issues/12038
+		 */
+		if (inContainer == ContainerStatus.NOT_FOUND) {
+			return false;
+		} else if (inContainer == ContainerStatus.FOUND) {
+			return true;
+		}
+		String osname = System.getProperty("os.name");
+		if ("Linux".equals(osname)) {
+			if (new File("/.dockerenv").exists()) {
+				logger.info("/.dockerenv found");
+				inContainer = ContainerStatus.FOUND;
+				return true;
+			}
+			try (BufferedReader reader = new BufferedReader(new InputStreamReader(new FileInputStream("/proc/1/cgroup")))) {
+				Optional<String> docker = reader.lines().filter(line -> line.contains("docker")).findFirst();
+				if (docker.isPresent()) {
+					logger.info("Container found: " + docker.get());
+					inContainer = ContainerStatus.FOUND;
+					return true;
+				}
+			} catch (IOException e) {
+				// not a container, fall through
+			}
+		}
+		inContainer = ContainerStatus.NOT_FOUND;
+		return false;
+	}
 
 	/**
 	 * Starting point for the test program.
@@ -169,12 +209,12 @@ public class TestOperatingSystemMXBean {
 					/* Call the API test methods */
 					error |= test_PhysicalMemoryAPIs(osmxbean);
 					error |= test_SwapSpaceSizeAPIs(osmxbean);
-					error |= test_getProcessVirtualMemorySize(osmxbean);
+					error |= test_getCommittedVirtualMemorySize(osmxbean);
 					error |= test_memoryInfo(osmxbean);
 					error |= test_processorInfo(osmxbean);
 				}
 				/* At this point, we have enabled support for only these API's on z/OS. */
-				error |= test_getProcessCpuTimeByNS(osmxbean, localTest);
+				error |= test_getProcessCpuTime(osmxbean, localTest);
 				error |= test_getProcessCpuLoad(osmxbean, localTest);
 				error |= test_getHardwareModel(osmxbean);
 				error |= test_isHardwareEmulated(osmxbean, localTest);
@@ -239,18 +279,18 @@ public class TestOperatingSystemMXBean {
 	}
 
 	/**
-	 * Test the getTotalPhysicalMemory() & getFreePhysicalMemorySize() APIs of OperatingSystemMXBean
+	 * Test the getTotalPhysicalMemorySize() & getFreePhysicalMemorySize() APIs of OperatingSystemMXBean
 	 * @param osmxbean The OperatingSystemMXBean instance
 	 *
 	 * @return false, if the test runs without any errors, true otherwise.
 	 */
 	private static boolean test_PhysicalMemoryAPIs(com.ibm.lang.management.OperatingSystemMXBean osmxbean) {
 
-		long totalMemory = osmxbean.getTotalPhysicalMemory();
+		long totalMemory = osmxbean.getTotalPhysicalMemorySize();
 		long freeMemory = osmxbean.getFreePhysicalMemorySize();
 		String osname = System.getProperty("os.name");
 
-		logger.info("Testing getTotalPhysicalMemory() & getFreePhysicalMemorySize() APIs");
+		logger.info("Testing getTotalPhysicalMemorySize() & getFreePhysicalMemorySize() APIs");
 		logger.debug("Total Physical Memory available: " + totalMemory + " bytes");
 		logger.debug("of which Free Physical Memory: " + freeMemory + " bytes");
 
@@ -260,16 +300,20 @@ public class TestOperatingSystemMXBean {
 			 */
 			Assert.assertTrue(totalMemory > 0,
 					"Invalid Physical Memory Info retrieved , Total Physical Memory cannot be 0 bytes.");
-			Assert.assertFalse(freeMemory > totalMemory,
-					"Free Physical Memory size cannot be greater than total Physical Memory Size.");
+			if (isPhysicalMemoryTestExcluded()) {
+				logger.info("Testing freeMemory <= totalMemory excluded on this platform");
+			} else {
+				Assert.assertFalse(freeMemory > totalMemory,
+					"Free Physical Memory size " + freeMemory + " cannot be greater than total Physical Memory Size " + totalMemory);
+			}
 		} else {
 			if ((-1 == totalMemory) && (false == osname.equalsIgnoreCase("z/OS"))) {
 				/*
-				 * An error has occurred since getTotalPhysicalMemory() has returned -1.
+				 * An error has occurred since getTotalPhysicalMemorySize() has returned -1.
 				 * -1 can also mean it is not supported, but we exclude these tests on
 				 * non-supported platforms(i.e System-Z).
 				 */
-				Assert.fail("getTotalPhysicalMemory() API returned -1, test failed");
+				Assert.fail("getTotalPhysicalMemorySize() API returned -1, test failed");
 			}
 			if ((-1 == freeMemory) && (false == osname.equalsIgnoreCase("z/OS"))) {
 				/*
@@ -285,15 +329,15 @@ public class TestOperatingSystemMXBean {
 	}
 
 	/**
-	 * Test the getProcessVirtualMemorySize() APIs OperatingSystemMXBean
+	 * Test the getCommittedVirtualMemorySize() APIs OperatingSystemMXBean
 	 * @param osmxbean The OperatingSystemMXBean instance
 	 *
 	 * @return false, if the test runs without any errors, true otherwise.
 	 */
-	private static boolean test_getProcessVirtualMemorySize(com.ibm.lang.management.OperatingSystemMXBean osmxbean) {
-		long processVirtualMem = osmxbean.getProcessVirtualMemorySize();
+	private static boolean test_getCommittedVirtualMemorySize(com.ibm.lang.management.OperatingSystemMXBean osmxbean) {
+		long processVirtualMem = osmxbean.getCommittedVirtualMemorySize();
 		String osname = osmxbean.getName();
-		logger.info("Testing getProcessVirtualMemorySize() API");
+		logger.info("Testing getCommittedVirtualMemorySize() API");
 		logger.debug("Amount of Virtual Memory used by the process: " + processVirtualMem + " bytes");
 
 		if (-1 != processVirtualMem) {
@@ -302,36 +346,36 @@ public class TestOperatingSystemMXBean {
 		} else if ((-1 == processVirtualMem) && (osname.equalsIgnoreCase("AIX") || osname.equalsIgnoreCase("z/OS"))) {
 			/* API not supported on AIX for now, so we ignore the -1 */
 			logger.warn(
-					"getProcessVirtualMemorySize() not supported on AIX and z/OS, Process Virtual Memory Size: <undefined for platform>");
+					"getCommittedVirtualMemorySize() not supported on AIX and z/OS, Process Virtual Memory Size: <undefined for platform>");
 		} else {
 			/*
-			 * An error has occurred since getProcessVirtualMemorySize() has returned -1.
+			 * An error has occurred since getCommittedVirtualMemorySize() has returned -1.
 			 * -1 can also mean it is not supported, but we exclude these tests on
 			 * non-supported platforms(i.e System-Z).
 			 */
-			Assert.fail("Error: getProcessVirtualMemorySize() returned -1, API failed!!");
+			Assert.fail("Error: getCommittedVirtualMemorySize() returned -1, API failed!!");
 		}
 		return false; /* No error */
 	}
 
 	/**
-	 * Test the getProcessCpuTimeByNS() API of OperatingSystemMXBean
+	 * Test the getProcessCpuTime() API of OperatingSystemMXBean
 	 * @param osmxbean The OperatingSystemMXBean instance
 	 *
 	 * @return false, if the test runs without any errors, true otherwise.
 	 */
-	private static boolean test_getProcessCpuTimeByNS(com.ibm.lang.management.OperatingSystemMXBean osmxbean, boolean local) {
+	private static boolean test_getProcessCpuTime(com.ibm.lang.management.OperatingSystemMXBean osmxbean, boolean local) {
 
 		int i = 0;
 		int warmupCntr = MAX_WARMUP_ROUNDS;
 		long processCpuTime_old = 0;
 		long processCpuTime_new = 0;
 
-		logger.info("Testing getProcessCpuTimeByNS() API");
-		processCpuTime_old = osmxbean.getProcessCpuTimeByNS();
+		logger.info("Testing getProcessCpuTime() API");
+		processCpuTime_old = osmxbean.getProcessCpuTime();
 
 		if (-1 != processCpuTime_old) {
-			logger.debug("First call to getProcessCpuTimeByNS, Process CPU Time is: " + processCpuTime_old);
+			logger.debug("First call to getProcessCpuTime, Process CPU Time is: " + processCpuTime_old);
 
 			try {
 				if (true == local) {
@@ -352,18 +396,18 @@ public class TestOperatingSystemMXBean {
 							busyObj[i].join();
 						}
 					}
-					processCpuTime_new = osmxbean.getProcessCpuTimeByNS();
+					processCpuTime_new = osmxbean.getProcessCpuTime();
 					if (-1 == processCpuTime_new) {
-						Assert.fail("Error: getProcessCpuTimeByNS() returned -1, API failed!!");
+						Assert.fail("Error: getProcessCpuTime() returned -1, API failed!!");
 					}
 				} else {
 					logger.debug("Warm up cycles ... " + warmupCntr);
 					for (; warmupCntr > 0; warmupCntr--) {
 						/* Sleep for 2s */
 						Thread.sleep(2000);
-						processCpuTime_new = osmxbean.getProcessCpuTimeByNS();
+						processCpuTime_new = osmxbean.getProcessCpuTime();
 						if (-1 == processCpuTime_new) {
-							Assert.fail("Error: getProcessCpuTimeByNS() returned -1, API failed!!");
+							Assert.fail("Error: getProcessCpuTime() returned -1, API failed!!");
 						}
 					}
 				}
@@ -371,17 +415,17 @@ public class TestOperatingSystemMXBean {
 				Assert.fail("Sleep Interrupted, unexpected InterruptedException occured", e);
 			}
 
-			logger.debug("Second call to getProcessCpuTimeByNS(), Process CPU Time is: " + processCpuTime_new);
+			logger.debug("Second call to getProcessCpuTime(), Process CPU Time is: " + processCpuTime_new);
 			logger.debug("Delta in Process CPU Time is: " + (processCpuTime_new - processCpuTime_old));
 			Assert.assertFalse(processCpuTime_new == processCpuTime_old, "Processor load did not increase. Test failed");
 
 		} else {
 			/*
-			 * An error has occurred since getProcessCpuTimeByNS() has returned -1.
+			 * An error has occurred since getProcessCpuTime() has returned -1.
 			 * -1 can also mean it is not supported, but we exclude these tests on
 			 * non-supported platforms(i.e System-Z).
 			 */
-			Assert.fail("Error: getProcessCpuTimeByNS() returned -1, API failed!!");
+			Assert.fail("Error: getProcessCpuTime() returned -1, API failed!!");
 		}
 		return false; /* No error */
 	}

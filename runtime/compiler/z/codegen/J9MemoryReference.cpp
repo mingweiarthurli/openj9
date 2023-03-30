@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -347,28 +347,18 @@ J9::Z::MemoryReference::createPatchableDataInLitpool(TR::Node * node, TR::CodeGe
    // create a patchable data in litpool
    TR::S390WritableDataSnippet * litpool = cg->CreateWritableConstant(node);
    litpool->setUnresolvedDataSnippet(uds);
+   litpool->resetNeedLitPoolBasePtr();
+   TR::S390RILInstruction * LRLinst;
+   LRLinst = (TR::S390RILInstruction *) generateRILInstruction(cg, TR::InstOpCode::getLoadRelativeLongOpCode(), node, tempReg, reinterpret_cast<uintptr_t*>(0xBABE), 0);
+   uds->setDataReferenceInstruction(LRLinst);
+   LRLinst->setSymbolReference(uds->getDataSymbolReference());
+   LRLinst->setTargetSnippet(litpool);
+   LRLinst->setTargetSymbol(uds->getDataSymbol());
+   TR_Debug * debugObj = cg->getDebug();
 
-   if (cg->comp()->target().cpu.isAtLeast(OMR_PROCESSOR_S390_Z10))
+   if (debugObj)
       {
-      litpool->resetNeedLitPoolBasePtr();
-      TR::S390RILInstruction * LRLinst;
-      LRLinst = (TR::S390RILInstruction *) generateRILInstruction(cg, TR::InstOpCode::getLoadRelativeLongOpCode(), node, tempReg, reinterpret_cast<uintptr_t*>(0xBABE), 0);
-      uds->setDataReferenceInstruction(LRLinst);
-      LRLinst->setSymbolReference(uds->getDataSymbolReference());
-      LRLinst->setTargetSnippet(litpool);
-      LRLinst->setTargetSymbol(uds->getDataSymbol());
-      TR_Debug * debugObj = cg->getDebug();
-
-      if (debugObj)
-         {
-         debugObj->addInstructionComment(LRLinst, "LoadLitPoolEntry");
-         }
-      }
-   else
-      {
-      auto dataMemoryReference = generateS390MemoryReference(litpool, cg, 0, node);
-
-      generateRXInstruction(cg, TR::InstOpCode::getLoadOpCode(), node, tempReg, dataMemoryReference);
+      debugObj->addInstructionComment(LRLinst, "LoadLitPoolEntry");
       }
 
    self()->setBaseRegister(tempReg, cg);

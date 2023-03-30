@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2018 IBM Corp. and others
+ * Copyright (c) 2001, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -39,7 +39,7 @@ class ResolveFrame_TestInterfaceMethod implements ResolveFrame_Interface
                               float f4, float f5, float f6, float f7, float f8, float f9, float f10, float f11, float f12, float f13) 
     {
      
-        Integer r_i1 = new Integer(1234);
+        Integer r_i1 = Integer.valueOf(1234);
         double  r_d1 = 2863311530.0;
         long    r_l1 = 1234567;
 

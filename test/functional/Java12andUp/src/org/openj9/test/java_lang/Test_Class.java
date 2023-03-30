@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2019 IBM Corp. and others
+ * Copyright (c) 2018, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -25,7 +25,9 @@ import java.lang.constant.ClassDesc;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodHandles.Lookup;
 import java.util.Optional;
+import java.util.NoSuchElementException;
 
+import org.openj9.test.util.VersionCheck;
 import org.testng.Assert;
 import org.testng.annotations.Test;
 import org.testng.log4testng.Logger;
@@ -55,12 +57,12 @@ public class Test_Class {
 	};
 
 	/* descriptor strings */
-	String objectResult = "Ljava/lang/Object;";
+	String objectResult = "Ljava/lang/Thread;";
 	String arrayResult = "[D";
 	String arrayResult2 = "[[[D";
 
 	/* test classes */
-	Class<?> objectTest = new Object().getClass();
+	Class<?> objectTest = new Thread().getClass();
 	Class<?> arrayTest = new double[0].getClass();
 	Class<?> arrayTest2 = new double[0][][].getClass();
 	Runnable lambdaExp = () -> System.out.println("test");
@@ -131,17 +133,11 @@ public class Test_Class {
 	 */
 	private void describeConstableTestLambda(String testName) {
 		Optional<ClassDesc> optionalDesc = lambdaExpTest.describeConstable();
-		ClassDesc desc = optionalDesc.orElseThrow();
-
-		/*
-		 * verify that descriptor can be resolved. Otherwise exception will be thrown.
-		 */
 		try {
-			Class<?> resolvedClass = (Class<?>)desc.resolveConstantDesc(MethodHandles.lookup());
-			Assert.fail(testName + " : resolveConstantDesc did not throw an error.");
-		} catch (Throwable e) {
-			/* resolveConstantDesc is expected to fail */
-			logger.debug(testName + ": exception thrown for resolveConstantDesc was " + e.toString());
+			ClassDesc desc = optionalDesc.orElseThrow(); 
+		} catch (NoSuchElementException e) {
+			/* In Java 15 and up, lambda classes are hidden classes whose describeConstable is an empty Optional. */
+			logger.debug(testName + ": exception thrown for optionalDesc.orElseThrow() was " + e.toString());
 		}
 	}
 
@@ -152,12 +148,20 @@ public class Test_Class {
 	public void testClassArrayType() throws Throwable {
 		for (Object[] prim : primitiveTest) {
 			if ((Class<?>)prim[0] == void.class) {
-				/* test is expected to throw IllegalArgumentException */
+				/* test is expected to throw IllegalArgumentException up to jdk18, or UnsupportedOperationException from jdk19 */
 				try {
-					arrayTypeTestGeneral("testClassArrayType (primitive) this test should throw IllegalArgumentException", (Class<?>)prim[0], (String)prim[1]);
+					arrayTypeTestGeneral("testClassArrayType (primitive) this test should throw Exception", (Class<?>)prim[0], (String)prim[1]);
 					Assert.fail();
-				} catch(IllegalArgumentException e) {
-					/* test passed */
+				} catch(Exception e) {
+					if (VersionCheck.major() >= 19) {
+						if (e.getClass() != UnsupportedOperationException.class) {
+							Assert.fail();
+						}
+					} else {
+						if (e.getClass() != IllegalArgumentException.class) {
+							Assert.fail();
+						}
+					}
 				}
 			} else {				
 				arrayTypeTestGeneral("testClassArrayType (primitive)", (Class<?>)prim[0], (String)prim[1]);

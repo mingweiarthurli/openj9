@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -240,11 +240,11 @@ typedef struct TR_MapIterator
       } \
    }
 
-void * getStackMapFromJitPC(J9JavaVM * javaVM, J9TR_MethodMetaData * exceptionTable, UDATA jitPC);
-void * getStackAllocMapFromJitPC(J9JavaVM * javaVM, J9TR_MethodMetaData * exceptionTable, UDATA jitPC, void *curStackMap);
+void * getStackMapFromJitPC(J9VMThread * currentThread, J9JavaVM * vm, J9TR_MethodMetaData * exceptionTable, UDATA jitPC);
+void * getStackAllocMapFromJitPC(J9VMThread * currentThread, J9TR_MethodMetaData * exceptionTable, UDATA jitPC, void *curStackMap);
 UDATA jitExceptionHandlerSearch(J9VMThread * currentThread, J9StackWalkState * walkState);
-void * jitGetInlinerMapFromPC(J9JavaVM * javaVM, J9JITExceptionTable * exceptionTable, UDATA jitPC);
-void jitGetMapsFromPC(J9JavaVM * javaVM, J9JITExceptionTable * exceptionTable, UDATA jitPC, void * * inlineMap, void * * stackMap);
+void * jitGetInlinerMapFromPC(J9VMThread * currentThread, J9JavaVM * vm, J9JITExceptionTable * exceptionTable, UDATA jitPC);
+void jitGetMapsFromPC(J9VMThread * currentThread, J9JavaVM * vm, J9JITExceptionTable * exceptionTable, UDATA jitPC, void * * inlineMap, void * * stackMap);
 void * getFirstInlineRange(TR_MapIterator * i, void * methodMetaData, UDATA * startOffset, UDATA * endOffset);
 void * getNextInlineRange(TR_MapIterator * i, UDATA * startOffset, UDATA * endOffset);
 void walkJITFrameSlotsForInternalPointers(J9StackWalkState * walkState,  U_8 ** jitDescriptionCursor, UDATA * scanCursor, void *stackMap, J9JITStackAtlas *gcStackAtlas);

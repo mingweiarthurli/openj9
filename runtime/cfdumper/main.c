@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -42,8 +42,8 @@
 #include "atoe.h"
 #endif
 
-#define CFDUMP_CLASSFILE_EXTESION ".class"
-#define CFDUMP_CLASSFILE_EXTESION_WITHOUT_DOT "class"
+#define CFDUMP_CLASSFILE_EXTENSION ".class"
+#define CFDUMP_CLASSFILE_EXTENSION_WITHOUT_DOT "class"
 
 /* Return values. */
 #define RET_SUCCESS                                0
@@ -266,7 +266,7 @@ convertToClassFilename(const char **files, char ***classFiles, I_32 *fileCount) 
 	UDATA size = 0;
 	I_32 i = 0;
 	I_32 result = RET_SUCCESS;
-	UDATA classExtLen = sizeof(CFDUMP_CLASSFILE_EXTESION) - 1;
+	UDATA classExtLen = sizeof(CFDUMP_CLASSFILE_EXTENSION) - 1;
 
 	PORT_ACCESS_FROM_PORT(portLib);
 
@@ -301,7 +301,7 @@ convertToClassFilename(const char **files, char ***classFiles, I_32 *fileCount) 
 		UDATA length = strlen(file);
 		UDATA j = 0;
 
-		if ((length > classExtLen) && !strncmp(&file[length - classExtLen], CFDUMP_CLASSFILE_EXTESION, classExtLen)) {
+		if ((length > classExtLen) && !strncmp(&file[length - classExtLen], CFDUMP_CLASSFILE_EXTENSION, classExtLen)) {
 			length -= classExtLen;
 		}
 		for (j = 0; j < length; j++) {
@@ -311,10 +311,10 @@ convertToClassFilename(const char **files, char ***classFiles, I_32 *fileCount) 
 				currentFile[j] = file[j];
 			}
 		}
-		strcpy(&currentFile[length], CFDUMP_CLASSFILE_EXTESION);
+		strcpy(&currentFile[length], CFDUMP_CLASSFILE_EXTENSION);
 		currentFile[length + classExtLen] = '\0';
 		convertedFiles[i] = currentFile;
-		currentFile += length + classExtLen + 1;		/* ".class\0" */
+		currentFile += length + classExtLen + 1; /* ".class" */
 	}
 
 _end:
@@ -383,10 +383,10 @@ convertToJImageLocations(J9JImage *jimage, char **files, JImageMatchInfo ** outp
 
 		/* Check if input ends with '.class' */
 		if (
-			(length > sizeof(CFDUMP_CLASSFILE_EXTESION)) &&
-			(0 == strcmp(file + length - sizeof(CFDUMP_CLASSFILE_EXTESION) + 1, CFDUMP_CLASSFILE_EXTESION))) {
+			(length > sizeof(CFDUMP_CLASSFILE_EXTENSION)) &&
+			(0 == strcmp(file + length - sizeof(CFDUMP_CLASSFILE_EXTENSION) + 1, CFDUMP_CLASSFILE_EXTENSION))) {
 			/* ignore the .class extension */
-			file[length - sizeof(CFDUMP_CLASSFILE_EXTESION)+1] = '\0';
+			file[length - sizeof(CFDUMP_CLASSFILE_EXTENSION)+1] = '\0';
 		}
 		/* Split into package & class */
 		lastDot = strrchr(file, '.');
@@ -907,6 +907,16 @@ static void dumpAttribute(J9CfrClassFile* classfile, J9CfrAttribute* attrib, U_3
 			}
 			break;
 
+		case CFR_ATTRIBUTE_PermittedSubclasses:
+			for(i = 0; i < ((J9CfrAttributePermittedSubclasses*)attrib)->numberOfClasses; i++) {
+				U_16 classIndex = ((J9CfrAttributePermittedSubclasses*)attrib)->classes[i];
+				U_16 nameIndex = classfile->constantPool[classIndex].slot1;
+
+				for(j = 0; j < tabLevel + 1; j++) j9tty_printf( PORTLIB, "  ");
+				j9tty_printf( PORTLIB, "PermittedSubclass class index, name: %i, %i -> %s\n", classIndex, nameIndex, classfile->constantPool[nameIndex].bytes);
+			}
+			break;
+
 		case CFR_ATTRIBUTE_StrippedLineNumberTable:
 		case CFR_ATTRIBUTE_StrippedLocalVariableTable:
 		case CFR_ATTRIBUTE_StrippedLocalVariableTypeTable:
@@ -930,13 +940,15 @@ static void printClassFile(J9CfrClassFile* classfile)
 {
 	U_16 index;
 	U_8* string;
-	I_32 i, j;
+	I_32 i, j, k;
 
 	PORT_ACCESS_FROM_PORT(portLib);
 
 	if(classfile->accessFlags & CFR_ACC_PUBLIC) j9tty_printf( PORTLIB, "public ");
 	if(classfile->accessFlags & CFR_ACC_PRIVATE) j9tty_printf( PORTLIB, "protected ");
 	if(classfile->accessFlags & CFR_ACC_PROTECTED) j9tty_printf( PORTLIB, "private ");
+	/* JEP 360: note: non-sealed will not be indicated for subclasses. There's no way of knowing until classes are linked. */
+	if(classfile->j9Flags & CFR_J9FLAG_IS_SEALED) j9tty_printf( PORTLIB, "sealed ");
 	if(classfile->accessFlags & CFR_ACC_INTERFACE)
 		j9tty_printf( PORTLIB, "interface ");
 	else if (classfile->j9Flags & CFR_J9FLAG_IS_RECORD)
@@ -958,24 +970,22 @@ static void printClassFile(J9CfrClassFile* classfile)
 		i++;
 	}
 
-	j9tty_printf( PORTLIB, " ");
 	if(classfile->superClass != 0)
 	{
 		index = classfile->constantPool[classfile->superClass].slot1;
 		string = classfile->constantPool[index].bytes;
-		j9tty_printf( PORTLIB, "extends ");
+		j9tty_printf( PORTLIB, " extends ");
 		i = 0;
 		while(string[i])
 		{
 			j9tty_printf( PORTLIB, "%c", (string[i] == '/')?'.':string[i]);
 			i++;
 		}
-		j9tty_printf( PORTLIB, " ");
 	}
 
 	if(classfile->interfacesCount > 0)
 	{
-		j9tty_printf( PORTLIB, "implements ");
+		j9tty_printf( PORTLIB, " implements ");
 		for(i = 0; i < classfile->interfacesCount - 1; i++)
 		{
 			index = classfile->constantPool[classfile->interfaces[i]].slot1;
@@ -997,6 +1007,34 @@ static void printClassFile(J9CfrClassFile* classfile)
 			j++;
 		}
 	}
+
+	/* JEP 360: sealed class permits list */
+	if(classfile->j9Flags & CFR_J9FLAG_IS_SEALED) {
+		/* find PermittedSubclasses attribute */
+		for (i = 0; i < classfile->attributesCount; i++) {
+			if (CFR_ATTRIBUTE_PermittedSubclasses == classfile->attributes[i]->tag) {
+				/* found attribute, print permitted subclasses */
+				j9tty_printf( PORTLIB, " permits ");
+
+				for (j = 0; j < ((J9CfrAttributePermittedSubclasses*)classfile->attributes[i])->numberOfClasses; j++) {
+					/* class index */
+					index = ((J9CfrAttributePermittedSubclasses*)classfile->attributes[i])->classes[j];
+					/* class name index */
+					index = classfile->constantPool[index].slot1;
+					string = classfile->constantPool[index].bytes;
+
+					k = 0;
+					while('\0' != string[k]) {
+						j9tty_printf( PORTLIB, "%c", (string[k] == '/') ? '.' : string[k]);
+						k++;
+					}
+					if ((j + 1) != ((J9CfrAttributePermittedSubclasses*)classfile->attributes[i])->numberOfClasses) j9tty_printf( PORTLIB, ", ");
+				}
+				break;
+			}
+		}
+	}
+
 
 	j9tty_printf( PORTLIB, "\n{\n");
 
@@ -1761,7 +1799,7 @@ static void printDisassembledMethod(J9CfrClassFile* classfile, J9CfrMethod* meth
 				case CFR_BC_checkcast:
 				case CFR_BC_instanceof:
 #if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
-				case CFR_BC_defaultvalue:
+				case CFR_BC_aconst_init:
 #endif /* J9VM_OPT_VALHALLA_VALUE_TYPES */
 					NEXT_U16_ENDIAN(bigEndian, index, bcIndex);
 					info = classfile->constantPool[index];
@@ -2347,7 +2385,6 @@ static U_32 buildFlags(void)
 	 * check in j9bcutil_readClassFileBytes.
 	 */
 	flags |= BCT_JavaMaxMajorVersionShifted;
-	flags |= BCT_ValueTypesEnabled;
 	flags |= BCT_AnyPreviewVersion;
 
 	if(options.options & OPTION_stripDebugAttributes) flags |= CFR_StripDebugAttributes;
@@ -2835,7 +2872,7 @@ processAllInJImage(J9JImage *jimage, char *jimageFileName, U_32 flags)
 
 		/* Don't bother with files that don't have a ".class" extension. */
 		if ((NULL == j9jimageLocation.extensionString)
-			|| (strncmp(j9jimageLocation.extensionString, CFDUMP_CLASSFILE_EXTESION_WITHOUT_DOT, sizeof(CFDUMP_CLASSFILE_EXTESION_WITHOUT_DOT)))
+			|| (strncmp(j9jimageLocation.extensionString, CFDUMP_CLASSFILE_EXTENSION_WITHOUT_DOT, sizeof(CFDUMP_CLASSFILE_EXTENSION_WITHOUT_DOT)))
 		) {
 			continue;
 		}
@@ -2910,7 +2947,7 @@ processFilesInJImage(J9JImage *jimage, char *jimageFileName, char **resources, U
 		if (ACTION_writeJImageResource == options.action) {
 			resourceName = resources[i];
 		} else {
-			result = j9bcutil_getJImageResourceName(PORTLIB, jimage,  matchInfo[i].module, matchInfo[i].parentString, matchInfo[i].baseString, CFDUMP_CLASSFILE_EXTESION_WITHOUT_DOT, &resourceName);
+			result = j9bcutil_getJImageResourceName(PORTLIB, jimage,  matchInfo[i].module, matchInfo[i].parentString, matchInfo[i].baseString, CFDUMP_CLASSFILE_EXTENSION_WITHOUT_DOT, &resourceName);
 			if (result != J9JIMAGE_NO_ERROR ){
 				j9tty_printf(PORTLIB, "Insufficient memory to complete operation\n");
 				goto cleanExit;
@@ -6636,7 +6673,7 @@ static void j9_formatBytecodes(J9ROMClass* romClass, J9ROMMethod* method, U_8* b
 				case JBcheckcast:
 				case JBinstanceof:
 #if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
-				case JBdefaultvalue:
+				case JBaconst_init:
 #endif /* J9VM_OPT_VALHALLA_VALUE_TYPES */
 					j9_formatBytecode(romClass, method, bytecodes, bcIndex, bc, 3, CFR_DECODE_J9_CLASSREF, formatString, stringLength, flags);
 					pc += 2;

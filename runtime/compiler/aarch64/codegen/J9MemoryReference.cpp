@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -23,14 +23,16 @@
 #include "codegen/ARM64Instruction.hpp"
 #include "codegen/CodeGenerator.hpp"
 #include "codegen/MemoryReference.hpp"
+#include "codegen/Machine.hpp"
 #include "codegen/Relocation.hpp"
 #include "codegen/UnresolvedDataSnippet.hpp"
 
 J9::ARM64::MemoryReference::MemoryReference(
       TR::Node *node,
       TR::CodeGenerator *cg)
-   : OMR::MemoryReferenceConnector(node, cg)
+   : OMR::MemoryReferenceConnector(node, cg), _j9Flags(0)
    {
+   self()->setupCausesImplicitNullPointerException(cg);
    if (self()->getUnresolvedSnippet())
       self()->adjustForResolution(cg);
    }
@@ -39,10 +41,21 @@ J9::ARM64::MemoryReference::MemoryReference(
       TR::Node *node,
       TR::SymbolReference *symRef,
       TR::CodeGenerator *cg)
-   : OMR::MemoryReferenceConnector(node, symRef, cg)
+   : OMR::MemoryReferenceConnector(node, symRef, cg), _j9Flags(0)
    {
+   self()->setupCausesImplicitNullPointerException(cg);
    if (self()->getUnresolvedSnippet())
       self()->adjustForResolution(cg);
+   }
+
+void J9::ARM64::MemoryReference::setupCausesImplicitNullPointerException(TR::CodeGenerator *cg)
+   {
+   auto topNode = cg->getCurrentEvaluationTreeTop()->getNode();
+   if (cg->getHasResumableTrapHandler() &&
+      (topNode->getOpCode().isNullCheck() || topNode->chkFoldedImplicitNULLCHK()))
+      {
+      self()->setCausesImplicitNullPointerException();
+      }
    }
 
 void
@@ -78,7 +91,7 @@ J9::ARM64::MemoryReference::assignRegisters(TR::Instruction *currentInstruction,
          {
          if (baseRegister->getTotalUseCount() == baseRegister->getFutureUseCount())
             {
-            if ((assignedBaseRegister = machine->findBestFreeRegister(TR_GPR, true)) == NULL)
+            if ((assignedBaseRegister = machine->findBestFreeRegister(currentInstruction, TR_GPR, true, baseRegister)) == NULL)
                {
                assignedBaseRegister = machine->freeBestRegister(currentInstruction, baseRegister);
                }
@@ -118,7 +131,7 @@ J9::ARM64::MemoryReference::assignRegisters(TR::Instruction *currentInstruction,
          {
          if (indexRegister->getTotalUseCount() == indexRegister->getFutureUseCount())
             {
-            if ((assignedIndexRegister = machine->findBestFreeRegister(TR_GPR, false)) == NULL)
+            if ((assignedIndexRegister = machine->findBestFreeRegister(currentInstruction, TR_GPR, false, indexRegister)) == NULL)
                {
                assignedIndexRegister = machine->freeBestRegister(currentInstruction, indexRegister);
                }
@@ -158,7 +171,7 @@ J9::ARM64::MemoryReference::assignRegisters(TR::Instruction *currentInstruction,
          {
          if (extraRegister->getTotalUseCount() == extraRegister->getFutureUseCount())
             {
-            if ((assignedExtraRegister = machine->findBestFreeRegister(TR_GPR, false)) == NULL)
+            if ((assignedExtraRegister = machine->findBestFreeRegister(currentInstruction, TR_GPR, false, extraRegister)) == NULL)
                {
                assignedExtraRegister = machine->freeBestRegister(currentInstruction, extraRegister);
                }
@@ -184,35 +197,20 @@ J9::ARM64::MemoryReference::assignRegisters(TR::Instruction *currentInstruction,
 
    if (baseRegister != NULL)
       {
-      if (baseRegister->decFutureUseCount() == 0)
-         {
-         baseRegister->setAssignedRegister(NULL);
-         assignedBaseRegister->setState(TR::RealRegister::Unlatched);
-         }
+      machine->decFutureUseCountAndUnlatch(currentInstruction, baseRegister);
       self()->setBaseRegister(assignedBaseRegister);
       }
 
    if (indexRegister != NULL)
       {
-      if (indexRegister->decFutureUseCount() == 0)
-         {
-         indexRegister->setAssignedRegister(NULL);
-         assignedIndexRegister->setState(TR::RealRegister::Unlatched);
-         }
+      machine->decFutureUseCountAndUnlatch(currentInstruction, indexRegister);
       self()->setIndexRegister(assignedIndexRegister);
       }
 
    if (extraRegister != NULL)
       {
-      if (extraRegister->decFutureUseCount() == 0)
-         {
-         extraRegister->setAssignedRegister(NULL);
-         assignedExtraRegister->setState(TR::RealRegister::Unlatched);
-         }
-      else
-         {
-         TR_ASSERT(false, "Unexpected future use count for extraReg");
-         }
+      machine->decFutureUseCountAndUnlatch(currentInstruction, extraRegister);
+      TR_ASSERT(extraRegister->getFutureUseCount() == 0, "Unexpected future use count for extraReg");
       self()->setExtraRegister(assignedExtraRegister);
       }
 

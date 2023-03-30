@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -61,8 +61,10 @@ getMethodName(J9PortLibrary *PORTLIB, J9Method *method, U_8 *pc, char *buffer)
 	if ((UDATA)pc <= J9SF_MAX_SPECIAL_FRAME_TYPE) {
 		j9str_printf(PORTLIB, temp, sizeof(temp), "SPECIAL %d", pc);
 		strcat(buffer, temp);
+#if defined(J9VM_OPT_METHOD_HANDLE)
 	} else if (((U_8*)-1 != pc) && (JBimpdep1 == *pc)) {
 		strcat(buffer, "MHMAGIC");
+#endif /* defined(J9VM_OPT_METHOD_HANDLE) */
 	} else if (((U_8*)-1 != pc) && (JBimpdep2 == *pc)) {
 		strcat(buffer, "CALLIN");
 	} else if (((U_8*)-1 != pc) && (((*pc >= JBretFromNative0) && (*pc <= JBreturnFromJ2I)) || (JBreturnFromJ2I == *pc))) {
@@ -85,7 +87,7 @@ getMethodName(J9PortLibrary *PORTLIB, J9Method *method, U_8 *pc, char *buffer)
 		if (0 == ((UDATA)method->extra & 1)) {
 			strcat(buffer, "JITTED ");
 		}
-		j9str_printf(PORTLIB, temp, sizeof(temp), "%.*s.%.*s%.*s (%p)", className->length, className->data, methodName->length, methodName->data, methodSig->length, methodSig->data, method);
+		j9str_printf(PORTLIB, temp, sizeof(temp), "%.*s.%.*s%.*s (%p)", J9UTF8_LENGTH(className), J9UTF8_DATA(className), J9UTF8_LENGTH(methodName), J9UTF8_DATA(methodName), J9UTF8_LENGTH(methodSig), J9UTF8_DATA(methodSig), method);
 		strcat(buffer, temp);
 		if ((U_8*)-1 != pc) {
 			j9str_printf(PORTLIB, temp, sizeof(temp), " @ %p (offset %d)", pc, pc - method->bytecodes);

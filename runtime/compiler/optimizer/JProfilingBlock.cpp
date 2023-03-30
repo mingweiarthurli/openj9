@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -695,9 +695,9 @@ int32_t TR_JProfilingBlock::processCFGForCounting(BlockParents &parent, TR::Bloc
             }
          // if the source of the edge has a single source we can count the source
          else if (block != to && !block->isOSRCatchBlock() &&
-             (block->getSuccessors().size() == 1 && block->getExceptionSuccessors().size() == 0)
+             ((block->getSuccessors().size() == 1 && block->getExceptionSuccessors().size() == 0)
              || (block->getSuccessors().size() == 0 && block->getExceptionSuccessors().size() == 1)
-             || block->isOSRInduceBlock() || block->isOSRCodeBlock())
+             || block->isOSRInduceBlock() || block->isOSRCodeBlock()))
             {
             if (!countedBlocks.contains(block))
                {
@@ -710,9 +710,9 @@ int32_t TR_JProfilingBlock::processCFGForCounting(BlockParents &parent, TR::Bloc
          // if the destination of the edge has a single destination we can count the destination
          // if the destination is a catch block we also just count the destination
          else if (block != to &&
-             (to->getPredecessors().size() == 1 && to->getExceptionPredecessors().size() == 0)
+             ((to->getPredecessors().size() == 1 && to->getExceptionPredecessors().size() == 0)
              || (to->getPredecessors().size() == 0 && to->getExceptionPredecessors().size() == 1)
-             || to->isCatchBlock() || to->isOSRInduceBlock() || to->isOSRCodeBlock())
+             || to->isCatchBlock() || to->isOSRInduceBlock() || to->isOSRCodeBlock()))
             {
             if (!countedBlocks.contains(to))
                {
@@ -856,6 +856,8 @@ void TR_JProfilingBlock::addRecompilationTests(TR_BlockFrequencyInfo *blockFrequ
          // In this case we only check if we have queued for recompilation before comparing against method invocation count.
          int32_t *loadAddress = isProfilingCompilation ? blockFrequencyInfo->getIsQueuedForRecompilation() : blockFrequencyInfo->getEnableJProfilingRecompilation();
          TR::SymbolReference *symRef = comp()->getSymRefTab()->createKnownStaticDataSymbolRef(loadAddress, TR::Int32);
+         symRef->getSymbol()->setIsRecompQueuedFlag();
+         symRef->getSymbol()->setNotDataAddress();
          TR::Node *enableLoad = TR::Node::createWithSymRef(node, TR::iload, 0, symRef);
          TR::Node *enableTest = TR::Node::createif(TR::ificmpeq, enableLoad, TR::Node::iconst(node, -1), originalFirstBlock->getEntry());
          TR::TreeTop *enableTree = TR::TreeTop::create(comp(), enableTest);
@@ -988,6 +990,8 @@ int32_t TR_JProfilingBlock::perform()
 
       // add the actual counter to the block
       TR::SymbolReference *symRef = comp()->getSymRefTab()->createKnownStaticDataSymbolRef(blockFrequencyInfo->getFrequencyForBlock(block->getNumber()), TR::Int32);
+      symRef->getSymbol()->setIsBlockFrequency();
+      symRef->getSymbol()->setNotDataAddress();
       TR::TreeTop *tree = TR::TreeTop::createIncTree(comp(), block->getEntry()->getNode(), symRef, 1);
       tree->getNode()->setIsProfilingCode();
       block->prepend(tree);

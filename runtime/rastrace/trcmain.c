@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1998, 2019 IBM Corp. and others
+ * Copyright (c) 1998, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -415,7 +415,7 @@ internalTraceSnapWithPriority(UtThreadData **thr, char *label, int32_t snapPrior
 					UT_DBGOUT(1, ("<UT thr="UT_POINTER_SPEC"> Starting Snap write thread, start: " UT_POINTER_SPEC ", stop: " UT_POINTER_SPEC "\n", thr, start, stop));
 
 					/* Spawn a snap writer with it's subscription as its userData*/
-					/* TODO: if a crash occurs during registration/deregistration the the trace lock is already held and this
+					/* TODO: if a crash occurs during registration/deregistration the trace lock is already held and this
 					 * can hang. We need to check to see if this thread is already the owner of the trace lock before trying
 					 * to snap dump in this fashion.
 					 */
@@ -1093,17 +1093,14 @@ initializeTrace(UtThreadData **thr, void **gbl,
 	}
 
 	/*
-	 *  Check options for the debug switch. Options are in name / value pairs
-	 *  so only look at the first of each pair
+	 * Check options for the debug switch. Options are in name / value pairs
+	 * so only look at the first of each pair.
 	 */
-
-	for(i = 0; opts[i] != NULL; i += 2) {
-		if (0 == j9_cmdla_strnicmp(opts[i], UT_DEBUG_KEYWORD, strlen(UT_DEBUG_KEYWORD))) {
-			if (opts[i + 1] != NULL &&
-				strlen(opts[i + 1]) == 1 &&
-				*opts[i + 1] >= '0' &&
-				*opts[i + 1] <= '9') {
-				UT_GLOBAL(traceDebug) = atoi(opts[i + 1]);
+	for (i = 0; NULL != opts[i]; i += 2) {
+		if (0 == j9_cmdla_stricmp(opts[i], UT_DEBUG_KEYWORD)) {
+			const char *value = opts[i + 1];
+			if ((NULL != value) && ('0' <= value[0]) && (value[0] <= '9') && ('\0' == value[1])) {
+				UT_GLOBAL(traceDebug) = value[0] - '0';
 			} else {
 				UT_GLOBAL(traceDebug) = 9;
 			}
@@ -1501,28 +1498,24 @@ omr_error_t
 getComponentGroup(char *compName, char *groupName,
 					int32_t *count, int32_t **tracePts)
 {
-
-	UtComponentData *compData = NULL;
-	UtGroupDetails *groupDetails = NULL;
+	UtComponentData *compData = getComponentData(compName, UT_GLOBAL(componentList));
 
 	/*
-	 *  Find the component
+	 * Find the component.
 	 */
-	compData = getComponentData(compName, UT_GLOBAL(componentList));
-	if (compData != NULL && compData->moduleInfo != NULL) {
-		groupDetails = compData->moduleInfo->groupDetails;
-	}
+	if ((NULL != compData) && (NULL != compData->moduleInfo)) {
+		UtGroupDetails *groupDetails = compData->moduleInfo->groupDetails;
 
-	/*
-	 *  Now look for the group
-	 */
-	while ( groupDetails != NULL ) {
-		if ( !j9_cmdla_strnicmp(groupName, groupDetails->groupName, strlen(groupDetails->groupName))  ){
-			*count = groupDetails->count;
-			*tracePts = groupDetails->tpids;
-			return OMR_ERROR_NONE;
+		/*
+		 * Now look for the group.
+		 */
+		for (; NULL != groupDetails; groupDetails = groupDetails->next) {
+			if (0 == j9_cmdla_stricmp(groupName, groupDetails->groupName)) {
+				*count = groupDetails->count;
+				*tracePts = groupDetails->tpids;
+				return OMR_ERROR_NONE;
+			}
 		}
-		groupDetails = groupDetails->next;
 	}
 
 	*count = 0;
@@ -1903,7 +1896,7 @@ trcGetTraceMetadata(void **data, int32_t *length)
  * description - Disables tracepoints for all threads, or for the current thread.
  * 	             Trace disable/enable is the internal mechanism that the trace,
  * 	             dump and memcheck use to switch trace off and on. Suspend/resume
- * 	             is the the external user facility available via -Xtrace and JVMTI.
+ * 	             is the external user facility available via -Xtrace and JVMTI.
  * parameters  - type (UT_DISABLE_GLOBAL or UT_DISABLE_THREAD)
  * returns     - void
  ******************************************************************************/

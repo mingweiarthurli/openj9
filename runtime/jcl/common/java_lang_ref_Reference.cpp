@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1998, 2018 IBM Corp. and others
+ * Copyright (c) 1998, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -38,13 +38,9 @@ Java_java_lang_ref_Reference_reprocess(JNIEnv *env, jobject recv)
 	J9MemoryManagerFunctions* mmFuncs = vm->memoryManagerFunctions;
 	vmFuncs->internalEnterVMFromJNI(currentThread);
 	j9object_t receiverObject = J9_JNI_UNWRAP_REFERENCE(recv);
-	if (J9_GC_POLICY_METRONOME == vm->gcPolicy) {
-		/* Under metronome call getReferent, which will mark the referent if a GC is in progress. */
-		mmFuncs->j9gc_objaccess_referenceGet(currentThread, receiverObject);
-	} else {
-		/* Reprocess this object if a concurrent GC is in progress */
-		mmFuncs->J9WriteBarrierBatchStore(currentThread, receiverObject);
-	}
+	/* Under the SATB barrier call getReferent (for metronome or standard SATB CM), this will mark the referent if a cycle is in progress.
+	 * Or reprocess this object if a concurrent GC (incremental cards) is in progress */
+	mmFuncs->j9gc_objaccess_referenceReprocess(currentThread, receiverObject);
 	vmFuncs->internalExitVMToJNI(currentThread);
 }
 
@@ -63,4 +59,33 @@ Java_java_lang_ref_Reference_waitForReferenceProcessingImpl(JNIEnv *env, jclass 
 	return result;
 }
 
+#if JAVA_SPEC_VERSION >= 16
+jboolean JNICALL
+Java_java_lang_ref_Reference_refersTo(JNIEnv *env, jobject reference, jobject target)
+{
+	J9VMThread * const currentThread = (J9VMThread *)env;
+	J9JavaVM * const vm = currentThread->javaVM;
+	J9InternalVMFunctions * const vmFuncs = vm->internalVMFunctions;
+	jboolean result = JNI_FALSE;
+
+	vmFuncs->internalEnterVMFromJNI(currentThread);
+
+	if (NULL == reference) {
+		vmFuncs->setCurrentException(currentThread, J9VMCONSTANTPOOL_JAVALANGNULLPOINTEREXCEPTION, NULL);
+	} else {
+		j9object_t j9reference = J9_JNI_UNWRAP_REFERENCE(reference);
+		j9object_t j9target = (NULL != target) ? J9_JNI_UNWRAP_REFERENCE(target) : NULL;
+		j9object_t referent = J9VMJAVALANGREFREFERENCE_REFERENT_VM(vm, j9reference);
+
+		if (referent == j9target) {
+			result = JNI_TRUE;
+		}
+	}
+
+	vmFuncs->internalExitVMToJNI(currentThread);
+
+	return result;
 }
+#endif /* JAVA_SPEC_VERSION >= 16 */
+
+} /* extern "C" */

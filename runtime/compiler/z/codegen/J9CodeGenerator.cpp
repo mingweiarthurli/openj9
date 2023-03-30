@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -56,9 +56,20 @@ extern void TEMPORARY_initJ9S390TreeEvaluatorTable(TR::CodeGenerator *cg);
 //Forward declarations
 bool nodeMightClobberAccumulatorBeforeUse(TR::Node *);
 
-J9::Z::CodeGenerator::CodeGenerator() :
-      J9::CodeGenerator()
+J9::Z::CodeGenerator::CodeGenerator(TR::Compilation *comp) :
+      J9::CodeGenerator(comp)
    {
+   /**
+    * Do not add CodeGenerator initialization logic here.
+    * Use the \c initialize() method instead.
+    */
+   }
+
+void
+J9::Z::CodeGenerator::initialize()
+   {
+   self()->J9::CodeGenerator::initialize();
+
    TR::CodeGenerator *cg = self();
    TR::Compilation *comp = cg->comp();
    TR_J9VMBase *fej9 = (TR_J9VMBase *)(comp->fe());
@@ -88,6 +99,11 @@ J9::Z::CodeGenerator::CodeGenerator() :
       cg->setSupportsInlineStringHashCode();
       }
 
+   if (cg->getSupportsVectorRegisters() && comp->target().cpu.isAtLeast(OMR_PROCESSOR_S390_Z14))
+      {
+      cg->setSupportsInlineStringLatin1Inflate();
+      }
+
    // See comment in `handleHardwareReadBarrier` implementation as to why we cannot support CTX under CS
    if (cg->getSupportsTM() && TR::Compiler->om.readBarrierType() == gc_modron_readbar_none)
       {
@@ -99,6 +115,12 @@ J9::Z::CodeGenerator::CodeGenerator() :
    if (comp->isOutOfProcessCompilation())
       {
       cg->resetSupportsArrayTranslateTRxx();
+      }
+
+   static char *disableInlineEncodeASCII = feGetEnv("TR_disableInlineEncodeASCII");
+   if (comp->fej9()->isStringCompressionEnabledVM() && cg->getSupportsVectorRegisters() && !TR::Compiler->om.canGenerateArraylets() && !disableInlineEncodeASCII)
+      {
+      cg->setSupportsInlineEncodeASCII();
       }
 
    // Let's turn this on.  There is more work needed in the opt
@@ -143,9 +165,6 @@ J9::Z::CodeGenerator::CodeGenerator() :
    if (!disableMonitorCacheLookup)
       comp->setOption(TR_EnableMonitorCacheLookup);
 
-   // Enable high-resolution timer
-   cg->setSupportsCurrentTimeMaxPrecision();
-
    // Defect 109299 : PMR 14649,999,760 / CritSit AV8426
    // Turn off use of hardware clock on zLinux for calculating currentTimeMillis() as user can adjust time on their system.
    //
@@ -154,6 +173,12 @@ J9::Z::CodeGenerator::CodeGenerator() :
    // (see the java/lang/System.nanoTime() spec for details).
    if (comp->target().isZOS())
       cg->setSupportsMaxPrecisionMilliTime();
+
+   // Enable high-resolution timer for System.nanoTime() unless we need to support checkpointing (i.e. snapshot mode), which requires
+   // that we adjust nanoTime() after restoring checkpoints. This adjustment is currently not implemented for the high res timer, hence
+   // we need to stick to the Java nanoTime() implementation.
+   if (!fej9->isSnapshotModeEnabled())
+      cg->setSupportsCurrentTimeMaxPrecision();
 
    // Support BigDecimal Long Lookaside versioning optimizations.
    if (!comp->getOption(TR_DisableBDLLVersioning))
@@ -182,20 +207,27 @@ J9::Z::CodeGenerator::CodeGenerator() :
 
    cg->getS390Linkage()->initS390RealRegisterLinkage();
 
-   const bool accessStaticsIndirectly = !comp->target().cpu.isAtLeast(OMR_PROCESSOR_S390_Z10) ||
-         comp->getOption(TR_DisableDirectStaticAccessOnZ) ||
-         (comp->compileRelocatableCode() && !comp->getOption(TR_UseSymbolValidationManager));
-
-   cg->setAccessStaticsIndirectly(accessStaticsIndirectly);
-
    if (comp->fej9()->hasFixedFrameC_CallingConvention())
       {
-      self()->setHasFixedFrameC_CallingConvention();
+      cg->setHasFixedFrameC_CallingConvention();
+      }
+
+   static bool disableIntegerToChars = (feGetEnv("TR_DisableIntegerToChars") != NULL);
+   if (cg->getSupportsVectorRegisters() && !TR::Compiler->om.canGenerateArraylets() && !disableIntegerToChars && comp->target().cpu.isAtLeast(OMR_PROCESSOR_S390_Z16))
+      {
+      cg->setSupportsIntegerToChars();
+      cg->setSupportsIntegerStringSize();
       }
 
    cg->setIgnoreDecimalOverflowException(false);
    }
 
+bool
+J9::Z::CodeGenerator::callUsesHelperImplementation(TR::Symbol *sym)
+   {
+   return sym && (!self()->comp()->getOption(TR_DisableInliningOfNatives) &&
+                        sym->castToMethodSymbol()->getMandatoryRecognizedMethod() == TR::java_lang_invoke_ComputedCalls_dispatchJ9Method);
+   }
 
 TR::Linkage *
 J9::Z::CodeGenerator::createLinkage(TR_LinkageConventions lc)
@@ -297,29 +329,6 @@ J9::Z::CodeGenerator::lowerTreesPreChildrenVisit(TR::Node* parent, TR::TreeTop *
          parent->setChild(0, pdopNode);
          }
       }
-
-#if defined(SUPPORT_DFP)
-   // Conversion from DFP to packed generates some ugly code. It is currently more efficient to go from
-   // DFP to zoned to packed on systems supporting CZDT (arch(10) and higher).
-
-   // If we have a truncating dd2zd node, we can use CZDT to truncate, but that will generate
-   // an overflow exception unless decimal overflow is suppressed. If it is not, we generate
-   // a non-truncating CZDT followed by an MVC. It seems more efficient to do the truncation
-   // in DFP, so this code inserts a truncating dfpModifyPrecision operation below the dd2zd
-   // and sets the source precision on the dd2zd to the truncated value.
-   if (parent != NULL &&
-       parent->getOpCode().isConversion() &&
-       parent->getType().isAnyZoned() &&
-       parent->getFirstChild()->getType().isDFP() &&
-       parent->isTruncating())
-      {
-      TR::Node *ddMod = TR::Node::create(parent, TR::ILOpCode::modifyPrecisionOpCode(parent->getFirstChild()->getDataType()), 1);
-      ddMod->setDFPPrecision(parent->getDecimalPrecision());
-      ddMod->setChild(0, parent->getFirstChild());
-      parent->setAndIncChild(0, ddMod);
-      parent->setSourcePrecision(parent->getDecimalPrecision());
-      }
-#endif
    }
 
 void
@@ -1585,8 +1594,8 @@ J9::Z::CodeGenerator::examineNode(
 
       if (nodeCanHaveHint &&
           bestNode &&
-          node->getStorageReferenceSize() > bestNode->getStorageReferenceSize() && // end hint before
-          endHintOnNode &&                                                                     // end hint after
+          node->getStorageReferenceSize(comp) > bestNode->getStorageReferenceSize(comp) && // end hint before
+          endHintOnNode &&                                                                 // end hint after
           !leftMostNodesList.empty())
          {
 
@@ -1617,7 +1626,7 @@ J9::Z::CodeGenerator::examineNode(
          // TODO: if a pdstore is to an auto then continually increase the size of this auto so it is the biggest on the left
          //       most subtree (i.e. force it to be the bestNode)
          if ((bestNode == NULL) ||
-             (node->getStorageReferenceSize() > bestNode->getStorageReferenceSize()) ||
+             (node->getStorageReferenceSize(comp) > bestNode->getStorageReferenceSize(comp)) ||
              (self()->nodeRequiresATemporary(node) && bestNode->getOpCode().isStore() && !self()->isAcceptableDestructivePDShiftRight(bestNode, NULL /* let the function find the load node */)))
             {
             if (!isAccumStore || node->useStoreAsAnAccumulator())
@@ -1627,10 +1636,10 @@ J9::Z::CodeGenerator::examineNode(
                   {
                   if (isAccumStore)
                      traceMsg(comp,"\t\tfound new store (canUse = %s) bestNode - %s (%p) with actual size %d and storageRefResultSize %d\n",
-                        bestNode->useStoreAsAnAccumulator() ? "yes":"no", bestNode->getOpCode().getName(),bestNode, bestNode->getSize(),bestNode->getStorageReferenceSize());
+                        bestNode->useStoreAsAnAccumulator() ? "yes":"no", bestNode->getOpCode().getName(),bestNode, bestNode->getSize(),bestNode->getStorageReferenceSize(comp));
                   else
                      traceMsg(comp,"\t\tfound new non-store bestNode - %s (%p) (isConversionToNonAggrOrNonBCD=%s, isForcedTemp=%s) with actual size %d and storageRefResultSize %d\n",
-                        bestNode->getOpCode().getName(),bestNode,isConversionToNonAggrOrNonBCD?"yes":"no",self()->nodeRequiresATemporary(node)?"yes":"no",bestNode->getSize(),bestNode->getStorageReferenceSize());
+                        bestNode->getOpCode().getName(),bestNode,isConversionToNonAggrOrNonBCD?"yes":"no",self()->nodeRequiresATemporary(node)?"yes":"no",bestNode->getSize(),bestNode->getStorageReferenceSize(comp));
                   }
                }
             }
@@ -1800,7 +1809,7 @@ J9::Z::CodeGenerator::processNodeList(
          {
          if (!leftMostNodesList.empty())
             {
-            int32_t bestNodeSize = bestNode->getStorageReferenceSize();
+            int32_t bestNodeSize = bestNode->getStorageReferenceSize(comp);
             int32_t tempSize = std::max(storeSize, bestNodeSize);
             if (self()->traceBCDCodeGen())
                {
@@ -2055,11 +2064,11 @@ J9::Z::CodeGenerator::genSignCodeSetting(TR::Node *node, TR_PseudoRegister *targ
       case TR::ZonedDecimal:
       case TR::ZonedDecimalSignLeadingEmbedded:
          {
-         if (comp->target().cpu.isAtLeast(OMR_PROCESSOR_S390_Z10) && isPacked && digitsToClear >= 3)
+         if (isPacked && digitsToClear >= 3)
             {
             int32_t bytesToSet = (digitsToClear+1)/2;
             int32_t leftMostByte = 0;
-            TR::InstOpCode::Mnemonic op = TR::InstOpCode::BAD;
+            TR::InstOpCode::Mnemonic op = TR::InstOpCode::bad;
             switch (bytesToSet)
                {
                case 2:
@@ -2734,7 +2743,7 @@ J9::Z::CodeGenerator::materializeFullBCDValue(TR::Node *node,
    int32_t regSize = reg->getSize();
    if (self()->traceBCDCodeGen())
       traceMsg(comp,"\tmaterializeFullBCDValue evaluated %s (%p) (nodeSize %d, requested resultSize %d) to reg %s (regSize %d), clearSize=%d, updateStorageReference=%s\n",
-         node->getOpCode().getName(),node,node->getStorageReferenceSize(),resultSize,self()->getDebug()->getName(reg),regSize,clearSize,updateStorageReference?"yes":"no");
+         node->getOpCode().getName(),node,node->getStorageReferenceSize(comp),resultSize,self()->getDebug()->getName(reg),regSize,clearSize,updateStorageReference?"yes":"no");
 
    TR_ASSERT(clearSize >= 0,"invalid clearSize %d for node %p\n",clearSize,node);
    if (clearSize == 0)
@@ -3004,12 +3013,6 @@ J9::Z::CodeGenerator::canCopyWithOneOrTwoInstrs(char *lit, size_t size)
       return false;
       }
 
-   // z9 does not support these complex move instructions
-   if (!self()->comp()->target().cpu.isAtLeast(OMR_PROCESSOR_S390_Z10) && size > 2)
-      {
-      return false;
-      }
-
    bool canCopy = false;
    switch (size)
       {
@@ -3104,15 +3107,7 @@ J9::Z::CodeGenerator::useMoveImmediateCommon(TR::Node *node,
          break;
       case 2:  // MVI/MVI or MVHHI
          {
-         if (self()->comp()->target().cpu.isAtLeast(OMR_PROCESSOR_S390_Z10))
-            {
-            genMVHHI(destMR, node, (lit[0]<<8)|lit[1], cg);
-            }
-         else
-            {
-            genMVI(destMR, node, lit[0], cg);
-            genMVI(getNextMR(destMR, node, 1, destLeftMostByte, isBCD, cg), node, lit[1], cg);
-            }
+         genMVHHI(destMR, node, (lit[0]<<8)|lit[1], cg);
          break;
          }
       case 3:  // MVHHI/MVI
@@ -3354,54 +3349,6 @@ J9::Z::CodeGenerator::getPDMulEncodedPrecision(TR::Node *pdmul, int32_t exponent
    return TR::DataType::byteLengthToPackedDecimalPrecisionFloor(self()->getPDMulEncodedSize(pdmul, exponent));
    }
 
-uint32_t
-J9::Z::CodeGenerator::getPackedToDecimalFloatFixedSize()
-   {
-   if (self()->supportsFastPackedDFPConversions())
-      return TR_PACKED_TO_DECIMAL_FLOAT_SIZE_ARCH11;
-   return TR_PACKED_TO_DECIMAL_FLOAT_SIZE;
-   }
-
-uint32_t
-J9::Z::CodeGenerator::getPackedToDecimalDoubleFixedSize()
-   {
-   if (self()->supportsFastPackedDFPConversions())
-      return TR_PACKED_TO_DECIMAL_DOUBLE_SIZE_ARCH11;
-   return TR_PACKED_TO_DECIMAL_DOUBLE_SIZE;
-   }
-
-uint32_t
-J9::Z::CodeGenerator::getPackedToDecimalLongDoubleFixedSize()
-   {
-   if (self()->supportsFastPackedDFPConversions())
-      return TR_PACKED_TO_DECIMAL_LONG_DOUBLE_SIZE_ARCH11;
-   return TR_PACKED_TO_DECIMAL_LONG_DOUBLE_SIZE;
-   }
-
-uint32_t
-J9::Z::CodeGenerator::getDecimalFloatToPackedFixedSize()
-   {
-   if (self()->supportsFastPackedDFPConversions())
-      return TR_DECIMAL_FLOAT_TO_PACKED_SIZE_ARCH11;
-   return TR_DECIMAL_FLOAT_TO_PACKED_SIZE;
-   }
-
-uint32_t
-J9::Z::CodeGenerator::getDecimalDoubleToPackedFixedSize()
-   {
-   if (self()->supportsFastPackedDFPConversions())
-      return TR_DECIMAL_DOUBLE_TO_PACKED_SIZE_ARCH11;
-   return TR_DECIMAL_DOUBLE_TO_PACKED_SIZE;
-   }
-
-uint32_t
-J9::Z::CodeGenerator::getDecimalLongDoubleToPackedFixedSize()
-   {
-   if (self()->supportsFastPackedDFPConversions())
-      return TR_DECIMAL_LONG_DOUBLE_TO_PACKED_SIZE_ARCH11;
-   return TR_DECIMAL_LONG_DOUBLE_TO_PACKED_SIZE;
-   }
-
 /**
  * Motivating example for the packedAddSubSize
  * pdsub p=3,s=2     // correct answer is 12111-345 truncated to 3 digits = (11)766
@@ -3584,7 +3531,7 @@ TR::Instruction* J9::Z::CodeGenerator::generateVMCallHelperSnippet(TR::Instructi
    // Associate all generated instructions with the first node
    TR::Node* node = comp->getStartTree()->getNode();
 
-   cursor = generateS390LabelInstruction(self(), TR::InstOpCode::LABEL, node, vmCallHelperSnippetLabel, cursor);
+   cursor = generateS390LabelInstruction(self(), TR::InstOpCode::label, node, vmCallHelperSnippetLabel, cursor);
 
    TR::Instruction* vmCallHelperSnippetLabelInstruction = cursor;
 
@@ -3618,26 +3565,24 @@ TR::Instruction* J9::Z::CodeGenerator::generateVMCallHelperSnippet(TR::Instructi
 
    TR::ResolvedMethodSymbol* methodSymbol = comp->getJittedMethodSymbol();
 
-   TR::SymbolReference* helperSymRef = self()->symRefTab()->findOrCreateRuntimeHelper(TR_j2iTransition, false, false, false);
+   TR::SymbolReference* helperSymRef = self()->symRefTab()->findOrCreateRuntimeHelper(TR_j2iTransition);
 
    // AOT relocation for the helper address
    TR::S390EncodingRelocation* encodingRelocation = new (self()->trHeapMemory()) TR::S390EncodingRelocation(TR_AbsoluteHelperAddress, helperSymRef);
-
-   AOTcgDiag3(comp, "Add encodingRelocation = %p reloType = %p symbolRef = %p\n", encodingRelocation, encodingRelocation->getReloType(), encodingRelocation->getSymbolReference());
 
    const intptr_t vmCallHelperAddress = reinterpret_cast<intptr_t>(helperSymRef->getMethodAddress());
 
    // Encode the address of the VM call helper
    if (comp->target().is64Bit())
       {
-      cursor = generateDataConstantInstruction(self(), TR::InstOpCode::DC, node, UPPER_4_BYTES(vmCallHelperAddress), cursor);
+      cursor = generateDataConstantInstruction(self(), TR::InstOpCode::dd, node, UPPER_4_BYTES(vmCallHelperAddress), cursor);
       cursor->setEncodingRelocation(encodingRelocation);
 
-      cursor = generateDataConstantInstruction(self(), TR::InstOpCode::DC, node, LOWER_4_BYTES(vmCallHelperAddress), cursor);
+      cursor = generateDataConstantInstruction(self(), TR::InstOpCode::dd, node, LOWER_4_BYTES(vmCallHelperAddress), cursor);
       }
    else
       {
-      cursor = generateDataConstantInstruction(self(), TR::InstOpCode::DC, node, vmCallHelperAddress, cursor);
+      cursor = generateDataConstantInstruction(self(), TR::InstOpCode::dd, node, vmCallHelperAddress, cursor);
       cursor->setEncodingRelocation(encodingRelocation);
       }
 
@@ -3647,20 +3592,18 @@ TR::Instruction* J9::Z::CodeGenerator::generateVMCallHelperSnippet(TR::Instructi
    TR::SymbolReference *methodSymRef = new (self()->trHeapMemory()) TR::SymbolReference(self()->symRefTab(), methodSymbol);
    encodingRelocation = new (self()->trHeapMemory()) TR::S390EncodingRelocation(TR_RamMethod, methodSymRef);
 
-   AOTcgDiag2(comp, "Add encodingRelocation = %p reloType = %p\n", encodingRelocation, encodingRelocation->getReloType());
-
    const intptr_t j9MethodAddress = reinterpret_cast<intptr_t>(methodSymbol->getResolvedMethod()->resolvedMethodAddress());
 
    if (comp->target().is64Bit())
       {
-      cursor = generateDataConstantInstruction(self(), TR::InstOpCode::DC, node, UPPER_4_BYTES(j9MethodAddress), cursor);
+      cursor = generateDataConstantInstruction(self(), TR::InstOpCode::dd, node, UPPER_4_BYTES(j9MethodAddress), cursor);
       cursor->setEncodingRelocation(encodingRelocation);
 
-      cursor = generateDataConstantInstruction(self(), TR::InstOpCode::DC, node, LOWER_4_BYTES(j9MethodAddress), cursor);
+      cursor = generateDataConstantInstruction(self(), TR::InstOpCode::dd, node, LOWER_4_BYTES(j9MethodAddress), cursor);
       }
    else
       {
-      cursor = generateDataConstantInstruction(self(), TR::InstOpCode::DC, node, j9MethodAddress, cursor);
+      cursor = generateDataConstantInstruction(self(), TR::InstOpCode::dd, node, j9MethodAddress, cursor);
       cursor->setEncodingRelocation(encodingRelocation);
       }
 
@@ -3707,17 +3650,17 @@ TR::Instruction* J9::Z::CodeGenerator::generateVMCallHelperPrePrologue(TR::Instr
    // The following 4 bytes are used for various patching sequences that overwrite the JIT entry point with a 4 byte
    // branch (BRC) to some location. Before patching in the branch we must save the 4 bytes at the JIT entry point
    // to this location so that we can later reverse the patching at JIT entry point if needed.
-   cursor = generateDataConstantInstruction(self(), TR::InstOpCode::DC, node, 0xdeafbeef, cursor);
+   cursor = generateDataConstantInstruction(self(), TR::InstOpCode::dd, node, 0xdeafbeef, cursor);
 
    // Generated a pad for the body info address to keep offsets in PreprologueConst.hpp constant for simplicity
    if (comp->target().is64Bit())
       {
-      cursor = generateDataConstantInstruction(self(), TR::InstOpCode::DC, node, 0x00000000, cursor);
-      cursor = generateDataConstantInstruction(self(), TR::InstOpCode::DC, node, 0x00000000, cursor);
+      cursor = generateDataConstantInstruction(self(), TR::InstOpCode::dd, node, 0x00000000, cursor);
+      cursor = generateDataConstantInstruction(self(), TR::InstOpCode::dd, node, 0x00000000, cursor);
       }
    else
       {
-      cursor = generateDataConstantInstruction(self(), TR::InstOpCode::DC, node, 0x00000000, cursor);
+      cursor = generateDataConstantInstruction(self(), TR::InstOpCode::dd, node, 0x00000000, cursor);
       }
 
    return cursor;
@@ -3731,52 +3674,13 @@ J9::Z::CodeGenerator::suppressInliningOfRecognizedMethod(TR::RecognizedMethod me
    if (self()->isMethodInAtomicLongGroup(method))
       return true;
 
-   if (!comp->compileRelocatableCode() && !comp->getOption(TR_DisableDFP) && comp->target().cpu.supportsFeature(OMR_FEATURE_S390_DFP))
+   if (method == TR::java_lang_Math_fma_D ||
+       method == TR::java_lang_StrictMath_fma_D ||
+       method == TR::java_lang_Math_fma_F ||
+       method == TR::java_lang_StrictMath_fma_F)
       {
-      if (method == TR::java_math_BigDecimal_DFPIntConstructor ||
-          method == TR::java_math_BigDecimal_DFPLongConstructor ||
-          method == TR::java_math_BigDecimal_DFPLongExpConstructor ||
-          method == TR::java_math_BigDecimal_DFPAdd ||
-          method == TR::java_math_BigDecimal_DFPSubtract ||
-          method == TR::java_math_BigDecimal_DFPMultiply ||
-          method == TR::java_math_BigDecimal_DFPDivide ||
-          method == TR::java_math_BigDecimal_DFPScaledAdd ||
-          method == TR::java_math_BigDecimal_DFPScaledSubtract ||
-          method == TR::java_math_BigDecimal_DFPScaledMultiply ||
-          method == TR::java_math_BigDecimal_DFPScaledDivide ||
-          method == TR::java_math_BigDecimal_DFPRound ||
-          method == TR::java_math_BigDecimal_DFPSetScale ||
-          method == TR::java_math_BigDecimal_DFPCompareTo ||
-          method == TR::java_math_BigDecimal_DFPSignificance ||
-          method == TR::java_math_BigDecimal_DFPExponent ||
-          method == TR::java_math_BigDecimal_DFPBCDDigits ||
-          method == TR::java_math_BigDecimal_DFPUnscaledValue ||
-          method == TR::java_math_BigDecimal_DFPConvertPackedToDFP ||
-          method == TR::java_math_BigDecimal_DFPConvertDFPToPacked)
-         {
-         return true;
-         }
-
-      if (method == TR::com_ibm_dataaccess_DecimalData_DFPConvertPackedToDFP ||
-          method == TR::com_ibm_dataaccess_DecimalData_DFPConvertDFPToPacked)
-         {
-         return true;
-         }
+      return true;
       }
-
-   if (self()->getSupportsVectorRegisters()){
-      if (method == TR::java_lang_Math_fma_D ||
-          method == TR::java_lang_StrictMath_fma_D)
-         {
-         return true;
-         }
-      if (comp->target().cpu.supportsFeature(OMR_FEATURE_S390_VECTOR_FACILITY_ENHANCEMENT_1) &&
-            (method == TR::java_lang_Math_fma_F ||
-             method == TR::java_lang_StrictMath_fma_F))
-         {
-         return true;
-         }
-   }
 
    if (method == TR::java_lang_Integer_highestOneBit ||
        method == TR::java_lang_Integer_numberOfLeadingZeros ||
@@ -3788,10 +3692,7 @@ J9::Z::CodeGenerator::suppressInliningOfRecognizedMethod(TR::RecognizedMethod me
       return true;
       }
 
-   if (method == TR::java_lang_Long_reverseBytes  ||
-       method == TR::java_lang_Integer_reverseBytes  ||
-       method == TR::java_lang_Short_reverseBytes ||
-       method == TR::java_util_concurrent_atomic_AtomicBoolean_getAndSet ||
+   if (method == TR::java_util_concurrent_atomic_AtomicBoolean_getAndSet ||
        method == TR::java_util_concurrent_atomic_AtomicInteger_getAndAdd ||
        method == TR::java_util_concurrent_atomic_AtomicInteger_getAndIncrement ||
        method == TR::java_util_concurrent_atomic_AtomicInteger_getAndDecrement ||
@@ -3823,53 +3724,6 @@ J9::Z::CodeGenerator::suppressInliningOfRecognizedMethod(TR::RecognizedMethod me
    return false;
    }
 
-/* extern TreeEvaluator functions */
-extern TR::Register* inlineCurrentTimeMaxPrecision(TR::CodeGenerator* cg, TR::Node* node);
-extern TR::Register* inlineSinglePrecisionSQRT(TR::Node *node, TR::CodeGenerator *cg);
-extern TR::Register* VMinlineCompareAndSwap( TR::Node *node, TR::CodeGenerator *cg, TR::InstOpCode::Mnemonic casOp, bool isObj);
-extern TR::Register* inlineAtomicOps(TR::Node *node, TR::CodeGenerator *cg, int8_t size, TR::MethodSymbol *method, bool isArray = false);
-extern TR::Register* inlineAtomicFieldUpdater(TR::Node *node, TR::CodeGenerator *cg, TR::MethodSymbol *method);
-extern TR::Register* inlineKeepAlive(TR::Node *node, TR::CodeGenerator *cg);
-extern TR::Register* inlineConcurrentLinkedQueueTMOffer(TR::Node *node, TR::CodeGenerator *cg);
-extern TR::Register* inlineConcurrentLinkedQueueTMPoll(TR::Node *node, TR::CodeGenerator *cg);
-
-extern TR::Register* inlineStringHashCode(TR::Node *node, TR::CodeGenerator *cg, bool isCompressed);
-extern TR::Register* inlineUTF16BEEncodeSIMD(TR::Node *node, TR::CodeGenerator *cg);
-extern TR::Register* inlineUTF16BEEncode    (TR::Node *node, TR::CodeGenerator *cg);
-
-extern TR::Register *inlineHighestOneBit(TR::Node *node, TR::CodeGenerator *cg, bool isLong);
-extern TR::Register *inlineNumberOfLeadingZeros(TR::Node *node, TR::CodeGenerator * cg, bool isLong);
-extern TR::Register *inlineNumberOfTrailingZeros(TR::Node *node, TR::CodeGenerator *cg, int32_t subfconst);
-extern TR::Register *inlineTrailingZerosQuadWordAtATime(TR::Node *node, TR::CodeGenerator *cg);
-
-extern TR::Register *inlineLongReverseBytes(TR::Node *node, TR::CodeGenerator *cg);
-extern TR::Register *inlineIntegerReverseBytes(TR::Node *node, TR::CodeGenerator *cg);
-extern TR::Register *inlineShortReverseBytes(TR::Node *node, TR::CodeGenerator *cg);
-
-extern TR::Register *inlineBigDecimalConstructor(TR::Node *node, TR::CodeGenerator *cg, bool isLong, bool exp);
-extern TR::Register *inlineBigDecimalBinaryOp(TR::Node * node, TR::CodeGenerator *cg, TR::InstOpCode::Mnemonic op, bool scaled);
-extern TR::Register *inlineBigDecimalScaledDivide(TR::Node * node, TR::CodeGenerator *cg);
-extern TR::Register *inlineBigDecimalDivide(TR::Node * node, TR::CodeGenerator *cg);
-extern TR::Register *inlineBigDecimalRound(TR::Node * node, TR::CodeGenerator *cg);
-extern TR::Register *inlineBigDecimalCompareTo(TR::Node * node, TR::CodeGenerator * cg);
-extern TR::Register *inlineBigDecimalUnaryOp(TR::Node * node, TR::CodeGenerator * cg, TR::InstOpCode::Mnemonic op);
-extern TR::Register *inlineBigDecimalSetScale(TR::Node * node, TR::CodeGenerator * cg);
-extern TR::Register *inlineBigDecimalUnscaledValue(TR::Node * node, TR::CodeGenerator * cg);
-extern TR::Register *inlineBigDecimalFromPackedConverter(TR::Node * node, TR::CodeGenerator * cg);
-extern TR::Register *inlineBigDecimalToPackedConverter(TR::Node * node, TR::CodeGenerator * cg);
-
-extern TR::Register *toUpperIntrinsic(TR::Node * node, TR::CodeGenerator * cg, bool isCompressedString);
-extern TR::Register *toLowerIntrinsic(TR::Node * node, TR::CodeGenerator * cg, bool isCompressedString);
-
-extern TR::Register* inlineVectorizedStringIndexOf(TR::Node* node, TR::CodeGenerator* cg, bool isCompressed);
-
-extern TR::Register *inlineIntrinsicIndexOf(TR::Node* node, TR::CodeGenerator* cg, bool isLatin1);
-
-extern TR::Register *inlineDoubleMax(TR::Node *node, TR::CodeGenerator *cg);
-extern TR::Register *inlineDoubleMin(TR::Node *node, TR::CodeGenerator *cg);
-
-extern TR::Register *inlineMathFma(TR::Node *node, TR::CodeGenerator *cg);
-
 #define IS_OBJ      true
 #define IS_NOT_OBJ  false
 
@@ -3895,14 +3749,20 @@ J9::Z::CodeGenerator::inlineDirectCall(
    // If the method to be called is marked as an inline method, see if it can
    // actually be generated inline.
    //
-   if (comp->getSymRefTab()->isNonHelper(node->getSymbolReference(), TR::SymbolReferenceTable::currentTimeMaxPrecisionSymbol))
+
+   if (comp->getSymRefTab()->isNonHelper(node->getSymbolReference(), TR::SymbolReferenceTable::encodeASCIISymbol))
       {
-      resultReg = inlineCurrentTimeMaxPrecision(cg, node);
+      TR::TreeEvaluator::inlineEncodeASCII(node, cg);
+      return true;
+      }
+   else if (comp->getSymRefTab()->isNonHelper(node->getSymbolReference(), TR::SymbolReferenceTable::currentTimeMaxPrecisionSymbol))
+      {
+      resultReg = TR::TreeEvaluator::inlineCurrentTimeMaxPrecision(cg, node);
       return true;
       }
    else if (comp->getSymRefTab()->isNonHelper(node->getSymbolReference(), TR::SymbolReferenceTable::singlePrecisionSQRTSymbol))
       {
-      resultReg = inlineSinglePrecisionSQRT(node, cg);
+      resultReg = TR::TreeEvaluator::inlineSinglePrecisionSQRT(node, cg);
       return true;
       }
    else if (comp->getSymRefTab()->isNonHelper(node->getSymbolReference(), TR::SymbolReferenceTable::synchronizedFieldLoadSymbol))
@@ -3923,7 +3783,7 @@ J9::Z::CodeGenerator::inlineDirectCall(
 
          if ((!TR::Compiler->om.canGenerateArraylets() || node->isUnsafeGetPutCASCallOnNonArray()) && node->isSafeForCGToFastPathUnsafeCall())
             {
-            resultReg = VMinlineCompareAndSwap(node, cg, TR::InstOpCode::CS, IS_NOT_OBJ);
+            resultReg = TR::TreeEvaluator::VMinlineCompareAndSwap(node, cg, TR::InstOpCode::CS, IS_NOT_OBJ);
             return true;
             }
 
@@ -3934,7 +3794,7 @@ J9::Z::CodeGenerator::inlineDirectCall(
 
          if (comp->target().is64Bit() && (!TR::Compiler->om.canGenerateArraylets() || node->isUnsafeGetPutCASCallOnNonArray()) && node->isSafeForCGToFastPathUnsafeCall())
             {
-            resultReg = VMinlineCompareAndSwap(node, cg, TR::InstOpCode::CSG, IS_NOT_OBJ);
+            resultReg = TR::TreeEvaluator::VMinlineCompareAndSwap(node, cg, TR::InstOpCode::CSG, IS_NOT_OBJ);
             return true;
             }
          // Too risky to do Long-31bit version now.
@@ -3947,7 +3807,7 @@ J9::Z::CodeGenerator::inlineDirectCall(
 
          if ((!TR::Compiler->om.canGenerateArraylets() || node->isUnsafeGetPutCASCallOnNonArray()) && node->isSafeForCGToFastPathUnsafeCall())
             {
-            resultReg = VMinlineCompareAndSwap(node, cg, (comp->useCompressedPointers() ? TR::InstOpCode::CS : TR::InstOpCode::getCmpAndSwapOpCode()), IS_OBJ);
+            resultReg = TR::TreeEvaluator::VMinlineCompareAndSwap(node, cg, (comp->useCompressedPointers() ? TR::InstOpCode::CS : TR::InstOpCode::getCmpAndSwapOpCode()), IS_OBJ);
             return true;
             }
          break;
@@ -3967,7 +3827,7 @@ J9::Z::CodeGenerator::inlineDirectCall(
       case TR::java_util_concurrent_atomic_AtomicInteger_addAndGet:
       case TR::java_util_concurrent_atomic_AtomicInteger_incrementAndGet:
       case TR::java_util_concurrent_atomic_AtomicInteger_decrementAndGet:
-         resultReg = inlineAtomicOps(node, cg, 4, methodSymbol);
+         resultReg = TR::TreeEvaluator::inlineAtomicOps(node, cg, 4, methodSymbol);
          return true;
          break;
 
@@ -3978,7 +3838,7 @@ J9::Z::CodeGenerator::inlineDirectCall(
       case TR::java_util_concurrent_atomic_AtomicIntegerArray_addAndGet:
       case TR::java_util_concurrent_atomic_AtomicIntegerArray_incrementAndGet:
       case TR::java_util_concurrent_atomic_AtomicIntegerArray_decrementAndGet:
-         resultReg = inlineAtomicOps(node, cg, 4, methodSymbol, true);
+         resultReg = TR::TreeEvaluator::inlineAtomicOps(node, cg, 4, methodSymbol, true);
          return true;
          break;
 
@@ -3992,7 +3852,7 @@ J9::Z::CodeGenerator::inlineDirectCall(
             {
             // TODO: I'm not sure we need the z196 restriction here given that the function already checks for z196 and
             // has a compare and swap fallback path
-            resultReg = inlineAtomicOps(node, cg, 8, methodSymbol);
+            resultReg = TR::TreeEvaluator::inlineAtomicOps(node, cg, 8, methodSymbol);
             return true;
             }
          break;
@@ -4007,7 +3867,7 @@ J9::Z::CodeGenerator::inlineDirectCall(
             {
             // TODO: I'm not sure we need the z196 restriction here given that the function already checks for z196 and
             // has a compare and swap fallback path
-            resultReg = inlineAtomicOps(node, cg, 8, methodSymbol);
+            resultReg = TR::TreeEvaluator::inlineAtomicOps(node, cg, 8, methodSymbol);
             return true;
             }
          break;
@@ -4020,20 +3880,20 @@ J9::Z::CodeGenerator::inlineDirectCall(
       case TR::java_util_concurrent_atomic_AtomicIntegerFieldUpdater_getAndAdd:
          if (cg->getSupportsAtomicLoadAndAdd())
             {
-            resultReg = inlineAtomicFieldUpdater(node, cg, methodSymbol);
+            resultReg = TR::TreeEvaluator::inlineAtomicFieldUpdater(node, cg, methodSymbol);
             return true;
             }
          break;
 
       case TR::java_nio_Bits_keepAlive:
       case TR::java_lang_ref_Reference_reachabilityFence:
-         resultReg = inlineKeepAlive(node, cg);
+         resultReg = TR::TreeEvaluator::inlineKeepAlive(node, cg);
          return true;
 
       case TR::java_util_concurrent_ConcurrentLinkedQueue_tmOffer:
          if (cg->getSupportsInlineConcurrentLinkedQueue())
             {
-            resultReg = inlineConcurrentLinkedQueueTMOffer(node, cg);
+            resultReg = TR::TreeEvaluator::inlineConcurrentLinkedQueueTMOffer(node, cg);
             return true;
             }
          break;
@@ -4041,7 +3901,7 @@ J9::Z::CodeGenerator::inlineDirectCall(
       case TR::java_util_concurrent_ConcurrentLinkedQueue_tmPoll:
          if (cg->getSupportsInlineConcurrentLinkedQueue())
             {
-            resultReg = inlineConcurrentLinkedQueueTMPoll(node, cg);
+            resultReg = TR::TreeEvaluator::inlineConcurrentLinkedQueueTMPoll(node, cg);
             return true;
             }
          break;
@@ -4049,20 +3909,53 @@ J9::Z::CodeGenerator::inlineDirectCall(
       case TR::java_lang_String_hashCodeImplDecompressed:
          if (cg->getSupportsInlineStringHashCode())
             {
-            return resultReg = inlineStringHashCode(node, cg, false);
+            return resultReg = TR::TreeEvaluator::inlineStringHashCode(node, cg, false);
             }
          break;
 
       case TR::java_lang_String_hashCodeImplCompressed:
          if (cg->getSupportsInlineStringHashCode())
             {
-            return resultReg = inlineStringHashCode(node, cg, true);
+            return resultReg = TR::TreeEvaluator::inlineStringHashCode(node, cg, true);
             }
         break;
 
+      case TR::java_lang_StringLatin1_inflate:
+         if (cg->getSupportsInlineStringLatin1Inflate())
+            {
+            resultReg = TR::TreeEvaluator::inlineStringLatin1Inflate(node, cg);
+            return resultReg != NULL;
+            }
+      break;
       case TR::com_ibm_jit_JITHelpers_transformedEncodeUTF16Big:
-         return resultReg = comp->getOption(TR_DisableUTF16BEEncoder) ? inlineUTF16BEEncodeSIMD(node, cg)
-                                                                      : inlineUTF16BEEncode    (node, cg);
+         return resultReg = comp->getOption(TR_DisableUTF16BEEncoder) ? TR::TreeEvaluator::inlineUTF16BEEncodeSIMD(node, cg)
+                                                                      : TR::TreeEvaluator::inlineUTF16BEEncode    (node, cg);
+         break;
+      case TR::java_lang_Integer_stringSize:
+      case TR::java_lang_Long_stringSize:
+         if (cg->getSupportsIntegerStringSize())
+            {
+            resultReg = TR::TreeEvaluator::inlineIntegerStringSize(node, cg);
+            return resultReg != NULL;
+            }
+         break;
+      case TR::java_lang_Integer_getChars:
+      case TR::java_lang_Long_getChars:
+         if (cg->getSupportsIntegerToChars())
+            {
+            resultReg = TR::TreeEvaluator::inlineIntegerToCharsForLatin1Strings(node, cg);
+            return resultReg != NULL;
+            }
+         break;
+      case TR::java_lang_StringUTF16_getChars_Integer:
+      case TR::java_lang_StringUTF16_getChars_Long:
+      case TR::java_lang_Integer_getChars_charBuffer:
+      case TR::java_lang_Long_getChars_charBuffer:
+         if (cg->getSupportsIntegerToChars())
+            {
+            resultReg = TR::TreeEvaluator::inlineIntegerToCharsForUTF16Strings(node, cg);
+            return resultReg != NULL;
+            }
          break;
 
       default:
@@ -4073,22 +3966,22 @@ J9::Z::CodeGenerator::inlineDirectCall(
    switch (methodSymbol->getRecognizedMethod())
       {
       case TR::java_lang_Integer_highestOneBit:
-         resultReg = inlineHighestOneBit(node, cg, false);
+         resultReg = TR::TreeEvaluator::inlineHighestOneBit(node, cg, false);
          return true;
       case TR::java_lang_Integer_numberOfLeadingZeros:
-         resultReg = inlineNumberOfLeadingZeros(node, cg, false);
+         resultReg = TR::TreeEvaluator::inlineNumberOfLeadingZeros(node, cg, false);
          return true;
       case TR::java_lang_Integer_numberOfTrailingZeros:
-         resultReg = inlineNumberOfTrailingZeros(node, cg, 32);
+         resultReg = TR::TreeEvaluator::inlineNumberOfTrailingZeros(node, cg, 32);
          return true;
       case TR::java_lang_Long_highestOneBit:
-         resultReg = inlineHighestOneBit(node, cg, true);
+         resultReg = TR::TreeEvaluator::inlineHighestOneBit(node, cg, true);
          return true;
       case TR::java_lang_Long_numberOfLeadingZeros:
-         resultReg = inlineNumberOfLeadingZeros(node, cg, true);
+         resultReg = TR::TreeEvaluator::inlineNumberOfLeadingZeros(node, cg, true);
          return true;
       case TR::java_lang_Long_numberOfTrailingZeros:
-         resultReg = inlineNumberOfTrailingZeros(node, cg, 64);
+         resultReg = TR::TreeEvaluator::inlineNumberOfTrailingZeros(node, cg, 64);
          return true;
       default:
          break;
@@ -4106,16 +3999,16 @@ J9::Z::CodeGenerator::inlineDirectCall(
       switch (methodSymbol->getRecognizedMethod())
          {
          case TR::com_ibm_jit_JITHelpers_toUpperIntrinsicUTF16:
-            resultReg = toUpperIntrinsic(node, cg, false);
+            resultReg = TR::TreeEvaluator::toUpperIntrinsic(node, cg, false);
             return true;
          case TR::com_ibm_jit_JITHelpers_toUpperIntrinsicLatin1:
-            resultReg = toUpperIntrinsic(node, cg, true);
+            resultReg = TR::TreeEvaluator::toUpperIntrinsic(node, cg, true);
             return true;
          case TR::com_ibm_jit_JITHelpers_toLowerIntrinsicUTF16:
-            resultReg = toLowerIntrinsic(node, cg, false);
+            resultReg = TR::TreeEvaluator::toLowerIntrinsic(node, cg, false);
             return true;
          case TR::com_ibm_jit_JITHelpers_toLowerIntrinsicLatin1:
-            resultReg = toLowerIntrinsic(node, cg, true);
+            resultReg = TR::TreeEvaluator::toLowerIntrinsic(node, cg, true);
             return true;
          default:
             break;
@@ -4127,147 +4020,50 @@ J9::Z::CodeGenerator::inlineDirectCall(
       switch (methodSymbol->getRecognizedMethod())
          {
          case TR::com_ibm_jit_JITHelpers_intrinsicIndexOfLatin1:
-            resultReg = inlineIntrinsicIndexOf(node, cg, true);
+            resultReg = TR::TreeEvaluator::inlineIntrinsicIndexOf(node, cg, true);
             return true;
          case TR::com_ibm_jit_JITHelpers_intrinsicIndexOfUTF16:
-            resultReg = inlineIntrinsicIndexOf(node, cg, false);
+            resultReg = TR::TreeEvaluator::inlineIntrinsicIndexOf(node, cg, false);
             return true;
          case TR::java_lang_StringLatin1_indexOf:
          case TR::com_ibm_jit_JITHelpers_intrinsicIndexOfStringLatin1:
-               resultReg = inlineVectorizedStringIndexOf(node, cg, false);
-               return true;
+               resultReg = TR::TreeEvaluator::inlineVectorizedStringIndexOf(node, cg, false);
+               return resultReg != NULL;
          case TR::java_lang_StringUTF16_indexOf:
          case TR::com_ibm_jit_JITHelpers_intrinsicIndexOfStringUTF16:
-               resultReg = inlineVectorizedStringIndexOf(node, cg, true);
-               return true;
+               resultReg = TR::TreeEvaluator::inlineVectorizedStringIndexOf(node, cg, true);
+               return resultReg != NULL;
          default:
             break;
          }
       }
 
-      if (!comp->getOption(TR_DisableSIMDDoubleMaxMin) && cg->getSupportsVectorRegisters())
-         {
-         switch (methodSymbol->getRecognizedMethod())
-            {
-            case TR::java_lang_Math_max_D:
-               resultReg = inlineDoubleMax(node, cg);
-               return true;
-            case TR::java_lang_Math_min_D:
-               resultReg = inlineDoubleMin(node, cg);
-               return true;
-            default:
-               break;
-            }
-         }
-      if (cg->getSupportsVectorRegisters())
-         {
-         switch (methodSymbol->getRecognizedMethod())
-            {
-            case TR::java_lang_Math_fma_D:
-            case TR::java_lang_StrictMath_fma_D:
-               resultReg = inlineMathFma(node, cg);
-               return true;
-
-            case TR::java_lang_Math_fma_F:
-            case TR::java_lang_StrictMath_fma_F:
-               if (comp->target().cpu.supportsFeature(OMR_FEATURE_S390_VECTOR_FACILITY_ENHANCEMENT_1))
-                  {
-                  resultReg = inlineMathFma(node, cg);
-                  return true;
-                  }
-               break;
-            default:
-               break;
-            }
-         }
-
-
-     switch (methodSymbol->getRecognizedMethod())
-        {
-        case TR::java_lang_Long_reverseBytes:
-            resultReg = inlineLongReverseBytes(node, cg);
-            return true;
-        case TR::java_lang_Integer_reverseBytes:
-            resultReg = inlineIntegerReverseBytes(node, cg);
-            return true;
-        case TR::java_lang_Short_reverseBytes:
-            resultReg = inlineShortReverseBytes(node, cg);
-            return true;
-        default:
-           break;
-        }
-
-   if (!comp->compileRelocatableCode() && !comp->getOption(TR_DisableDFP) &&
-       comp->target().cpu.supportsFeature(OMR_FEATURE_S390_DFP))
+   if (!comp->getOption(TR_DisableSIMDDoubleMaxMin) && cg->getSupportsVectorRegisters())
       {
-      TR_ASSERT( methodSymbol, "require a methodSymbol for DFP on Z\n");
-      if (methodSymbol)
+      switch (methodSymbol->getRecognizedMethod())
          {
-         switch(methodSymbol->getMandatoryRecognizedMethod())
-            {
-            case TR::java_math_BigDecimal_DFPIntConstructor:
-               resultReg = inlineBigDecimalConstructor(node, cg, false, false);
-               return true;
-            case TR::java_math_BigDecimal_DFPLongConstructor:
-               resultReg = inlineBigDecimalConstructor(node, cg, true, false);
-               return true;
-            case TR::java_math_BigDecimal_DFPLongExpConstructor:
-               resultReg = inlineBigDecimalConstructor(node, cg, true, true);
-               return true;
-            case TR::java_math_BigDecimal_DFPAdd:
-               resultReg = inlineBigDecimalBinaryOp(node, cg, TR::InstOpCode::ADTR, false);
-               return true;
-            case TR::java_math_BigDecimal_DFPSubtract:
-               resultReg = inlineBigDecimalBinaryOp(node, cg, TR::InstOpCode::SDTR, false);
-               return true;
-            case TR::java_math_BigDecimal_DFPMultiply:
-               resultReg = inlineBigDecimalBinaryOp(node, cg, TR::InstOpCode::MDTR, false);
-               return true;
-            case TR::java_math_BigDecimal_DFPScaledAdd:
-               resultReg = inlineBigDecimalBinaryOp(node, cg, TR::InstOpCode::ADTR, true);
-               return true;
-            case TR::java_math_BigDecimal_DFPScaledSubtract:
-               resultReg = inlineBigDecimalBinaryOp(node, cg, TR::InstOpCode::SDTR, true);
-               return true;
-            case TR::java_math_BigDecimal_DFPScaledMultiply:
-               resultReg = inlineBigDecimalBinaryOp(node, cg, TR::InstOpCode::MDTR, true);
-               return true;
-            case TR::java_math_BigDecimal_DFPRound:
-               resultReg = inlineBigDecimalRound(node, cg);
-               return true;
-            case TR::java_math_BigDecimal_DFPSignificance:
-               resultReg = inlineBigDecimalUnaryOp(node, cg, TR::InstOpCode::ESDTR);
-               return true;
-            case TR::java_math_BigDecimal_DFPExponent:
-               resultReg = inlineBigDecimalUnaryOp(node, cg, TR::InstOpCode::EEDTR);
-               return true;
-            case TR::java_math_BigDecimal_DFPCompareTo:
-               resultReg = inlineBigDecimalCompareTo(node, cg);
-               return true;
-            case TR::java_math_BigDecimal_DFPBCDDigits:
-               resultReg = inlineBigDecimalUnaryOp(node, cg, TR::InstOpCode::CUDTR);
-               return true;
-            case TR::java_math_BigDecimal_DFPUnscaledValue:
-               resultReg = inlineBigDecimalUnscaledValue(node, cg);
-               return true;
-            case TR::java_math_BigDecimal_DFPSetScale:
-               resultReg = inlineBigDecimalSetScale(node, cg);
-               return true;
-            case TR::java_math_BigDecimal_DFPDivide:
-               resultReg = inlineBigDecimalDivide(node, cg);
-               return true;
-            case TR::java_math_BigDecimal_DFPConvertPackedToDFP:
-            case TR::com_ibm_dataaccess_DecimalData_DFPConvertPackedToDFP:
-               resultReg = inlineBigDecimalFromPackedConverter(node, cg);
-               return true;
-            case TR::java_math_BigDecimal_DFPConvertDFPToPacked:
-            case TR::com_ibm_dataaccess_DecimalData_DFPConvertDFPToPacked:
-               resultReg = inlineBigDecimalToPackedConverter(node, cg);
-               return true;
-            default:
-               break;
-            }
+         case TR::java_lang_Math_max_D:
+            resultReg = TR::TreeEvaluator::inlineDoubleMax(node, cg);
+            return true;
+         case TR::java_lang_Math_min_D:
+            resultReg = TR::TreeEvaluator::inlineDoubleMin(node, cg);
+            return true;
+         default:
+            break;
          }
+      }
+
+   switch (methodSymbol->getRecognizedMethod())
+      {
+      case TR::java_lang_Math_fma_D:
+      case TR::java_lang_StrictMath_fma_D:
+      case TR::java_lang_Math_fma_F:
+      case TR::java_lang_StrictMath_fma_F:
+         resultReg = TR::TreeEvaluator::inlineMathFma(node, cg);
+         return true;
+
+      default:
+         break;
       }
 
    TR::MethodSymbol * symbol = node->getSymbol()->castToMethodSymbol();
@@ -4302,4 +4098,3 @@ J9::Z::CodeGenerator::supportsTrapsInTMRegion()
    {
    return self()->comp()->target().isZOS();
    }
-

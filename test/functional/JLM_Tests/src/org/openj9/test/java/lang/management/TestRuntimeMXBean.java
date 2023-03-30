@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2005, 2020 IBM Corp. and others
+ * Copyright (c) 2005, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -174,10 +174,12 @@ public class TestRuntimeMXBean {
 			AssertJUnit.assertNotNull(mbs.getAttribute(objName, "SystemProperties"));
 			AssertJUnit.assertTrue(mbs.getAttribute(objName, "SystemProperties") instanceof TabularData);
 			AssertJUnit.assertTrue(((TabularData)(mbs.getAttribute(objName, "SystemProperties"))).size() > 0);
-			if (System.getSecurityManager() == null) {
+			try {
 				AssertJUnit.assertTrue(((TabularData)(mbs.getAttribute(objName, "SystemProperties"))).size() ==
 						System.getProperties().size());
-			} // end if no security manager
+			} catch (SecurityException e) {
+				/* Security Manager was set; ignore */
+			}
 
 			AssertJUnit.assertNotNull(mbs.getAttribute(objName, "Uptime"));
 			AssertJUnit.assertTrue(mbs.getAttribute(objName, "Uptime") instanceof Long);
@@ -332,8 +334,10 @@ public class TestRuntimeMXBean {
 		AssertJUnit.assertTrue(props instanceof Map);
 		AssertJUnit.assertTrue(props.size() > 0);
 
-		if (System.getSecurityManager() == null) {
+		try {
 			AssertJUnit.assertTrue(props.size() == System.getProperties().size());
+		} catch (SecurityException e) {
+			/* Security Manager was set; ignore */
 		}
 	}
 
@@ -403,7 +407,7 @@ public class TestRuntimeMXBean {
 		} catch (Exception e1) {
 		}
 
-		attr = new Attribute("StartTime", new Long(2333));
+		attr = new Attribute("StartTime", Long.valueOf(2333));
 		try {
 			mbs.setAttribute(objName, attr);
 			Assert.fail("Should have thrown an exception.");
@@ -417,7 +421,7 @@ public class TestRuntimeMXBean {
 		} catch (Exception e1) {
 		}
 
-		attr = new Attribute("Uptime", new Long(1979));
+		attr = new Attribute("Uptime", Long.valueOf(1979));
 		try {
 			mbs.setAttribute(objName, attr);
 			Assert.fail("Should have thrown an exception.");
@@ -445,7 +449,7 @@ public class TestRuntimeMXBean {
 		} catch (Exception e1) {
 		}
 
-		attr = new Attribute("BootClassPathSupported", new Boolean(false));
+		attr = new Attribute("BootClassPathSupported", Boolean.valueOf(false));
 		try {
 			mbs.setAttribute(objName, attr);
 			Assert.fail("Should have thrown an exception.");
@@ -453,7 +457,7 @@ public class TestRuntimeMXBean {
 		}
 
 		// Try and set the Name attribute with an incorrect type.
-		attr = new Attribute("Name", new Long(42));
+		attr = new Attribute("Name", Long.valueOf(42));
 		try {
 			mbs.setAttribute(objName, attr);
 			Assert.fail("Should have thrown an exception");
@@ -506,7 +510,7 @@ public class TestRuntimeMXBean {
 						// the SystemProperties.
 						TabularData td = (TabularData)value;
 						AssertJUnit.assertTrue(td.size() > 0);
-						if (System.getSecurityManager() == null) {
+						try {
 							Properties props = System.getProperties();
 							AssertJUnit.assertTrue(td.size() == props.size());
 							Enumeration<?> propNames = props.propertyNames();
@@ -515,7 +519,9 @@ public class TestRuntimeMXBean {
 								String propVal = props.getProperty(property);
 								AssertJUnit.assertEquals(propVal, td.get(new String[] { property }).get("value"));
 							} // end while
-						} // end if no security manager
+						} catch (SecurityException e) {
+							/* Security Manager was set; ignore */
+						}
 					} // end else a String array expected
 				} // end if a known attribute
 				else {
@@ -571,7 +577,7 @@ public class TestRuntimeMXBean {
 		try {
 			Object retVal = null;
 			try {
-				retVal = mbs.invoke(objName, "DoTheStrand", new Object[] { new Long(7446), new Long(54) },
+				retVal = mbs.invoke(objName, "DoTheStrand", new Object[] { Long.valueOf(7446), Long.valueOf(54) },
 						new String[] { "java.lang.Long", "java.lang.Long" });
 			} catch (InstanceNotFoundException e) {
 				// An unlikely exception - if this occurs, we can't proceed with the test.
@@ -630,9 +636,14 @@ public class TestRuntimeMXBean {
 		MBeanAttributeInfo[] attributes = mbi.getAttributes();
 		AssertJUnit.assertNotNull(attributes);
 		int attrNbr;
-		if (org.openj9.test.util.VersionCheck.major() >= 10) {
+		int verMajor = org.openj9.test.util.VersionCheck.major();
+		if (verMajor >= 10) {
 			// Pid added in Java 10
 			attrNbr = 26;
+			if (verMajor >= 19) {
+				// deprecated APIs are removed in 19
+				attrNbr -= 1;
+			}
 		} else {
 			// Java 8 - 9
 			attrNbr = 25;

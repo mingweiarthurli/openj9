@@ -1,6 +1,6 @@
 
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -71,6 +71,7 @@ private:
 	void startUnfinalizedProcessing(MM_EnvironmentBase *env);
 	void scavengeFinalizableObjects(MM_EnvironmentStandard *env);
 #endif /* defined(J9VM_GC_FINALIZATION) */
+	void startContinuationProcessing(MM_EnvironmentBase *env);
 
 protected:
 
@@ -165,7 +166,7 @@ public:
 	virtual void
 	scanClearable(MM_EnvironmentBase *env)
 	{
-		if(env->_currentTask->synchronizeGCThreadsAndReleaseSingleThread(env, UNIQUE_ID)) {
+		if (env->_currentTask->synchronizeGCThreadsAndReleaseSingleThread(env, UNIQUE_ID)) {
 			/* Soft and weak references resurrected by finalization need to be cleared immediately since weak and soft processing has already completed.
 			 * This has to be set before unfinalizable (and phantom) processing
 			 */
@@ -207,6 +208,7 @@ public:
 		 * hence not subject for unfinalized processing.
 		 */ 
 		startUnfinalizedProcessing(env);
+		startContinuationProcessing(env);
 	}
 
 	void

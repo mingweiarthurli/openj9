@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -515,8 +515,8 @@ reorderTargetNodesInBB(TR_CISCTransformer *trans)
 
                // Analyze whether we can move the node t to immediately before the nodes in nextPlist
                List<TR_CISCNode> *dagList = T->getDagId2Nodes()+t->getDagID();
-               TR_CISCNode *tgt;
-               if (tgt = analyzeMoveNodeForward(trans, dagList, t, nextPlist))
+               TR_CISCNode *tgt = analyzeMoveNodeForward(trans, dagList, t, nextPlist);
+               if (tgt)
                   {
                   T->duplicateListsDuplicator();
                   // OK, we can move the node t!
@@ -855,7 +855,7 @@ indexContainsArray(TR::Compilation *comp, TR::Node *index, vcount_t visitCount)
 
    if (comp->trace(OMR::idiomRecognition))
       traceMsg(comp, "analyzing node %p\n", index);
-   
+
    if (index->getOpCode().hasSymbolReference() &&
          index->getSymbolReference()->getSymbol()->isArrayShadowSymbol())
       {
@@ -877,7 +877,7 @@ indexContainsArrayAccess(TR::Compilation *comp, TR::Node *aXaddNode)
    {
    if (comp->trace(OMR::idiomRecognition))
       traceMsg(comp, "axaddnode %p\n", aXaddNode);
-   
+
    TR::Node *loadNode1, *loadNode2, *topLevelIndex;
    findIndexLoad(aXaddNode, loadNode1, loadNode2, topLevelIndex);
    // topLevelIndex now contains the actual expression q in a[q]
@@ -1592,6 +1592,12 @@ CISCTransform2FindBytes(TR_CISCTransformer *trans)
       }
    else
       {
+      // the static table currently cannot be relocated
+      if (comp->compileRelocatableCode())
+         {
+         if (disptrace) traceMsg(comp, "Abandoning reduction since we can't relocate the static table\n");
+         return false;
+         }
       tableNode = createTableLoad(comp, baseRepNode, 8, 8, tmpTable, disptrace);    // function table for TRT
       }
 
@@ -5318,8 +5324,8 @@ static StatusArrayStore checkArrayStore(TR::Compilation *comp, TR::Node *inputNo
    // and a typical arraycopy loop. loops like above cannot be reduced to an arraycopy
    // (look at the java semantics for arraycopy)
    //
-   if (comp->target().cpu.isZ())
-      return NO_NEED_TO_CHECK;       // On 390, MVC (which performs byte copies) is generated.
+   if (comp->target().cpu.isZ() || comp->target().cpu.isARM64())
+      return NO_NEED_TO_CHECK;       // On 390, MVC (which performs byte copies) is generated. ARM64 arraycopy can handle byte copies.
 
    if (inputNode->getFirstChild()->getSymbol()->getRegisterMappedSymbol() == outputNode->getFirstChild()->getSymbol()->getRegisterMappedSymbol())
       {
@@ -5734,7 +5740,7 @@ CISCTransform2ArrayCopySub(TR_CISCTransformer *trans, TR::Node *indexRepNode, TR
 
 
    int32_t postIncrement = checkForPostIncrement(comp, block, cmpIfAllCISCNode->getHeadOfTrNodeInfo()->_node, exitVarSymRef->getSymbol());
-   
+
    if (disptrace)
       traceMsg(comp, "detected postIncrement %d modLength %d modStartIdx %d\n", postIncrement, modLength, modStartIdx);
 
@@ -6163,7 +6169,7 @@ CISCTransform2ArrayCopyB2CorC2B(TR_CISCTransformer *trans)
 
    // check whether the transformation is valid
    //
-   if (outputMemNode->getOpCode().isShort() && outputMemNode->getOpCode().isUnsigned())
+   if (outputMemNode->getOpCode().isShort())
       {
       TR::Node * iorNode = trans->getP2TRepInLoop(P->getImportantNode(2))->getHeadOfTrNodeInfo()->_node;
       if (!checkByteToChar(comp, iorNode, inputNode, bigEndian))
@@ -6798,10 +6804,12 @@ CISCTransform2ArrayCopyC2BMixed(TR_CISCTransformer *trans)
    //
    TR::Node * LELoadTree  = LEloadMemNode->duplicateTree();
    TR::Node * LEStoreAddrTree = LEstoreMemNode->getChild(0)->duplicateTree();
-   if (comp->cg()->getSupportsReverseLoadAndStore())
+   if (comp->cg()->supportsByteswap())
       {
-      TR::Node * LEReverseStore = TR::Node::createWithSymRef(TR::irsstore, 2, 2, LEStoreAddrTree, LELoadTree,
-                                                 comp->getSymRefTab()->findOrCreateGenericIntShadowSymbolReference(0));
+      TR::Node * LEReverseStore = TR::Node::createWithSymRef(TR::sstorei, 2, 2,
+         LEStoreAddrTree,
+         TR::Node::create(TR::sbyteswap, 1, LELoadTree),
+         comp->getSymRefTab()->findOrCreateGenericIntShadowSymbolReference(0));
       blockLE->append(TR::TreeTop::create(comp, LEReverseStore));
       }
    else
@@ -10594,6 +10602,12 @@ CISCTransform2CountDecimalDigit(TR_CISCTransformer *trans)
    trans->findFirstNode(&trTreeTop, &trNode, &block);
    if (!block) return false;    // cannot find
 
+   if (comp->compileRelocatableCode())
+      {
+      traceMsg(comp, "Bailing CISCTransform2CountDecimalDigit - not supported for AOT compilations.");
+      return false;
+      }
+
    if (isLoopPreheaderLastBlockInMethod(comp, block))
       {
       traceMsg(comp, "Bailing CISCTransform2CountDecimalDigit due to null TT - might be a preheader in last block of method\n");
@@ -10896,6 +10910,12 @@ CISCTransform2LongToStringDigit(TR_CISCTransformer *trans)
 
    trans->findFirstNode(&trTreeTop, &trNode, &block);
    if (!block) return false;    // cannot find
+
+   if (comp->compileRelocatableCode())
+      {
+      traceMsg(comp, "Bailing CISCTransform2LongToStringDigit - not supported for AOT compilations.");
+      return false;
+      }
 
    if (isLoopPreheaderLastBlockInMethod(comp, block))
       {

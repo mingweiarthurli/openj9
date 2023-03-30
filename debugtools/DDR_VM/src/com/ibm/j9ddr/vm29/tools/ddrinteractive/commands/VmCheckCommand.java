@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2019 IBM Corp. and others
+ * Copyright (c) 2001, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -60,6 +60,7 @@ import com.ibm.j9ddr.vm29.pointer.helper.J9MethodHelper;
 import com.ibm.j9ddr.vm29.pointer.helper.J9RASHelper;
 import com.ibm.j9ddr.vm29.pointer.helper.J9ROMClassHelper;
 import com.ibm.j9ddr.vm29.pointer.helper.J9ROMMethodHelper;
+import com.ibm.j9ddr.vm29.pointer.helper.J9UTF8Helper;
 import com.ibm.j9ddr.vm29.structure.J9ClassInitFlags;
 import com.ibm.j9ddr.vm29.structure.J9Consts;
 import com.ibm.j9ddr.vm29.structure.J9MemorySegment;
@@ -68,7 +69,7 @@ import com.ibm.j9ddr.vm29.types.U32;
 import com.ibm.j9ddr.vm29.types.U8;
 import com.ibm.j9ddr.vm29.types.UDATA;
 
-public class VmCheckCommand extends Command 
+public class VmCheckCommand extends Command
 {
 	private static final String nl = System.getProperty("line.separator");
 
@@ -76,8 +77,8 @@ public class VmCheckCommand extends Command
 	{
 		addCommand("vmcheck", "", "Run VM state sanity checks");
 	}
-	
-	public void run(String command, String[] args, Context context, PrintStream out) throws DDRInteractiveCommandException 
+
+	public void run(String command, String[] args, Context context, PrintStream out) throws DDRInteractiveCommandException
 	{
 		try {
 			J9JavaVMPointer javaVM = J9RASHelper.getVM(DataType.getJ9RASPointer());
@@ -120,7 +121,7 @@ public class VmCheckCommand extends Command
 	private void reportError(PrintStream out, String format, Object... args) {
 		appendLine(out, "<vm check: FAILED - Error %s>", String.format(format, args));
 	}
-	
+
 	private void reportMessage(PrintStream out, String format, Object... args) {
 		appendLine(out, "<vm check: %s>", String.format(format, args));
 	}
@@ -143,7 +144,7 @@ public class VmCheckCommand extends Command
 		boolean exclusiveVMAccess = javaVM.exclusiveAccessState().eq(J9Consts.J9_XACCESS_EXCLUSIVE);
 
 		reportMessage(out, "Checking threads");
-		
+
 		while (gcvmThreadListIterator.hasNext()) {
 			J9VMThreadPointer thread = gcvmThreadListIterator.next();
 
@@ -177,7 +178,7 @@ public class VmCheckCommand extends Command
 			}
 		}
 	}
-	
+
 	/*
 	 *  Based on vmchk/checkclasses.c r1.7
 	 *
@@ -204,12 +205,10 @@ public class VmCheckCommand extends Command
 	 *			Ensure obsolete classes are found in the replacedClass linked list on the currentClass.
 	 */
 	private void checkJ9ClassSanity(J9JavaVMPointer javaVM, PrintStream out) throws CorruptDataException {
-
 		reportMessage(out, "Checking classes");
 
 		// Stolen from RootScanner.scanClasses()
-		// GCClassLoaderIterator gcClassLoaderIterator =
-		// GCClassLoaderIterator.from();
+		// GCClassLoaderIterator gcClassLoaderIterator = GCClassLoaderIterator.from();
 		GCSegmentIterator segmentIterator = GCSegmentIterator.fromJ9MemorySegmentList(javaVM.classMemorySegments(), J9MemorySegment.MEMORY_TYPE_RAM_CLASS);
 		int count = 0;
 		int obsoleteCount = 0;
@@ -220,7 +219,7 @@ public class VmCheckCommand extends Command
 			GCClassHeapIterator classHeapIterator = GCClassHeapIterator.fromJ9MemorySegment(segment);
 			while (classHeapIterator.hasNext()) {
 				J9ClassPointer clazz = classHeapIterator.next();
-				
+
 				if (!J9ClassHelper.isObsolete(clazz)) {
 					verifyJ9Class(javaVM, out, clazz);
 				} else {
@@ -237,13 +236,20 @@ public class VmCheckCommand extends Command
 
 	private boolean verifyJ9Class(J9JavaVMPointer javaVM, PrintStream out, J9ClassPointer classPointer) throws CorruptDataException {
 		boolean passed = verifyJ9ClassHeader(javaVM, out, classPointer);
+		J9ClassLoaderPointer classLoader;
 
-		if (!classPointer.classLoader().isNull()) {
-			J9MemorySegmentPointer segment = classPointer.classLoader().classSegments();
+		if (J9ROMClassHelper.isAnonymousClass(classPointer.romClass())) {
+			classLoader = javaVM.anonClassLoader();
+		} else {
+			classLoader = classPointer.classLoader();
+		}
+
+		if (!classLoader.isNull()) {
+			J9MemorySegmentPointer segment = classLoader.classSegments();
 			segment = findSegmentInClassLoaderForAddress(classPointer, segment);
 
 			if (segment.isNull()) {
-				reportError(out, "class=0x%s not found in classLoader=0x%s", Long.toHexString(classPointer.getAddress()), Long.toHexString(classPointer.classLoader().getAddress()));
+				reportError(out, "class=0x%s not found in classLoader=0x%s", Long.toHexString(classPointer.getAddress()), Long.toHexString(classLoader.getAddress()));
 				passed = false;
 			}
 		}
@@ -251,7 +257,7 @@ public class VmCheckCommand extends Command
 		if (!verifyJ9ClassSubclassHierarchy(javaVM, out, classPointer)) {
 			passed = false;
 		}
-		
+
 		return passed;
 	}
 
@@ -273,7 +279,7 @@ public class VmCheckCommand extends Command
 			reportError(out, "NULL == classLoader for class=0x%s", Long.toHexString(classPointer.getAddress()));
 			passed = false;
 		}
-		
+
 		long classDepth = J9ClassHelper.classDepth(classPointer).longValue();
 		if (classDepth > 0) {
 			if (classPointer.superclasses().isNull()) {
@@ -311,7 +317,7 @@ public class VmCheckCommand extends Command
 		if (!romClass.isNull() && !romClass.romConstantPoolCount().eq(0)) {
 			J9ConstantPoolPointer constantPool = J9ConstantPoolPointer.cast(classPointer.ramConstantPool());
 			J9ClassPointer cpClass = constantPool.ramClass();
-			
+
 			if (!classPointer.eq(cpClass)) {
 				reportError(out, "clazz=0x%s not equal clazz->ramConstantPool->ramClass=0x%s",
 					Long.toHexString(classPointer.getAddress()), Long.toHexString(cpClass.getAddress()));
@@ -322,7 +328,7 @@ public class VmCheckCommand extends Command
 
 		return passed;
 	}
-	
+
 	private boolean verifyObsoleteJ9Class(J9JavaVMPointer javaVM, PrintStream out, J9ClassPointer classPointer) throws CorruptDataException {
 		boolean passed = true;
 		J9ClassPointer replacedClass;
@@ -347,7 +353,7 @@ public class VmCheckCommand extends Command
 
 		return passed;
 	}
-	
+
 	private boolean verifyJ9ClassSubclassHierarchy(J9JavaVMPointer javaVM, PrintStream out, J9ClassPointer classPointer) throws CorruptDataException {
 		int index = 0;
 		UDATA rootDepth = J9ClassHelper.classDepth(classPointer);
@@ -367,7 +373,7 @@ public class VmCheckCommand extends Command
 			if (!verifyJ9ClassHeader(javaVM, out, nextSubclass)) {
 				return false;
 			}
-			
+
 			if (J9ClassHelper.classDepth(nextSubclass).lte(rootDepth)) {
 				done = true;
 			} else {
@@ -392,7 +398,7 @@ public class VmCheckCommand extends Command
 
 	/*
 	 *  Based on vmchk/checkromclasses.c r1.5
-	 * 
+	 *
 	 *	J9ROMClass sanity:
 	 *		SRP check:
 	 *			Ensure J9ROMClass->interfaces SRP is in the same segment if J9ROMClass->interfaceCount != 0.
@@ -406,7 +412,6 @@ public class VmCheckCommand extends Command
 	 *			Ensure ramConstantPoolCount <= romConstantPoolCount
 	 */
 	private void checkJ9ROMClassSanity(J9JavaVMPointer vm, PrintStream out) throws CorruptDataException {
-
 		reportMessage(out, "Checking ROM classes");
 
 		// Stolen from RootScanner.scanClasses()
@@ -426,7 +431,6 @@ public class VmCheckCommand extends Command
 		}
 
 		reportMessage(out, "Checking %d ROM classes done", count);
-
 	}
 
 	private void verifyJ9ROMClass(PrintStream out, J9JavaVMPointer vm, J9ClassPointer clazz) throws CorruptDataException {
@@ -457,8 +461,8 @@ public class VmCheckCommand extends Command
 
 			U32Pointer cpShapeDescription = J9ROMClassHelper.cpShapeDescription(romClass);
 
-			/* TODO: is !isNull() check required or not? */
-			if (!cpShapeDescription.isNull()) {
+			/* TODO: is notNull() check required or not? */
+			if (cpShapeDescription.notNull()) {
 				address = cpShapeDescription.getAddress();
 				verifyAddressInSegment(out, vm, segment, address, "romClass->cpShapeDescription");
 			}
@@ -487,7 +491,6 @@ public class VmCheckCommand extends Command
 		if (ramConstantPoolCount.gt(romConstantPoolCount)) {
 			reportError(out, "ramConstantPoolCount=%d > romConstantPoolCount=%d for romClass=0x%s", ramConstantPoolCount.longValue(), romConstantPoolCount.longValue(), Long.toHexString(romClass.getAddress()));
 		}
-
 	}
 
 	private boolean verifyUTF8(J9UTF8Pointer utf8) throws CorruptDataException {
@@ -495,7 +498,7 @@ public class VmCheckCommand extends Command
 			return false;
 		}
 		UDATA length = new UDATA(utf8.length());
-		U8Pointer utf8Data = utf8.dataEA();
+		U8Pointer utf8Data = J9UTF8Helper.dataEA(utf8);
 		while (length.longValue() > 0) {
 			U16 temp = new U16(0); // not used
 
@@ -512,13 +515,13 @@ public class VmCheckCommand extends Command
 
 	/**
 	 * Decode the UTF8 character.
-	 * 
+	 *
 	 * Decode the input UTF8 character and stores it into result.
-	 * 
+	 *
 	 * @param[in] input The UTF8 character
 	 * @param[out] result buffer for unicode characters
 	 * @param[in] bytesRemaining number of bytes remaining in input
-	 * 
+	 *
 	 * @return The number of UTF8 characters consumed (1,2,3) on success, 0 on
 	 *         failure
 	 * @throws CorruptDataException
@@ -541,7 +544,7 @@ public class VmCheckCommand extends Command
 		if (c.eq(0x0)) {
 			/* illegal NUL encoding */
 			return new U32(0);
-		} else if ((c.bitAnd(0x80)).eq(0x0)) {
+		} else if (c.bitAnd(0x80).eq(0x0)) {
 			/* one byte encoding */
 			// *result = (U_16)c;
 			return new U32(1);
@@ -606,18 +609,18 @@ public class VmCheckCommand extends Command
 
 	/**
 	 * Based on vmchk/checkclasses.c function: findSegmentInClassLoaderForAddress
-	 * 
+	 *
 	 * This method searches classloader's segments to find out on which segment this ROMClass lays in.
 	 * @param classLoader Classloader that romclass is being searched
 	 * @param romClassPointer ROMClass that is searched in classloader segments
-	 * @return Classloader segment which has this romclass, otherwise null. 
+	 * @return Classloader segment which has this romclass, otherwise null.
 	 * @throws CorruptDataException
 	 */
 	public J9MemorySegmentPointer findSegmentInClassLoaderForAddress(J9ClassLoaderPointer classLoader, J9ROMClassPointer romClassPointer) throws CorruptDataException {
 		MemorySegmentIterator memorySegmentIterator = new MemorySegmentIterator(classLoader.classSegments(), MemorySegmentIterator.MEMORY_ALL_TYPES, true);
 		J9MemorySegmentPointer memorySegmentPointer = J9MemorySegmentPointer.NULL;
 		J9MemorySegmentPointer foundMemorySegmentPointer = J9MemorySegmentPointer.NULL;
-		
+
 		while (memorySegmentIterator.hasNext()) {
 			Object next2 = memorySegmentIterator.next();
 			memorySegmentPointer = (J9MemorySegmentPointer) next2;
@@ -631,7 +634,7 @@ public class VmCheckCommand extends Command
 
 	/*
 	 *  Based on vmchk/checkmethods.c r1.5
-	 * 
+	 *
 	 *	J9Method sanity:
 	 *		Bytecode check:
 	 *			Ensure (bytecodes - sizeof(J9ROMMethod) is in the right "area" to be a ROM Method.
@@ -697,13 +700,13 @@ public class VmCheckCommand extends Command
 					Long.toHexString(ConstantPoolHelpers.J9_CP_FROM_METHOD(method).getAddress()), Long.toHexString(method.getAddress()),
 					Long.toHexString(ramConstantPool.getAddress()), Long.toHexString(clazz.getAddress()));
 			}
-			
+
 			count++;
 		}
-	
+
 		return count;
 	}
-	
+
 	private boolean findMethodInVTable(J9MethodPointer method, J9ClassPointer classPointer) throws CorruptDataException {
 		UDATAPointer vTable;
 		long vTableSize;
@@ -711,7 +714,12 @@ public class VmCheckCommand extends Command
 
 		if (AlgorithmVersion.getVersionOf(AlgorithmVersion.VTABLE_VERSION).getAlgorithmVersion() >= 1) {
 			J9VTableHeaderPointer vTableHeader = J9ClassHelper.vTableHeader(classPointer);
-			vTableSize = vTableHeader.size().longValue();
+			try {
+				vTableSize = vTableHeader.size().longValue();
+			} catch (NoSuchFieldException e) {
+				// J9VTableHeader should have the 'size' field given the algorithm version check above
+				throw new CorruptDataException(e);
+			}
 			vTable = J9ClassHelper.vTable(vTableHeader);
 			vTableIndex = 0;
 		} else {
@@ -719,7 +727,6 @@ public class VmCheckCommand extends Command
 			vTableSize = vTable.at(0).longValue() + 1;
 			vTableIndex = 2;
 		}
-		
 
 		for (; vTableIndex < vTableSize; vTableIndex++) {
 			//System.out.printf("%d COMP 0x%s vs. 0x%s\n", (int)vTableIndex, Long.toHexString(method.getAddress()), Long.toHexString(vTable.at(vTableIndex).longValue()));
@@ -746,7 +753,7 @@ public class VmCheckCommand extends Command
 
 	/*
 	 *  Based on runtime/vmchk/checkinterntable.c
-	 * 
+	 *
 	 *	J9LocalInternTableSanity sanity:
 	 *		if (J9JavaVM->dynamicLoadBuffers != NULL) && (J9JavaVM->dynamicLoadBuffers->romClassBuilder != NULL)
 	 *			invariantInternTree check:
@@ -785,14 +792,13 @@ public class VmCheckCommand extends Command
 	}
 
 	private boolean verifyJ9ClassLoader(J9JavaVMPointer vm, J9ClassLoaderPointer classLoader) throws CorruptDataException {
-
 		GCClassLoaderIterator classLoaderIterator = GCClassLoaderIterator.from();
-		while(classLoaderIterator.hasNext()) {
+		while (classLoaderIterator.hasNext()) {
 			J9ClassLoaderPointer classLoaderPointer = classLoaderIterator.next();
-			if(classLoaderPointer.eq(classLoader)) {
+			if (classLoaderPointer.eq(classLoader)) {
 				return true;
-			}			
-		}	
+			}
+		}
 		return false;
 	}
 }

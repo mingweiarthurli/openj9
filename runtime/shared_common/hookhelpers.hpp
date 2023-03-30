@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2017 IBM Corp. and others
+ * Copyright (c) 2001, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -67,6 +67,6 @@ ClasspathItem* getBootstrapClasspathItem(J9VMThread* currentThread, J9ClassPathE
 
 UDATA checkForStoreFilter(J9JavaVM* vm, J9ClassLoader* classloader, const char* classname, UDATA classnameLen, J9Pool* filterPool);
 void storeClassVerboseIO( J9VMThread* currentThread, ClasspathItem * classpath, I_16 entryIndex, U_16 classnameLength, const U_8 * classnameData, UDATA helperID, BOOLEAN didWeStore);
-ClasspathItem *createClasspath(J9VMThread* currentThread, J9ClassPathEntry* classPathEntries, UDATA entryCount, IDATA helperID, U_16 cpType, UDATA infoFound);
+ClasspathItem *createClasspath(J9VMThread* currentThread, J9ClassLoader* classloader, J9ClassPathEntry** cpePtrArray, UDATA entryCount, IDATA helperID, U_16 cpType, UDATA infoFound);
 
 #endif /*J9SC_HOOK_HELPERS_HPP*/

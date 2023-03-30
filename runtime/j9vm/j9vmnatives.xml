@@ -1,5 +1,5 @@
 <!--
-Copyright (c) 2007, 2020 IBM Corp. and others
+Copyright (c) 2007, 2022 IBM Corp. and others
 
 This program and the accompanying materials are made available under
 the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@ Exception [1] and GNU General Public License, version 2 with the
 OpenJDK Assembly Exception [2].
 
 [1] https://www.gnu.org/software/classpath/license.html
-[2] http://openjdk.java.net/legal/assembly-exception.html
+[2] https://openjdk.org/legal/assembly-exception.html
 
 SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 -->
@@ -83,7 +83,9 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 		</export>
 		<export name="_JVM_GetClassSignature@8" />
 		<export name="_JVM_GetEnclosingMethodInfo@8" />
-		<export name="_JVM_GetInterfaceVersion@0" />
+		<export name="_JVM_GetInterfaceVersion@0">
+			<exclude-if condition="spec.java17"/>
+		</export>
 		<export name="_JVM_GetLastErrorString@8" />
 		<export name="_JVM_GetManagement@4" />
 		<export name="_JVM_GetPortLibrary@0" />
@@ -96,7 +98,12 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 		<export name="_JVM_IsNaN@8" />
 		<export name="_JVM_LatestUserDefinedLoader@4" />
 		<export name="_JVM_Listen@8" />
-		<export name="_JVM_LoadLibrary@4" />
+		<export name="_JVM_LoadLibrary@4">
+			<exclude-if condition="spec.java11"/>
+		</export>
+		<export name="_JVM_LoadLibrary@8">
+			<include-if condition="spec.java11"/>
+		</export>
 		<export name="_JVM_LoadSystemLibrary@4" />
 		<export name="_JVM_Lseek@16" />
 		<export name="_JVM_MaxMemory@0" />
@@ -159,10 +166,16 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 		<export name="_JVM_GetStackTraceDepth@8"/>
 		<export name="_JVM_FillInStackTrace@8"/>
 		<export name="_JVM_StartThread@8"/>
-		<export name="_JVM_StopThread@12"/>
+		<export name="_JVM_StopThread@12">
+			<exclude-if condition="spec.java20"/>
+		</export>
 		<export name="_JVM_IsThreadAlive@8"/>
-		<export name="_JVM_SuspendThread@8"/>
-		<export name="_JVM_ResumeThread@8"/>
+		<export name="_JVM_SuspendThread@8">
+			<exclude-if condition="spec.java20"/>
+		</export>
+		<export name="_JVM_ResumeThread@8">
+			<exclude-if condition="spec.java20"/>
+		</export>
 		<export name="_JVM_SetThreadPriority@12"/>
 		<export name="_JVM_Yield@8"/>
 		<export name="_JVM_CurrentThread@8"/>
@@ -213,15 +226,24 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 		<export name="_JVM_GetSockOpt@20"/>
 		<export name="_JVM_ExtendBootClassPath@8" />
 		<export name="_JVM_Bind@12"/>
-		<export name="_JVM_DTraceActivate@20"/>
-		<export name="_JVM_DTraceDispose@12"/>
-		<export name="_JVM_DTraceGetVersion@4"/>
-		<export name="_JVM_DTraceIsProbeEnabled@8"/>
-		<export name="_JVM_DTraceIsSupported@4"/>
+		<export name="_JVM_DTraceActivate@20">
+			<exclude-if condition="spec.java17"/>
+		</export>
+		<export name="_JVM_DTraceDispose@12">
+			<exclude-if condition="spec.java17"/>
+		</export>
+		<export name="_JVM_DTraceGetVersion@4">
+			<exclude-if condition="spec.java17"/>
+		</export>
+		<export name="_JVM_DTraceIsProbeEnabled@8">
+			<exclude-if condition="spec.java17"/>
+		</export>
+		<export name="_JVM_DTraceIsSupported@4">
+			<exclude-if condition="spec.java17"/>
+		</export>
 		<export name="_JVM_DefineClass@24"/>
 		<export name="_JVM_DefineClassWithSourceCond@32"/>
 		<export name="_JVM_EnqueueOperation@20"/>
-		<export name="_JVM_Exit@4"/>
 		<export name="_JVM_GetCPFieldNameUTF@12"/>
 		<export name="_JVM_GetClassConstructor@16"/>
 		<export name="_JVM_GetClassConstructors@12"/>
@@ -290,10 +312,17 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 		<export name="_JVM_GetFieldTypeAnnotations@8"/>
 		<export name="_JVM_GetMethodParameters@8"/>
 		<export name="_JVM_GetMethodTypeAnnotations@8"/>
+		<export name="JVM_IsUseContainerSupport"/>
 		<export name="_JVM_IsVMGeneratedMethodIx@12"/>
 		<export name="JVM_GetTemporaryDirectory"/>
 		<export name="_JVM_CopySwapMemory@44"/>
 		<export name="JVM_BeforeHalt"/>
+		<export name="AsyncGetCallTrace"/>
+
+		<!-- Additions for Valhalla -->
+		<export name="JVM_IsValhallaEnabled">
+			<include-if condition="spec.flags.opt_valhallaValueTypes"/>
+		</export>
 	</exports>
 
 	<exports group="jdk11">
@@ -306,7 +335,6 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 		<export name="JVM_AddModulePackage"/>
 		<export name="JVM_AddModuleExportsToAllUnnamed"/>
 		<export name="JVM_SetBootLoaderUnnamedModule"/>
-		<export name="JVM_GetModuleByPackageName"/>
 
 		<!-- Additions for Java 9 RAW -->
 		<export name="JVM_GetSimpleBinaryName"/>
@@ -346,11 +374,50 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 
 	<exports group="jdk15">
 		<!-- Additions for Java 15 (General) -->
-		<export name="JVM_GetRandomSeedForCDSDump"/>
 		<export name="JVM_RegisterLambdaProxyClassForArchiving"/>
 		<export name="JVM_LookupLambdaProxyClassFromArchive"/>
 		<export name="JVM_IsCDSDumpingEnabled"/>
-		<export name="JVM_IsCDSSharingEnabled"/>
+	</exports>
+
+	<exports group="jdk16">
+		<!-- Additions for Java 16 (General) -->
+		<export name="JVM_DefineArchivedModules"/>
+		<export name="JVM_GetRandomSeedForDumping"/>
+		<export name="JVM_IsSharingEnabled"/>
+		<export name="JVM_LogLambdaFormInvoker"/>
+		<export name="JVM_IsDumpingClassList"/>
+	</exports>
+
+	<exports group="jdk17">
+		<!-- Additions for Java 17 (General) -->
+		<export name="JVM_DumpClassListToFile"/>
+		<export name="JVM_DumpDynamicArchive"/>
+	</exports>
+
+	<exports group="jdk18">
+		<!-- Additions for Java 18 (General) -->
+		<export name="JVM_IsFinalizationEnabled"/>
+		<export name="JVM_ReportFinalizationComplete"/>
+	</exports>
+
+	<exports group="jdk19">
+		<!-- Additions for Java 19 (General) -->
+		<export name="JVM_LoadZipLibrary"/>
+
+		<!-- Additions for Java 19 (VirtualThread) -->
+		<export name="JVM_RegisterContinuationMethods"/>
+		<export name="JVM_IsContinuationsSupported"/>
+		<export name="JVM_IsPreviewEnabled"/>
+		<export name="JVM_VirtualThreadMountBegin"/>
+		<export name="JVM_VirtualThreadMountEnd"/>
+		<export name="JVM_VirtualThreadUnmountBegin"/>
+		<export name="JVM_VirtualThreadUnmountEnd"/>
+	</exports>
+
+	<exports group="jdk20">
+		<!-- Additions for Java 20 (General) -->
+		<export name="JVM_GetClassFileVersion"/>
+		<export name="JVM_VirtualThreadHideFrames"/>
 	</exports>
 
 </exportlists>

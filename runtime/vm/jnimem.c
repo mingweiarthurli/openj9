@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2014 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -51,6 +51,10 @@ void* jniArrayAllocateMemoryFromThread(J9VMThread* vmThread, UDATA sizeInBytes) 
 #endif
 }
 
+void* jniArrayAllocateMemory32FromThread(J9VMThread* vmThread, UDATA sizeInBytes) {
+	PORT_ACCESS_FROM_VMC(vmThread);
+	return j9mem_allocate_memory32(sizeInBytes, J9MEM_CATEGORY_JNI);
+}
 
 void jniArrayFreeMemoryFromThread(J9VMThread* vmThread, void* location) {
 	PORT_ACCESS_FROM_VMC(vmThread);
@@ -79,6 +83,10 @@ void jniArrayFreeMemoryFromThread(J9VMThread* vmThread, void* location) {
 #endif
 }
 
+void jniArrayFreeMemory32FromThread(J9VMThread* vmThread, void* location) {
+	PORT_ACCESS_FROM_VMC(vmThread);
+	j9mem_free_memory32(location);
+}
 
 #if (defined(J9VM_GC_JNI_ARRAY_CACHE)) 
 void cleanupVMThreadJniArrayCache(J9VMThread *vmThread) {

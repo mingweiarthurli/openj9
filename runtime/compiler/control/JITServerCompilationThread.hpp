@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2020 IBM Corp. and others
+ * Copyright (c) 2018, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -42,7 +42,7 @@ namespace TR
 // Objects of this type are instantiated at JITServer
 class CompilationInfoPerThreadRemote : public TR::CompilationInfoPerThread
    {
-   public:
+public:
    friend class TR::CompilationInfo;
    CompilationInfoPerThreadRemote(TR::CompilationInfo &compInfo, J9JITConfig *jitConfig, int32_t id, bool isDiagnosticThread);
 
@@ -51,11 +51,36 @@ class CompilationInfoPerThreadRemote : public TR::CompilationInfoPerThread
 
    uint32_t getSeqNo() const { return _seqNo; }; // For ordering requests at the server
    void setSeqNo(uint32_t seqNo) { _seqNo = seqNo; }
-   void updateSeqNo(ClientSessionData *clientSession);
+   uint32_t getExpectedSeqNo() const { return _expectedSeqNo; }
+   void setExpectedSeqNo(uint32_t seqNo) { _expectedSeqNo = seqNo; }
 
+   void notifyAndDetachWaitingRequests(ClientSessionData *clientSession);
    void waitForMyTurn(ClientSessionData *clientSession, TR_MethodToBeCompiled &entry); // Return false if timeout
    bool getWaitToBeNotified() const { return _waitToBeNotified; }
    void setWaitToBeNotified(bool b) { _waitToBeNotified = b; }
+   static int32_t getNumClearedCaches() { return _numClearedCaches; }
+   void incNumClearedCaches() { _numClearedCaches++; }
+
+   void copyClientOptions(const std::string &clientOptStr, TR_PersistentMemory *persistentMemory)
+      {
+      size_t clientOptSize = clientOptStr.size();
+      _clientOptionsSize = clientOptSize;
+      _clientOptions = new (persistentMemory->_persistentAllocator.get()) char[clientOptSize];
+      memcpy(_clientOptions, clientOptStr.data(), clientOptSize);
+      }
+
+   void deleteClientOptions(TR_PersistentMemory *persistentMemory)
+      {
+      if (_clientOptions)
+         {
+         persistentMemory->freePersistentMemory(_clientOptions);
+         _clientOptions = NULL;
+         _clientOptionsSize = 0;
+         }
+      }
+
+   char *getClientOptions() { return _clientOptions; }
+   size_t getClientOptionsSize() { return _clientOptionsSize; }
 
    bool cacheIProfilerInfo(TR_OpaqueMethodBlock *method, uint32_t byteCodeIndex, TR_IPBytecodeHashTableEntry *entry);
    TR_IPBytecodeHashTableEntry *getCachedIProfilerInfo(TR_OpaqueMethodBlock *method, uint32_t byteCodeIndex, bool *methodInfoPresent);
@@ -80,7 +105,15 @@ class CompilationInfoPerThreadRemote : public TR::CompilationInfoPerThread
    void deleteClientSessionData(uint64_t clientId, TR::CompilationInfo* compInfo, J9VMThread* compThread);
    virtual void freeAllResources() override;
 
-   private:
+   void incrementClassUnloadReadMutexDepth() { _classUnloadReadMutexDepth++; }
+   void decrementClassUnloadReadMutexDepth() { _classUnloadReadMutexDepth--; }
+   int32_t getClassUnloadReadMutexDepth() { return _classUnloadReadMutexDepth; }
+
+   bool isAOTCacheStore() const { return _aotCacheStore; }
+   uint32_t getMethodIndex() const { return _methodIndex; }
+   const AOTCacheClassChainRecord *getDefiningClassChainRecord() { return _definingClassChainRecord; }
+
+private:
    /* Template method for allocating a cache of type T on the heap.
     * Cache pointer must be NULL.
     */
@@ -136,16 +169,30 @@ class CompilationInfoPerThreadRemote : public TR::CompilationInfoPerThread
       cache = NULL;
       }
 
+   bool serveCachedAOTMethod(TR_MethodToBeCompiled &entry, J9Method *method, J9Class *definingClass,
+                             TR_OptimizationPlan *optPlan, ClientSessionData *clientData,
+                             J9::J9SegmentProvider &scratchSegmentProvider);
+
    TR_PersistentMethodInfo *_recompilationMethodInfo;
    uint32_t _seqNo;
+   uint32_t _expectedSeqNo; // this request is allowed to go if _expectedSeqNo is processed
    bool _waitToBeNotified; // accessed with clientSession->_sequencingMonitor in hand
+   char *_clientOptions;
+   size_t _clientOptionsSize;
    IPTableHeap_t *_methodIPDataPerComp;
    TR_ResolvedMethodInfoCache *_resolvedMethodInfoMap;
-   ResolvedMirrorMethodsPersistIP_t *_resolvedMirrorMethodsPersistIPInfo; //list of mirrors of resolved methods for persisting IProfiler info
+   ResolvedMirrorMethodsPersistIP_t *_resolvedMirrorMethodsPersistIPInfo; // list of mirrors of resolved methods for persisting IProfiler info
    ClassOfStatic_t *_classOfStaticMap;
    FieldOrStaticAttrTable_t *_fieldAttributesCache;
    FieldOrStaticAttrTable_t *_staticAttributesCache;
    UnorderedMap<std::pair<TR_OpaqueClassBlock *, int32_t>, TR_IsUnresolvedString> *_isUnresolvedStrCache;
+   int32_t _classUnloadReadMutexDepth;
+   bool _aotCacheStore; // True if the result of this compilation will be stored in AOT cache
+   uint32_t _methodIndex; // Index of the method being compiled in the array of methods of its defining class
+   const AOTCacheClassChainRecord *_definingClassChainRecord; // Used to store the result of the compilation in AOT cache
+
+   static int32_t _numClearedCaches; // number of instances JITServer was forced to clear its internal per-client caches
+
    }; // class CompilationInfoPerThreadRemote
 } // namespace TR
 

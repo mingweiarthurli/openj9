@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2019, 2020 IBM Corp. and others
+ * Copyright (c) 2019, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -55,6 +55,10 @@ class OMR_EXTENSIBLE TreeEvaluator: public J9::TreeEvaluator
    static TR::Register *irdbariEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *ardbarEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *ardbariEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *fwrtbarEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *fwrtbariEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *dwrtbarEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *dwrtbariEvaluator(TR::Node *node, TR::CodeGenerator *cg);
 
    static TR::Register *DIVCHKEvaluator(TR::Node *node, TR::CodeGenerator *cg);
 
@@ -88,6 +92,26 @@ class OMR_EXTENSIBLE TreeEvaluator: public J9::TreeEvaluator
 
    static TR::Register *instanceofEvaluator(TR::Node *node, TR::CodeGenerator *cg);
 
+   /**
+    * @brief Generates instructions for inlining instanceof
+    *
+    * @param[in] node: node
+    * @param[in]   cg: code generator
+    *
+    * @return register containing the result of instanceof
+    */
+   static TR::Register *VMinstanceofEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+
+   /**
+    * @brief Generates instructions for inlining checkcast
+    *
+    * @param[in] node: node
+    * @param[in]   cg: code generator
+    *
+    * @return register whcih is always NULL
+    */
+   static TR::Register *VMcheckcastEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+
    static TR::Register *checkcastAndNULLCHKEvaluator(TR::Node *node, TR::CodeGenerator *cg);
 
    static TR::Register *checkcastEvaluator(TR::Node *node, TR::CodeGenerator *cg);
@@ -107,6 +131,10 @@ class OMR_EXTENSIBLE TreeEvaluator: public J9::TreeEvaluator
    static TR::Register *asynccheckEvaluator(TR::Node *node, TR::CodeGenerator *cg);
 
    static TR::Register *ArrayStoreCHKEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+
+   static TR::Register *ArrayCHKEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+
+   static TR::Register *arraycopyEvaluator(TR::Node *node, TR::CodeGenerator *cg);
 
    static TR::Register *ZEROCHKEvaluator(TR::Node *node, TR::CodeGenerator *cg);
 
@@ -128,6 +156,8 @@ class OMR_EXTENSIBLE TreeEvaluator: public J9::TreeEvaluator
    static TR::Register *resolveAndNULLCHKEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *evaluateNULLCHKWithPossibleResolve(TR::Node *node, bool needResolution, TR::CodeGenerator *cg);
 
+   static TR::Register *BNDCHKwithSpineCHKEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+
    /**
     * @brief Handles direct call nodes
     * @param[in] node : node
@@ -135,6 +165,35 @@ class OMR_EXTENSIBLE TreeEvaluator: public J9::TreeEvaluator
     * @return register containing result
     */
    static TR::Register *directCallEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+
+   /**
+    * @brief Generates the sequence to handle cases where the monitor object is value type
+    * @param[in] node : the monitor enter/exit node
+    * @param[in] mergeLabel : the label to return from OOL code
+    * @param[in] helperCallLabel : the label for OOL code calling VM monitor enter/exit helpers. If null, an OOL code section is created.
+    * @param[in] objReg : register for the monitor object
+    * @param[in] temp1Reg : temporary register 1
+    * @param[in] temp2Reg : temporary register 2
+    * @param[in] cg : CodeGenerator
+    * @param[in] classFlag : class flag
+    */
+   static void generateCheckForValueMonitorEnterOrExit(TR::Node *node, TR::LabelSymbol *mergeLabel, TR::LabelSymbol *helperCallLabel, TR::Register *objReg, TR::Register *temp1Reg, TR::Register *temp2Reg, TR::CodeGenerator *cg, int32_t classFlag);
+
+   /**
+    * @brief Generates array copy code with array store check
+    * @param[in] node : node
+    * @param[in] cg : CodeGenerator
+    */
+   static void genArrayCopyWithArrayStoreCHK(TR::Node *node, TR::CodeGenerator *cg);
+
+   /**
+    * @brief Generates write barrier code for array copy
+    * @param[in] node : node
+    * @param[in] srcObjReg : register for the source object
+    * @param[in] dstObjReg : register for the destination object
+    * @param[in] cg : CodeGenerator
+    */
+   static void genWrtbarForArrayCopy(TR::Node *node, TR::Register *srcObjReg, TR::Register *dstObjReg, TR::CodeGenerator *cg);
    };
 
 } // ARM64

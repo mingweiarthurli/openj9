@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2018 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -328,6 +328,7 @@ mapEventType(J9VMThread *vmThread, J9JVMTIObjectIteratorData * data, IDATA type,
 		case J9GC_ROOT_TYPE_STRING_TABLE:
 		case J9GC_ROOT_TYPE_REMEMBERED_SET:
 		case J9GC_ROOT_TYPE_OWNABLE_SYNCHRONIZER_OBJECT:
+		case J9GC_ROOT_TYPE_CONTINUATION_OBJECT:
 			event.type = J9JVMTI_HEAP_EVENT_NONE_NOFOLLOW;
 			event.rootKind = JVMTI_HEAP_ROOT_OTHER;
 			break;
@@ -410,6 +411,7 @@ mapEventType(J9VMThread *vmThread, J9JVMTIObjectIteratorData * data, IDATA type,
 		case J9GC_ROOT_TYPE_CLASSLOADER:
 		case J9GC_ROOT_TYPE_JVMTI_TAG_REF:
 		case J9GC_REFERENCE_TYPE_UNKNOWN:
+		case J9GC_REFERENCE_TYPE_CLASS_FCC:
 		default:
 			event.type = J9JVMTI_HEAP_EVENT_NONE_NOFOLLOW;
 			break;

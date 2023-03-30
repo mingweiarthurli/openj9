@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2017, 2020 IBM Corp. and others
+# Copyright (c) 2017, 2022 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
 # OpenJDK Assembly Exception [2].
 #
 # [1] https://www.gnu.org/software/classpath/license.html
-# [2] http://openjdk.java.net/legal/assembly-exception.html
+# [2] https://openjdk.org/legal/assembly-exception.html
 #
 # SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 ################################################################################
@@ -28,20 +28,20 @@ include(OmrAssert)
 # of <omr_name>. If <omr_name> is not supplied it defaults to <j9_name>
 # with the leading 'J9VM_' replaced with 'OMR_'
 function(j9vm_shadowed_option j9_opt_name)
-    if(ARGC EQUAL 1)
-        message(FATAL_ERROR "Too few arguments passed to j9vm_shadowed_option")
-    elseif(ARGC EQUAL 2)
-        omr_assert(FATAL_ERROR TEST j9_opt_name MATCHES "^J9VM_" MESSAGE "expected name starting with J9VM_")
-        string(REGEX REPLACE "^J9VM_" "OMR_" omr_opt_name "${j9_opt_name}")
-        set(opt_comment "${ARGV1}")
-    elseif(ARGC EQUAL 3)
-        set(omr_opt_name "${ARGV1}")
-        set(opt_comment "${ARGV2}")
-    else()
-        message(FATAL_ERROR "Too many arguments passed to j9vm_shadowed_option")
-    endif()
-    option("${j9_opt_name}" "${opt_comment}")
-    set("${omr_opt_name}" "${${j9_opt_name}}" CACHE BOOL "" FORCE)
+	if(ARGC EQUAL 1)
+		message(FATAL_ERROR "Too few arguments passed to j9vm_shadowed_option")
+	elseif(ARGC EQUAL 2)
+		omr_assert(FATAL_ERROR TEST j9_opt_name MATCHES "^J9VM_" MESSAGE "expected name starting with J9VM_")
+		string(REGEX REPLACE "^J9VM_" "OMR_" omr_opt_name "${j9_opt_name}")
+		set(opt_comment "${ARGV1}")
+	elseif(ARGC EQUAL 3)
+		set(omr_opt_name "${ARGV1}")
+		set(opt_comment "${ARGV2}")
+	else()
+		message(FATAL_ERROR "Too many arguments passed to j9vm_shadowed_option")
+	endif()
+	option("${j9_opt_name}" "${opt_comment}")
+	set("${omr_opt_name}" "${${j9_opt_name}}" CACHE BOOL "" FORCE)
 endfunction()
 
 # This replicates the options from j9.flags that I felt were important. Blank lines
@@ -51,7 +51,7 @@ endfunction()
 
 j9vm_shadowed_option(J9VM_GC_ALLOCATION_TAX "Enable allocation tax capabilities")
 j9vm_shadowed_option(J9VM_GC_BATCH_CLEAR_TLH "Zero any TLH allocated")
-j9vm_shadowed_option(J9VM_GC_COMBINATION_SPEC "Set on specs which implement LIR 16325:  reduce memory footprint by combining multiple sidecars into the same set of libraries.")
+j9vm_shadowed_option(J9VM_GC_COMBINATION_SPEC "Set on specs which implement LIR 16325: reduce memory footprint by combining multiple sidecars into the same set of libraries.")
 j9vm_shadowed_option(J9VM_GC_CONCURRENT_SWEEP "Enable concurrent sweep in Modron")
 j9vm_shadowed_option(J9VM_GC_DEBUG_ASSERTS "Specialized GC assertions are used instead of standard trace asserts for GC assertions")
 
@@ -59,7 +59,7 @@ j9vm_shadowed_option(J9VM_GC_DEBUG_ASSERTS "Specialized GC assertions are used i
 # if the data was stored in a contiguous region of memory. All of the array data is stored in a unique region (not with spine); hence, all arraylets
 # become discontiguous whenever this flag is enabled. Since there won’t be any empty arraylet leaves, then arrayoid NULL pointers are no longer required since
 # all data is stored in a unique region. It additionaly reduces footprint, mainly for JNI primitive array critical.
-j9vm_shadowed_option(J9VM_GC_ENABLE_DOUBLE_MAP OMR_GC_DOUBLE_MAP_ARRAYLETS "Allows LINUX systems to double map arrays that are stored as arraylets.")
+j9vm_shadowed_option(J9VM_GC_ENABLE_DOUBLE_MAP OMR_GC_DOUBLE_MAP_ARRAYLETS "Allows LINUX and OSX systems to double map arrays that are stored as arraylets.")
 j9vm_shadowed_option(J9VM_GC_LARGE_OBJECT_AREA "Enable large object area (LOA) support")
 j9vm_shadowed_option(J9VM_GC_LEAF_BITS "Add leaf bit instance descriptions to classes")
 j9vm_shadowed_option(J9VM_GC_MINIMUM_OBJECT_SIZE "Guarantee a minimum size to all objects allocated")
@@ -68,11 +68,11 @@ j9vm_shadowed_option(J9VM_GC_MODRON_CONCURRENT_MARK "Enable concurrent mark in M
 j9vm_shadowed_option(J9VM_GC_MODRON_SCAVENGER "Enable scavenger in Modron")
 j9vm_shadowed_option(J9VM_GC_MODRON_STANDARD "Enable Modron standard configuration")
 j9vm_shadowed_option(J9VM_GC_NON_ZERO_TLH "Allocator might use special non-zeroed thread local heap for objects")
-j9vm_shadowed_option(J9VM_GC_REALTIME  "Realtime Garbage Collection is supported")
+j9vm_shadowed_option(J9VM_GC_REALTIME "Realtime Garbage Collection is supported")
 j9vm_shadowed_option(J9VM_GC_SEGREGATED_HEAP "Enable Segregated Heap model")
 j9vm_shadowed_option(J9VM_GC_THREAD_LOCAL_HEAP "Allocator uses a thread local heap for objects")
-j9vm_shadowed_option(J9VM_GC_TLH_PREFETCH_FTA  "Enable tlhPrefetchFTA")
-j9vm_shadowed_option(J9VM_GC_VLHGC  "Enables the Very Large Heap Garbage Collector")
+j9vm_shadowed_option(J9VM_GC_TLH_PREFETCH_FTA "Enable tlhPrefetchFTA")
+j9vm_shadowed_option(J9VM_GC_VLHGC "Enables the Very Large Heap Garbage Collector")
 
 option(J9VM_INTERP_AOT_COMPILE_SUPPORT "Controls if the AOT compilation support is included in the VM")
 option(J9VM_INTERP_AOT_RUNTIME_SUPPORT "Controls if the AOT runtime support is included in the VM")
@@ -97,7 +97,7 @@ option(J9VM_INTERP_NEW_HEADER_SHAPE "Temporary flag for experimentation with the
 option(J9VM_INTERP_PROFILING_BYTECODES "If enabled, profiling versions of branch and call bytecodes are available. These gather additional info for the JIT for optimal code generation")
 option(J9VM_INTERP_ROMABLE_AOT_SUPPORT "ROMable AOT Support for TJ Watson")
 
-option(J9VM_INTERP_TRACING "DEBUGGING FEATURE.  Determines if the interpreter produces debug information at every bytecode.")
+option(J9VM_INTERP_TRACING "DEBUGGING FEATURE. Determines if the interpreter produces debug information at every bytecode.")
 option(J9VM_INTERP_TWO_PASS_EXCLUSIVE "Exclusive VM access - Set halt bit in one pass, count responders in another pass")
 
 option(J9VM_INTERP_USE_SPLIT_SIDE_TABLES "Use split side tables for handling constant pool entry shared between multiple invoke bytecodes")
@@ -123,18 +123,23 @@ option(J9VM_MODULE_WINDBG "Enables compilation of the windbg module.")
 option(J9VM_MODULE_ZIP "Enables compilation of the zip module.")
 option(J9VM_MODULE_ZLIB "Enables compilation of the zlib module.")
 
+option(J9VM_OPT_CRIU_SUPPORT "Enables support for CRIU Java API's")
+
 j9vm_shadowed_option(J9VM_OPT_CUDA "Add support for CUDA")
 
 option(J9VM_OPT_DYNAMIC_LOAD_SUPPORT "Determines if the dynamic loader is included.")
-option(J9VM_OPT_FIPS "Add supports for FIPs")
-option(J9VM_OPT_FRAGMENT_RAM_CLASSES "Transitional flag for the the GC during the switch to fragmented RAM class allocation")
+option(J9VM_OPT_FIPS "Add supports for FIPS")
+option(J9VM_OPT_FRAGMENT_RAM_CLASSES "Transitional flag for the GC during the switch to fragmented RAM class allocation")
 
 option(J9VM_OPT_JVMTI "Support for the JVMTI interface")
 option(J9VM_OPT_JXE_LOAD_SUPPORT "Controls if main will allow -jxe: and relocate the disk image for you.")
 
-option(J9VM_OPT_METHOD_HANDLE "Turns on methodhandle support")
+option(J9VM_OPT_METHOD_HANDLE "Enables support for OpenJ9 MethodHandles. J9VM_OPT_OPENJDK_METHODHANDLE should be disabled.")
+option(J9VM_OPT_METHOD_HANDLE_COMMON "Enables common dependencies between OpenJ9 and OpenJDK MethodHandles.")
 option(J9VM_OPT_MODULE "Turns on module support")
 option(J9VM_OPT_MULTI_VM "Decides if multiple VMs can be created in the same address space")
+option(J9VM_OPT_OPENJDK_METHODHANDLE "Enables support for OpenJDK MethodHandles. J9VM_OPT_METHOD_HANDLE should be disabled.")
+option(J9VM_OPT_OPENJDK_THREAD_SUPPORT "Enables OpenJDK Thread support for Project Loom.")
 
 option(J9VM_OPT_PANAMA "Enables support for Project Panama features such as native method handles")
 option(J9VM_OPT_VALHALLA_VALUE_TYPES "Enables support for Project Valhalla Value Types")
@@ -148,5 +153,6 @@ option(J9VM_OPT_ZLIB_SUPPORT "Controls if the VM includes the zlib compression l
 
 option(J9VM_PORT_RUNTIME_INSTRUMENTATION "Controls whether runtime instrumentation support exists on this platform.")
 
-option(J9VM_RAS_DUMP_AGENTS "Support multiple dump agents, instead of just console dump.")
-option(J9VM_RAS_EYE_CATCHERS "Add eyecatcher blocks to key structures")
+option(J9VM_USE_RDYNAMIC "Link using the -rdynamic option (Linux only)" OFF)
+
+option(J9VM_ZOS_3164_INTEROPERABILITY "Enables support for 64-bit zOS to interoperate with 31-bit JNI native targets.")

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2018 IBM Corp. and others
+ * Copyright (c) 2001, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -35,7 +35,7 @@ public class TestExampleTestCase
 		return true;
 	}
 	/** A test case help method. The method name must start with 'help' and the remainder
-	 *  of the name must match the postfix of the test case method (ie ie whatever comes
+	 *  of the name must match the postfix of the test case method (ie whatever comes
 	 *  after the 'test' prefix. ex:  testCase1 -> helpCase1)
 	 *   
 	 * @return a String containing test case description

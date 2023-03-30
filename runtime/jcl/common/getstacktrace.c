@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1998, 2017 IBM Corp. and others
+ * Copyright (c) 1998, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -32,26 +32,45 @@
 #include "ut_j9jcl.h"
 #include "vmaccess.h"
 
-
-
+/**
+ * Creates a throwable object containing the stacktrace of threadObject.
+ * @param[in] currentThread
+ * @param[in] targetThread the J9VMThread that threadObject is running on.
+ * @param[in] skipCount number of frames to skip during stackwalk (ignored if walking continuation stack).
+ * @param[in] threadObject the target thread object to retrieve stacktrace on.
+ * @return throwable object
+ */
 j9object_t
-getStackTraceForThread(J9VMThread *currentThread, J9VMThread *targetThread, UDATA skipCount)
+getStackTraceForThread(J9VMThread *currentThread, J9VMThread *targetThread, UDATA skipCount, j9object_t threadObject)
 {
 	J9JavaVM * vm = currentThread->javaVM;
 	J9InternalVMFunctions * vmfns = vm->internalVMFunctions;
 	j9object_t throwable = NULL;
-	J9StackWalkState walkState;
-	UDATA rc;
-
+	J9StackWalkState walkState = {0};
+	UDATA rc = J9_STACKWALK_RC_NONE;
+#if JAVA_SPEC_VERSION >= 19
+	J9VMContinuation *continuation = targetThread->currentContinuation;
+#endif /* JAVA_SPEC_VERSION >= 19 */
 	/* Halt the target thread */
 	vmfns->haltThreadForInspection(currentThread, targetThread);
 
 	/* walk stack and cache PCs */
-	walkState.walkThread = targetThread;
 	walkState.flags = J9_STACKWALK_CACHE_PCS | J9_STACKWALK_WALK_TRANSLATE_PC | J9_STACKWALK_SKIP_INLINES | J9_STACKWALK_INCLUDE_NATIVES | J9_STACKWALK_VISIBLE_ONLY;
-	walkState.skipCount = skipCount;
-	rc = vm->walkStackFrames(currentThread, &walkState);
-
+#if JAVA_SPEC_VERSION >= 19
+	if ((NULL != continuation) && (threadObject != targetThread->threadObject)) {
+		/* If targetThread has a continuation mounted and its current threadObject doesn't match the
+		 * target threadObject, then the carrier thread's stacktrace is retrieved through the cached
+		 * state in the continuation.
+		 */
+		walkState.skipCount = 0;
+		rc = vmfns->walkContinuationStackFrames(currentThread, continuation, &walkState);
+	} else
+#endif /* JAVA_SPEC_VERSION >= 19 */
+	{
+		walkState.walkThread = targetThread;
+		walkState.skipCount = skipCount;
+		rc = vm->walkStackFrames(currentThread, &walkState);
+	}
 	/* Now that the stack trace has been copied, resume the thread */
 	vmfns->resumeThreadForInspection(currentThread, targetThread);
 
@@ -71,7 +90,7 @@ fail:
 }
 
 j9object_t
-createStackTraceThrowable(J9VMThread *currentThread,  const UDATA *frames, UDATA maxFrames)
+createStackTraceThrowable(J9VMThread *currentThread, const UDATA *frames, UDATA maxFrames)
 {
 	J9JavaVM *vm = currentThread->javaVM;
 	J9InternalVMFunctions *vmfns = vm->internalVMFunctions;

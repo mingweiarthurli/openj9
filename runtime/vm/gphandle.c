@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -62,6 +62,10 @@ static UDATA throwConditionException(J9VMThread *vmThread, struct ConditionExcep
 #include "omrsig.h"
 #endif /* defined(J9VM_PORT_OMRSIG_SUPPORT) */
 
+#if defined(J9VM_ZOS_3164_INTEROPERABILITY)
+#include "ffi.h"
+#endif
+
 #define J9DO_NOT_WRITE_DUMP "J9NO_DUMPS"
 #define INFO_COLS 4
 
@@ -80,9 +84,7 @@ typedef struct J9CrashData {
 	void* gpInfo;
 	char *consoleOutputBuf;
 	size_t sizeofConsoleOutputBuf;
-#ifdef J9VM_RAS_EYECATCHERS
 J9RASCrashInfo *rasCrashInfo;
-#endif
 } J9CrashData;
 
 typedef struct J9WriteGPInfoData {
@@ -128,17 +130,13 @@ static UDATA isCallerClassJavaNio(J9VMThread *currentThread, J9StackWalkState *w
 static UDATA sigBusHandler(J9VMThread *vmThread, void* gpInfo);
 #endif /* defined(J9VM_INTERP_USE_UNSAFE_HELPER) */
 
-#ifdef J9VM_RAS_EYECATCHERS
 static UDATA setupRasCrashInfo(struct J9PortLibrary* portLibrary, void* userData);
-#endif
 
 #if defined(J9VM_INTERP_NATIVE_SUPPORT)
 static UDATA writeJITInfo (J9VMThread* vmThread, char* s, UDATA length, void* gpInfo);
 #endif /* J9VM_INTERP_NATIVE_SUPPORT */
 
-#if defined(J9VM_RAS_DUMP_AGENTS)
 static void printBacktrace(struct J9JavaVM *vm, void* gpInfo);
-#endif /* J9VM_RAS_DUMP_AGENTS */
 
 #if defined(J9VM_ARCH_X86) && defined(J9VM_ENV_DATA64)
 #define UNSAFE_TARGET_REGISTER J9PORT_SIG_GPR_AMD64_RDI
@@ -151,8 +149,8 @@ static void printBacktrace(struct J9JavaVM *vm, void* gpInfo);
 /* The target register is GPR2 */
 #define UNSAFE_TARGET_REGISTER 2
 #elif defined(J9VM_ARCH_RISCV)
-/* The target register is GPR1 */
-#define UNSAFE_TARGET_REGISTER 1
+/* The target register is GPR15 */
+#define UNSAFE_TARGET_REGISTER 15
 #elif defined(J9ZOS390)
 /* The target register is GPR1 */
 #define UNSAFE_TARGET_REGISTER 1
@@ -182,17 +180,13 @@ dumpVmDetailString(struct J9PortLibrary *portLibrary, J9JavaVM* vm)
 	PORT_ACCESS_FROM_PORT(portLibrary);
 	struct vmDetails details;
 
-#if defined(J9VM_RAS_EYECATCHERS)
-
 	if (NULL != vm->j9ras) {
 		details.osBuf = (char*)vm->j9ras->osname;
 		details.versionBuf = (char*)vm->j9ras->osversion;
 		details.cpuBuf = (char*)vm->j9ras->osarch;
 		details.cpus = vm->j9ras->cpus;
 		details.mem = vm->j9ras->memory;
-	} else
-#endif	
-	{
+	} else {
 		getVmDetailsFromPortLib(portLibrary, &details);
 	}
 
@@ -200,7 +194,6 @@ dumpVmDetailString(struct J9PortLibrary *portLibrary, J9JavaVM* vm)
 			details.osBuf ? details.osBuf : "unknown", details.versionBuf ? details.versionBuf : "unknown");
 	j9tty_printf(portLibrary, "CPU=%s (%d logical CPUs) (0x%llx RAM)\n",
 			details.cpuBuf ? details.cpuBuf : "unknown", details.cpus, details.mem);
-
 }
 
 static UDATA
@@ -711,9 +704,7 @@ vmSignalHandler(struct J9PortLibrary* portLibrary, U_32 gpType, void* gpInfo, vo
 	PORT_ACCESS_FROM_PORT(portLibrary);
 	char consoleOutputBuf[3560]; /* Reduced from 4096 so that stack frame fits in one page */
 	J9RecursiveCrashData recursiveCrashData;
-#ifdef J9VM_RAS_EYECATCHERS
 	J9RASCrashInfo rasCrashInfo;
-#endif
 
 	/* We no longer have J9VMToken, but we must still use the second slot to 
 	 * figure out whether we were passed a VM or a Thread in this case, because the stack swap code
@@ -822,7 +813,6 @@ vmSignalHandler(struct J9PortLibrary* portLibrary, U_32 gpType, void* gpInfo, vo
 
 #endif
 
-#ifdef J9VM_RAS_EYECATCHERS
 	crashData.rasCrashInfo = &rasCrashInfo;
 
 	recursiveCrashData.protectedFunctionName = "setupRasCrashInfo";
@@ -831,7 +821,6 @@ vmSignalHandler(struct J9PortLibrary* portLibrary, U_32 gpType, void* gpInfo, vo
 			recursiveCrashHandler, &recursiveCrashData,
 			J9PORT_SIG_FLAG_MAY_RETURN | J9PORT_SIG_FLAG_SIGALLSYNC,
 			&result);
-#endif
 
 	recursiveCrashData.protectedFunctionName = "writeCrashDataToConsole";
 	j9sig_protect(
@@ -898,14 +887,13 @@ vmSignalHandler(struct J9PortLibrary* portLibrary, U_32 gpType, void* gpInfo, vo
 static void
 generateSystemDump(struct J9PortLibrary* portLibrary, void* gpInfo)
 {
-	char dumpName[EsMaxPath];
-	UDATA dumpCreateReturnCode;
-	IDATA getEnvForDumpReturnCode;
 	PORT_ACCESS_FROM_PORT(portLibrary);
+	IDATA getEnvForDumpReturnCode = j9sysinfo_get_env(J9DO_NOT_WRITE_DUMP, NULL, 0);
 
-	getEnvForDumpReturnCode = j9sysinfo_get_env(J9DO_NOT_WRITE_DUMP, NULL, 0);
-	if (getEnvForDumpReturnCode != 0) {
+	if (-1 == getEnvForDumpReturnCode) {
 		/* failed to find the env var, so write the dump */
+		char dumpName[EsMaxPath];
+		UDATA dumpCreateReturnCode = 0;
 		*dumpName = '\0';
 #ifdef LINUX
 		/* Ensure that userdata argument is NULL on Linux. */
@@ -1043,7 +1031,7 @@ writeJITInfo(J9VMThread* vmThread, char* s, UDATA length, void* gpInfo)
 		return numBytesWritten;
 	}
 
-	if((vmThread->omrVMThread->vmState & J9VMSTATE_MAJOR) == J9VMSTATE_JIT_CODEGEN) {
+	if((vmThread->omrVMThread->vmState & J9VMSTATE_MAJOR) == J9VMSTATE_JIT) {
 		if(vmThread->jitMethodToBeCompiled) {
 			J9Method *ramMethod = vmThread->jitMethodToBeCompiled;
 			J9Class *clazz = J9_CLASS_FROM_METHOD(ramMethod);
@@ -1153,16 +1141,13 @@ generateDiagnosticFiles(struct J9PortLibrary* portLibrary, void* userData)
 	J9VMThread *vmThread = data->vmThread;
 	void* gpInfo = data->gpInfo;
 
-#ifdef J9VM_RAS_DUMP_AGENTS
 	gpHaveRASdump = ( vm->j9rasDumpFunctions && vm->j9rasDumpFunctions->reserved != 0 );
-#endif
 
 	/* Generate primary crash dump (but only if RASdump is not activated) */
 	if (!gpHaveRASdump) {
 		generateSystemDump(portLibrary, gpInfo);
 	}
 
-#ifdef J9VM_RAS_DUMP_AGENTS
 	if (vmThread) {
 		vmThread->gpInfo = gpInfo;
 		printBacktrace(vm, gpInfo);
@@ -1172,15 +1157,10 @@ generateDiagnosticFiles(struct J9PortLibrary* portLibrary, void* userData)
 	if (gpHaveRASdump) {
 		J9DMP_TRIGGER( vm, vmThread, J9RAS_DUMP_ON_GP_FAULT );
 	}
-#else
-	gpThreadDump(vm, vmThread);
-#endif
 
 	return 0;
-
 }
 
-#ifdef J9VM_RAS_EYECATCHERS
 static UDATA
 setupRasCrashInfo(struct J9PortLibrary* portLibrary, void* userData)
 {
@@ -1196,7 +1176,6 @@ setupRasCrashInfo(struct J9PortLibrary* portLibrary, void* userData)
 
 	return 0;
 }
-#endif
 
 static UDATA 
 writeCrashDataToConsole(struct J9PortLibrary* portLibrary, void* userData)
@@ -1222,9 +1201,7 @@ writeCrashDataToConsole(struct J9PortLibrary* portLibrary, void* userData)
 	*s = '\0';
 	bufStart = s;
 
-#ifdef J9VM_RAS_DUMP_AGENTS
 	gpHaveRASdump = ( vm->j9rasDumpFunctions && vm->j9rasDumpFunctions->reserved != 0 );
-#endif
 
 	description = getSignalDescription(portLibrary, gpType);
 	j9tty_printf(portLibrary, "Unhandled exception\nType=%s vmState=0x%08.8x\n", description, vmThread ? vmThread->omrVMThread->vmState : -1);
@@ -1316,45 +1293,55 @@ executeAbortHook(struct J9PortLibrary* portLibrary, void* userData)
 	J9JavaVM* vm = data->javaVM;
 
 	if (vm->abortHook) {
-		vm->abortHook();
+#if defined(J9VM_ZOS_3164_INTEROPERABILITY)
+		if (J9_IS_31BIT_INTEROP_TARGET(vm->abortHook)) {
+			ffi_cif cif_t;
+			ffi_cif * const cif = &cif_t;
+
+			if (FFI_OK == ffi_prep_cif(cif, FFI_CEL4RO31, 0, &ffi_type_void, NULL)) {
+				ffi_call(cif, FFI_FN(vm->abortHook), NULL, NULL);
+			}
+		} else
+#endif /* defined(J9VM_ZOS_3164_INTEROPERABILITY) */
+		{
+			vm->abortHook();
+		}
 	}
 
 	return 0;
 }
 
-#ifdef J9VM_RAS_DUMP_AGENTS
 static void
-printBacktrace(struct J9JavaVM *vm, void* gpInfo)
+printBacktrace(struct J9JavaVM *vm, void *gpInfo)
 {
-	J9PlatformThread thread;
-	J9PlatformStackFrame *frame;
-
 	PORT_ACCESS_FROM_JAVAVM(vm);
+	OMRPORT_ACCESS_FROM_J9PORT(PORTLIB);
+	J9PlatformStackFrame *frame = NULL;
+	J9PlatformThread thread;
 
 	memset(&thread, 0, sizeof(thread));
 
-	j9tty_printf(PORTLIB, "----------- Stack Backtrace -----------\n");
-	j9introspect_backtrace_thread(&thread, NULL, gpInfo);
-	j9introspect_backtrace_symbols(&thread, NULL);
+	omrtty_printf("----------- Stack Backtrace -----------\n");
+	omrintrospect_backtrace_thread(&thread, NULL, gpInfo);
+	omrintrospect_backtrace_symbols_ex(&thread, NULL, 0);
 
 	frame = thread.callstack;
 	while (frame) {
 		J9PlatformStackFrame *tmp = frame;
 
-		if (frame->symbol) {
-			j9tty_printf(PORTLIB, "%s\n", frame->symbol);
-			j9mem_free_memory(frame->symbol);
+		if (NULL != frame->symbol) {
+			omrtty_printf("%s\n", frame->symbol);
+			omrmem_free_memory(frame->symbol);
 		} else {
-			j9tty_printf(PORTLIB, "0x%p\n", (void*)frame->instruction_pointer);
+			omrtty_printf("0x%p\n", (void *)frame->instruction_pointer);
 		}
 
 		frame = frame->parent_frame;
-		j9mem_free_memory(tmp);
+		omrmem_free_memory(tmp);
 	}
 
-	j9tty_printf(PORTLIB, "---------------------------------------\n");
+	omrtty_printf("---------------------------------------\n");
 }
-#endif /* ifdef J9VM_RAS_DUMP_AGENTS */
 
 #if defined(J9VM_PORT_ZOS_CEEHDLRSUPPORT)
 void

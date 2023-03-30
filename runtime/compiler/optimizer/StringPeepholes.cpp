@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -1000,7 +1000,7 @@ TR::TreeTop *TR_StringPeepholes::detectBDPattern(TR::TreeTop *tt, TR::TreeTop *e
    TR_BDChain *prevInChain = NULL;
    TR_BDChain *firstInChain = NULL;
    if ((node->getOpCodeValue() == TR::acall) &&
-       !node->getSymbolReference()->isUnresolved() &&
+        node->getSymbolReference()->getSymbol()->isResolvedMethod() &&
        ((node->getSymbolReference()->getSymbol()->getResolvedMethodSymbol()->getRecognizedMethod() == TR::java_math_BigDecimal_valueOf) ||
         (node->getSymbolReference()->getSymbol()->getResolvedMethodSymbol()->getRecognizedMethod() == TR::java_math_BigDecimal_valueOf_J)))
       {
@@ -1525,7 +1525,7 @@ TR::TreeTop *TR_StringPeepholes::detectBDPattern(TR::TreeTop *tt, TR::TreeTop *e
 
 //-------------------------- detectPattern ----------------------------------
 // Collects stats about string peepholes patterns
-// tt is the the treetop that has the TR::New opcode ( for new(StringBuffer) )
+// tt is the treetop that has the TR::New opcode ( for new(StringBuffer) )
 // Will return 0 if it cannot apply the transformation
 //---------------------------------------------------------------------------
 TR::TreeTop *TR_StringPeepholes::detectPattern(TR::Block *block, TR::TreeTop *tt, bool useStringBuffer)
@@ -1886,14 +1886,14 @@ TR::TreeTop *TR_StringPeepholes::detectPattern(TR::Block *block, TR::TreeTop *tt
                                     initSymRef1);
          }
       }
-   else if ((stringCount == 3))
+   else if (stringCount == 3)
       {
       TR::SymbolReference *initSymRef2 = findSymRefForOptMethod(SPH_String_init_SSS) ? getSymRefTab()->findOrCreateMethodSymbol(stringNode->getSymbolReference()->getOwningMethodIndex(), -1, findSymRefForOptMethod(SPH_String_init_SSS)->getSymbol()->getResolvedMethodSymbol()->getResolvedMethod(), TR::MethodSymbol::Special) : 0;
       initCall = TR::Node::createWithSymRef(TR::call, 4, 4,
                                  stringNode, appendedString[0], appendedString[1], appendedString[2],
                                  initSymRef2);
       }
-   else if ((stringCount == 5))
+   else if (stringCount == 5)
       {
       TR::SymbolReference *initSymRef7 = findSymRefForOptMethod(SPH_String_init_ISISS) ? getSymRefTab()->findOrCreateMethodSymbol(stringNode->getSymbolReference()->getOwningMethodIndex(), -1, findSymRefForOptMethod(SPH_String_init_ISISS)->getSymbol()->getResolvedMethodSymbol()->getResolvedMethod(), TR::MethodSymbol::Special) : 0;
       initCall = TR::Node::createWithSymRef(TR::call, 6, 6,
@@ -2050,8 +2050,14 @@ bool TR_StringPeepholes::classesRedefined()
 
 bool TR_StringPeepholes::classRedefined(TR_OpaqueClassBlock *clazz)
    {
-   if (!clazz)
-      return true;
+   // The class in question may not have been loaded yet. For example in JDK11 the JCL removed most (all?) uses of the
+   // StringBuffer class, thus this class is never loaded until `main` is reached. If the class is not loaded it could
+   // not have been redefined, so we return false here.
+   if (clazz == NULL)
+      {
+      return false;
+      }
+
    TR_PersistentClassInfo *clazzInfo = comp()->getPersistentInfo()->getPersistentCHTable()->findClassInfoAfterLocking(clazz, fe());
    return !clazzInfo || clazzInfo->classHasBeenRedefined();
    }

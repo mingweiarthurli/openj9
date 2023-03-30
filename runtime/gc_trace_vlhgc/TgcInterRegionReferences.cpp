@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -104,6 +104,7 @@ tgcHookReportInterRegionReferenceCounting(J9HookInterface** hookInterface, UDATA
 				case GC_ObjectModel::SCAN_ATOMIC_MARKABLE_REFERENCE_OBJECT:
 				case GC_ObjectModel::SCAN_MIXED_OBJECT:
 				case GC_ObjectModel::SCAN_OWNABLESYNCHRONIZER_OBJECT:
+				case GC_ObjectModel::SCAN_CONTINUATION_OBJECT:
 				case GC_ObjectModel::SCAN_CLASS_OBJECT:
 				case GC_ObjectModel::SCAN_CLASSLOADER_OBJECT:
 				{
@@ -111,9 +112,6 @@ tgcHookReportInterRegionReferenceCounting(J9HookInterface** hookInterface, UDATA
 
 					GC_MixedObjectIterator mixedObjectIterator(javaVM->omrVM, object);
 					GC_SlotObject *slotObject = NULL;
-					UDATA thisObjectIn = 0;
-					UDATA thisObjectOut = 0;
-					UDATA thisObjectBeyond = 0;
 					bool doesPointOut = false;
 					bool doesPointBeyond = false;
 
@@ -123,17 +121,14 @@ tgcHookReportInterRegionReferenceCounting(J9HookInterface** hookInterface, UDATA
 							MM_HeapRegionDescriptorVLHGC *dest = (MM_HeapRegionDescriptorVLHGC *)regionManager->tableDescriptorForAddress(target);
 							if (dest == region) {
 								inSlotCount += 1;
-								thisObjectIn += 1;
 							} else if (MM_CompactGroupManager::getCompactGroupNumber(env, dest) == regionCompactGroup) {
 								doesPointOut = true;
 								cardDoesPointOut = true;
 								outSlotCount += 1;
-								thisObjectOut += 1;
 							} else {
 								doesPointBeyond = true;
 								cardDoesPointOut = true;
 								beyondSlotCount += 1;
-								thisObjectBeyond += 1;
 							}
 						}
 					}
@@ -152,9 +147,6 @@ tgcHookReportInterRegionReferenceCounting(J9HookInterface** hookInterface, UDATA
 
 					GC_PointerArrayIterator pointerArrayIterator(javaVM, object);
 					GC_SlotObject *slotObject = NULL;
-					UDATA thisObjectIn = 0;
-					UDATA thisObjectOut = 0;
-					UDATA thisObjectBeyond = 0;
 					bool doesPointOut = false;
 					bool doesPointBeyond = false;
 
@@ -164,17 +156,14 @@ tgcHookReportInterRegionReferenceCounting(J9HookInterface** hookInterface, UDATA
 							MM_HeapRegionDescriptorVLHGC *dest = (MM_HeapRegionDescriptorVLHGC *)regionManager->tableDescriptorForAddress(target);
 							if (dest == region) {
 								inSlotCount += 1;
-								thisObjectIn += 1;
 							} else if (MM_CompactGroupManager::getCompactGroupNumber(env, dest) == regionCompactGroup) {
 								doesPointOut = true;
 								cardDoesPointOut = true;
 								outSlotCount += 1;
-								thisObjectOut += 1;
 							} else {
 								doesPointBeyond = true;
 								cardDoesPointOut = true;
 								beyondSlotCount += 1;
-								thisObjectBeyond += 1;
 							}
 						}
 					}

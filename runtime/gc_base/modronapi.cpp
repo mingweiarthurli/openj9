@@ -1,6 +1,5 @@
-
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -31,7 +30,6 @@
 #include "modronapi.hpp"
 #include "modronopt.h"
 
-#include "Dispatcher.hpp"
 #include "EnvironmentBase.hpp"
 #include "GCExtensions.hpp"
 #include "HeapMemorySnapshot.hpp"
@@ -43,11 +41,14 @@
 #include "ObjectAllocationInterface.hpp"
 #include "ObjectModel.hpp"
 #include "OwnableSynchronizerObjectBuffer.hpp"
+#include "ContinuationObjectBuffer.hpp"
+#include "ParallelDispatcher.hpp"
 #include "MemorySpace.hpp"
 #include "MemorySubSpace.hpp"
 #include "MemoryPoolLargeObjects.hpp"
 #include "VMInterface.hpp"
 #include "VMThreadListIterator.hpp"
+#include "VMAccess.hpp"
 
 extern "C" {
 
@@ -81,13 +82,27 @@ j9gc_modron_global_collect_with_overrides(J9VMThread *vmThread, U_32 gcCode)
 	MM_EnvironmentBase *env = MM_EnvironmentBase::getEnvironment(vmThread->omrVMThread);
 
 	if ((J9MMCONSTANT_EXPLICIT_GC_SYSTEM_GC == gcCode) || (J9MMCONSTANT_EXPLICIT_GC_NOT_AGGRESSIVE == gcCode)) {
-		if(MM_GCExtensions::getExtensions(env)->disableExplicitGC) {
+		if (MM_GCExtensions::getExtensions(env)->disableExplicitGC) {
 			return 0;
 		}
 	}
 
+	/* Prevent thread to respond to safe point; GC has higher priority */
+	VM_VMAccess::setPublicFlags(vmThread, J9_PUBLIC_FLAGS_NOT_AT_SAFE_POINT);
 	MM_GCExtensions::getExtensions(env)->heap->systemGarbageCollect(env, gcCode);
-	
+	VM_VMAccess::clearPublicFlags(vmThread, J9_PUBLIC_FLAGS_NOT_AT_SAFE_POINT);
+
+	/* During GC that we just performed, this thread might have temporarily released and required VM access, misleading other threads
+	 * that we will not proceed running (like waking up an inspector thread to walk this thread's stack). Hence we have to check again if we are expected to halt.
+	 * An exceptional case is if this thread already blocked all other threads globally (for example RAS DUMP acquired exclusive VM access prior to entering here),
+	 * in which case we are safe to proceed - with such externally obtained exclusive VM access, we would not have yielded VM access and would not have mislead other threads.
+	 * On the other side, while still holding exclusive, blocking would be wrong, leading to a deadlock.
+	 */
+	if (J9_ARE_ANY_BITS_SET(vmThread->publicFlags, J9_PUBLIC_FLAGS_HALT_THREAD_ANY) && (0 == vmThread->omrVMThread->exclusiveCount)) {
+		vmThread->javaVM->internalVMFunctions->internalReleaseVMAccess(vmThread);
+		vmThread->javaVM->internalVMFunctions->internalAcquireVMAccess(vmThread);
+	}
+
 	return 0;
 }
 
@@ -96,7 +111,14 @@ j9gc_modron_local_collect(J9VMThread *vmThread)
 {
 	MM_EnvironmentBase *env = MM_EnvironmentBase::getEnvironment(vmThread->omrVMThread);
 
+	VM_VMAccess::setPublicFlags(vmThread, J9_PUBLIC_FLAGS_NOT_AT_SAFE_POINT);
 	((MM_MemorySpace *)vmThread->omrVMThread->memorySpace)->localGarbageCollect(env, J9MMCONSTANT_IMPLICIT_GC_DEFAULT);
+	VM_VMAccess::clearPublicFlags(vmThread, J9_PUBLIC_FLAGS_NOT_AT_SAFE_POINT);
+
+	if (J9_ARE_ANY_BITS_SET(vmThread->publicFlags, J9_PUBLIC_FLAGS_HALT_THREAD_ANY) && (0 == vmThread->omrVMThread->exclusiveCount)) {
+		vmThread->javaVM->internalVMFunctions->internalReleaseVMAccess(vmThread);
+		vmThread->javaVM->internalVMFunctions->internalAcquireVMAccess(vmThread);
+	}
 
 	return 0;
 }
@@ -728,6 +750,9 @@ j9gc_get_gc_cause(OMR_VMThread *omrVMthread)
 			ret = "collect due to JVM becomes idle";
 			break;
 #endif
+		case J9MMCONSTANT_EXPLICIT_GC_PREPARE_FOR_CHECKPOINT:
+			ret = "collect due to checkpoint";
+			break;
 		case J9MMCONSTANT_IMPLICIT_GC_COMPLETE_CONCURRENT :
 			ret = "concurrent collection must be completed";
 			break;
@@ -933,51 +958,51 @@ j9gc_get_bytes_allocated_by_thread(J9VMThread *vmThread)
 
 /**
  * Return information about the total CPU time consumed by GC threads, as well
- * as the number of GC threads. The time for the master and slave threads is
- * reported separately, with the slave threads returned as a total.
+ * as the number of GC threads. The time for the main and worker threads is
+ * reported separately, with the worker threads returned as a total.
  * 
  * @parm[in] vm The J9JavaVM
- * @parm[out] masterCpuMillis The amount of CPU time spent in the GC by the master thread, in milliseconds
- * @parm[out] slaveCpuMillis The amount of CPU time spent in the GC by the all slave threads, in milliseconds
- * @parm[out] maxThreads The maximum number of GC slave threads
- * @parm[out] currentThreads The number of GC slave threads that participated in the last collection
+ * @parm[out] mainCpuMillis The amount of CPU time spent in the GC by the main thread, in milliseconds
+ * @parm[out] workerCpuMillis The amount of CPU time spent in the GC by the all worker threads, in milliseconds
+ * @parm[out] maxThreads The maximum number of GC worker threads
+ * @parm[out] currentThreads The number of GC worker threads that participated in the last collection
  */
 void
-j9gc_get_CPU_times(J9JavaVM *javaVM, U_64 *masterCpuMillis, U_64 *slaveCpuMillis, U_32 *maxThreads, U_32 *currentThreads)
+j9gc_get_CPU_times(J9JavaVM *javaVM, U_64 *mainCpuMillis, U_64 *workerCpuMillis, U_32 *maxThreads, U_32 *currentThreads)
 {
 	MM_GCExtensions *extensions = MM_GCExtensions::getExtensions(javaVM);
 	GC_VMThreadListIterator iterator(javaVM);
-	U_64 masterMillis = 0;
-	U_64 slaveMillis = 0;
-	U_64 slaveNanos = 0;
+	U_64 mainMillis = 0;
+	U_64 workerMillis = 0;
+	U_64 workerNanos = 0;
 	J9VMThread *vmThread = iterator.nextVMThread();
-	while(NULL != vmThread) {
+	while (NULL != vmThread) {
 		MM_EnvironmentBase *env = MM_EnvironmentBase::getEnvironment(vmThread->omrVMThread);
-		if(!env->isMasterThread()) {
-			/* For a large number of slave threads and very long runs, a sum of 
+		if (!env->isMainThread()) {
+			/* For a large number of worker threads and very long runs, a sum of 
 			 * nanos might overflow a U_64. Sum the millis and nanos separately.
 			 */
-			slaveMillis += env->_slaveThreadCpuTimeNanos / 1000000;
-			slaveNanos += env->_slaveThreadCpuTimeNanos % 1000000;
+			workerMillis += env->_workerThreadCpuTimeNanos / 1000000;
+			workerNanos += env->_workerThreadCpuTimeNanos % 1000000;
 		}
 		vmThread = iterator.nextVMThread();
 	}
 
 	/* Adjust the total millis by the nanos, rounding up. */
-	slaveMillis += slaveNanos / 1000000;
-	if((slaveNanos % 1000000) > 500000) {
-		slaveMillis += 1;
+	workerMillis += workerNanos / 1000000;
+	if ((workerNanos % 1000000) > 500000) {
+		workerMillis += 1;
 	}
 
-	/* Adjust the master millis by the nanos, rounding up. */
-	masterMillis = extensions->_masterThreadCpuTimeNanos / 1000000;
-	if((extensions->_masterThreadCpuTimeNanos % 1000000) > 500000) {
-		masterMillis += 1;
+	/* Adjust the main millis by the nanos, rounding up. */
+	mainMillis = extensions->_mainThreadCpuTimeNanos / 1000000;
+	if ((extensions->_mainThreadCpuTimeNanos % 1000000) > 500000) {
+		mainMillis += 1;
 	}
 	
 	/* Store the results */
-	*masterCpuMillis = masterMillis;
-	*slaveCpuMillis = slaveMillis;
+	*mainCpuMillis = mainMillis;
+	*workerCpuMillis = workerMillis;
 	*maxThreads = (U_32)extensions->dispatcher->threadCountMaximum();	
 	*currentThreads = (U_32)extensions->dispatcher->activeThreadCount();
 }
@@ -998,6 +1023,20 @@ ownableSynchronizerObjectCreated(J9VMThread *vmThread, j9object_t object)
 	MM_ObjectAllocationInterface *objectAllocation = env->_objectAllocationInterface;
 	if (NULL != objectAllocation) {
 		objectAllocation->getAllocationStats()->_ownableSynchronizerObjectCount += 1;
+	}
+	return 0;
+}
+
+UDATA
+continuationObjectCreated(J9VMThread *vmThread, j9object_t object)
+{
+	Assert_MM_true(NULL != object);
+	MM_EnvironmentBase *env = MM_EnvironmentBase::getEnvironment(vmThread->omrVMThread);
+
+	env->getGCEnvironment()->_continuationObjectBuffer->add(env, object);
+	MM_ObjectAllocationInterface *objectAllocation = env->_objectAllocationInterface;
+	if (NULL != objectAllocation) {
+		objectAllocation->getAllocationStats()->_continuationObjectCount += 1;
 	}
 	return 0;
 }
@@ -1028,7 +1067,7 @@ j9gc_notifyGCOfClassReplacement(J9VMThread *vmThread, J9Class *oldClass, J9Class
 	 */
 	Assert_MM_true(NULL == newClass->gcLink);
 
-	if(NULL != oldClass->gcLink) {
+	if (NULL != oldClass->gcLink) {
 		/* Remembered Set for class is using in balanced only */
 		MM_GCExtensions *extensions = MM_GCExtensions::getExtensions(vmThread->javaVM);
 		Assert_MM_true(extensions->isVLHGC());
@@ -1088,7 +1127,7 @@ j9gc_incrementalUpdate_getCardSize(OMR_VM *omrVM)
 	MM_GCExtensionsBase *extensions = MM_GCExtensionsBase::getExtensions(omrVM);
 
 	/* make sure that the table is initialized */
-	if(NULL != extensions->cardTable) {
+	if (NULL != extensions->cardTable) {
 		return CARD_SIZE;
 	} else {
 		return 0;
@@ -1101,7 +1140,7 @@ j9gc_incrementalUpdate_getCardTableShiftValue(OMR_VM *omrVM)
 	MM_GCExtensionsBase *extensions = MM_GCExtensionsBase::getExtensions(omrVM);
 
 	/* make sure that the table is initialized */
-	if(NULL != extensions->cardTable) {
+	if (NULL != extensions->cardTable) {
 		return CARD_SIZE_SHIFT;
 	} else {
 		return 0;
@@ -1122,7 +1161,7 @@ j9gc_incrementalUpdate_getHeapBase(OMR_VM *omrVM)
 	MM_GCExtensionsBase *extensions = MM_GCExtensionsBase::getExtensions(omrVM);
 
 	/* make sure that the table is initialized */
-	if(NULL != extensions->cardTable) {
+	if (NULL != extensions->cardTable) {
 		return (uintptr_t) extensions->cardTable->getHeapBase();
 	} else {
 		return 0;

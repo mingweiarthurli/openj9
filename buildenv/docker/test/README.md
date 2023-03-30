@@ -1,5 +1,5 @@
 <!--
-Copyright (c) 2017, 2020 IBM Corp. and others
+Copyright (c) 2017, 2021 IBM Corp. and others
 
 This program and the accompanying materials are made available under
 the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@ Exception [1] and GNU General Public License, version 2 with the
 OpenJDK Assembly Exception [2].
 
 [1] https://www.gnu.org/software/classpath/license.html
-[2] http://openjdk.java.net/legal/assembly-exception.html
+[2] https://openjdk.org/legal/assembly-exception.html
 
 SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 -->
@@ -46,7 +46,7 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 
    > https://www.eclipse.org/openj9/oj9_build.html
 
-   > https://github.com/eclipse/openj9/blob/master/test/README.md
+   > https://github.com/eclipse-openj9/openj9/blob/master/test/README.md
 
    Highly recommend mounting folders to Docker container rather
    than cloning them within Docker container. e.g.

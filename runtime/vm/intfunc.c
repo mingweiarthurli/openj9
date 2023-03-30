@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,13 +15,13 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
 
 #include "j9protos.h"
-
+#include "vm_api.h"
 #if defined(J9VM_OPT_VM_LOCAL_STORAGE)
 
 #include "j9vmls.h"
@@ -146,9 +146,7 @@ J9InternalVMFunctions J9InternalFunctions = {
 	initializeMethodRunAddress,
 	growJavaStack,
 	freeStacks,
-#if defined(J9VM_INTERP_SIG_QUIT_THREAD) || defined(J9VM_RAS_DUMP_AGENTS)
 	printThreadInfo,
-#endif /* J9VM_INTERP_SIG_QUIT_THREAD || J9VM_RAS_DUMP_AGENTS */
 	initializeAttachedThread,
 	initializeMethodRunAddressNoHook,
 	sidecarInvokeReflectMethod,
@@ -195,7 +193,7 @@ J9InternalVMFunctions J9InternalFunctions = {
 	cleanUpClassLoader,
 #endif /* J9VM_GC_DYNAMIC_CLASS_UNLOADING */
 	iterateStackTrace,
-	getCompleteNPEMessage,
+	getNPEMessage,
 	internalReleaseVMAccessNoMutex,
 	getVMHookInterface,
 	internalAttachCurrentThread,
@@ -228,12 +226,14 @@ J9InternalVMFunctions J9InternalFunctions = {
 	structuredSignalHandler,
 	structuredSignalHandlerVM,
 	addHiddenInstanceField,
+	reportHotField,
 	fieldOffsetsStartDo,
 	defaultValueWithUnflattenedFlattenables,
 	fieldOffsetsNextDo,
 	fullTraversalFieldOffsetsStartDo,
 	fullTraversalFieldOffsetsNextDo,
 	setClassCastException,
+	setNegativeArraySizeException,
 	compareStrings,
 	compareStringToUTF8,
 	prepareForExceptionThrow,
@@ -297,9 +297,13 @@ J9InternalVMFunctions J9InternalFunctions = {
 	sendForGenericInvoke,
 	jitFillOSRBuffer,
 	sendResolveMethodHandle,
+	resolveOpenJDKInvokeHandle,
 	resolveConstantDynamic,
 	resolveInvokeDynamic,
+	sendResolveOpenJDKInvokeHandle,
+#if JAVA_SPEC_VERSION >= 11
 	sendResolveConstantDynamic,
+#endif /* JAVA_SPEC_VERSION >= 11 */
 	sendResolveInvokeDynamic,
 	resolveMethodHandleRef,
 	resolveNativeAddress,
@@ -324,7 +328,9 @@ J9InternalVMFunctions J9InternalFunctions = {
 	getMonitorForWait,
 	jvmPhaseChange,
 	prepareClass,
+#if defined(J9VM_OPT_METHOD_HANDLE)
 	buildMethodTypeFrame,
+#endif /* defined(J9VM_OPT_METHOD_HANDLE) */
 	fatalRecursiveStackOverflow,
 	setIllegalAccessErrorNonPublicInvokeInterface,
 	createThreadWithCategory,
@@ -355,9 +361,7 @@ J9InternalVMFunctions J9InternalFunctions = {
 	getVMRuntimeState,
 	updateVMRuntimeState,
 	getVMMinIdleWaitTime,
-#if defined(J9VM_RAS_EYECATCHERS)
 	j9rasSetServiceLevel,
-#endif /* J9VM_RAS_EYECATCHERS */
 #if defined(J9VM_INTERP_ATOMIC_FREE_JNI_USES_FLUSH)
 	flushProcessWriteBuffers,
 #endif /* J9VM_INTERP_ATOMIC_FREE_JNI_USES_FLUSH */
@@ -376,10 +380,58 @@ J9InternalVMFunctions J9InternalFunctions = {
 #endif /* J9VM_OPT_JITSERVER */
 	createJoinableThreadWithCategory,
 	valueTypeCapableAcmp,
+	isNameOrSignatureQtype,
 	isClassRefQtype,
 	getFlattenableFieldOffset,
 	isFlattenableFieldFlattened,
 	getFlattenableFieldType,
 	getFlattenableFieldSize,
 	arrayElementSize,
+	getFlattenableField,
+	cloneValueType,
+	putFlattenableField,
+#if JAVA_SPEC_VERSION >= 15
+	checkClassBytes,
+#endif /* JAVA_SPEC_VERSION >= 15 */
+	storeFlattenableArrayElement,
+	loadFlattenableArrayElement,
+	jniIsInternalClassRef,
+	objectIsBeingWaitedOn,
+	areValueBasedMonitorChecksEnabled,
+	fieldContainsRuntimeAnnotation,
+	methodContainsRuntimeAnnotation,
+	findFieldExt,
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+	jvmCheckpointHooks,
+	jvmRestoreHooks,
+	isCRIUSupportEnabled,
+	isCheckpointAllowed,
+	isNonPortableRestoreMode,
+	runInternalJVMCheckpointHooks,
+	runInternalJVMRestoreHooks,
+	runDelayedLockRelatedOperations,
+	delayedLockingOperation,
+	setCRIUSingleThreadModeJVMCRIUException,
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
+	getClassNameString,
+	getDefaultValueSlotAddress,
+#if JAVA_SPEC_VERSION >= 16
+	createUpcallThunk,
+	getArgPointer,
+	allocateUpcallThunkMemory,
+	doneUpcallThunkGeneration,
+	native2InterpJavaUpcall0,
+	native2InterpJavaUpcall1,
+	native2InterpJavaUpcallJ,
+	native2InterpJavaUpcallF,
+	native2InterpJavaUpcallD,
+	native2InterpJavaUpcallStruct,
+#endif /* JAVA_SPEC_VERSION >= 16 */
+#if JAVA_SPEC_VERSION >= 19
+	copyFieldsFromContinuation,
+	createContinuation,
+	freeContinuation,
+	freeTLS,
+	walkContinuationStackFrames,
+#endif /* JAVA_SPEC_VERSION >= 19 */
 };

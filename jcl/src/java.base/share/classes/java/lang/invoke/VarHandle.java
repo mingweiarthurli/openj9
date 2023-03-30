@@ -1,6 +1,6 @@
-/*[INCLUDE-IF Sidecar19-SE]*/
+/*[INCLUDE-IF Sidecar19-SE & !OPENJDK_METHODHANDLES]*/
 /*******************************************************************************
- * Copyright (c) 2017, 2020 IBM Corp. and others
+ * Copyright (c) 2017, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -29,15 +29,15 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.ArrayList;
-/*[IF Java12]*/
+/*[IF JAVA_SPEC_VERSION >= 12]*/
 import java.util.Optional;
-/*[ENDIF]*/
+/*[ENDIF] JAVA_SPEC_VERSION >= 12 */
 /*[IF Sidecar19-SE]
 import jdk.internal.misc.Unsafe;
 /*[ELSE]*/
 import sun.misc.Unsafe;
 /*[ENDIF]*/
-/*[IF Java12]*/
+/*[IF JAVA_SPEC_VERSION >= 12]*/
 import java.lang.constant.ClassDesc;
 import java.lang.constant.Constable;
 import java.lang.constant.ConstantDesc;
@@ -45,15 +45,15 @@ import java.lang.constant.ConstantDescs;
 import java.lang.constant.DirectMethodHandleDesc;
 import java.lang.constant.DynamicConstantDesc;
 import java.util.Objects;
-/*[ENDIF] Java12 */
+/*[ENDIF] JAVA_SPEC_VERSION >= 12 */
 
 import java.util.Map;
 import java.util.HashMap;
 
-/*[IF Java14]*/
+/*[IF JAVA_SPEC_VERSION >= 14]*/
 import java.util.function.BiFunction;
 import java.lang.reflect.Method;
-/*[ENDIF] Java14 */
+/*[ENDIF] JAVA_SPEC_VERSION >= 14 */
 
 /**
  * Dynamically typed reference to a field, allowing read and write operations, 
@@ -64,9 +64,9 @@ import java.lang.reflect.Method;
  * 
  */
 public abstract class VarHandle extends VarHandleInternal 
-/*[IF Java12]*/
+/*[IF JAVA_SPEC_VERSION >= 12]*/
 	implements Constable
-/*[ENDIF]*/
+/*[ENDIF] JAVA_SPEC_VERSION >= 12 */
 {
 	/**
 	 * Access mode identifiers for VarHandle operations.
@@ -270,11 +270,19 @@ public abstract class VarHandle extends VarHandleInternal
 	}
 	
 	enum AccessType {
-		GET,
-		SET,
-		COMPARE_AND_SET,
-		COMPARE_AND_EXCHANGE,
-		GET_AND_UPDATE;
+		GET(Object.class),
+		SET(void.class),
+		COMPARE_AND_SET(boolean.class),
+		COMPARE_AND_EXCHANGE(Object.class),
+		GET_AND_UPDATE(Object.class);
+
+		final boolean isMonomorphicInReturnType;
+		final Class<?> returnType;
+
+		AccessType(Class<?> returnType) {
+			this.returnType = returnType;
+			this.isMonomorphicInReturnType = (returnType != Object.class);
+		}
 
 		/**
 		 * Gets the MethodType associated with the AccessType.
@@ -330,21 +338,33 @@ public abstract class VarHandle extends VarHandleInternal
 	}
 	
 	static final Unsafe _unsafe = Unsafe.getUnsafe();
-	static final Lookup _lookup = Lookup.internalPrivilegedLookup;
+	static final Lookup _lookup = Lookup.IMPL_LOOKUP;
 
-/*[IF Java14]*/
-	static final BiFunction<String, List<Integer>, ArrayIndexOutOfBoundsException> AIOOBE_SUPPLIER = null;
-	private boolean varFormUsed = false;
-/*[ENDIF] Java14 */
+/*[IF JAVA_SPEC_VERSION >= 14]*/
+	static final BiFunction<String,
+				/*[IF JAVA_SPEC_VERSION >= 16]*/
+				List<Number>,
+				/*[ELSE]*/
+				List<Integer>,
+				/*[ENDIF] JAVA_SPEC_VERSION >= 16 */
+				ArrayIndexOutOfBoundsException> AIOOBE_SUPPLIER = null;
+	VarForm vform = null;
+/*[ENDIF] JAVA_SPEC_VERSION >= 14 */
 	
+/*[IF JAVA_SPEC_VERSION >= 15]*/
+	MethodHandle[] handleTable;
+/*[ELSE]*/
 	private final MethodHandle[] handleTable;
+/*[ENDIF] JAVA_SPEC_VERSION >= 15 */
+
 	final Class<?> fieldType;
 	final Class<?>[] coordinateTypes;
 	final int modifiers;
-/*[IF Java12]*/
-	private int hashCode = 0;
-/*[ENDIF] Java12 */
-	
+
+/*[IF JAVA_SPEC_VERSION >= 16]*/
+	final boolean exact;
+/*[ENDIF] JAVA_SPEC_VERSION >= 16 */
+
 	/**
 	 * Constructs a generic VarHandle instance. 
 	 * 
@@ -358,76 +378,107 @@ public abstract class VarHandle extends VarHandleInternal
 		this.coordinateTypes = coordinateTypes;
 		this.handleTable = handleTable;
 		this.modifiers = modifiers;
+/*[IF JAVA_SPEC_VERSION >= 16]*/
+		this.exact = false;
+/*[ENDIF] JAVA_SPEC_VERSION >= 16 */
 	}
 
-/*[IF Java14]*/
+/*[IF JAVA_SPEC_VERSION >= 14]*/
 	/**
 	 * Constructs a generic VarHandle instance.
 	 *
 	 * @param varForm an instance of VarForm.
 	 */
 	VarHandle(VarForm varForm) {
-		AccessMode[] accessModes = AccessMode.values();
-		int numAccessModes = accessModes.length;
+/*[IF JAVA_SPEC_VERSION >= 16]*/
+		this(varForm, false);
+	}
 
-		/* The first argument in AccessType.GET MethodType is the receiver class. */
-		Class<?> receiverActual = accessModeTypeUncached(AccessMode.GET).parameterType(0);
-		Class<?> receiverVarForm = varForm.methodType_table[AccessType.GET.ordinal()].parameterType(0);
-		
-		/* Specify the exact operation method types if the actual receiver doesn't match the
-		 * receiver derived from VarForm.
-		 */
-		MethodType[] operationMTsExact = null;
-		if (receiverActual != receiverVarForm) {
-			operationMTsExact = new MethodType[numAccessModes];
-		}
-		
-		MethodType[] operationMTs = new MethodType[numAccessModes];
-		Class<?> operationsClass = null;
+	/**
+	 * Constructs a generic VarHandle instance.
+	 *
+	 * @param varForm an instance of VarForm.
+	 * @param exact has invokeExact behavior.
+	 */
+	VarHandle(VarForm varForm, boolean exact) {
+		this.exact = exact;
+/*[ENDIF] JAVA_SPEC_VERSION >= 16 */
+		if (varForm.memberName_table == null) {
+			/* Indirect VarHandle. */
+			MethodType getter = varForm.methodType_table[VarHandle.AccessType.GET.ordinal()];
+			this.fieldType = getter.returnType();
+			this.coordinateTypes = getter.parameterArray();
+			this.modifiers = 0;
+			this.vform = varForm;
+			return;
+		} else {
+			/* Direct VarHandle. */
+			AccessMode[] accessModes = AccessMode.values();
+			int numAccessModes = accessModes.length;
+	
+			/* The first argument in AccessType.GET MethodType is the receiver class. */
+			Class<?> receiverActual = accessModeTypeUncached(
+					/*[IF JAVA_SPEC_VERSION >= 16]*/
+					AccessMode.GET.at
+					/*[ELSE]*/
+					AccessMode.GET
+					/*[ENDIF] JAVA_SPEC_VERSION >= 16 */
+				).parameterType(0);
 
-		for (int i = 0; i < numAccessModes; i++) {
-			MemberName memberName = varForm.memberName_table[i];
-			if (memberName != null) {
-				Method method = memberName.method;
-				if (method != null) {
-					operationMTs[i] = MethodType.methodType(method.getReturnType(), method.getParameterTypes());
+			Class<?> receiverVarForm = varForm.methodType_table[AccessType.GET.ordinal()].parameterType(0);
+			
+			/* Specify the exact operation method types if the actual receiver doesn't match the
+			 * receiver derived from VarForm.
+			 */
+			MethodType[] operationMTsExact = null;
+			if (receiverActual != receiverVarForm) {
+				operationMTsExact = new MethodType[numAccessModes];
+			}
+			
+			MethodType[] operationMTs = new MethodType[numAccessModes];
+			Class<?> operationsClass = null;
+	
+			for (int i = 0; i < numAccessModes; i++) {
+				MemberName memberName = varForm.memberName_table[i];
+				if (memberName != null) {
+					operationMTs[i] = memberName.getMethodType();
 					if (operationMTsExact != null) {
 						/* Replace with the actual receiver, which is expected when the operation method
-						 * is invoked. The receiver is the second argument. 
+						 * is invoked. The receiver is the second argument.
 						 */
 						operationMTsExact[i] = operationMTs[i].changeParameterType(1, receiverActual);
 					}
 					if (operationsClass == null) {
-						operationsClass = method.getDeclaringClass();
+						operationsClass = memberName.getDeclaringClass();
 					}
 				}
 			}
+	
+			MethodType getter = operationMTs[AccessMode.GET.ordinal()];
+			MethodType setter = operationMTs[AccessMode.SET.ordinal()];
+			
+			if (operationMTsExact != null) {
+				getter = operationMTsExact[AccessMode.GET.ordinal()];
+				setter = operationMTsExact[AccessMode.SET.ordinal()];
+			}
+	
+			this.fieldType = setter.parameterType(setter.parameterCount() - 1);
+			
+			/* The first VarHandle parameter type should be removed from the getter in order to derive
+			 * the coordinate types. 
+			 */
+			Class<?>[] getterParams = getter.parameterArray();
+			this.coordinateTypes = Arrays.copyOfRange(getterParams, 1, getterParams.length);
+			
+			if (operationMTsExact != null) {
+				this.handleTable = populateMHsJEP370(operationsClass, operationMTs, operationMTsExact);
+			} else {
+				this.handleTable = populateMHsJEP370(operationsClass, operationMTs, operationMTs);
+			}
+			
+			this.modifiers = 0;
+			this.vform = varForm;
 		}
-
-		MethodType getter = operationMTs[AccessMode.GET.ordinal()];
-		MethodType setter = operationMTs[AccessMode.SET.ordinal()];
-		
-		if (operationMTsExact != null) {
-			getter = operationMTsExact[AccessMode.GET.ordinal()];
-			setter = operationMTsExact[AccessMode.SET.ordinal()];
-		}
-
-		this.fieldType = setter.parameterType(setter.parameterCount() - 1);
-		
-		/* The first VarHandle parameter type should be removed from the getter in order to derive
-		 * the coordinate types. 
-		 */
-		Class<?>[] getterParams = getter.parameterArray();
-		this.coordinateTypes = Arrays.copyOfRange(getterParams, 1, getterParams.length);
-		
-		if (operationMTsExact != null) {
-			this.handleTable = populateMHsJEP370(operationsClass, operationMTs, operationMTsExact);
-		} else {
-			this.handleTable = populateMHsJEP370(operationsClass, operationMTs, operationMTs);
-		}
-		
-		this.modifiers = 0;
-		this.varFormUsed = true;
 	}
 
 	/**
@@ -445,18 +496,19 @@ public abstract class VarHandle extends VarHandleInternal
 		try {
 			/* Lookup the MethodHandles corresponding to access modes. */
 			for (AccessMode accessMode : AccessMode.values()) {
-				MethodType lookupType = lookupTypes[accessMode.ordinal()];
+				int index = accessMode.ordinal();
+				MethodType lookupType = lookupTypes[index];
 				if (lookupType != null) {
-					operationMHs[accessMode.ordinal()] = _lookup.findStatic(operationsClass, accessMode.methodName(), lookupType);
+					operationMHs[index] = _lookup.findStatic(operationsClass, accessMode.methodName(), lookupType);
 					if (lookupTypes == exactTypes) {
-						operationMHs[accessMode.ordinal()] = permuateHandleJEP370(operationMHs[accessMode.ordinal()]);
+						operationMHs[index] = permuteHandleJ9ToReference(operationMHs[index]);
 					} else {
 						/* Clone the MethodHandles with the exact types if different set of exactTypes are provided. */
-						MethodType exactType = exactTypes[accessMode.ordinal()];
+						MethodType exactType = exactTypes[index];
 						if (exactType != null) {
-							operationMHs[accessMode.ordinal()] = operationMHs[accessMode.ordinal()].cloneWithNewType(exactType);
+							operationMHs[index] = operationMHs[index].cloneWithNewType(exactType);
 						}
-						operationMHs[accessMode.ordinal()] = permuateHandleJEP370(operationMHs[accessMode.ordinal()]);
+						operationMHs[index] = permuteHandleJ9ToReference(operationMHs[index]);
 					}
 				}
 			}
@@ -478,31 +530,111 @@ public abstract class VarHandle extends VarHandleInternal
 	 * @param methodHandle to be permuted.
 	 * @return the adapter MethodHandle which performs the translation.
 	 */
-	static MethodHandle permuateHandleJEP370(MethodHandle methodHandle) {
+	static MethodHandle permuteHandleJ9ToReference(MethodHandle methodHandle) {
 		/* HandleType = {VarHandle, Receiver, Intermediate ..., Value}
 		 * PermuteType = {Receiver, Intermediate ..., Value, VarHandle}
 		 */
-		MethodType permuteMethodType = methodHandle.type;
+		MethodType permuteMethodType = methodHandle.type();
 		int parameterCount = permuteMethodType.parameterCount();
 		Class<?> firstParameter = permuteMethodType.parameterType(0);
-		permuteMethodType = permuteMethodType.dropFirstParameterType();
+		permuteMethodType = permuteMethodType.dropParameterTypes(0, 1);
 		permuteMethodType = permuteMethodType.appendParameterTypes(firstParameter);
 
 		/* reorder specifies the mapping between PermuteType and HandleType
 		 * reorder = {parameterCount - 1, 0, 1, 2, ..., parameterCount - 2}
 		 */
 		int[] reorder = new int[parameterCount];
-		for (int i = 0; i < parameterCount; i++) {
-			if (i == 0) {
-				reorder[i] = parameterCount - 1;
-			} else {
+		if (parameterCount > 0) {
+			reorder[0] = parameterCount - 1;
+			for (int i = 1; i < parameterCount; i++) {
 				reorder[i] = i - 1;
 			}
 		}
 
 		return MethodHandles.permuteArguments(methodHandle, permuteMethodType, reorder);
 	}
-/*[ENDIF] Java14 */
+/*[ENDIF] JAVA_SPEC_VERSION >= 14 */
+
+/*[IF JAVA_SPEC_VERSION >= 15]*/
+	/**
+	 * Generate a MethodHandle which translates:
+	 *     FROM {VarHandle, Receiver, Intermediate ..., Value}ReturnType
+	 *     TO   {Receiver, Intermediate ..., Value, VarHandle}ReturnType
+	 *
+	 * @param methodHandle to be permuted.
+	 * @return the adapter MethodHandle which performs the translation.
+	 */
+	static MethodHandle permuteHandleReferenceToJ9(MethodHandle methodHandle) {
+		/* HandleType = {Receiver, Intermediate ..., Value, VarHandle}
+		 * PermuteType = {VarHandle, Receiver, Intermediate ..., Value}
+		 */
+		MethodType permuteMethodType = methodHandle.type();
+		int parameterCount = permuteMethodType.parameterCount();
+		Class<?>[] params = permuteMethodType.parameterArray();
+		int[] reorder = new int[parameterCount];
+		
+		if (parameterCount > 0) {
+			permuteMethodType = permuteMethodType.changeParameterType(0, params[parameterCount - 1]);
+			for (int i = 1; i < parameterCount; i++) {
+				permuteMethodType = permuteMethodType.changeParameterType(i, params[i - 1]);
+			}
+			
+			/**
+			 * reorder specifies the mapping between PermuteType and HandleType.
+			 * reorder = {1, 2, ..., parameterCount - 1, 0}
+			 */
+			reorder[parameterCount - 1] = 0;
+			for (int i = 0; i < parameterCount - 1; i++) {
+				reorder[i] = i + 1;
+			}
+		}
+		
+		return MethodHandles.permuteArguments(methodHandle, permuteMethodType, reorder);
+	}
+
+	/**
+	 * Generates handleTable for Indirect VarHandles (supports JEP383).
+	 *
+	 * @param target the target VarHandle for the Indirect VarHandle.
+	 * @param handleFactory used to transform an AccessMode MethodHandle accordingly.
+	 * 
+	 * @return a MethodHandle array which is used to initialize the handleTable.
+	 */
+	static MethodHandle[] populateMHsJEP383(VarHandle target, BiFunction<AccessMode, MethodHandle, MethodHandle> handleFactory) {
+		MethodHandle[] operationMHs = new MethodHandle[AccessMode.values().length];
+
+		try {
+			MethodType replaceWithDirectType = MethodType.methodType(VarHandle.class, VarHandle.class);
+			MethodHandle replaceWithDirect = MethodHandles.lookup().findStatic(VarHandle.class, "asDirect", replaceWithDirectType);
+
+			for (AccessMode mode : AccessMode.values()) {
+				int index = mode.ordinal();
+				MethodHandle targetHandle = target.getMethodHandle(index);
+
+				if (targetHandle != null) {
+					MethodType targetType = targetHandle.type();
+					if (targetType.parameterType(targetType.parameterCount() - 1) == VarHandle.class) {
+						/*
+						 * Permute a J9 VarHandle to an equivalent reference implementation VarHandle
+						 * before applying handleFactory.
+						 */
+						targetHandle = permuteHandleReferenceToJ9(targetHandle);
+					}
+					operationMHs[index] = handleFactory.apply(mode, targetHandle);
+					operationMHs[index] = permuteHandleJ9ToReference(operationMHs[index]);
+					operationMHs[index] = MethodHandles.collectArguments(operationMHs[index], operationMHs[index].type().parameterCount() - 1, replaceWithDirect);
+				}
+			}
+		} catch (IllegalAccessException | NoSuchMethodException e) {
+			/* [MSG "K0623", "Unable to create MethodHandle to VarHandle operation."] */
+			InternalError error = new InternalError(com.ibm.oti.util.Msg.getString("K0623")); //$NON-NLS-1$
+			error.initCause(e);
+			throw error;
+		}
+
+		return operationMHs;
+	}
+/*[ENDIF] JAVA_SPEC_VERSION >= 15 */
 
 	Class<?> getDefiningClass() {
 		/*[MSG "K0627", "Expected override of this method."]*/
@@ -523,11 +655,11 @@ public abstract class VarHandle extends VarHandleInternal
 	 * 
 	 * @return The field type
 	 */
-	/*[IF Java15]*/
+	/*[IF JAVA_SPEC_VERSION >= 15]*/
 	public Class<?> varType() {
 	/*[ELSE]*/
 	public final Class<?> varType() {
-	/*[ENDIF] Java15 */
+	/*[ENDIF] JAVA_SPEC_VERSION >= 15 */
 		return this.fieldType;
 	}
 	
@@ -539,15 +671,15 @@ public abstract class VarHandle extends VarHandleInternal
 	 * 
 	 * @return The parameters required to access the field.
 	 */
-	/*[IF Java15]*/
+	/*[IF JAVA_SPEC_VERSION >= 15]*/
 	public List<Class<?>> coordinateTypes() {
 	/*[ELSE]*/
 	public final List<Class<?>> coordinateTypes() {
-	/*[ENDIF] Java15 */
+	/*[ENDIF] JAVA_SPEC_VERSION >= 15 */
 		return Collections.unmodifiableList(Arrays.<Class<?>>asList(coordinateTypes));
 	}
 
-/*[IF Java12]*/
+/*[IF JAVA_SPEC_VERSION >= 12]*/
 	/**
 	 * Returns the nominal descriptor of this VarHandle instance, or an empty Optional 
 	 * if construction is not possible.
@@ -557,72 +689,6 @@ public abstract class VarHandle extends VarHandleInternal
 	public Optional<VarHandleDesc> describeConstable() {
 		/* this method should be overridden by types that are supported */
 		return Optional.empty();
-	}
-
-	/**
-	 * Compares the specified object to this VarHandle and answer if they are equal.
-	 *
-	 * @param obj the object to compare
-	 * @return true if the specified object is equal to this VarHandle, false otherwise
-	 */
-	@Override
-	public boolean equals(Object obj) {
-		if (this == obj) {
-			return true;
-		}
-
-		if (!(obj instanceof VarHandle)) {
-			return false;
-		}
-
-		/* argument comparison */
-		VarHandle that = (VarHandle)obj;
-		if (!(this.fieldType.equals(that.fieldType) 
-			&& (this.modifiers == that.modifiers)
-			&& Arrays.equals(this.coordinateTypes, that.coordinateTypes))
-		) {
-			return false;
-		}
-
-		/* Compare properties of FieldVarHandle that are not captured in the parent class */
-		if (obj instanceof FieldVarHandle) {
-			if (!(this instanceof FieldVarHandle)) {
-				return false;
-			}
-
-			FieldVarHandle thisf = (FieldVarHandle)this;
-			FieldVarHandle thatf = (FieldVarHandle)obj;
-			if (!(thisf.definingClass.equals(thatf.definingClass)
-				&& thisf.fieldName.equals(thatf.fieldName))
-			) {
-				return false;
-			}
-			
-		}
-
-		return true;
-	}
-
-	/**
-	 * Answers an integer hash code for the VarHandle. VarHandle instances
-	 * which are equal answer the same value for this method.
-	 *
-	 * @return a hash for this VarHandle
-	 */
-	@Override
-	public int hashCode() {
-		if (hashCode == 0) {
-			hashCode = fieldType.hashCode();
-			for (Class<?> c : coordinateTypes) {
-				hashCode = 31 * hashCode + c.hashCode();
-			}
-
-			/* Add properties for FieldVarHandle */
-			if (this instanceof FieldVarHandle) {
-				hashCode = 31 * hashCode + ((FieldVarHandle)this).definingClass.hashCode();
-			}
-		}
-		return hashCode;
 	}
 
 	/**
@@ -637,8 +703,8 @@ public abstract class VarHandle extends VarHandleInternal
 		String coordList = Arrays.toString(coordinateTypes);
 		return String.format(structure, this.fieldType.getName(), coordList);
 	}
-/*[ENDIF]*/
-	
+/*[ENDIF] JAVA_SPEC_VERSION >= 12 */
+
 	/**
 	 * Each {@link AccessMode}, e.g. get and set, requires different parameters
 	 * in addition to the {@link VarHandle#coordinateTypes() coordinateTypes()}. 
@@ -652,10 +718,16 @@ public abstract class VarHandle extends VarHandleInternal
 		MethodType modifiedType = null;
 		MethodHandle internalHandle = handleTable[accessMode.ordinal()];
 		if (internalHandle == null) {
-			modifiedType = accessModeTypeUncached(accessMode);
+			modifiedType = accessModeTypeUncached(
+					/*[IF JAVA_SPEC_VERSION >= 16]*/
+					accessMode.at
+					/*[ELSE]*/
+					accessMode
+					/*[ENDIF] JAVA_SPEC_VERSION >= 16 */
+				);
 		} else {
-			MethodType internalType = internalHandle.type;
-			int numOfArguments = internalType.arguments.length;
+			MethodType internalType = internalHandle.type();
+			int numOfArguments = internalType.parameterCount();
 
 			/* Drop the internal VarHandle argument. */
 			modifiedType = internalType.dropParameterTypes(numOfArguments - 1, numOfArguments);
@@ -671,12 +743,12 @@ public abstract class VarHandle extends VarHandleInternal
 	 * @return A boolean value indicating whether the {@link AccessMode} is supported.
 	 */
 	boolean isAccessModeSupportedHelper(AccessMode accessMode) {
-/*[IF Java14]*/
-		if (varFormUsed) {
+/*[IF JAVA_SPEC_VERSION >= 14]*/
+		if (vform != null) {
 			return (handleTable[accessMode.ordinal()] != null);
 		}
-/*[ENDIF] Java14 */
-		
+/*[ENDIF] JAVA_SPEC_VERSION >= 14 */
+
 		switch (accessMode) {
 		case GET:
 		case GET_VOLATILE:
@@ -721,7 +793,7 @@ public abstract class VarHandle extends VarHandleInternal
 	/**
 	 * Not all AccessMode are supported for all {@link VarHandle} instances, e.g. 
 	 * because of the field type and/or field modifiers. This method indicates whether 
-	 * a specific {@link AccessMode} is supported by by this {@link VarHandle} instance.
+	 * a specific {@link AccessMode} is supported by this {@link VarHandle} instance.
 	 * 
 	 * @param accessMode The {@link AccessMode} to check support for.
 	 * @return A boolean value indicating whether the {@link AccessMode} is supported.
@@ -738,24 +810,32 @@ public abstract class VarHandle extends VarHandleInternal
 	 * @return A {@link MethodHandle} for the specified {@link AccessMode}, bound to
 	 * 			this {@link VarHandle} instance.
 	 */
-	/*[IF Java15]*/
+	/*[IF JAVA_SPEC_VERSION >= 15]*/
 	public MethodHandle toMethodHandle(AccessMode accessMode) {
 	/*[ELSE]*/
 	public final MethodHandle toMethodHandle(AccessMode accessMode) {
-	/*[ENDIF] Java15 */
+	/*[ENDIF] JAVA_SPEC_VERSION >= 15 */
 		MethodHandle mh = handleTable[accessMode.ordinal()];
 
 		if (mh != null) {
-			mh = MethodHandles.insertArguments(mh, mh.type.parameterCount() - 1, this);
+			mh = MethodHandles.insertArguments(mh, mh.type().parameterCount() - 1, this);
 		}
 
 		if ((mh == null) || !isAccessModeSupported(accessMode)) {
 			MethodType mt = null;
 
 			if (mh != null) {
-				mt = mh.type;
+				mt = mh.type();
 			} else {
-				mt = accessModeTypeUncached(accessMode);
+
+				mt = accessModeTypeUncached(
+						/*[IF JAVA_SPEC_VERSION >= 16]*/
+						accessMode.at
+						/*[ELSE]*/
+						accessMode
+						/*[ENDIF] JAVA_SPEC_VERSION >= 16 */
+					);
+
 				/* accessModeTypeUncached does not return null. It throws InternalError if the method type
 				 * cannot be determined.
 				 */
@@ -773,8 +853,8 @@ public abstract class VarHandle extends VarHandleInternal
 			/* The resulting method handle must come with the same signature as the requested access mode method
 			 * so as to throw out UnsupportedOperationException from that method.
 			 */
-			mh = mh.asType(MethodType.methodType(mt.returnType));
-			mh = MethodHandles.dropArguments(mh, 0, mt.arguments);
+			mh = mh.asType(MethodType.methodType(mt.returnType()));
+			mh = MethodHandles.dropArguments(mh, 0, mt.ptypes());
 		}
 		
 		return mh;
@@ -803,8 +883,8 @@ public abstract class VarHandle extends VarHandleInternal
 	}
 	
 	/**
-	 * Inserts a release memory fence, ensuring that no stores before this fence
-	 * are reordered with any loads/stores after the fence. 
+	 * Inserts a release memory fence, ensuring that no loads and stores before
+	 * this fence are reordered with any stores after the fence.
 	 */
 	public static void releaseFence() {
 		// TODO: storeStore + loadStore
@@ -904,7 +984,7 @@ public abstract class VarHandle extends VarHandleInternal
 		
 	/**
 	 * Sets the value of the field referenced by this {@link VarHandle} using acquire semantics.
-	 * Preceding stores will not be reordered with subsequent loads/stores.
+	 * Preceding loads and stores will not be reordered after this access.
 	 * 
 	 * @param args The arguments for this operation are determined by the field type
 	 * 				(see {@link VarHandle#accessModeType(AccessMode) accessModeType()}) 
@@ -1218,13 +1298,15 @@ public abstract class VarHandle extends VarHandleInternal
 		try {
 			/* Lookup the MethodHandles corresponding to access modes. */
 			for (AccessMode accessMode : AccessMode.values()) {
-				operationMHs[accessMode.ordinal()] = _lookup.findStatic(operationsClass, accessMode.methodName(), lookupTypes[accessMode.ordinal()]);
+				int index = accessMode.ordinal();
+				operationMHs[index] = _lookup.findStatic(operationsClass, accessMode.methodName(), lookupTypes[index]);
 			}
 			
 			/* If we provided a different set of exactTypes, clone the MethodHandles with the exact types. */
 			if (lookupTypes != exactTypes) {
 				for (AccessMode accessMode : AccessMode.values()) {
-					operationMHs[accessMode.ordinal()] = operationMHs[accessMode.ordinal()].cloneWithNewType(exactTypes[accessMode.ordinal()]);
+					int index = accessMode.ordinal();
+					operationMHs[index] = operationMHs[index].cloneWithNewType(exactTypes[index]);
 				}
 			}
 		} catch (IllegalAccessException | NoSuchMethodException e) {
@@ -1286,7 +1368,7 @@ public abstract class VarHandle extends VarHandleInternal
 		return handleTable[operation];
 	}
 
-/*[IF Java12]*/
+/*[IF JAVA_SPEC_VERSION >= 12]*/
 	/* nominal descriptor of a VarHandle constant */
 	public static final class VarHandleDesc extends DynamicConstantDesc<VarHandle> implements ConstantDesc {
 		private Kind type = null;
@@ -1517,25 +1599,87 @@ public abstract class VarHandle extends VarHandleInternal
 			return (ClassDesc)args[0];
 		}		
 	}
-/*[ENDIF] Java12 */ 
+/*[ENDIF] JAVA_SPEC_VERSION >= 12 */
 
-/*[IF Java15]*/
+/*[IF JAVA_SPEC_VERSION >= 15]*/
+	/**
+	 * Return the target VarHandle. For a direct VarHandle, the target
+	 * VarHandle is null. An indirect VarHandle will override this method to
+	 * return a non-null target VarHandle.
+	 * 
+	 * @return null for the target VarHandle.
+	 */
 	VarHandle target() {
-		throw OpenJDKCompileStub.OpenJDKCompileStubThrowError();
+		return null;
 	}
 
+	/**
+	 * Return the direct-target VarHandle. For a direct VarHandle, the
+	 * direct-target is itself. An indirect VarHandle will override this method 
+	 * to return a direct-target, which should be a direct VarHandle.
+	 * 
+	 * @return "this" for a direct VarHandle.
+	 */
 	VarHandle asDirect() {
-		throw OpenJDKCompileStub.OpenJDKCompileStubThrowError();
+		return this;
 	}
 
-	MethodHandle getMethodHandle(int i) {
-		throw OpenJDKCompileStub.OpenJDKCompileStubThrowError();
-	}
-
+	/**
+	 * Return true for a direct VarHandle and false for an indirect VarHandle.
+	 * An indirect VarHandle will override this method to return false. By
+	 * default, all VarHandles are direct VarHandles.
+	 * 
+	 * @return true for a direct VarHandle and false for an indirect VarHandle.
+	 */
 	boolean isDirect() {
+		return true;
+	}
+	
+	/**
+	 * Return the direct-target VarHandle for the input varHandle.
+	 * 
+	 * @param varHandle the input VarHandle.
+	 * 
+	 * @return the direct-target VarHandle for the input VarHandle.
+	 */
+	private static VarHandle asDirect(VarHandle varHandle) {
+		return varHandle.asDirect();
+	}
+
+	/**
+	 * Return the MethodHandle corresponding to the integer-value of the AccessMode.
+	 * 
+	 * @param i integer value of the AccessMode.
+	 * 
+	 * @return the MethodHandle corresponding to the integer-value of the AccessMode.
+	 */
+	MethodHandle getMethodHandle(int i) {
+		return handleTable[i];
+	}
+/*[ENDIF] JAVA_SPEC_VERSION >= 15 */
+
+	MethodType accessModeTypeUncached(
+		/*[IF JAVA_SPEC_VERSION >= 16]*/
+		AccessType type
+		/*[ELSE]*/
+		AccessMode accessMode
+		/*[ENDIF] JAVA_SPEC_VERSION >= 16 */
+	) {
 		throw OpenJDKCompileStub.OpenJDKCompileStubThrowError();
 	}
-/*[ENDIF] Java15 */
 
-	abstract MethodType accessModeTypeUncached(AccessMode accessMode);
+/*[IF JAVA_SPEC_VERSION >= 16]*/
+	final MethodType accessModeTypeUncached(int index) {
+		return accessModeTypeUncached(AccessType.values()[index]);
+	}
+
+	public abstract VarHandle withInvokeExactBehavior();
+
+	public abstract VarHandle withInvokeBehavior();
+
+	public boolean hasInvokeExactBehavior() {
+		return exact;
+	}
+/*[ENDIF] JAVA_SPEC_VERSION >= 16 */
+
 }

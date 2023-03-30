@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -31,7 +31,6 @@
 #include "ClassLoaderClassesIterator.hpp"
 #include "ClassIterator.hpp"
 #include "CycleState.hpp"
-#include "Dispatcher.hpp"
 #include "EnvironmentVLHGC.hpp"
 #include "HeapMapWordIterator.hpp"
 #include "HeapRegionDescriptorVLHGC.hpp"
@@ -39,9 +38,13 @@
 #include "InterRegionRememberedSet.hpp"
 #include "MarkMap.hpp"
 #include "MixedObjectIterator.hpp"
+#include "ParallelDispatcher.hpp"
 #include "PointerArrayIterator.hpp"
 #include "Task.hpp"
 #include "WorkPacketsVLHGC.hpp"
+
+#include "VMThreadStackSlotIterator.hpp"
+#include "VMHelpers.hpp"
 
 MM_GlobalMarkCardScrubber::MM_GlobalMarkCardScrubber(MM_EnvironmentVLHGC *env, MM_HeapMap *map, UDATA yieldCheckFrequency)
 	: MM_CardCleaner()
@@ -134,6 +137,9 @@ MM_GlobalMarkCardScrubber::scrubObject(MM_EnvironmentVLHGC *env, J9Object *objec
 		case GC_ObjectModel::SCAN_REFERENCE_MIXED_OBJECT:
 			doScrub = scrubMixedObject(env, objectPtr);
 			break;
+		case GC_ObjectModel::SCAN_CONTINUATION_OBJECT:
+			doScrub = scrubContinuationObject(env, objectPtr);
+			break;
 		case GC_ObjectModel::SCAN_CLASS_OBJECT:
 			doScrub = scrubClassObject(env, objectPtr);
 			break;
@@ -168,6 +174,42 @@ MM_GlobalMarkCardScrubber::scrubMixedObject(MM_EnvironmentVLHGC *env, J9Object *
 		doScrub = mayScrubReference(env, objectPtr, toObject);
 	}
 	
+	return doScrub;
+}
+
+
+void
+stackSlotIteratorForGlobalMarkCardScrubber(J9JavaVM *javaVM, J9Object **slotPtr, void *localData, J9StackWalkState *walkState, const void *stackLocation)
+{
+	StackIteratorData4GlobalMarkCardScrubber *data = (StackIteratorData4GlobalMarkCardScrubber *)localData;
+	if (*data->doScrub) {
+		*data->doScrub = data->globalMarkCardScrubber->mayScrubReference(data->env, data->fromObject, *slotPtr);
+	}
+	/* It's unfortunate, but we probably cannot terminate iteration of slots once we do see for one slot that we cannot scurb */
+}
+
+bool MM_GlobalMarkCardScrubber::scrubContinuationNativeSlots(MM_EnvironmentVLHGC *env, J9Object *objectPtr)
+{
+	bool doScrub = true;
+	J9VMThread *currentThread = (J9VMThread *)env->getLanguageVMThread();
+	if (VM_VMHelpers::needScanStacksForContinuation(currentThread, objectPtr)) {
+		StackIteratorData4GlobalMarkCardScrubber localData;
+		localData.globalMarkCardScrubber = this;
+		localData.env = env;
+		localData.doScrub = &doScrub;
+		localData.fromObject = objectPtr;
+
+		GC_VMThreadStackSlotIterator::scanSlots(currentThread, objectPtr, (void *)&localData, stackSlotIteratorForGlobalMarkCardScrubber, false, false);
+	}
+	return doScrub;
+}
+
+bool MM_GlobalMarkCardScrubber::scrubContinuationObject(MM_EnvironmentVLHGC *env, J9Object *objectPtr)
+{
+	bool doScrub = scrubMixedObject(env, objectPtr);
+	if (doScrub) {
+		doScrub = scrubContinuationNativeSlots(env, objectPtr);
+	}
 	return doScrub;
 }
 
@@ -238,6 +280,7 @@ MM_GlobalMarkCardScrubber::scrubClassLoaderObject(MM_EnvironmentVLHGC *env, J9Ob
 
 		if (NULL != classLoader->moduleHashTable) {
 			J9HashTableState walkState;
+			J9JavaVM *javaVM = ((J9VMThread*)env->getLanguageVMThread())->javaVM;
 			J9Module **modulePtr = (J9Module **)hashTableStartDo(classLoader->moduleHashTable, &walkState);
 			while (doScrub && (NULL != modulePtr)) {
 				J9Module * const module = *modulePtr;
@@ -250,6 +293,13 @@ MM_GlobalMarkCardScrubber::scrubClassLoaderObject(MM_EnvironmentVLHGC *env, J9Ob
 					doScrub = mayScrubReference(env, classLoaderObject, module->version);
 				}
 				modulePtr = (J9Module**)hashTableNextDo(&walkState);
+			}
+
+			if (classLoader == javaVM->systemClassLoader) {
+				Assert_MM_true(NULL != javaVM->unamedModuleForSystemLoader->moduleObject);
+				if (doScrub) {
+					doScrub = mayScrubReference(env, classLoaderObject, javaVM->unamedModuleForSystemLoader->moduleObject);
+				}
 			}
 		}
 	}
@@ -312,7 +362,7 @@ MM_ParallelScrubCardTableTask::run(MM_EnvironmentBase *envBase)
 	env->_cardCleaningStats.addToCardCleaningTime(cleanStartTime, cleanEndTime);
 	
 	Trc_MM_ParallelScrubCardTableTask_scrubCardTable_Exit(env->getLanguageVMThread(),
-		env->getSlaveID(),
+		env->getWorkerID(),
 		scrubber.getScrubbedObjects(), scrubber.getScrubbedCards(), scrubber.getDirtyCards(), scrubber.getGMPMustScanCards(),
 		j9time_hires_delta(cleanStartTime, cleanEndTime, J9PORT_TIME_DELTA_IN_MICROSECONDS),
 		didTimeout() ? "true" : "false");
@@ -321,7 +371,7 @@ MM_ParallelScrubCardTableTask::run(MM_EnvironmentBase *envBase)
 void
 MM_ParallelScrubCardTableTask::setup(MM_EnvironmentBase *env)
 {
-	if (!env->isMasterThread()) {
+	if (!env->isMainThread()) {
 		Assert_MM_true(NULL == env->_cycleState);
 		env->_cycleState = _cycleState;
 	} else {
@@ -332,7 +382,7 @@ MM_ParallelScrubCardTableTask::setup(MM_EnvironmentBase *env)
 void
 MM_ParallelScrubCardTableTask::cleanup(MM_EnvironmentBase *env)
 {
-	if (!env->isMasterThread()) {
+	if (!env->isMainThread()) {
 		env->_cycleState = NULL;
 	}
 }
@@ -360,11 +410,11 @@ MM_ParallelScrubCardTableTask::synchronizeGCThreads(MM_EnvironmentBase *env, con
 }
 
 bool
-MM_ParallelScrubCardTableTask::synchronizeGCThreadsAndReleaseMaster(MM_EnvironmentBase *env, const char *id)
+MM_ParallelScrubCardTableTask::synchronizeGCThreadsAndReleaseMain(MM_EnvironmentBase *env, const char *id)
 {
 	/* this task doesn't use synchronization */
 	Assert_MM_unreachable();
-	return MM_ParallelTask::synchronizeGCThreadsAndReleaseMaster(env, id);
+	return MM_ParallelTask::synchronizeGCThreadsAndReleaseMain(env, id);
 }
 
 bool

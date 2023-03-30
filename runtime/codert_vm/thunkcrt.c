@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2014 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -41,7 +41,7 @@
 
 /* This value should be a multiple of 8 bytes (to maintain pointer alignment).
  *
- * Also note that the value must be smaller than 64 (128 types) so that argCount * 2 + 
+ * Also note that the value must be smaller than 64 (128 types) so that argCount * 2 +
  * may be stored in the inline argCount byte.
  */
 
@@ -115,7 +115,7 @@ j9ThunkLookupNameAndSig(void * jitConfig, void *parm)
 
 	Trc_Thunk_j9ThunkLookupNameAndSig_Entry();
 
-	thunkAddress = j9ThunkLookupSignature(jitConfig, J9UTF8_LENGTH(J9ROMNAMEANDSIGNATURE_SIGNATURE(nameAndSignature)), (char *) &J9UTF8_DATA((J9ROMNAMEANDSIGNATURE_SIGNATURE(nameAndSignature))));
+	thunkAddress = j9ThunkLookupSignature(jitConfig, J9UTF8_LENGTH(J9ROMNAMEANDSIGNATURE_SIGNATURE(nameAndSignature)), (char *) J9UTF8_DATA((J9ROMNAMEANDSIGNATURE_SIGNATURE(nameAndSignature))));
 
 	if (NULL == thunkAddress) {
 		Trc_Thunk_j9ThunkLookupNameAndSig_Exit_ThunkNotFound();
@@ -180,7 +180,7 @@ j9ThunkTableFree(J9JavaVM * vm)
 }
 
 static UDATA
-j9ThunkTableHash(void *key, void *userData) 
+j9ThunkTableHash(void *key, void *userData)
 {
 	U_8 * encodedSignature;
 	U_8 argCount;
@@ -188,8 +188,8 @@ j9ThunkTableHash(void *key, void *userData)
 	argCount = j9ThunkGetEncodedSignature(key, &encodedSignature);
 	return j9crc32(0, encodedSignature + 1, J9_THUNK_ENCODED_SIGNATURE_LENGTH(argCount));
 }
-static UDATA 
-j9ThunkTableEquals(void *leftKey, void *rightKey, void *userData) 
+static UDATA
+j9ThunkTableEquals(void *leftKey, void *rightKey, void *userData)
 {
 	U_8 * leftSig;
 	U_8 * rightSig;
@@ -233,7 +233,7 @@ j9ThunkNewNameAndSig(void * jitConfig, void *parm, void *thunkAddress)
 {
 	J9ROMNameAndSignature *nameAndSignature = (J9ROMNameAndSignature *) parm;
 
-	return j9ThunkNewSignature(jitConfig, J9UTF8_LENGTH(J9ROMNAMEANDSIGNATURE_SIGNATURE(nameAndSignature)), (char *) &J9UTF8_DATA((J9ROMNAMEANDSIGNATURE_SIGNATURE(nameAndSignature))), thunkAddress);
+	return j9ThunkNewSignature(jitConfig, J9UTF8_LENGTH(J9ROMNAMEANDSIGNATURE_SIGNATURE(nameAndSignature)), (char *) J9UTF8_DATA((J9ROMNAMEANDSIGNATURE_SIGNATURE(nameAndSignature))), thunkAddress);
 }
 
 IDATA
@@ -268,7 +268,7 @@ j9ThunkNewSignature(void * jitConfig, int signatureLength, char *signatureChars,
 		}
 
 		memcpy(allocatedSignature, encodedSignature, length);
-		exemplar.encodedSignature.outOfLineBytes = allocatedSignature;		
+		exemplar.encodedSignature.outOfLineBytes = allocatedSignature;
 	} else {
 		/* Inline encoding bytes must all be odd - multiply argCount by 2 and add 1 to make it odd */
 		encodedSignature[0] = encodedSignature[0] * 2 + 1;
@@ -350,7 +350,9 @@ j9ThunkEncodeSignature(char *signatureData, U_8 * encodedSignature)
 				while ((c = *signatureData++) == '[') ;
 				/* intentional fall-through */
 			case 'L':
-				if (c == 'L') {
+				/* intentional fall-through */
+			case 'Q':
+				if ((c == 'L') || (c == 'Q')) {
 					while (*signatureData++ != ';') ;
 				}
 #if defined(J9VM_ENV_DATA64)
@@ -395,7 +397,7 @@ j9ThunkEncodeSignature(char *signatureData, U_8 * encodedSignature)
 }
 
 static U_8
-j9ThunkGetEncodedSignature(J9ThunkTableEntry * entry, U_8 ** encodedSignaturePtr) 
+j9ThunkGetEncodedSignature(J9ThunkTableEntry * entry, U_8 ** encodedSignaturePtr)
 {
 	U_8 * encodedSignature;
 	U_8 argCount;
@@ -435,6 +437,8 @@ j9ThunkVMHelperFromSignature(void * jitConfig, UDATA signatureLength, char *sign
 		case '[':
 			/* intentional fall-through */
 		case 'L':
+			/* intentional fall-through */
+		case 'Q':
 #if defined(J9VM_ENV_DATA64)
 			helper = J9_BUILDER_SYMBOL(icallVMprJavaSendVirtualL);
 			break;
@@ -470,6 +474,8 @@ j9ThunkInvokeExactHelperFromSignature(void * jitConfig, UDATA signatureLength, c
 		case '[':
 			/* intentional fall-through */
 		case 'L':
+			/* intentional fall-through */
+		case 'Q':
 			helper = J9_BUILDER_SYMBOL(icallVMprJavaSendInvokeExactL);
 			break;
 		default:
@@ -485,5 +491,5 @@ j9ThunkVMHelperFromNameAndSig(void * jitConfig, void *parm)
 {
 	J9ROMNameAndSignature *nameAndSignature = (J9ROMNameAndSignature *) parm;
 
-	return j9ThunkVMHelperFromSignature(jitConfig, J9UTF8_LENGTH(J9ROMNAMEANDSIGNATURE_SIGNATURE(nameAndSignature)), (char *) &J9UTF8_DATA((J9ROMNAMEANDSIGNATURE_SIGNATURE(nameAndSignature))));
+	return j9ThunkVMHelperFromSignature(jitConfig, J9UTF8_LENGTH(J9ROMNAMEANDSIGNATURE_SIGNATURE(nameAndSignature)), (char *) J9UTF8_DATA((J9ROMNAMEANDSIGNATURE_SIGNATURE(nameAndSignature))));
 }

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -139,7 +139,6 @@ class CompilationInfoPerThreadBase
    {
    TR_PERSISTENT_ALLOC(TR_Memory::CompilationInfoPerThreadBase);
    friend class TR::CompilationInfo;
-   friend class ::TR_DebugExt;
    public:
    CompilationInfoPerThreadBase(TR::CompilationInfo &compInfo, J9JITConfig *jitConfig, int32_t id, bool onSeparateThread);
 
@@ -197,45 +196,104 @@ class CompilationInfoPerThreadBase
 
    /*
     * LdTM: This should, pedantically speaking, be an 'extern "C"' friend function rather than a static member function (with C++ linkage).
-    * However a brief search reveals that such an approach approach is fraught with its own set of compiler-bug-related risk.
+    * However a brief search reveals that such an approach is fraught with its own set of compiler-bug-related risk.
     */
    static TR_MethodMetaData *wrappedCompile(J9PortLibrary *portLib, void * opaqueParameters);
 
    bool methodCanBeCompiled(TR_Memory *trMemory, TR_FrontEnd *fe, TR_ResolvedMethod *compilee, TR_FilterBST *&filter);
    int32_t                getCompThreadId() const { return _compThreadId; }
 
-   bool                   compilationCanBeInterrupted() const { return _compilationCanBeInterrupted; }
-   void                   enterInterruptibleOperation()
-      {
-      TR_ASSERT(!_compilationCanBeInterrupted, "This guard is not re-entrant.");
-      _compilationCanBeInterrupted = true;
-      }
-   void                   exitInterruptibleOperation()
-      {
-      TR_ASSERT(_compilationCanBeInterrupted, "Exiting interruptible operation without having entered.");
-      _compilationCanBeInterrupted = false;
-      }
-
+   /**
+    * \brief
+    *
+    * An RAII class used to scope an interruptible operation on a compilation thread.
+    *
+    * \details
+    *
+    * Interruptible (\see InterruptibleOperation) and Uninterruptible (\see UninterruptibleOperation) operations related
+    * classes expressing whether the current compilation thread can terminate the compilation at the next yield point.
+    * The two classes can be intertwined and the logic of what happens when scopes mix is as follows:
+    *
+    * - Nesting an InterruptibleOperation under an UninterruptibleOperation acts as a NOP
+    * - Nesting an UninterruptibleOperation under an InterruptibleOperation results in an UninterruptibleOperation that
+    *   once gone out of scope results in an InterruptibleOperation
+    *
+    * Put simply, an UninterruptibleOperation takes higher precedence over an InterruptibleOperation.
+    */
    class InterruptibleOperation
       {
+      friend class TR::CompilationInfoPerThreadBase;
+
    public:
       InterruptibleOperation(TR::CompilationInfoPerThreadBase &compThread) :
          _compThread(compThread)
          {
-         _compThread.enterInterruptibleOperation();
+         if (_compThread._uninterruptableOperationDepth == 0)
+            {
+            _compThread._compilationCanBeInterrupted = true;
+            }
          }
 
       ~InterruptibleOperation()
          {
-         _compThread.exitInterruptibleOperation();
+         if (_compThread._uninterruptableOperationDepth == 0)
+            {
+            _compThread._compilationCanBeInterrupted = false;
+            }
+         }
+
+   private:
+      TR::CompilationInfoPerThreadBase & _compThread;
+      };
+
+   /**
+    * \brief
+    *
+    * An RAII class used to scope an uninterruptible operation on a compilation thread.
+    *
+    * \details
+    *
+    * Interruptible (\see InterruptibleOperation) and Uninterruptible (\see UninterruptibleOperation) operations related
+    * classes expressing whether the current compilation thread can terminate the compilation at the next yield point.
+    * The two classes can be intertwined and the logic of what happens when scopes mix is as follows:
+    *
+    * - Nesting an InterruptibleOperation under an UninterruptibleOperation acts as a NOP
+    * - Nesting an UninterruptibleOperation under an InterruptibleOperation results in an UninterruptibleOperation that
+    *   once gone out of scope results in an InterruptibleOperation
+    *
+    * Put simply, an UninterruptibleOperation takes higher precedence over an InterruptibleOperation.
+    */
+   class UninterruptibleOperation
+      {
+      friend class TR::CompilationInfoPerThreadBase;
+
+   public:
+      UninterruptibleOperation(TR::CompilationInfoPerThreadBase &compThread) :
+         _compThread(compThread), _originalValue(_compThread._compilationCanBeInterrupted)
+         {
+         _compThread._compilationCanBeInterrupted = false;
+         _compThread._uninterruptableOperationDepth++;
+         }
+
+      ~UninterruptibleOperation()
+         {
+         _compThread._compilationCanBeInterrupted = _originalValue;
+         _compThread._uninterruptableOperationDepth--;
          }
 
    private:
       TR::CompilationInfoPerThreadBase & _compThread;
 
+      /// Represents the original value of whether the compilation can be interrupted before executing the
+      /// uninterruptable operation
+      bool _originalValue;
       };
 
-   uint8_t                compilationShouldBeInterrupted() const { return _compilationShouldBeInterrupted; }
+   uint8_t compilationShouldBeInterrupted() const
+      {
+      return _compilationCanBeInterrupted ? _compilationShouldBeInterrupted : 0;
+      }
+
    void                   setCompilationShouldBeInterrupted(uint8_t reason) { _compilationShouldBeInterrupted = reason; }
    TR_DataCache*          reservedDataCache() { return _reservedDataCache; }
    void                   setReservedDataCache(TR_DataCache *dataCache) { _reservedDataCache = dataCache; }
@@ -256,6 +314,21 @@ class CompilationInfoPerThreadBase
 
    void                     setClientStream(JITServer::ClientStream *stream) { _clientStream = stream; }
    JITServer::ClientStream *getClientStream() const { return _clientStream; }
+
+   /**
+      @brief After this method runs, all subsequent persistent allocations
+      on the current thread for a given client will use a per-client allocator,
+      instead of the global one.
+    */
+   void                     enterPerClientAllocationRegion();
+
+   /**
+      @brief Ends per-client allocation on this thread. After this method returns,
+      all allocations will use the global persistent allocator.
+   */
+   void                     exitPerClientAllocationRegion();
+   TR_PersistentMemory *getPerClientPersistentMemory() { return _perClientPersistentMemory; }
+
    /**
       @brief Heuristic that returns true if compiling a method of given size
              and at given optimization level less is likely to consume little
@@ -268,7 +341,30 @@ class CompilationInfoPerThreadBase
              CPU relative to what the JVM has at its disposal
     */
    bool isCPUCheapCompilation(uint32_t bcsz, TR_Hotness optLevel);
-   bool shouldPerformLocalComp(const TR_MethodToBeCompiled *entry);
+   /**
+      @brief Returns true if we truly cannot perform a remote compilation
+             maybe because the server is not compatible, is not available, etc.
+
+             Note, that if this query returns false, it is not guaranteed that we
+             can do a remote compilation, because the server could have died since
+             we last checked.
+    */
+   bool cannotPerformRemoteComp(
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+      J9VMThread *vmThread
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
+   );
+   /**
+      @brief Returns true if heuristics determine that we have the resources to perform
+             this compilation locally, rather than offloading it to the remote server.
+    */
+   bool preferLocalComp(const TR_MethodToBeCompiled *entry);
+
+
+   bool compilationCanBeInterrupted() const { return _compilationCanBeInterrupted; }
+
+   void downgradeLocalCompilationIfLowPhysicalMemory(TR_MethodToBeCompiled *entry);
+
 #endif /* defined(J9VM_OPT_JITSERVER) */
 
    protected:
@@ -290,7 +386,16 @@ class CompilationInfoPerThreadBase
    uintptr_t                    _timeWhenCompStarted;
    int32_t                      _numJITCompilations; // num JIT compilations this thread has performed; AOT loads not counted
    int32_t                      _qszWhenCompStarted; // size of compilation queue and compilation starts
-   bool                         _compilationCanBeInterrupted;
+
+   /// Determines whether this compilation thread can be interrupted the compile at the next yield point. A different
+   /// thread may still request that the compilation _should_ be interrupted, however we may not be in a state at
+   /// which we _can_ interrupt.
+   bool _compilationCanBeInterrupted;
+
+   /// Counts the number of nested \see UninterruptibleOperation in the stack. An \see InterruptibleOperation can only
+   /// be issued if the depth of uninterruptable operations is 0.
+   int32_t _uninterruptableOperationDepth;
+
    bool                         _addToJProfilingQueue;
 
    volatile CompilationThreadState _compilationThreadState;
@@ -302,6 +407,7 @@ class CompilationInfoPerThreadBase
 #if defined(J9VM_OPT_JITSERVER)
    ClientSessionData * _cachedClientDataPtr;
    JITServer::ClientStream * _clientStream;
+   TR_PersistentMemory * _perClientPersistentMemory;
 #endif /* defined(J9VM_OPT_JITSERVER) */
 
 private:
@@ -327,7 +433,8 @@ private:
       J9VMThread *vmThread,
       TR::SegmentAllocator const &scratchSegmentProvider,
       TR::Compilation * compiler,
-      const char *exceptionName);
+      const char *exceptionName,
+      TR_MethodToBeCompiled *entry);
 
 #if defined(TR_HOST_S390)
    void outputVerboseMMapEntry(
@@ -361,7 +468,6 @@ namespace TR
 class CompilationInfoPerThread : public TR::CompilationInfoPerThreadBase
    {
    friend class TR::CompilationInfo;
-   friend class ::TR_DebugExt;
    public:
    CompilationInfoPerThread(TR::CompilationInfo &compInfo, J9JITConfig *jitConfig, int32_t id, bool isDiagnosticThread);
    bool                   initializationSucceeded() { return _initializationSucceeded; }
@@ -372,7 +478,7 @@ class CompilationInfoPerThread : public TR::CompilationInfoPerThreadBase
    int32_t                getCompThreadPriority() const { return _compThreadPriority; }
    void                   setCompThreadPriority(int32_t priority) { _compThreadPriority = priority; }
    int32_t                changeCompThreadPriority(int32_t priority, int32_t locationCode);
-   TR::Monitor *getCompThreadMonitor() { return _compThreadMonitor; }
+   TR::Monitor           *getCompThreadMonitor() { return _compThreadMonitor; }
    void                   run();
    void                   processEntries();
    virtual void           processEntry(TR_MethodToBeCompiled &entry, J9::J9SegmentProvider &scratchSegmentProvider);
@@ -394,6 +500,7 @@ class CompilationInfoPerThread : public TR::CompilationInfoPerThreadBase
    void                   setLastCompilationDuration(int32_t t) { _lastCompilationDuration = t; }
    bool                   isDiagnosticThread() const { return _isDiagnosticThread; }
    CpuSelfThreadUtilization& getCompThreadCPU() { return _compThreadCPU; }
+   TR::FILE              *getRTLogFile() { return _rtLogFile; }
    virtual void           freeAllResources();
 
 #if defined(J9VM_OPT_JITSERVER)
@@ -402,8 +509,8 @@ class CompilationInfoPerThread : public TR::CompilationInfoPerThreadBase
    TR_J9SharedCacheServerVM *getSharedCacheServerVM() const { return _sharedCacheServerVM; }
    void                      setSharedCacheServerVM(TR_J9SharedCacheServerVM *vm) { _sharedCacheServerVM = vm; }
    JITServer::ServerStream  *getStream();
-   J9ROMClass               *getAndCacheRemoteROMClass(J9Class *, TR_Memory *trMemory=NULL);
-   J9ROMClass               *getRemoteROMClassIfCached(J9Class *);
+   J9ROMClass               *getAndCacheRemoteROMClass(J9Class *clazz);
+   J9ROMClass               *getRemoteROMClassIfCached(J9Class *clazz);
    PersistentUnorderedSet<TR_OpaqueClassBlock*> *getClassesThatShouldNotBeNewlyExtended() const { return _classesThatShouldNotBeNewlyExtended; }
 #endif /* defined(J9VM_OPT_JITSERVER) */
 
@@ -422,6 +529,7 @@ class CompilationInfoPerThread : public TR::CompilationInfoPerThreadBase
    bool                   _initializationSucceeded;
    bool                   _isDiagnosticThread;
    CpuSelfThreadUtilization _compThreadCPU;
+   TR::FILE              *_rtLogFile;
 #if defined(J9VM_OPT_JITSERVER)
    TR_J9ServerVM         *_serverVM;
    TR_J9SharedCacheServerVM *_sharedCacheServerVM;

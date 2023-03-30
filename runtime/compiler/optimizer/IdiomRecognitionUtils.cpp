@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -421,8 +421,8 @@ createIdiomArrayStoreBodyInLoop(TR_PCISCGraph *tgt, int32_t ctrl, int dagId, TR_
    else
       {
       i2c = new (PERSISTENT_NEW) TR_PCISCNode(tgt->trMemory(),
-                                              (opcode == TR::cstorei) ? (TR_CISCOps)TR::i2s : TR_conversion,
-                                              (opcode == TR::cstorei) ? TR::Int16 : TR::NoType,
+                                              (opcode == TR::sstorei) ? (TR_CISCOps)TR::i2s : TR_conversion,
+                                              (opcode == TR::sstorei) ? TR::Int16 : TR::NoType,
                                               tgt->incNumNodes(),  dagId,   1,   1, pred); tgt->addNode(i2c);
       i2c->setIsOptionalNode();
       pred = i2c;
@@ -680,12 +680,12 @@ getThreeNodesForArray(TR_CISCNode *top, TR_CISCNode **ixloadORstore, TR_CISCNode
       case TR::ladd:
       case TR::iadd:
          // search iload
-         if (q = searchIload(p->getChild(1), allowArrayIndex))
+         if ((q = searchIload(p->getChild(1), allowArrayIndex)))
             {
             *iload = q;
             q = p->getChild(0);
             }
-         else if (q = searchIload(p->getChild(0), allowArrayIndex))
+         else if ((q = searchIload(p->getChild(0), allowArrayIndex)))
             {
             *iload = q;
             q = p->getChild(1);

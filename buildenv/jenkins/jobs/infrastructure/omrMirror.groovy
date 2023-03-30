@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2017, 2020 IBM Corp. and others
+ * Copyright (c) 2017, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -24,7 +24,7 @@ timestamps {
     timeout(time: 1, unit: 'HOURS') {
         def HTTP = 'https://'
         def SRC_REPO = 'github.com/eclipse/omr.git'
-        def TARGET_REPO = 'github.com/eclipse/openj9-omr.git'
+        def TARGET_REPO = 'github.com/eclipse-openj9/openj9-omr.git'
         def ARCHIVE_FILE = "OMR_COMMIT"
 
         stage("Mirror") {
@@ -40,7 +40,7 @@ timestamps {
                             }
 
                             // Push
-                            withCredentials([usernamePassword(credentialsId: 'b6987280-6402-458f-bdd6-7affc2e360d4', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
+                            withCredentials([usernamePassword(credentialsId: 'github-bot', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
                                 sh "git push ${HTTP}${USERNAME}:${PASSWORD}@${TARGET_REPO} --all"
                                 sh "git push ${HTTP}${USERNAME}:${PASSWORD}@${TARGET_REPO} --tags"
                             }

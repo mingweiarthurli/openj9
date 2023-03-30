@@ -1,7 +1,7 @@
 package org.openj9.test.com.ibm.jit;
 
 /*******************************************************************************
- * Copyright (c) 1998, 2020 IBM Corp. and others
+ * Copyright (c) 1998, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -17,7 +17,7 @@ package org.openj9.test.com.ibm.jit;
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -444,7 +444,7 @@ public class Test_JITHelpers {
 			// Latin1 tests are valid if and only if compact strings are enabled because of the way we extract the
 			// String.value field and pass it off to the intrinsicIndexOfLatin1 API. The only way to ensure
 			// the extracted array is in Latin1 format is to make sure compact strings are enabled.
-			Field enableCompressionField = String.class.getDeclaredField("enableCompression");
+			Field enableCompressionField = String.class.getDeclaredField("COMPACT_STRINGS");
 			enableCompressionField.setAccessible(true);
 
 			if ((boolean)enableCompressionField.get(null)) {
@@ -678,7 +678,7 @@ public class Test_JITHelpers {
 			// Latin1 tests are valid if and only if compact strings are enabled because of the way we extract the
 			// String.value field and pass it off to the intrinsicIndexOfStringLatin1 API. The only way to ensure
 			// the extracted array is in Latin1 format is to make sure compact strings are enabled.
-			Field enableCompressionField = String.class.getDeclaredField("enableCompression");
+			Field enableCompressionField = String.class.getDeclaredField("COMPACT_STRINGS");
 			enableCompressionField.setAccessible(true);
 
 			if ((boolean)enableCompressionField.get(null)) {
@@ -904,6 +904,9 @@ public class Test_JITHelpers {
 				Assert.assertEquals(helpers.intrinsicIndexOfStringLatin1(valueField.get("ab12345678901234567cdefghijklmnopq"), 34, valueField.get("def"), 3, 5), 20);
 				Assert.assertEquals(helpers.intrinsicIndexOfStringLatin1(valueField.get("ab12345678901234567cdefghijklmnopq"), 34, valueField.get("defghijklmn"), 11, 5), 20);
 				Assert.assertEquals(helpers.intrinsicIndexOfStringLatin1(valueField.get("abcdefghiklmnopqrstwyzabcdefghikabcdefghiklmnopqlmmnopqrstwyzabcdepoisd"), 71, valueField.get("abcdefghiklmnopqlmmnopqrstwyzabcdepoisd"), 39, 0), 32);
+				Assert.assertEquals(helpers.intrinsicIndexOfStringLatin1(valueField.get("abcdefghiklmnopqrstwyzabcdefghikabcdefghiklmnopqlmmnopqrstwyzabcdepoisd"), 37, valueField.get("zabcdefghikabcdefg"), 17, 5), -1);
+				Assert.assertEquals(helpers.intrinsicIndexOfStringLatin1(valueField.get("abcdefghiklmnopqrstwyzabcdefghikabcdefghiklmnopqlmmnopqrstwyzabcdepoisd"), 37, valueField.get("zabcdefghikabcdefg"), 17, 2), -1);
+				Assert.assertEquals(helpers.intrinsicIndexOfStringLatin1(valueField.get("abcdefghiklmnopqrstwyzabcdefghikabcdefghiklmnopqlmmnopqrstwyzabcdepoisd"), 38, valueField.get("zabcdefghikabcdefg"), 17, 5), 21);
 			}
 		} catch (IllegalAccessException e) {
 			throw new RuntimeException(e);
@@ -1140,6 +1143,9 @@ public class Test_JITHelpers {
 			Assert.assertEquals(helpers.intrinsicIndexOfStringUTF16(valueField.get("\u0190\u019112\u0199456789012\u01994567c\u0196efghijklmn\u0194\u0197\u0198"), 34, valueField.get("\u0196e"), 2, 5), 20);
 			Assert.assertEquals(helpers.intrinsicIndexOfStringUTF16(valueField.get("\u0190\u019112\u0199456789012\u01994567c\u0196efghijklmn\u0194\u0197\u0198"), 34, valueField.get("\u0196ef"), 3, 5), 20);
 			Assert.assertEquals(helpers.intrinsicIndexOfStringUTF16(valueField.get("\u0190\u019112\u0199456789012\u01994567c\u0196efghijklmn\u0194\u0197\u0198"), 34, valueField.get("\u0196efghijklmn"), 11, 5), 20);
+			Assert.assertEquals(helpers.intrinsicIndexOfStringUTF16(valueField.get("\u0190\u019112\u0199456789012\u01994567c\u0196efghijklmn\u0194\u0197\u0198"), 29, valueField.get("\u0196efghijklmn"), 10, 3), -1);
+			Assert.assertEquals(helpers.intrinsicIndexOfStringUTF16(valueField.get("\u0190\u019112\u0199456789012\u01994567c\u0196efghijklmn\u0194\u0197\u0198"), 29, valueField.get("\u0196efghijklmn"), 10, 5), -1);
+			Assert.assertEquals(helpers.intrinsicIndexOfStringUTF16(valueField.get("\u0190\u019112\u0199456789012\u01994567c\u0196efghijklmn\u0194\u0197\u0198"), 30, valueField.get("\u0196efghijklmn"), 10, 5), 20);
 		} catch (IllegalAccessException e) {
 			throw new RuntimeException(e);
 		} catch (NoSuchFieldException e) {

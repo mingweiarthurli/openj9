@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2020 IBM Corp. and others
+ * Copyright (c) 2018, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -111,6 +111,13 @@ void TR_BoolArrayStoreTransformer::perform()
    if (comp()->getOption(TR_TraceILGen))
       traceMsg(comp(), "<BoolArrayStoreTransformer>\n");
 
+   if (comp()->isDLT())
+      {
+      // Parameter slots may have been stored to in bytecode that isn't
+      // included in the DLT body.
+      _hasVariantArgs = true;
+      }
+
    if (!_hasVariantArgs)
       {
       // There is no store to args and bstorei nodes with argument as array base have known type
@@ -152,8 +159,13 @@ void TR_BoolArrayStoreTransformer::perform()
 
    if (!_bstoreiUnknownArrayTypeNodes->empty())
       {
-      if (_hasByteArrayAutoOrCheckCast && _hasBoolArrayAutoOrCheckCast) // only need to iterate CFG if both byte and boolean array exist
+      if ((_hasByteArrayAutoOrCheckCast && _hasBoolArrayAutoOrCheckCast) || comp()->isDLT())
+         {
+         // need to iterate CFG if both byte and boolean array exist or on DLT compiles
+         // On DLT compiles full analysis is needed because not all bytecodes are translated
+         // into IL. Autos and/or checkcast operations of type boolean[] and byte[] may exist.
          findBoolArrayStoreNodes();
+         }
       else
          {
          if (_hasBoolArrayAutoOrCheckCast) // if only boolean array exist then all the bstorei nodes are operating on boolean array
@@ -272,8 +284,13 @@ void TR_BoolArrayStoreTransformer::findBoolArrayStoreNodes()
     * Do a reverse post-order traversal of the CFG as the best effort to figure out types in one traverse
     */
    TR::ReversePostorderSnapshotBlockIterator blockIt (comp()->getFlowGraph(), comp());
-   //Initialize type info for parms for the entry block
-   if (blockIt.currentBlock())
+   // Initialize type info for parms for the entry block.
+   //
+   // Skip this for DLT because parameter slots may have been stored to in
+   // bytecode that isn't included in the DLT body, in which case the initial
+   // parameter value we receive will not necessarily be the right type.
+   //
+   if (blockIt.currentBlock() && !comp()->isDLT())
       {
       TR::Block *firstBlock = blockIt.currentBlock();
       ListIterator<TR::ParameterSymbol> parms(&comp()->getMethodSymbol()->getParameterList());

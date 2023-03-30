@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -75,6 +75,7 @@ internalDefineClass(
 	J9Class* result = NULL;
 	J9LoadROMClassData loadData = {0};
 	BOOLEAN isAnonFlagSet = J9_ARE_ALL_BITS_SET(options, J9_FINDCLASS_FLAG_ANON);
+	BOOLEAN isHiddenFlagSet = J9_ARE_ALL_BITS_SET(options, J9_FINDCLASS_FLAG_HIDDEN);
 
 	/* This trace point is obsolete. It is retained only because j9vm test depends on it.
 	 * Once j9vm tests are fixed, it would be marked as Obsolete in j9bcu.tdf
@@ -95,9 +96,9 @@ internalDefineClass(
 	loadData.classData = classData;
 	loadData.classDataLength = classDataLength;
 	loadData.classDataObject = classDataObject;
-	/* use anonClassLoader if this is an anonClass */
+
 	loadData.classLoader = classLoader;
-	if (J9_ARE_ALL_BITS_SET(options, J9_FINDCLASS_FLAG_ANON)) {
+	if (isAnonFlagSet) {
 		loadData.classLoader = vm->anonClassLoader;
 	}
 	loadData.protectionDomain = protectionDomain;
@@ -105,6 +106,14 @@ internalDefineClass(
 	loadData.freeUserData = NULL;
 	loadData.freeFunction = NULL;
 	loadData.romClass = existingROMClass;
+
+	loadData.hostPackageName = NULL;
+	loadData.hostPackageLength = 0;
+	if (isAnonFlagSet && (J2SE_VERSION(vm) >= J2SE_V11)) {
+		J9ROMClass *hostROMClass = hostClass->romClass;
+		loadData.hostPackageName = J9UTF8_DATA(J9ROMCLASS_CLASSNAME(hostROMClass));
+		loadData.hostPackageLength = packageNameLength(hostROMClass);
+	}
 
 	if (J9_ARE_NO_BITS_SET(options, J9_FINDCLASS_FLAG_NO_CHECK_FOR_EXISTING_CLASS)) {
 		/* For non-bootstrap classes, this check is done in jcldefine.c:defineClassCommon(). */
@@ -114,7 +123,7 @@ internalDefineClass(
 		}
 	}
 
-	if (!isAnonFlagSet) {
+	if (!isAnonFlagSet && !isHiddenFlagSet) {
 		/* See if there's already an orphan romClass available - still own classTableMutex at this point */
 		if (NULL != classLoader->romClassOrphansHashTable) {
 			orphanROMClass = romClassHashTableFind(classLoader->romClassOrphansHashTable, className, classNameLength);
@@ -141,13 +150,13 @@ internalDefineClass(
 		romClass = createROMClassFromClassFile(vmThread, &loadData, localBuffer);
 	}
 	if (romClass) {
-		/* Host class can only be set for anonymous classes, which are defined by Unsafe.defineAnonymousClass.
+		/* Host class can only be set for anonymous classes which are defined by Unsafe.defineAnonymousClass, or hidden classes.
 		 * For other cases, host class is set to NULL.
 		 */
 		if ((NULL != hostClass) && (J2SE_VERSION(vm) >= J2SE_V11)) {
 			J9ROMClass *hostROMClass = hostClass->romClass;
 			/* This error-check should only be done for anonymous classes. */
-			Trc_BCU_Assert_True(isAnonFlagSet);
+			Trc_BCU_Assert_True(isAnonFlagSet || isHiddenFlagSet);
 			/* From Java 9 and onwards, set IllegalArgumentException when host class and anonymous class have different packages. */
 			if (!hasSamePackageName(romClass, hostROMClass)) {
 				omrthread_monitor_exit(vm->classTableMutex);
@@ -319,7 +328,7 @@ internalLoadROMClass(J9VMThread * vmThread, J9LoadROMClassData *loadData, J9Tran
 
 	/* Call the class load hook to potentially replace the class data */
 
-	if ((J9_ARE_NO_BITS_SET(loadData->options, J9_FINDCLASS_FLAG_ANON))
+	if ((J9_ARE_NO_BITS_SET(loadData->options, J9_FINDCLASS_FLAG_ANON | J9_FINDCLASS_FLAG_HIDDEN) || (J2SE_VERSION(vm) <= J2SE_18))
 		&& (J9_EVENT_IS_HOOKED(vm->hookInterface, J9HOOK_VM_CLASS_LOAD_HOOK) || J9_EVENT_IS_HOOKED(vm->hookInterface, J9HOOK_VM_CLASS_LOAD_HOOK2))
 	) {
 		U_8 * classData = NULL;
@@ -370,7 +379,7 @@ internalLoadROMClass(J9VMThread * vmThread, J9LoadROMClassData *loadData, J9Tran
 			className = NULL;
 		} else {
 			UDATA classNameLength = loadData->classNameLength;
-			if (J9_ARE_ALL_BITS_SET(loadData->options, J9_FINDCLASS_FLAG_ANON)) {
+			if (J9_ARE_ANY_BITS_SET(loadData->options, J9_FINDCLASS_FLAG_ANON | J9_FINDCLASS_FLAG_HIDDEN)) {
 				classNameLength -= (1 + ROM_ADDRESS_LENGTH);
 			}
 			className = j9mem_allocate_memory(classNameLength + 1, J9MEM_CATEGORY_CLASSES);
@@ -533,27 +542,18 @@ internalLoadROMClass(J9VMThread * vmThread, J9LoadROMClassData *loadData, J9Tran
 	if (J9_ARE_ANY_BITS_SET(vm->extendedRuntimeFlags2, J9_EXTENDED_RUNTIME2_ENABLE_PREVIEW)) {
 		translationFlags |= BCT_EnablePreview;
 	}
-
-	if (J9_ARE_ALL_BITS_SET(vm->extendedRuntimeFlags2, J9_EXTENDED_RUNTIME2_ENABLE_VALHALLA)) {
-		translationFlags |= BCT_ValueTypesEnabled;
+#if (JAVA_SPEC_VERSION == 8) && defined(J9ZOS390) && defined(J9VM_ENV_DATA64)
+	/* This code duplication is intentional, it works around a JDK8 z/OS 64bit (non-compressedrefs) compiler issue, RTC 147197. */
+	if (J9_ARE_ANY_BITS_SET(vm->extendedRuntimeFlags2, J9_EXTENDED_RUNTIME2_ENABLE_PREVIEW)) {
+		translationFlags |= BCT_EnablePreview;
 	}
-
+#endif
 	/* Determine allowed class file version */
 #ifdef J9VM_OPT_SIDECAR
-	if (J2SE_VERSION(vm) >= J2SE_V16) {
-		translationFlags |= BCT_Java16MajorVersionShifted;
-	} else if (J2SE_VERSION(vm) >= J2SE_V15) {
-		translationFlags |= BCT_Java15MajorVersionShifted;
-	} else if (J2SE_VERSION(vm) >= J2SE_V14) {
-		translationFlags |= BCT_Java14MajorVersionShifted;
-	} else if (J2SE_VERSION(vm) >= J2SE_V13) {
-		translationFlags |= BCT_Java13MajorVersionShifted;
-	} else if (J2SE_VERSION(vm) >= J2SE_V12) {
-		translationFlags |= BCT_Java12MajorVersionShifted;
-	} else if (J2SE_VERSION(vm) >= J2SE_V11) {
-		translationFlags |= BCT_Java11MajorVersionShifted;
-	} else if (J2SE_VERSION(vm) >= J2SE_18) {
-		translationFlags |= BCT_Java8MajorVersionShifted;
+	{
+		/* Using local variable majorVer avoids a z/OS 64-bit compiler issue. */
+		U_32 majorVer = BCT_JavaMaxMajorVersionShifted;
+		translationFlags |= majorVer;
 	}
 #endif
 
@@ -850,6 +850,9 @@ createROMClassFromClassFile(J9VMThread *currentThread, J9LoadROMClassData *loadD
 		case BCT_ERR_VERIFY_ERROR_INLINING:
 		case BCT_ERR_BYTECODE_TRANSLATION_FAILED:
 		case BCT_ERR_UNKNOWN_ANNOTATION:
+#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+		case BCT_ERR_INVALID_VALUE_TYPE:
+#endif /* defined(J9VM_OPT_VALHALLA_VALUE_TYPES) */
 			exceptionNumber = J9VMCONSTANTPOOL_JAVALANGVERIFYERROR;
 			break;
 
@@ -882,10 +885,15 @@ createROMClassFromClassFile(J9VMThread *currentThread, J9LoadROMClassData *loadD
 			break;
 		}
 
+		case BCT_ERR_DUPLICATE_NAME:
+			/* This case is handled below */
+			break;
+
 		/*
 		 * Error messages are contents of vm->dynamicLoadBuffers->classFileError if anything is assigned
 		 * otherwise just the classname.
 		 */
+		case BCT_ERR_INVALID_CLASS_TYPE:
 		case BCT_ERR_CLASS_NAME_MISMATCH:
 			exceptionNumber = J9VMCONSTANTPOOL_JAVALANGNOCLASSDEFFOUNDERROR;
 			/* FALLTHROUGH */
@@ -924,7 +932,15 @@ createROMClassFromClassFile(J9VMThread *currentThread, J9LoadROMClassData *loadD
 			J9_VM_FUNCTION(currentThread, setCurrentException)(currentThread, exceptionNumber, NULL);
 		} else {
 			PORT_ACCESS_FROM_JAVAVM(vm);
-			J9_VM_FUNCTION(currentThread, setCurrentExceptionUTF)(currentThread, exceptionNumber, (const char*)errorUTF);
+			if (BCT_ERR_DUPLICATE_NAME == result) {
+				size_t nameLength = 0;
+				if (NULL != errorUTF ){
+					nameLength = strlen((const char*)errorUTF);
+				}
+				J9_VM_FUNCTION(currentThread, setCurrentExceptionNLSWithArgs)(currentThread, J9NLS_JCL_DUPLICATE_CLASS_DEFINITION, J9VMCONSTANTPOOL_JAVALANGLINKAGEERROR, (const char*)errorUTF, nameLength);
+			} else {
+				J9_VM_FUNCTION(currentThread, setCurrentExceptionUTF)(currentThread, exceptionNumber, (const char*)errorUTF);
+			}
 			j9mem_free_memory(errorUTF);
 		}
 	}

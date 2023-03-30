@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2020 IBM Corp. and others
+ * Copyright (c) 2001, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -43,14 +43,14 @@ import com.ibm.j9ddr.vm29.pointer.generated.J9IndexableObjectContiguousFullPoint
 import com.ibm.j9ddr.vm29.pointer.generated.J9IndexableObjectDiscontiguousFullPointer;
 import com.ibm.j9ddr.vm29.pointer.generated.J9IndexableObjectPointer;
 import com.ibm.j9ddr.vm29.pointer.generated.J9ObjectPointer;
-import com.ibm.j9ddr.vm29.types.U32;
-import com.ibm.j9ddr.vm29.types.UDATA;
 import com.ibm.j9ddr.vm29.structure.J9IndexableObjectContiguous;
 import com.ibm.j9ddr.vm29.structure.J9IndexableObjectContiguousCompressed;
 import com.ibm.j9ddr.vm29.structure.J9IndexableObjectContiguousFull;
 import com.ibm.j9ddr.vm29.structure.J9IndexableObjectDiscontiguous;
 import com.ibm.j9ddr.vm29.structure.J9IndexableObjectDiscontiguousCompressed;
 import com.ibm.j9ddr.vm29.structure.J9IndexableObjectDiscontiguousFull;
+import com.ibm.j9ddr.vm29.types.U32;
+import com.ibm.j9ddr.vm29.types.UDATA;
 
 public class J9IndexableObjectHelper extends J9ObjectHelper 
 {
@@ -77,10 +77,15 @@ public class J9IndexableObjectHelper extends J9ObjectHelper
 	public static U32 rawSize(J9IndexableObjectPointer objPointer) throws CorruptDataException 
 	{
 		if (mixedReferenceMode) {
-			if (compressObjectReferences) {
-				return (U32)J9IndexableObjectContiguousCompressedPointer.cast(objPointer).size();
+			try {
+				if (compressObjectReferences) {
+					return (U32)J9IndexableObjectContiguousCompressedPointer.cast(objPointer).size();
+				}
+				return (U32)J9IndexableObjectContiguousFullPointer.cast(objPointer).size();
+			} catch (NoSuchFieldException e) {
+				// the 'size' field should be present in a VM that supports mixed reference mode
+				throw new CorruptDataException(e);
 			}
-			return (U32)J9IndexableObjectContiguousFullPointer.cast(objPointer).size();
 		}
 		return (U32)J9IndexableObjectContiguousPointer.cast(objPointer).size();
 	}
@@ -88,12 +93,17 @@ public class J9IndexableObjectHelper extends J9ObjectHelper
 	public static U32 size(J9IndexableObjectPointer objPointer) throws CorruptDataException 
 	{
 		U32 size = rawSize(objPointer);
-		if (size.eq(0)) {
+		if (size.isZero()) {
 			if (mixedReferenceMode) {
-				if (compressObjectReferences) {
-					size = (U32)J9IndexableObjectDiscontiguousCompressedPointer.cast(objPointer).size();
-				} else {
-					size = (U32)J9IndexableObjectDiscontiguousFullPointer.cast(objPointer).size();
+				try {
+					if (compressObjectReferences) {
+						size = (U32)J9IndexableObjectDiscontiguousCompressedPointer.cast(objPointer).size();
+					} else {
+						size = (U32)J9IndexableObjectDiscontiguousFullPointer.cast(objPointer).size();
+					}
+				} catch (NoSuchFieldException e) {
+					// the 'size' field should be present in a VM that supports mixed reference mode
+					throw new CorruptDataException(e);
 				}
 			} else {
 				size = (U32)J9IndexableObjectDiscontiguousPointer.cast(objPointer).size();
@@ -133,6 +143,38 @@ public class J9IndexableObjectHelper extends J9ObjectHelper
 	}
 
 	/**
+	 * @param objPointer the contiguous array object who's dataAddr field we are accessing
+	 * @throws CorruptDataException If there's a problem accessing the indexable object dataAddr field
+	 * @throws NoSuchFieldException If the indexable object dataAddr field does not exist on the build that generated the core file
+	 */
+	public static VoidPointer getDataAddrForContiguous(J9IndexableObjectPointer objPointer) throws CorruptDataException, NoSuchFieldException
+	{
+		if (mixedReferenceMode) {
+			if (compressObjectReferences) {
+				return VoidPointer.cast((J9IndexableObjectContiguousCompressedPointer.cast(objPointer)).dataAddr());
+			}
+			return VoidPointer.cast((J9IndexableObjectContiguousFullPointer.cast(objPointer)).dataAddr());
+		}
+		return VoidPointer.cast((J9IndexableObjectContiguousPointer.cast(objPointer)).dataAddr());
+	}
+
+	/**
+	 * @param objPointer the discontiguous array object who's dataAddr field we are accessing
+	 * @throws CorruptDataException If there's a problem accessing the indexable object dataAddr field
+	 * @throws NoSuchFieldException If the indexable object dataAddr field does not exist on the build that generated the core file
+	 */
+	public static VoidPointer getDataAddrForDiscontiguous(J9IndexableObjectPointer objPointer) throws CorruptDataException, NoSuchFieldException
+	{
+		if (mixedReferenceMode) {
+			if (compressObjectReferences) {
+				return VoidPointer.cast((J9IndexableObjectDiscontiguousCompressedPointer.cast(objPointer)).dataAddr());
+			}
+			return VoidPointer.cast((J9IndexableObjectDiscontiguousFullPointer.cast(objPointer)).dataAddr());
+		}
+		return VoidPointer.cast((J9IndexableObjectDiscontiguousPointer.cast(objPointer)).dataAddr());
+	}
+
+	/**
 	 * @param objPointer array object who's elements we are outputting to dst
 	 * @param index the desired index within then array
 	 * @param dataSize size of the data held in the array
@@ -144,6 +186,15 @@ public class J9IndexableObjectHelper extends J9ObjectHelper
 		return ObjectModel.getElementAddress(objPointer, index, dataSize);
 	}
 	
+	/**
+	 * @param objPointer array object that we are checking if isInlineContiguousArraylet
+	 * @throws CorruptDataException If there's a problem accessing the layout of the indexable object
+	 */
+	public static boolean isInlineContiguousArraylet(J9IndexableObjectPointer objPointer) throws CorruptDataException
+	{
+		return ObjectModel.isInlineContiguousArraylet(objPointer);
+	}
+
 	/**
 	 *  @param objPointer array object who's elements we are outputting to dst
 	 *  @param dst destination array where we will output the elements

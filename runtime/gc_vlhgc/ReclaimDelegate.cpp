@@ -1,6 +1,5 @@
-
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -42,7 +41,6 @@
 #include "CompactGroupManager.hpp"
 #include "CompactGroupPersistentStats.hpp"
 #include "CompactStats.hpp"
-#include "Dispatcher.hpp"
 #include "EnvironmentVLHGC.hpp"
 #include "GlobalAllocationManagerTarok.hpp"
 #include "InterRegionRememberedSet.hpp"
@@ -50,8 +48,9 @@
 #include "HeapRegionDescriptorVLHGC.hpp"
 #include "HeapRegionIteratorVLHGC.hpp"
 #include "HeapRegionManagerTarok.hpp"
-#include "MemoryPoolBumpPointer.hpp"
+#include "MemoryPool.hpp"
 #include "ObjectAllocationInterface.hpp"
+#include "ParallelDispatcher.hpp"
 #include "ParallelSweepSchemeVLHGC.hpp"
 #include "VMThreadListIterator.hpp"
 #include "WriteOnceCompactor.hpp"
@@ -217,7 +216,7 @@ MM_ReclaimDelegate::tagRegionsBeforeCompactWithWorkGoal(MM_EnvironmentVLHGC *env
 				Assert_MM_true(!region->_compactData._shouldCompact);
 			}
 
-			MM_MemoryPoolBumpPointer *memoryPool = (MM_MemoryPoolBumpPointer *)region->getMemoryPool();
+			MM_MemoryPool *memoryPool = region->getMemoryPool();
 			Assert_MM_true(NULL != memoryPool);
 			UDATA freeMemory = memoryPool->getFreeMemoryAndDarkMatterBytes();
 			UDATA compactGroup = MM_CompactGroupManager::getCompactGroupNumber(env, region);
@@ -278,7 +277,7 @@ MM_ReclaimDelegate::estimateReclaimableRegions(MM_EnvironmentVLHGC *env, double 
 		while (NULL != (region = regionIterator.nextRegion())) {
 			/* regions that are overflowed or RSCL is being rebuilt are not included into estimate */
 			if (region->hasValidMarkMap() && region->getRememberedSetCardList()->isAccurate()) {
-				MM_MemoryPoolBumpPointer *memoryPool = (MM_MemoryPoolBumpPointer *)region->getMemoryPool();
+				MM_MemoryPool *memoryPool = region->getMemoryPool();
 				Assert_MM_true(NULL != memoryPool);
 				UDATA freeMemory = memoryPool->getFreeMemoryAndDarkMatterBytes();
 			
@@ -336,10 +335,10 @@ compareEmptinessFunc(const void *element1, const void *element2)
 	MM_HeapRegionDescriptorVLHGC *region1 = *(MM_HeapRegionDescriptorVLHGC **)element1;
 	MM_HeapRegionDescriptorVLHGC *region2 = *(MM_HeapRegionDescriptorVLHGC **)element2;
 
-	UDATA emptiness1 = ((MM_MemoryPoolBumpPointer *)region1->getMemoryPool())->getFreeMemoryAndDarkMatterBytes();
-	UDATA emptiness2 = ((MM_MemoryPoolBumpPointer *)region2->getMemoryPool())->getFreeMemoryAndDarkMatterBytes();
+	UDATA emptiness1 = region1->getMemoryPool()->getFreeMemoryAndDarkMatterBytes();
+	UDATA emptiness2 = region2->getMemoryPool()->getFreeMemoryAndDarkMatterBytes();
 
-	 if (emptiness1 == emptiness2) {
+	if (emptiness1 == emptiness2) {
 		 return 0;
 	 } else if (emptiness1 < emptiness2) {
 		 return 1;
@@ -428,7 +427,7 @@ MM_ReclaimDelegate::calculateOptimalEmptinessRegionThreshold(MM_EnvironmentVLHGC
 			}
 
 			MM_HeapRegionDescriptorVLHGC * region = _regionsSortedByEmptinessArray[regionSortedByEmptinessIndex++];
-			freeAndDarkMatterBytes = ((MM_MemoryPoolBumpPointer *)region->getMemoryPool())->getFreeMemoryAndDarkMatterBytes();
+			freeAndDarkMatterBytes = region->getMemoryPool()->getFreeMemoryAndDarkMatterBytes();
 			bytesRecovered += freeAndDarkMatterBytes;
 			defragmentBytesCopyForwardedPerGMP += (regionSize - freeAndDarkMatterBytes);
 		}
@@ -474,6 +473,7 @@ done:
 void
 MM_ReclaimDelegate::runGlobalSweepBeforePGC(MM_EnvironmentVLHGC *env, MM_AllocateDescription *allocDescription, MM_MemorySubSpace *activeSubSpace, MM_GCCode gcCode)
 {
+	env->_cycleState->_noCompactionAfterSweep = true;
 	performAtomicSweep(env, allocDescription, activeSubSpace, gcCode);
 	
 	/* Now that dark matter and free bytes data have been updated in all memoryPools, we want to rebuild the _regionsSortedByEmptinessArray table */
@@ -532,8 +532,6 @@ MM_ReclaimDelegate::performAtomicSweep(MM_EnvironmentVLHGC *env, MM_AllocateDesc
 void
 MM_ReclaimDelegate::createRegionCollectionSetForPartialGC(MM_EnvironmentVLHGC *env, UDATA desiredWorkToDo)
 {
-	Assert_MM_true(env->_cycleState->_shouldRunCopyForward);
-	
 	UDATA ignoreSkippedRegions = 0;
 	tagRegionsBeforeCompactWithWorkGoal(env, true, desiredWorkToDo, &ignoreSkippedRegions);
 }
@@ -569,7 +567,7 @@ MM_ReclaimDelegate::deriveCompactScore(MM_EnvironmentVLHGC *env)
 				region->_compactData._compactScore = 0.0;
 				notDefragmentationTarget += 1;
 			} else if (!region->getRememberedSetCardList()->isAccurate()) {
-				/* Overflowed regions or those that RSCL is being rebuilt will not be be compacted (not even put into the sorted list) */
+				/* Overflowed regions or those that RSCL is being rebuilt will not be compacted (not even put into the sorted list) */
 				region->_compactData._compactScore = 0.0;
 				overflowedRegionCount += 1;
 			} else if(!region->_sweepData._alreadySwept) {
@@ -582,7 +580,7 @@ MM_ReclaimDelegate::deriveCompactScore(MM_EnvironmentVLHGC *env)
 				jniCriticalReservedRegions += 1;
 			} else {
 				UDATA compactGroup = MM_CompactGroupManager::getCompactGroupNumber(env, region);
-				MM_MemoryPoolBumpPointer *memoryPool = (MM_MemoryPoolBumpPointer *)region->getMemoryPool();
+				MM_MemoryPool *memoryPool = region->getMemoryPool();
 				UDATA freeMemory = memoryPool->getFreeMemoryAndDarkMatterBytes();
 
 				if (region->_markData._shouldMark) {
@@ -604,8 +602,8 @@ MM_ReclaimDelegate::deriveCompactScore(MM_EnvironmentVLHGC *env)
 					double potentialWastedWork = (1.0 - weightedSurvivalRate) * (1.0 - emptiness);
 					
 					if (env->_cycleState->_shouldRunCopyForward) {
-						double sparsity = (double)(freeMemory - memoryPool->getAllocatableBytes()) / (double)regionSize;
-						compactScore = 50.0 * (sparsity + emptiness) * (1.0 - potentialWastedWork);
+						double sparsity = (double)memoryPool->getDarkMatterBytes() / (double)regionSize;
+						compactScore = 100.0 * sparsity * (1.0 - potentialWastedWork);
 					} else {
 						compactScore = 100.0 * emptiness * (1.0 - potentialWastedWork);
 					}
@@ -645,8 +643,7 @@ MM_ReclaimDelegate::deriveCompactScore(MM_EnvironmentVLHGC *env)
 	/* Walk the sorted list bottom up, and remove regions that do not contribute to recovering a full free region */
 	for (IDATA i = _currentSortedRegionCount - 1; i >= 0; i--) {
 		region = _regionSortedByCompactScore[i];
-		MM_MemoryPoolBumpPointer *memoryPool = (MM_MemoryPoolBumpPointer *)region->getMemoryPool();
-		UDATA freeMemory = memoryPool->getFreeMemoryAndDarkMatterBytes();
+		UDATA freeMemory = region->getMemoryPool()->getFreeMemoryAndDarkMatterBytes();
 
 		UDATA compactGroup = MM_CompactGroupManager::getCompactGroupNumber(env, region);
 		Assert_MM_true(compactGroup < _compactGroupMaxCount);
@@ -674,7 +671,7 @@ void
 MM_ReclaimDelegate::postCompactCleanup(MM_EnvironmentVLHGC *env, MM_AllocateDescription *allocDescription, MM_MemorySubSpace *activeSubSpace, MM_GCCode gcCode)
 {
 	/* Restart the allocation caches associated to all threads */
-	masterThreadRestartAllocationCaches(env);
+	mainThreadRestartAllocationCaches(env);
 
 	/* ----- start of cleanupAfterCollect ------*/
 	
@@ -744,7 +741,6 @@ MM_ReclaimDelegate::runReclaimForAbortedCopyForward(MM_EnvironmentVLHGC *env, MM
 	MM_CompactGroupPersistentStats *persistentStats = extensions->compactGroupPersistentStats;
 
 	Trc_MM_ReclaimDelegate_runReclaimForAbortedCopyForward_Entry(env->getLanguageVMThread(), ((MM_GlobalAllocationManagerTarok *)MM_GCExtensions::getExtensions(env)->globalAllocationManager)->getFreeRegionCount());
-	Assert_MM_true(env->_cycleState->_shouldRunCopyForward);
 
 	/* Perform Atomic Sweep on nonEvacuated regions before compacting in order to maintain accurate projectedLiveByte for the regions
 	 * projectedLiveByte will be used in selecting RateOfReturnCollectionSet in future collection */
@@ -797,7 +793,7 @@ MM_ReclaimDelegate::compactAndCorrectStats(MM_EnvironmentVLHGC *env, MM_Allocate
 	 */
 	static_cast<MM_CycleStateVLHGC*>(env->_cycleState)->_vlhgcIncrementStats._compactStats.clear();
 	/* run the compactor and we will read the stats, afterward */
-	masterThreadCompact(env, allocDescription, nextMarkMap);
+	mainThreadCompact(env, allocDescription, nextMarkMap);
 }
 #endif /* defined(J9VM_GC_MODRON_COMPACTION) */	
 
@@ -833,7 +829,7 @@ MM_ReclaimDelegate::deleteSweepPoolState(MM_EnvironmentBase *env, void *sweepPoo
 
 #if defined(J9VM_GC_MODRON_COMPACTION)
 void
-MM_ReclaimDelegate::masterThreadCompact(MM_EnvironmentVLHGC *env, MM_AllocateDescription *allocDescription, MM_MarkMap *nextMarkMap)
+MM_ReclaimDelegate::mainThreadCompact(MM_EnvironmentVLHGC *env, MM_AllocateDescription *allocDescription, MM_MarkMap *nextMarkMap)
 {
 	PORT_ACCESS_FROM_ENVIRONMENT(env);
 	MM_GCExtensions *extensions = MM_GCExtensions::getExtensions(env);
@@ -852,7 +848,7 @@ MM_ReclaimDelegate::masterThreadCompact(MM_EnvironmentVLHGC *env, MM_AllocateDes
 #endif /* J9VM_GC_MODRON_COMPACTION */
 
 void
-MM_ReclaimDelegate::masterThreadRestartAllocationCaches(MM_EnvironmentVLHGC *env)
+MM_ReclaimDelegate::mainThreadRestartAllocationCaches(MM_EnvironmentVLHGC *env)
 {
 	GC_VMThreadListIterator vmThreadListIterator((J9JavaVM *)env->getLanguageVM());
 	J9VMThread *walkThread;
@@ -889,7 +885,9 @@ MM_ReclaimDelegate::reportSweepEnd(MM_EnvironmentBase *env)
 {
 	J9VMThread *vmThread = (J9VMThread *)env->getLanguageVMThread();
 	PORT_ACCESS_FROM_ENVIRONMENT(env);
-	Trc_MM_SweepEnd(vmThread);
+	MM_SweepVLHGCStats sweepStats = static_cast<MM_CycleStateVLHGC*>(env->_cycleState)->_vlhgcIncrementStats._sweepStats;
+
+	Trc_MM_SweepEndBalancedGC(vmThread, j9time_hires_delta(sweepStats._startTime, sweepStats._endTime, J9PORT_TIME_DELTA_IN_MICROSECONDS));
 
 	TRIGGER_J9HOOK_MM_PRIVATE_SWEEP_END(
 		MM_GCExtensions::getExtensions(env)->privateHookInterface,

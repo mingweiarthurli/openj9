@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -80,7 +80,6 @@ class TR_PersistentMethodInfo
    friend class TR::CompilationInfo;
    friend class TR_S390Recompilation;  // FIXME: ugly
    friend class ::OMR::Options;
-   friend class TR_DebugExt;
    friend class TR::DefaultCompilationStrategy;
    friend class TR::ThresholdCompilationStrategy;
 
@@ -322,7 +321,6 @@ class TR_PersistentJittedBodyInfo
    friend class TR_EmilyPersistentJittedBodyInfo;
    friend class ::OMR::Options;
    friend class J9::Options;
-   friend class TR_DebugExt;
 
 #if defined(TR_HOST_X86) || defined(TR_HOST_POWER) || defined(TR_HOST_S390) || defined(TR_HOST_ARM) || defined(TR_HOST_ARM64)
    friend void fixPersistentMethodInfo(void *table, bool isJITClientAOTLoad);

@@ -1,6 +1,6 @@
 /*[INCLUDE-IF Sidecar18-SE]*/
 /*******************************************************************************
- * Copyright (c) 2007, 2018 IBM Corp. and others
+ * Copyright (c) 2007, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -32,14 +32,15 @@ import com.ibm.dtfj.javacore.builder.IBuilderData;
 import com.ibm.dtfj.javacore.builder.IImageAddressSpaceBuilder;
 import com.ibm.dtfj.javacore.builder.IImageProcessBuilder;
 import com.ibm.dtfj.javacore.parser.framework.parser.ParserException;
+import com.ibm.dtfj.javacore.parser.framework.scanner.IParserToken;
 import com.ibm.dtfj.javacore.parser.j9.IAttributeValueMap;
 import com.ibm.dtfj.javacore.parser.j9.SectionParser;
 
 public class PlatformSectionParser extends SectionParser implements IPlatformTypes {
-	
+
 	private IImageAddressSpaceBuilder fImageAddressSpaceBuilder;
 	private IImageProcessBuilder fImageProcessBuilder;
-	
+
 	public PlatformSectionParser() {
 		super(PLATFORM_SECTION);
 	}
@@ -48,14 +49,14 @@ public class PlatformSectionParser extends SectionParser implements IPlatformTyp
 	 * Controls parsing for host platform (XH) section in the javacore
 	 * @throws ParserException
 	 */
+	@Override
 	protected void topLevelRule() throws ParserException {
-		
-		// get access to DTFJ AddressSpace and ImageProcess objects 
+		// get access to DTFJ AddressSpace and ImageProcess objects
 		fImageAddressSpaceBuilder = fImageBuilder.getCurrentAddressSpaceBuilder();
 		if (fImageAddressSpaceBuilder != null) {
 			fImageProcessBuilder = fImageAddressSpaceBuilder.getCurrentImageProcessBuilder();
 		}
-		
+
 		hostInfo();
 		crashInfo();
 		// Windows can come before registers
@@ -67,13 +68,12 @@ public class PlatformSectionParser extends SectionParser implements IPlatformTyp
 	}
 
 	/**
-	 * Parse the OS and CPU information (2XHOSLEVEL,2XHCPUARCH and 2XHCPUS lines) 
+	 * Parse the OS and CPU information (2XHOSLEVEL,2XHCPUARCH and 2XHCPUS lines)
 	 * @throws ParserException
 	 */
 	private void hostInfo() throws ParserException {
-
 		IAttributeValueMap results = null;
-		
+
 		// Operating system information
 		results = processTagLineOptional(T_2XHHOSTNAME);
 		if (results != null) {
@@ -88,6 +88,7 @@ public class PlatformSectionParser extends SectionParser implements IPlatformTyp
 					InetAddress addr = InetAddress.getByName(host_addr);
 					fImageBuilder.addHostAddr(addr);
 				} catch (UnknownHostException e) {
+					// ignore
 				}
 			}
 		}
@@ -127,20 +128,38 @@ public class PlatformSectionParser extends SectionParser implements IPlatformTyp
 	 * @throws ParserException
 	 */
 	private void crashInfo() throws ParserException {
-		IAttributeValueMap results = null;
-		
 		// 1XHEXCPCODE line if present contains the signal information
-		while((results = processTagLineOptional(T_1XHEXCPCODE)) != null) {
-			int j9_signal = results.getIntValue(PL_SIGNAL);
-			if (j9_signal != IBuilderData.NOT_AVAILABLE) {
-				fImageProcessBuilder.setSignal(resolveGenericSignal(j9_signal));
+		for (;;) {
+			IAttributeValueMap results = processTagLineOptional(T_1XHEXCPCODE);
+
+			if (results == null) {
+				break;
+			}
+
+			IParserToken token = results.getToken(PL_SIGNAL);
+
+			if (token == null) {
+				continue;
+			}
+
+			String value = token.getValue();
+
+			if (value.startsWith("0x")) { //$NON-NLS-1$
+				try {
+					int signal = Integer.parseUnsignedInt(value.substring(2), 16);
+
+					if (signal != IBuilderData.NOT_AVAILABLE) {
+						fImageProcessBuilder.setSignal(signal);
+					}
+				} catch (NumberFormatException e) {
+					// ignore
+				}
 			}
 		}
-		
+
 		// 1XHERROR2 line indicates no crash information
 		processTagLineOptional(T_1XHERROR2);
 	}
-	
 
 	/**
 	 * Parse the exception information lines
@@ -168,7 +187,7 @@ public class PlatformSectionParser extends SectionParser implements IPlatformTyp
 			}
 		}
 	}
-	
+
 	/**
 	 * Parse the exception register information lines
 	 * @throws ParserException
@@ -203,51 +222,14 @@ public class PlatformSectionParser extends SectionParser implements IPlatformTyp
 			fImageProcessBuilder.setRegisters(m);
 		}
 	}
-	
-	// J9 port library signal bit values (from j9port.h). These same values are also used in 
-	// class com.ibm.jvm.j9.dump.indexsupport.NodeGPF in the DTFJ J9 project. Really this is 
-	// a candidate for using a DTFJ 'Common' project at some point.
-	private final static int J9PORT_SIG_FLAG_SIGSEGV 	= 4;
-	private final static int J9PORT_SIG_FLAG_SIGBUS 	= 8;
-	private final static int J9PORT_SIG_FLAG_SIGILL 	= 16;
-	private final static int J9PORT_SIG_FLAG_SIGFPE 	= 32;
-	private final static int J9PORT_SIG_FLAG_SIGTRAP 	= 64;
-	private final static int J9PORT_SIG_FLAG_SIGQUIT 	= 0x400;
-	private final static int J9PORT_SIG_FLAG_SIGABRT 	= 0x800;
-	private final static int J9PORT_SIG_FLAG_SIGTERM 	= 0x1000;
-	
-	private final static int J9PORT_SIG_FLAG_SIGFPE_DIV_BY_ZERO 	= 0x40020;
-	private final static int J9PORT_SIG_FLAG_SIGFPE_INT_DIV_BY_ZERO = 0x80020;
-	private final static int J9PORT_SIG_FLAG_SIGFPE_INT_OVERFLOW 	= 0x100020;
 
 	/**
-	 * Converts J9 signal value to generic signal number.
-	 */
-	private int resolveGenericSignal(int num) {
-
-		if ((num & J9PORT_SIG_FLAG_SIGQUIT) != 0) 	return 3;
-		if ((num & J9PORT_SIG_FLAG_SIGILL) != 0) 	return 4;
-		if ((num & J9PORT_SIG_FLAG_SIGTRAP) != 0) 	return 5;
-		if ((num & J9PORT_SIG_FLAG_SIGABRT) != 0) 	return 6;
-		if ((num & J9PORT_SIG_FLAG_SIGFPE) != 0) {
-			if (num == J9PORT_SIG_FLAG_SIGFPE_DIV_BY_ZERO) 		return 35;
-			if (num == J9PORT_SIG_FLAG_SIGFPE_INT_DIV_BY_ZERO) 	return 36;
-			if (num == J9PORT_SIG_FLAG_SIGFPE_INT_OVERFLOW) 	return 37;
-			return 8;
-		}
-		if ((num & J9PORT_SIG_FLAG_SIGBUS) != 0) 	return 10;
-		if ((num & J9PORT_SIG_FLAG_SIGSEGV) != 0) 	return 11;
-		if ((num & J9PORT_SIG_FLAG_SIGTERM) != 0) 	return 15;
-		return num;
-	}
-	
-	/**
-	 * Parse the user args information (1XHUSERARGS and 2XHUSERARG lines) 
+	 * Parse the user args information (1XHUSERARGS and 2XHUSERARG lines)
 	 * @throws ParserException
 	 */
 	private void parseEnvironmentVars() throws ParserException {
 		IAttributeValueMap results = null;
-		
+
 		results = processTagLineOptional(T_1XHENVVARS);
 		if (results != null) {
 			while ((results = processTagLineOptional(T_2XHENVVAR)) != null) {
@@ -259,12 +241,13 @@ public class PlatformSectionParser extends SectionParser implements IPlatformTyp
 			}
 		}
 	}
-	
+
 	/**
 	 * Empty hook for now.
 	 */
+	@Override
 	protected void sovOnlyRules(String startingTag) throws ParserException {
-
+		// do nothing
 	}
 
 }

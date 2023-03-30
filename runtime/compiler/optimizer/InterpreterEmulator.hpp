@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -53,6 +53,7 @@
 #include "il/Block.hpp"
 #include "ilgen/ByteCodeIteratorWithState.hpp"
 #include "ilgen/J9ByteCodeIterator.hpp"
+#include "infra/String.hpp"
 #include "optimizer/Inliner.hpp"
 #include "optimizer/J9EstimateCodeSize.hpp"
 #include "optimizer/J9Inliner.hpp"
@@ -60,6 +61,10 @@
 class IconstOperand;
 class KnownObjOperand;
 class MutableCallsiteTargetOperand;
+class FixedClassOperand;
+class PreexistentObjectOperand;
+class ObjectOperand;
+class TR_PrexArgument;
 
 /*
  * \class Operand
@@ -72,49 +77,111 @@ class Operand
    {
    public:
       TR_ALLOC(TR_Memory::EstimateCodeSize);
-      virtual IconstOperand *asIconst(){ return NULL;}
+
+      enum KnowledgeLevel { NONE, OBJECT, MUTABLE_CALLSITE_TARGET, PREEXISTENT, FIXED_CLASS, KNOWN_OBJECT, ICONST };
+      static const char* KnowledgeStrings[];
+
+      virtual IconstOperand* asIconst(){ return NULL;}
       virtual KnownObjOperand *asKnownObject(){ return NULL;}
+      virtual FixedClassOperand *asFixedClassOperand(){ return NULL;}
+      virtual PreexistentObjectOperand *asPreexistentObjectOperand(){ return NULL;}
+      virtual ObjectOperand *asObjectOperand(){ return NULL;}
       virtual MutableCallsiteTargetOperand* asMutableCallsiteTargetOperand(){ return NULL;}
-      virtual bool isUnkownOperand(){ return true;}
       virtual TR::KnownObjectTable::Index getKnownObjectIndex(){ return TR::KnownObjectTable::UNKNOWN;}
-      virtual void printToString( char *buffer)
-         {
-         sprintf(buffer, "(obj%d)", getKnownObjectIndex());
-         }
+      virtual char* getSignature(TR::Compilation *comp, TR_Memory *trMemory) {return NULL;}
+      virtual void printToString(TR::StringBuf *buf);
+      virtual KnowledgeLevel getKnowledgeLevel() { return NONE; }
+      Operand* merge(Operand* other);
+      virtual Operand* merge1(Operand* other);
    };
 
-/*
- * \class KnownOperand
- *
- * \brief represent operands that can be reasoned about at compile time
- */
-class KnownOperand : public Operand
-   {
-   public:
-      TR_ALLOC(TR_Memory::EstimateCodeSize);
-      virtual bool isUnkownOperand(){ return false;}
-   };
-
-class IconstOperand : public KnownOperand
+class IconstOperand : public Operand
    {
    public:
       TR_ALLOC(TR_Memory::EstimateCodeSize);
       IconstOperand (int x): intValue(x) { }
       virtual IconstOperand *asIconst() { return this;}
-      virtual void printToString( char *buffer)
-         {
-         sprintf(buffer, "(iconst=%d)", intValue);
-         }
+      virtual void printToString(TR::StringBuf *buf);
       int32_t intValue;
+
+      virtual KnowledgeLevel getKnowledgeLevel() { return ICONST; }
+      virtual Operand* merge1(Operand* other);
    };
 
-class KnownObjOperand : public KnownOperand
+
+/*
+ * \class ObjectOperand
+ *
+ * \brief Represent a java object
+ */
+class ObjectOperand : public Operand
    {
    public:
       TR_ALLOC(TR_Memory::EstimateCodeSize);
-      KnownObjOperand(TR::KnownObjectTable::Index koi):knownObjIndex(koi){ }
+      ObjectOperand(TR_OpaqueClassBlock* clazz = NULL):
+                   _signature(NULL), _clazz(clazz) {}
+      virtual char* getSignature(TR::Compilation *comp, TR_Memory *trMemory);
+      virtual ObjectOperand *asObjectOperand(){ return this;}
+      virtual TR_OpaqueClassBlock* getClass() { return _clazz;}
+      virtual KnowledgeLevel getKnowledgeLevel() { return OBJECT; }
+      virtual Operand* merge1(Operand* other);
+      virtual void printToString(TR::StringBuf *buf);
+
+   protected:
+      char* _signature;
+      TR_OpaqueClassBlock* _clazz;
+   };
+
+/*
+ * \class PreexistentObjectOperand
+ *
+ * \brief Represent an object that preexist before the compiled method, i.e. it is
+ *        a parm of the compiled method.
+ */
+class PreexistentObjectOperand : public ObjectOperand
+   {
+   public:
+      TR_ALLOC(TR_Memory::EstimateCodeSize);
+      PreexistentObjectOperand(TR_OpaqueClassBlock* clazz):ObjectOperand(clazz){ }
+      virtual PreexistentObjectOperand *asPreexistentObjectOperand(){ return this;}
+      virtual KnowledgeLevel getKnowledgeLevel() { return PREEXISTENT; }
+      virtual Operand* merge1(Operand* other);
+   };
+
+/*
+ * \class FixedClassOperand
+ *
+ * \brief An object with known type
+ */
+class FixedClassOperand : public ObjectOperand
+   {
+   public:
+      TR_ALLOC(TR_Memory::EstimateCodeSize);
+      FixedClassOperand(TR_OpaqueClassBlock* clazz):ObjectOperand(clazz){ }
+      virtual FixedClassOperand *asFixedClassOperand(){ return this;}
+      virtual KnowledgeLevel getKnowledgeLevel() { return FIXED_CLASS; }
+      virtual Operand* merge1(Operand* other);
+   };
+
+/*
+ * \class KnownObjOperand
+ *
+ * \brief Represent an object with known identity at compile time
+ */
+class KnownObjOperand : public FixedClassOperand
+   {
+   public:
+      TR_ALLOC(TR_Memory::EstimateCodeSize);
+      KnownObjOperand(TR::KnownObjectTable::Index koi, TR_OpaqueClassBlock* clazz = NULL);
       virtual KnownObjOperand *asKnownObject(){ return this;}
+      virtual FixedClassOperand *asFixedClassOperand();
+      virtual ObjectOperand *asObjectOperand();
+      virtual TR_OpaqueClassBlock* getClass();
       virtual TR::KnownObjectTable::Index getKnownObjectIndex(){ return knownObjIndex;}
+      virtual KnowledgeLevel getKnowledgeLevel() { return KNOWN_OBJECT; }
+      virtual Operand* merge1(Operand* other);
+      virtual void printToString(TR::StringBuf *buf);
+   private:
       TR::KnownObjectTable::Index knownObjIndex;
    };
 
@@ -126,25 +193,25 @@ class KnownObjOperand : public KnownOperand
  *       the mutable callsite object can be set for the callsite even though it's really the
  *       methodhandle object that's on the operand stack.
  *
- * \see getReturnValueForInvokevirtual
+ * \see getReturnValue
  * \see refineResolvedCalleeForInvokestatic
  * \see visitInvokestatic
  */
-class MutableCallsiteTargetOperand : public KnownObjOperand
+class MutableCallsiteTargetOperand : public ObjectOperand
    {
    public:
       TR_ALLOC(TR_Memory::EstimateCodeSize);
       MutableCallsiteTargetOperand (TR::KnownObjectTable::Index methodHandleIndex, TR::KnownObjectTable::Index mutableCallsiteIndex):
-         KnownObjOperand(methodHandleIndex),
+         methodHandleIndex(methodHandleIndex),
          mutableCallsiteIndex(mutableCallsiteIndex){}
       virtual MutableCallsiteTargetOperand* asMutableCallsiteTargetOperand(){ return this; }
-      virtual void printToString(char *buffer)
-         {
-         sprintf(buffer, "(mh=%d, mcs=%d)", getMethodHandleIndex(), getMutableCallsiteIndex());
-         }
-      TR::KnownObjectTable::Index getMethodHandleIndex(){ return knownObjIndex; }
+      virtual Operand* merge1(Operand* other);
+      virtual void printToString(TR::StringBuf *buf);
+      virtual KnowledgeLevel getKnowledgeLevel() { return MUTABLE_CALLSITE_TARGET; }
+      TR::KnownObjectTable::Index getMethodHandleIndex(){ return methodHandleIndex; }
       TR::KnownObjectTable::Index getMutableCallsiteIndex() { return mutableCallsiteIndex; }
       TR::KnownObjectTable::Index mutableCallsiteIndex;
+      TR::KnownObjectTable::Index methodHandleIndex;
    };
 
 class InterpreterEmulator : public TR_ByteCodeIteratorWithState<TR_J9ByteCode, J9BCunknown, TR_J9ByteCodeIterator, Operand *>
@@ -168,6 +235,20 @@ class InterpreterEmulator : public TR_ByteCodeIteratorWithState<TR_J9ByteCode, J
          TR_J9ByteCodeIterator::initialize(static_cast<TR_ResolvedJ9Method *>(methodSymbol->getResolvedMethod()), fe);
          _flags = NULL;
          _stacks = NULL;
+         _currentLocalObjectInfo = NULL;
+         _localObjectInfos = NULL;
+         _currentCallSite = NULL;
+         _currentCallMethod = NULL;
+         _currentCallMethodUnrefined = NULL;
+         _numSlots = 0;
+         _callerIsThunkArchetype = _calltarget->_calleeMethod->convertToMethod()->isArchetypeSpecimen();
+
+         _operandBuf = NULL;
+         if (_tracer->heuristicLevel() || _tracer->debugLevel())
+            {
+            TR::Region &stackRegion = comp->trMemory()->currentStackRegion();
+            _operandBuf = new (stackRegion) TR::StringBuf(stackRegion);
+            }
          }
       TR_LogTracer *tracer() { return _tracer; }
       /* \brief Initialize data needed for looking for callsites
@@ -206,6 +287,15 @@ class InterpreterEmulator : public TR_ByteCodeIteratorWithState<TR_J9ByteCode, J
       bool findAndCreateCallsitesFromBytecodes(bool wasPeekingSuccessfull, bool withState);
       void setBlocks(TR::Block **blocks) { _blocks = blocks; }
       TR_StackMemory trStackMemory()            { return _trMemory; }
+
+      /*
+       * \brief Compute prex arg info for the given call site
+       */
+      TR_PrexArgInfo* computePrexInfo(
+         TR_CallSite *callsite, TR::KnownObjectTable::Index appendix);
+      TR_PrexArgument* createPrexArgFromOperand(Operand* operand);
+      Operand* createOperandFromPrexArg(TR_PrexArgument* arg);
+
       bool _nonColdCallExists;
       bool _inlineableCallExists;
 
@@ -233,31 +323,43 @@ class InterpreterEmulator : public TR_ByteCodeIteratorWithState<TR_J9ByteCode, J
       void maintainStackForIf(TR_J9ByteCode bc);
       void maintainStackForGetField();
       void maintainStackForAload(int slotIndex);
+      void maintainStackForReturn();
       /*
        * \brief helper to pop arguments from the stack and push the result for calls
        *
-       * \param method
-       *    the method being called from the current bytecode
+       * \param numArgs
+       *    Number of arguments of the call
        *
        * \param result
        *    the operand reprenting the call return value
        *
-       * \param isDirect
-       *    whether it's a direct call or indirect call
+       * \param returnType
+       *    Return type of the call
        */
-      void maintainStackForCall(TR_ResolvedMethod *method, Operand *result, bool isDirect);
-      void maintainStackForDirectCall(TR_ResolvedMethod *method, Operand *result = NULL) { maintainStackForCall(method, result, true /* isDirect */); }
-      void maintainStackForIndirectCall(TR_ResolvedMethod *method, Operand *result = NULL) { maintainStackForCall(method, result, false/* isDirect */); }
+      void maintainStackForCall(Operand *result, int32_t numArgs, TR::DataType returnType);
       /*
-       * \brief refine the callee method based on operands when possible
+       * \brief helper to pop arguments from the stack and push the result for calls
+       */
+      void maintainStackForCall();
+      /*
+       * \brief refine invokestatic callee method based on operands when possible
        */
       void refineResolvedCalleeForInvokestatic(TR_ResolvedMethod *&callee, TR::KnownObjectTable::Index & mcsIndex, TR::KnownObjectTable::Index & mhIndex, bool & isIndirectCall);
-      Operand *getReturnValueForInvokevirtual(TR_ResolvedMethod *callee);
-      Operand *getReturnValueForInvokestatic(TR_ResolvedMethod *callee);
+      /*
+       * \brief refine invokevirtual callee method based on operands when possible
+       */
+      void refineResolvedCalleeForInvokevirtual(TR_ResolvedMethod*& callee, bool &isIndirectCall);
+      /*
+       * \brief Compute result of the given call based on operand stack state
+       */
+      Operand *getReturnValue(TR_ResolvedMethod *callee);
       void dumpStack();
       void pushUnknownOperand() { Base::push(_unknownOperand); }
       // doesn't need to handle execeptions yet as they don't exist in method handle thunk archetypes
       virtual void findAndMarkExceptionRanges(){ }
+      /*
+       * \brief Propagte state state and local variable state to next target
+       */
       virtual void saveStack(int32_t targetIndex);
 
       // the following methods can be used in both stateless and with state mode
@@ -275,14 +377,61 @@ class InterpreterEmulator : public TR_ByteCodeIteratorWithState<TR_J9ByteCode, J
        * \note This query is used to avoid regenerating bytecodes which shouldn't happen at stateless mode
        */
       bool isGenerated(int32_t bcIndex) { return _iteratorWithState ? Base::isGenerated(bcIndex): false; }
+      /*
+       * \brief Set up operand stack and local slot array for block starting at given bytecode index
+       *
+       * \param index
+       *    Bytecode index at the block entry
+       */
+      virtual int32_t setupBBStartContext(int32_t index);
+      /*
+       * \brief set up object info in local slots at entry of a block
+       *
+       * \param index
+       *    Bytecode index at the block entry
+       */
+      void setupBBStartLocalObjectState(int32_t index);
+      /*
+       * \brief set up object info in local slots for the method entry
+       */
+      void setupMethodEntryLocalObjectState();
+      /*
+       * \brief set up operand stack state at entry of a block
+       *
+       * \param index
+       *    Bytecode index at the block entry
+       */
+      void setupBBStartStackState(int32_t index);
+
       void visitInvokedynamic();
       void visitInvokevirtual();
+#if defined(J9VM_OPT_OPENJDK_METHODHANDLE)
+      void visitInvokehandle();
+      void updateKnotAndCreateCallSiteUsingInvokeCacheArray(TR_ResolvedJ9Method* owningMethod, uintptr_t * invokeCacheArray, int32_t cpIndex);
+#endif
       void visitInvokespecial();
       void visitInvokestatic();
       void visitInvokeinterface();
-      void findTargetAndUpdateInfoForCallsite(TR_CallSite *callsite);
+      void findTargetAndUpdateInfoForCallsite(
+         TR_CallSite *callsite,
+         TR::KnownObjectTable::Index appendix = TR::KnownObjectTable::UNKNOWN);
       bool isCurrentCallUnresolvedOrCold(TR_ResolvedMethod *resolvedMethod, bool isUnresolvedInCP);
       void debugUnresolvedOrCold(TR_ResolvedMethod *resolvedMethod);
+      void maintainStackForAstore(int slotIndex);
+      void maintainStackForldc(int32_t cpIndex);
+      void maintainStackForGetStatic();
+      /*
+       * \brief Check if a block has predecessors whose bytecodes haven't been visited
+       */
+      bool hasUnvisitedPred(TR::Block* block);
+
+      typedef TR_Array<Operand*> OperandArray;
+      void printOperandArray(OperandArray* operands);
+      /*
+       * \brief Merge second operand into the first, does an intersect operand on every operand in the array
+       */
+      void mergeOperandArray(OperandArray *first, OperandArray *second);
+
 
       TR_LogTracer *_tracer;
       TR_EstimateCodeSize *_ecs;
@@ -291,6 +440,9 @@ class InterpreterEmulator : public TR_ByteCodeIteratorWithState<TR_J9ByteCode, J
       bool _iteratorWithState;
       flags8_t * _InterpreterEmulatorFlags; // flags with bits to indicate property of each bytecode.
       TR_CallSite ** _callSites;
+      TR_CallSite * _currentCallSite; // Store created callsite if visiting invoke* bytecodes
+      TR_ResolvedMethod * _currentCallMethod; // Resolved method for invoke* bytecodes, some calls won't have call site created due to coldness info
+      TR_ResolvedMethod * _currentCallMethodUnrefined; // Call method without any refinement applied to it
       TR::CFG* _cfg;
       TR_ByteCodeInfo *_newBCInfo;
       int32_t _recursionDepth;
@@ -298,5 +450,15 @@ class InterpreterEmulator : public TR_ByteCodeIteratorWithState<TR_J9ByteCode, J
       bool _wasPeekingSuccessfull;
       TR::Block *_currentInlinedBlock;
       TR_prevArgs _pca;
+
+      bool _callerIsThunkArchetype;
+      // State of local object for current bytecode being visited
+      OperandArray* _currentLocalObjectInfo;
+      // Array of local object info arrays, indexed by bytecode index
+      OperandArray** _localObjectInfos;
+      // Number of local slots
+      int32_t _numSlots;
+
+      TR::StringBuf *_operandBuf; // for debug printing
    };
 #endif

@@ -1,6 +1,6 @@
-<?xml version="1.0" encoding="UTF-8"?>
+<?xml version='1.0' encoding='UTF-8'?>
 <!--
-Copyright (c) 2019, 2019 IBM Corp. and others
+Copyright (c) 2019, 2021 IBM Corp. and others
 
 This program and the accompanying materials are made available under
 the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@ Exception [1] and GNU General Public License, version 2 with the
 OpenJDK Assembly Exception [2].
 
 [1] https://www.gnu.org/software/classpath/license.html
-[2] http://openjdk.java.net/legal/assembly-exception.html
+[2] https://openjdk.org/legal/assembly-exception.html
 
 SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 -->
@@ -28,7 +28,7 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 		</variations>
 		<command>
 			perl $(JVM_TEST_ROOT)$(D)TestConfig$(D)scripts$(D)tools$(D)sysvcleanup.pl all ; \
-			$(JAVA_COMMAND) $(JVM_OPTIONS) -Xint -XX:+EnableValhalla -Xverify:none \
+			$(JAVA_COMMAND) $(JVM_OPTIONS) -Xverify:none \
 			--add-opens java.base/jdk.internal.misc=ALL-UNNAMED \
 			-DRESJAR=$(CMDLINETESTER_RESJAR) \
 			-DEXE=$(SQ)$(JAVA_COMMAND) $(JVM_OPTIONS)$(SQ) \
@@ -37,12 +37,13 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 			-DJCOMMANDERJAR=$(Q)$(JVM_TEST_ROOT)$(D)TKG$(D)lib$(D)jcommander.jar$(Q) \
 			-DTESTNGJAR=$(Q)$(JVM_TEST_ROOT)$(D)TKG$(D)lib$(D)testng.jar$(Q) \
 			-DVALUETYPEJAR=$(Q)$(JVM_TEST_ROOT)$(D)functional$(D)Valhalla$(D)ValhallaTests.jar$(Q) \
+			-DCPDL=$(Q)$(P)$(Q) \
 			-jar $(CMDLINETESTER_JAR) \
 			-config $(Q)$(TEST_RESROOT)$(D)flattenedvaluetypeddrtests.xml$(Q) \
 			-outputLimit 1000 -explainExcludes -nonZeroExitWhenError; \
 			${TEST_STATUS}
 		</command>
-		<!-- Tests excluded on zos because it does not support DDR yet. Please see https://github.com/eclipse/openj9/issues/1511 for updates -->
+		<!-- Tests excluded on zos because it does not support DDR yet. Please see https://github.com/eclipse-openj9/openj9/issues/1511 for updates -->
 		<platformRequirements>^os.zos</platformRequirements>
 		<levels>
 			<level>extended</level>
@@ -50,23 +51,22 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 		<groups>
 			<group>functional</group>
 		</groups>
-		<subsets>
-			<subset>Valhalla</subset>
-		</subsets>
+		<versions>
+			<version>Valhalla</version>
+		</versions>
 		<impls>
 			<impl>openj9</impl>
 			<impl>ibm</impl>
 		</impls>
 	</test>
-
 	<test>
 		<testCaseName>cmdLineTester_unflattenedvaluetypeddrtests</testCaseName>
 		<variations>
-			<variation>-XX:ValueTypeFlatteningThreshold=1</variation>
+			<variation>NoOptions</variation>
 		</variations>
 		<command>
 			perl $(JVM_TEST_ROOT)$(D)TestConfig$(D)scripts$(D)tools$(D)sysvcleanup.pl all ; \
-			$(JAVA_COMMAND) $(JVM_OPTIONS) -Xint -XX:+EnableValhalla -Xverify:none \
+			$(JAVA_COMMAND) $(JVM_OPTIONS) -Xverify:none \
 			--add-opens java.base/jdk.internal.misc=ALL-UNNAMED \
 			-DRESJAR=$(CMDLINETESTER_RESJAR) \
 			-DEXE=$(SQ)$(JAVA_COMMAND) $(JVM_OPTIONS)$(SQ) \
@@ -75,12 +75,13 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 			-DJCOMMANDERJAR=$(Q)$(JVM_TEST_ROOT)$(D)TKG$(D)lib$(D)jcommander.jar$(Q) \
 			-DTESTNGJAR=$(Q)$(JVM_TEST_ROOT)$(D)TKG$(D)lib$(D)testng.jar$(Q) \
 			-DVALUETYPEJAR=$(Q)$(JVM_TEST_ROOT)$(D)functional$(D)Valhalla$(D)ValhallaTests.jar$(Q) \
+			-DCPDL=$(Q)$(P)$(Q) \
 			-jar $(CMDLINETESTER_JAR) \
 			-config $(Q)$(TEST_RESROOT)$(D)unflattenedvaluetypeddrtests.xml$(Q) \
 			-outputLimit 1000 -explainExcludes -nonZeroExitWhenError; \
 			${TEST_STATUS}
 		</command>
-		<!-- Tests excluded on zos because it does not support DDR yet. Please see https://github.com/eclipse/openj9/issues/1511 for updates -->
+		<!-- Tests excluded on zos because it does not support DDR yet. Please see https://github.com/eclipse-openj9/openj9/issues/1511 for updates -->
 		<platformRequirements>^os.zos</platformRequirements>
 		<levels>
 			<level>extended</level>
@@ -88,9 +89,87 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 		<groups>
 			<group>functional</group>
 		</groups>
-		<subsets>
-			<subset>Valhalla</subset>
-		</subsets>
+		<versions>
+			<version>Valhalla</version>
+		</versions>
+		<impls>
+			<impl>openj9</impl>
+			<impl>ibm</impl>
+		</impls>
+	</test>
+	<test>
+		<testCaseName>cmdLineTester_flattened32bitRefBackfillTest</testCaseName>
+		<variations>
+			<variation>NoOptions</variation>
+		</variations>
+		<command>
+			perl $(JVM_TEST_ROOT)$(D)TestConfig$(D)scripts$(D)tools$(D)sysvcleanup.pl all ; \
+			$(JAVA_COMMAND) $(JVM_OPTIONS) -Xverify:none \
+			--add-opens java.base/jdk.internal.misc=ALL-UNNAMED \
+			-DRESJAR=$(CMDLINETESTER_RESJAR) \
+			-DOPT=-Xint \
+			-DEXE=$(SQ)$(JAVA_COMMAND) $(JVM_OPTIONS)$(SQ) \
+			-DJDMPVIEW_EXE=$(Q)$(TEST_JDK_HOME)$(D)bin$(D)jdmpview$(EXECUTABLE_SUFFIX)$(Q) \
+			-DASMJAR=$(Q)$(JVM_TEST_ROOT)$(D)TKG$(D)lib$(D)asm-all.jar$(Q) \
+			-DJCOMMANDERJAR=$(Q)$(JVM_TEST_ROOT)$(D)TKG$(D)lib$(D)jcommander.jar$(Q) \
+			-DTESTNGJAR=$(Q)$(JVM_TEST_ROOT)$(D)TKG$(D)lib$(D)testng.jar$(Q) \
+			-DVALUETYPEJAR=$(Q)$(JVM_TEST_ROOT)$(D)functional$(D)Valhalla$(D)ValhallaTests.jar$(Q) \
+			-DCPDL=$(Q)$(P)$(Q) \
+			-jar $(CMDLINETESTER_JAR) \
+			-config $(Q)$(TEST_RESROOT)$(D)flattened32bitRefBackfillTest.xml$(Q) \
+			-outputLimit 1000 -explainExcludes -nonZeroExitWhenError; \
+			${TEST_STATUS}
+		</command>
+		<!-- Tests excluded on zos because it does not support DDR yet. Please see https://github.com/eclipse-openj9/openj9/issues/1511 for updates -->
+		<platformRequirements>^os.zos</platformRequirements>
+		<levels>
+			<level>extended</level>
+		</levels>
+		<groups>
+			<group>functional</group>
+		</groups>
+		<versions>
+			<version>Valhalla</version>
+		</versions>
+		<impls>
+			<impl>openj9</impl>
+			<impl>ibm</impl>
+		</impls>
+	</test>
+	<test>
+		<testCaseName>cmdLineTester_flattened32bitRefBackfillTestJIT</testCaseName>
+		<variations>
+			<variation>NoOptions</variation>
+		</variations>
+		<command>
+			perl $(JVM_TEST_ROOT)$(D)TestConfig$(D)scripts$(D)tools$(D)sysvcleanup.pl all ; \
+			$(JAVA_COMMAND) $(JVM_OPTIONS) -Xverify:none \
+			--add-opens java.base/jdk.internal.misc=ALL-UNNAMED \
+			-DRESJAR=$(CMDLINETESTER_RESJAR) \
+			-DEXE=$(SQ)$(JAVA_COMMAND) $(JVM_OPTIONS)$(SQ) \
+			-DOPT=-Xjit \
+			-DJDMPVIEW_EXE=$(Q)$(TEST_JDK_HOME)$(D)bin$(D)jdmpview$(EXECUTABLE_SUFFIX)$(Q) \
+			-DASMJAR=$(Q)$(JVM_TEST_ROOT)$(D)TKG$(D)lib$(D)asm-all.jar$(Q) \
+			-DJCOMMANDERJAR=$(Q)$(JVM_TEST_ROOT)$(D)TKG$(D)lib$(D)jcommander.jar$(Q) \
+			-DTESTNGJAR=$(Q)$(JVM_TEST_ROOT)$(D)TKG$(D)lib$(D)testng.jar$(Q) \
+			-DVALUETYPEJAR=$(Q)$(JVM_TEST_ROOT)$(D)functional$(D)Valhalla$(D)ValhallaTests.jar$(Q) \
+			-DCPDL=$(Q)$(P)$(Q) \
+			-jar $(CMDLINETESTER_JAR) \
+			-config $(Q)$(TEST_RESROOT)$(D)flattened32bitRefBackfillTest.xml$(Q) \
+			-outputLimit 1000 -explainExcludes -nonZeroExitWhenError; \
+			${TEST_STATUS}
+		</command>
+		<!-- Tests excluded on zos because it does not support DDR yet. Please see https://github.com/eclipse-openj9/openj9/issues/1511 for updates -->
+		<platformRequirements>^os.zos</platformRequirements>
+		<levels>
+			<level>extended</level>
+		</levels>
+		<groups>
+			<group>functional</group>
+		</groups>
+		<versions>
+			<version>Valhalla</version>
+		</versions>
 		<impls>
 			<impl>openj9</impl>
 			<impl>ibm</impl>

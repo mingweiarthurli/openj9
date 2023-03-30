@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2019 IBM Corp. and others
+ * Copyright (c) 2001, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -55,9 +55,9 @@ SH_OSCacheTestMmap::testBasic(J9PortLibrary *portLibrary, J9JavaVM *vm)
 	J9PortShcVersion versionData;
 	U_32 flags = J9SHMEM_GETDIR_APPEND_BASEDIR;
 
-#if defined(OPENJ9_BUILD)
+#if defined(OPENJ9_BUILD) && !defined(J9ZOS390)
 	flags |= J9SHMEM_GETDIR_USE_USERHOME;
-#endif /* defined(OPENJ9_BUILD) */
+#endif /* defined(OPENJ9_BUILD) && !defined(J9ZOS390) */
 	
 	setCurrentCacheVersion(vm, J2SE_CURRENT_VERSION, &versionData);
 	versionData.cacheType = J9PORT_SHR_CACHE_TYPE_PERSISTENT;
@@ -142,9 +142,9 @@ SH_OSCacheTestMmap::testConstructor(J9PortLibrary *portLibrary, J9JavaVM *vm)
 	J9PortShcVersion versionData;
 	U_32 flags = J9SHMEM_GETDIR_APPEND_BASEDIR;
 
-#if defined(OPENJ9_BUILD)
+#if defined(OPENJ9_BUILD) && !defined(J9ZOS390)
 	flags |= J9SHMEM_GETDIR_USE_USERHOME;
-#endif /* defined(OPENJ9_BUILD) */
+#endif /* defined(OPENJ9_BUILD) && !defined(J9ZOS390) */
 	
 	setCurrentCacheVersion(vm, J2SE_CURRENT_VERSION, &versionData);
 	versionData.cacheType = J9PORT_SHR_CACHE_TYPE_PERSISTENT;
@@ -214,9 +214,9 @@ SH_OSCacheTestMmap::testFailedConstructor(J9PortLibrary *portLibrary, J9JavaVM *
 	J9PortShcVersion versionData;
 	U_32 flags = J9SHMEM_GETDIR_APPEND_BASEDIR;
 
-#if defined(OPENJ9_BUILD)
+#if defined(OPENJ9_BUILD) && !defined(J9ZOS390)
 	flags |= J9SHMEM_GETDIR_USE_USERHOME;
-#endif /* defined(OPENJ9_BUILD) */
+#endif /* defined(OPENJ9_BUILD) && !defined(J9ZOS390) */
 
 	setCurrentCacheVersion(vm, J2SE_CURRENT_VERSION, &versionData);
 	versionData.cacheType = J9PORT_SHR_CACHE_TYPE_PERSISTENT;
@@ -278,7 +278,7 @@ cleanup:
 	return rc;	
 }
 
-#if defined(J9SHR_CACHELET_SUPPORT) || defined (J9VM_GC_REALTIME)
+#if defined(J9VM_GC_REALTIME)
 	/* rtjavm7 does not seem to like testing with processes. Without doing a
 	 * terrible amount of investigation lowering this to 3 appears to fix the problem
 	 */
@@ -313,9 +313,9 @@ SH_OSCacheTestMmap::testMultipleCreate(J9PortLibrary* portLibrary, J9JavaVM *vm,
 	UDATA childargc = 0;
 	U_32 flags = J9SHMEM_GETDIR_APPEND_BASEDIR;
 
-#if defined(OPENJ9_BUILD)
+#if defined(OPENJ9_BUILD) && !defined(J9ZOS390)
 	flags |= J9SHMEM_GETDIR_USE_USERHOME;
-#endif /* defined(OPENJ9_BUILD) */
+#endif /* defined(OPENJ9_BUILD) && !defined(J9ZOS390) */
 	
 	setCurrentCacheVersion(vm, J2SE_CURRENT_VERSION, &versionData);
 	versionData.cacheType = J9PORT_SHR_CACHE_TYPE_PERSISTENT;
@@ -460,9 +460,9 @@ SH_OSCacheTestMmap::testGetAllCacheStatistics(J9JavaVM* vm)
 	}
 	piconfig->sharedClassDebugAreaBytes = -1;
 
-#if defined(OPENJ9_BUILD)
+#if defined(OPENJ9_BUILD) && !defined(J9ZOS390)
 	flags |= J9SHMEM_GETDIR_USE_USERHOME;
-#endif /*  defined(OPENJ9_BUILD) */
+#endif /*  defined(OPENJ9_BUILD) && !defined(J9ZOS390) */
 
 	ret = j9shmem_getDir(ctrlDirName, flags, cacheDirName, J9SH_MAXPATH);
 	if (0 > ret) {
@@ -486,7 +486,7 @@ SH_OSCacheTestMmap::testGetAllCacheStatistics(J9JavaVM* vm)
 
 		tmposc = new(tmposc) SH_OSCachemmap(PORTLIB, vm, cacheDirName, cacheName[i], piconfig, 1, J9SH_OSCACHE_CREATE, 1, 0, 0, &versionData, NULL);
 		if(tmposc->getError() < 0) {
-			j9tty_printf(PORTLIB, "testGetAllCacheStatistics: clean up old caches : failed to create create cache %zu (getError() =%zd)\n", i, tmposc->getError());
+			j9tty_printf(PORTLIB, "testGetAllCacheStatistics: clean up old caches : failed to create cache %zu (getError() =%zd)\n", i, tmposc->getError());
 			goto loop_cleanup;
 		}
 
@@ -515,7 +515,7 @@ SH_OSCacheTestMmap::testGetAllCacheStatistics(J9JavaVM* vm)
 		}
 		osc[i] = new(osc[i]) SH_OSCachemmap(PORTLIB, vm, cacheDirName, cacheName[i], piconfig, 1, J9SH_OSCACHE_CREATE, 1, 0, 0, &versionData, NULL);
 		if(osc[i]->getError() < 0) {
-			j9tty_printf(PORTLIB, "testGetAllCacheStatistics: failed to create create cache %zu (getError() =%zd)\n", i, osc[i]->getError());
+			j9tty_printf(PORTLIB, "testGetAllCacheStatistics: failed to create cache %zu (getError() =%zd)\n", i, osc[i]->getError());
 			goto cleanup;
 		}
 	}
@@ -570,9 +570,9 @@ SH_OSCacheTestMmap::testMutex(J9PortLibrary *portLibrary, J9JavaVM *vm, struct j
 	UDATA childargc = 0;
 	U_32 flags = J9SHMEM_GETDIR_APPEND_BASEDIR;
 
-#if defined(OPENJ9_BUILD)
+#if defined(OPENJ9_BUILD) && !defined(J9ZOS390)
 	flags |= J9SHMEM_GETDIR_USE_USERHOME;
-#endif /* defined(OPENJ9_BUILD) */
+#endif /* defined(OPENJ9_BUILD) && !defined(J9ZOS390) */
 
 	setCurrentCacheVersion(vm, J2SE_CURRENT_VERSION, &versionData);
 	versionData.cacheType = J9PORT_SHR_CACHE_TYPE_PERSISTENT;
@@ -643,7 +643,7 @@ SH_OSCacheTestMmap::testMutex(J9PortLibrary *portLibrary, J9JavaVM *vm, struct j
 
 /**
  * This test launches a child OSCache, which exits whilst holding the write lock. The
- * master then attempts to acquire the write lock. It should succeed, because JVMs are
+ * parent then attempts to acquire the write lock. It should succeed, because JVMs are
  * supposed to release the write lock if they crash.
  */
 #define OSCACHETEST_MUTEX_HANG_NAME "testMutexHang"
@@ -663,9 +663,9 @@ SH_OSCacheTestMmap::testMutexHang(J9PortLibrary *portLibrary, J9JavaVM *vm, stru
 	UDATA childargc = 0;
 	U_32 flags = J9SHMEM_GETDIR_APPEND_BASEDIR;
 
-#if defined(OPENJ9_BUILD)
+#if defined(OPENJ9_BUILD) && !defined(J9ZOS390)
 	flags |= J9SHMEM_GETDIR_USE_USERHOME;
-#endif /* defined(OPENJ9_BUILD) */
+#endif /* defined(OPENJ9_BUILD) && !defined(J9ZOS390) */
 	
 	setCurrentCacheVersion(vm, J2SE_CURRENT_VERSION, &versionData);
 	versionData.cacheType = J9PORT_SHR_CACHE_TYPE_PERSISTENT;
@@ -757,9 +757,9 @@ SH_OSCacheTestMmap::testDestroy (J9PortLibrary* portLibrary, J9JavaVM *vm, struc
 	UDATA childargc = 0;
 	U_32 flags = J9SHMEM_GETDIR_APPEND_BASEDIR;
 
-#if defined(OPENJ9_BUILD)
+#if defined(OPENJ9_BUILD) && !defined(J9ZOS390)
 	flags |= J9SHMEM_GETDIR_USE_USERHOME;
-#endif /* defined(OPENJ9_BUILD) */
+#endif /* defined(OPENJ9_BUILD) && !defined(J9ZOS390) */
 
 	setCurrentCacheVersion(vm, J2SE_CURRENT_VERSION, &versionData);
 	versionData.cacheType = J9PORT_SHR_CACHE_TYPE_PERSISTENT;

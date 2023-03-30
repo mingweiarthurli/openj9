@@ -1,10 +1,7 @@
 package org.openj9.test.support;
 
-import org.openj9.test.java.lang.Test_Class;
-import org.testng.log4testng.Logger;
-
 /*******************************************************************************
- * Copyright (c) 2010, 2018 IBM Corp. and others
+ * Copyright (c) 2010, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -20,14 +17,12 @@ import org.testng.log4testng.Logger;
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
 
 public class Support_ExtendedTestEnvironment {
-	private static final Logger logger = Logger.getLogger(Support_ExtendedTestEnvironment.class);
-
 	private static Support_ExtendedTestEnvironment environment;
 
 	public void execute(Runnable toRun) {
@@ -51,23 +46,5 @@ public class Support_ExtendedTestEnvironment {
 			environment = new Support_ExtendedTestEnvironment();
 		}
 		return environment;
-	}
-
-	public SecurityManager setSecurityManager(final Class clazz) {
-		final SecurityManager[] sm = new SecurityManager[1];
-
-		try {
-			if (clazz != null) {
-				sm[0] = (SecurityManager) clazz.newInstance();
-			} else {
-				sm[0] = null;
-			}
-			System.setSecurityManager(sm[0]);
-		} catch (IllegalAccessException e) {
-			logger.error("Unexpected exception: " + e);
-		} catch (InstantiationException e) {
-			logger.error("Unexpected exception: " + e);
-		}
-		return sm[0];
 	}
 }

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -50,11 +50,62 @@ public:
    static int32_t getLoopNestingDepth(TR::Compilation *comp, TR::Block *block);
    static bool foldFinalFieldsIn(TR_OpaqueClassBlock *clazz, const char *className, int32_t classNameLength, bool isStatic, TR::Compilation *comp);
 
+   /**
+    * \brief
+    *    Determine whether to avoid folding a final instance field of an
+    *    instance of a trusted JCL type.
+    *
+    *    This determination can depend on the particular instance, not only the
+    *    field. For example, a field might be foldable only once its value is
+    *    non-null, or it might be foldable in some subclasses but not others.
+    *
+    *    Because it may be dependent on the object's state, this determination
+    *    should be made \em before reading the field in question. Otherwise
+    *    there is a risk of incorrect folding:
+    *    1. The compiler reads a value from field f that should not be folded.
+    *    2. A concurrent modification changes the value of f and puts the
+    *       object into a state that allows f to be folded.
+    *    3. avoidFoldingInstanceField() returns false.
+    *    4. The compiler incorrectly folds the value from step 1 instead of the
+    *       new value from step 2.
+    *
+    *    This method requires the caller to hold VM access.
+    *
+    * \parm object
+    *    The address of the Java object to load from
+    *
+    * \parm field
+    *    The shadow symbol of the final field to load from \p object
+    *
+    * \parm cpIndex
+    *    The field reference CP index (-1 for fabricated references)
+    *
+    * \parm owningMethod
+    *    The owning method of the field reference
+    *
+    * \parm comp
+    *    The compilation object
+    *
+    * \return
+    *    True if folding must be avoided, false if folding is allowed.
+    */
+   static bool avoidFoldingInstanceField(
+      uintptr_t object,
+      TR::Symbol *field,
+      uint32_t fieldOffset,
+      int cpIndex,
+      TR_ResolvedMethod *owningMethod,
+      TR::Compilation *comp);
+
+   static bool avoidFoldingInstanceField(
+      uintptr_t object,
+      TR::SymbolReference *symRef,
+      TR::Compilation *comp);
+
    static TR::Node *generateArrayElementShiftAmountTrees(
          TR::Compilation *comp,
          TR::Node *object);
-   
-   static TR::Node *transformIndirectLoad(TR::Compilation *, TR::Node *node);
+
    static bool transformDirectLoad(TR::Compilation *, TR::Node *node);
 
    /**
@@ -145,13 +196,39 @@ public:
 
    static bool transformIndirectLoadChain(TR::Compilation *, TR::Node *node, TR::Node *baseExpression, TR::KnownObjectTable::Index baseKnownObject, TR::Node **removedNode);
    static bool transformIndirectLoadChainAt(TR::Compilation *, TR::Node *node, TR::Node *baseExpression, uintptr_t *baseReferenceLocation, TR::Node **removedNode);
-   static bool transformIndirectLoadChainImpl( TR::Compilation *, TR::Node *node, TR::Node *baseExpression, void *baseAddress, TR::Node **removedNode);
+   static bool transformIndirectLoadChainImpl( TR::Compilation *, TR::Node *node, TR::Node *baseExpression, void *baseAddress, bool isBaseStableArray, TR::Node **removedNode);
 
    static bool fieldShouldBeCompressed(TR::Node *node, TR::Compilation *comp);
 
    static TR::Block *insertNewFirstBlockForCompilation(TR::Compilation *comp);
+   /**
+    * \brief
+    *    Calculate offset for an array element given its index based on `type`
+    *
+    * \param index
+    *    The index into the array
+    *
+    * \param type
+    *    The data type of the array element
+    *
+    * \return The Int64 value representing the offset into an array of the specified type given the index
+    */
    static TR::Node *calculateOffsetFromIndexInContiguousArray(TR::Compilation *, TR::Node * index, TR::DataType type);
+   /**
+    * \brief
+    *    Calculate offset for an array element given its index based on `elementStride`
+    *
+    * \param index
+    *    The index into the array
+    *
+    * \param elementStride
+    *    The size of the array element
+    *
+    * \return The Int64 value representing the offset into an array of the specified element size given the index
+    */
+   static TR::Node *calculateOffsetFromIndexInContiguousArrayWithElementStride(TR::Compilation *, TR::Node * index, int32_t elementStride);
    static TR::Node *calculateElementAddress(TR::Compilation *, TR::Node *array, TR::Node * index, TR::DataType type);
+   static TR::Node *calculateElementAddressWithElementStride(TR::Compilation *, TR::Node *array, TR::Node * index, int32_t elementStride);
    static TR::Node *calculateIndexFromOffsetInContiguousArray(TR::Compilation *, TR::Node * offset, TR::DataType type);
 
    static TR::Node* saveNodeToTempSlot(TR::Compilation* comp, TR::Node* node, TR::TreeTop* insertTreeTop);
@@ -203,6 +280,40 @@ public:
     *   \return True if specialization succeeds, false otherwise
     */
    static bool specializeInvokeExactSymbol(TR::Compilation *comp, TR::Node *callNode, uintptr_t *methodHandleLocation);
+
+   /*
+    * \brief
+    *    Refine `MethodHandle.invokeBasic` with a known receiver handle
+    */
+   static bool refineMethodHandleInvokeBasic(TR::Compilation* comp, TR::TreeTop* treetop, TR::Node* node, TR::KnownObjectTable::Index mhIndex, bool trace = false);
+   /*
+    * \brief
+    *    Refine `MethodHandle.linkTo*` with a known MemberName argument (the last argument)
+    *    Doesn't support `MethodHandle.linkToInterface` right now
+    */
+   static bool refineMethodHandleLinkTo(TR::Compilation* comp, TR::TreeTop* treetop, TR::Node* node, TR::KnownObjectTable::Index mnIndex, bool trace = false);
+
+   /*
+    * \brief
+    *    Determine the known-object index to use for a reference-typed final
+    *    static field that is foldable in the walker.
+    *
+    *    The caller must check in advance that the field is a final reference.
+    *    This method does not verify.
+    *
+    * \param comp the compilation object
+    * \param owningMethod the owning method of the static field reference
+    * \param cpIndex the constant pool index of the static field reference
+    * \param dataAddress The static field address from \c staticAttributes()
+    *
+    * \return the known object index, or \c UNKNOWN if disallowed
+    */
+   static TR::KnownObjectTable::Index knownObjectFromFinalStatic(
+      TR::Compilation *comp,
+      TR_ResolvedMethod *owningMethod,
+      int32_t cpIndex,
+      void *dataAddress);
+
 protected:
    /**
     * \brief

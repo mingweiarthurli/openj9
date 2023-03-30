@@ -1,9 +1,6 @@
-/*[INCLUDE-IF Sidecar16 & !Sidecar19-SE]*/
-
-package com.ibm.oti.vm;
-
+/*[INCLUDE-IF JAVA_SPEC_VERSION == 8]*/
 /*******************************************************************************
- * Copyright (c) 1998, 2018 IBM Corp. and others
+ * Copyright (c) 1998, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -19,11 +16,11 @@ package com.ibm.oti.vm;
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
- 
+package com.ibm.oti.vm;
 
 import java.lang.ref.SoftReference;
 import java.net.URL;
@@ -178,14 +175,12 @@ static String getPackageName(Class<?> theClass)
 	int index;
 
 	/*[PR 126182] Do not intern bootstrap class names when loading */
-	name = VM.getClassNameImpl(theClass);
+	name = VM.getClassNameImpl(theClass, false);
 	if((index = name.lastIndexOf('.')) == -1) return null;
 	return name.substring(0, index);
 }
 
-/*[IF AnnotateOverride]*/
 @Override
-/*[ENDIF]*/
 protected URL findResource(final String res) {
 	URL result = (URL)AccessController.doPrivileged(new PrivilegedAction() {
 		public Object run() {
@@ -196,6 +191,7 @@ protected URL findResource(final String res) {
 			return null;
 		}});
 	if (result != null) {
+		@SuppressWarnings("removal")
 		SecurityManager sm = System.getSecurityManager();
 		if (sm != null) {
 			try {
@@ -244,9 +240,7 @@ private URL findResourceImpl(int i, String res) {
 	return null;
 }
 
-/*[IF AnnotateOverride]*/
 @Override
-/*[ENDIF]*/
 protected Enumeration findResources(final String res) throws IOException {
 	if (resourceCacheRef != null) {
 		ConcurrentHashMap<String, Vector> resourceCache = resourceCacheRef.get();
@@ -264,6 +258,7 @@ protected Enumeration findResources(final String res) throws IOException {
 			}
 			return resources;
 		}});
+	@SuppressWarnings("removal")
 	SecurityManager sm;
 	int length = result.size();
 	if (length > 0 && (sm = System.getSecurityManager()) != null) {
@@ -303,9 +298,7 @@ protected Enumeration findResources(final String res) throws IOException {
  * @param		resName	String
  *					the name of the resource to find.
  */
-/*[IF AnnotateOverride]*/
 @Override
-/*[ENDIF]*/
 public InputStream getResourceAsStream(String resName) {
 	if (resName == null || resName.length() < 1 || resName.charAt(0) == '/')
 		return null;	// Do not allow absolute resource references!
@@ -330,6 +323,7 @@ public InputStream getResourceAsStream(String resName) {
 					final ZipFile zf = (ZipFile)cache[i];
 					ZipEntry entry;
 					if ((entry = zf.getEntry(resName)) != null) {
+						@SuppressWarnings("removal")
 						SecurityManager security = System.getSecurityManager();
 						if (security != null) {
 							initalizePermissions();

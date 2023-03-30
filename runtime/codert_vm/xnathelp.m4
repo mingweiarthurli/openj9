@@ -1,4 +1,4 @@
-dnl Copyright (c) 2017, 2020 IBM Corp. and others
+dnl Copyright (c) 2017, 2021 IBM Corp. and others
 dnl
 dnl This program and the accompanying materials are made available under
 dnl the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@ dnl Exception [1] and GNU General Public License, version 2 with the
 dnl OpenJDK Assembly Exception [2].
 dnl
 dnl [1] https://www.gnu.org/software/classpath/license.html
-dnl [2] http://openjdk.java.net/legal/assembly-exception.html
+dnl [2] https://openjdk.org/legal/assembly-exception.html
 dnl
 dnl SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 
@@ -147,7 +147,6 @@ define({OLD_DUAL_MODE_HELPER},{
 	test _rax,_rax
 	je LABEL(L_done_$1)
 	SAVE_C_NONVOLATILE_REGS
-	SAVE_C_NONVOLATILE_JIT_FP_ARG_REGS
 	FASTCALL_INDIRECT_WITH_VMTHREAD(_rax)
 	test _rax,_rax
 	je SHORT_JMP LABEL(L_slow_$1)
@@ -172,7 +171,6 @@ define({OLD_DUAL_MODE_HELPER_NO_RETURN_VALUE},{
 	test _rax,_rax
 	je LABEL(L_done_$1)
 	SAVE_C_NONVOLATILE_REGS
-	SAVE_C_NONVOLATILE_JIT_FP_ARG_REGS
 	FASTCALL_INDIRECT_WITH_VMTHREAD(_rax)
 	test _rax,_rax
 	je SHORT_JMP LABEL(L_slow_$1)
@@ -348,6 +346,35 @@ define({CINTERP},{
 	jmp uword ptr J9TR_JavaVM_cInterpreter[_rax]
 })
 
+dnl Helpers that are at a method invocation point.
+dnl
+dnl See definition of SAVE_C_VOLATILE_REGS in xhelpers.m4
+dnl for details.
+
+define({METHOD_INVOCATION})
+
+PICBUILDER_DUAL_MODE_HELPER(jitLookupInterfaceMethod,3)
+PICBUILDER_SLOW_PATH_ONLY_HELPER(jitResolveInterfaceMethod,2)
+PICBUILDER_SLOW_PATH_ONLY_HELPER(jitResolveSpecialMethod,3)
+PICBUILDER_SLOW_PATH_ONLY_HELPER(jitResolveStaticMethod,3)
+PICBUILDER_SLOW_PATH_ONLY_HELPER(jitResolveVirtualMethod,2)
+SLOW_PATH_ONLY_HELPER(jitInduceOSRAtCurrentPC,0)
+SLOW_PATH_ONLY_HELPER(jitInduceOSRAtCurrentPCAndRecompile,0)
+SLOW_PATH_ONLY_HELPER(jitRetranslateMethod,3)
+
+dnl jitStackOverflow is special case in that the frame size argument
+dnl is implicit (in the register file) rather than being passed as
+dnl an argument in the usual way.
+
+SLOW_PATH_ONLY_HELPER_NO_RETURN_VALUE(jitStackOverflow,0)
+
+dnl Helpers that are not at a method invocation point.
+dnl
+dnl See definition of SAVE_C_VOLATILE_REGS in xhelpers.m4
+dnl for details.
+
+undefine({METHOD_INVOCATION})
+
 dnl Runtime helpers
 
 DUAL_MODE_ALLOCATION_HELPER(jitNewValue,1)
@@ -359,12 +386,6 @@ DUAL_MODE_HELPER(jitANewArrayNoZeroInit,2)
 DUAL_MODE_ALLOCATION_HELPER(jitNewArray,2)
 DUAL_MODE_ALLOCATION_HELPER(jitNewArrayNoZeroInit,2)
 SLOW_PATH_ONLY_HELPER(jitAMultiNewArray,3)
-
-dnl jitStackOverflow is special case in that the frame size argument
-dnl is implicit (in the register file) rather than being passed as
-dnl an argument in the usual way.
-
-SLOW_PATH_ONLY_HELPER_NO_RETURN_VALUE(jitStackOverflow,0)
 
 SLOW_PATH_ONLY_HELPER_NO_RETURN_VALUE(jitCheckAsyncMessages,0)
 DUAL_MODE_HELPER_NO_RETURN_VALUE(jitCheckCast,2)
@@ -387,14 +408,19 @@ SLOW_PATH_ONLY_HELPER_NO_RETURN_VALUE(jitReportInstanceFieldRead,2)
 SLOW_PATH_ONLY_HELPER_NO_RETURN_VALUE(jitReportInstanceFieldWrite,3)
 SLOW_PATH_ONLY_HELPER_NO_RETURN_VALUE(jitReportStaticFieldRead,1)
 SLOW_PATH_ONLY_HELPER_NO_RETURN_VALUE(jitReportStaticFieldWrite,2)
-FAST_PATH_ONLY_HELPER(jitAcmpHelper,2)
+FAST_PATH_ONLY_HELPER(jitAcmpeqHelper,2)
+FAST_PATH_ONLY_HELPER(jitAcmpneHelper,2)
 OLD_DUAL_MODE_HELPER(jitGetFlattenableField,2)
-OLD_DUAL_MODE_HELPER_NO_RETURN_VALUE(jitWithFlattenableField,3)
+OLD_DUAL_MODE_HELPER(jitCloneValueType, 1)
+OLD_DUAL_MODE_HELPER(jitWithFlattenableField,3)
 OLD_DUAL_MODE_HELPER_NO_RETURN_VALUE(jitPutFlattenableField,3)
 OLD_DUAL_MODE_HELPER(jitGetFlattenableStaticField,2)
 OLD_DUAL_MODE_HELPER_NO_RETURN_VALUE(jitPutFlattenableStaticField,3)
 OLD_DUAL_MODE_HELPER(jitLoadFlattenableArrayElement,2)
 OLD_DUAL_MODE_HELPER_NO_RETURN_VALUE(jitStoreFlattenableArrayElement,3)
+SLOW_PATH_ONLY_HELPER_NO_RETURN_VALUE(jitResolveFlattenableField,3)
+FAST_PATH_ONLY_HELPER(jitLookupDynamicInterfaceMethod,3)
+OLD_DUAL_MODE_HELPER(jitLookupDynamicPublicInterfaceMethod,3)
 
 dnl Trap handlers
 
@@ -408,7 +434,6 @@ dnl Only called from PicBuilder
 PICBUILDER_FAST_PATH_ONLY_HELPER(jitMethodIsNative,1)
 PICBUILDER_FAST_PATH_ONLY_HELPER(jitMethodIsSync,1)
 PICBUILDER_FAST_PATH_ONLY_HELPER(jitResolvedFieldIsVolatile,3)
-PICBUILDER_DUAL_MODE_HELPER(jitLookupInterfaceMethod,3)
 PICBUILDER_SLOW_PATH_ONLY_HELPER(jitResolveString,3)
 PICBUILDER_SLOW_PATH_ONLY_HELPER(jitResolveClass,3)
 PICBUILDER_SLOW_PATH_ONLY_HELPER(jitResolveClassFromStaticField,3)
@@ -416,10 +441,6 @@ PICBUILDER_SLOW_PATH_ONLY_HELPER(jitResolveField,3)
 PICBUILDER_SLOW_PATH_ONLY_HELPER(jitResolveFieldSetter,3)
 PICBUILDER_SLOW_PATH_ONLY_HELPER(jitResolveStaticField,3)
 PICBUILDER_SLOW_PATH_ONLY_HELPER(jitResolveStaticFieldSetter,3)
-PICBUILDER_SLOW_PATH_ONLY_HELPER(jitResolveInterfaceMethod,2)
-PICBUILDER_SLOW_PATH_ONLY_HELPER(jitResolveSpecialMethod,3)
-PICBUILDER_SLOW_PATH_ONLY_HELPER(jitResolveStaticMethod,3)
-PICBUILDER_SLOW_PATH_ONLY_HELPER(jitResolveVirtualMethod,2)
 PICBUILDER_SLOW_PATH_ONLY_HELPER(jitResolveMethodType,3)
 PICBUILDER_SLOW_PATH_ONLY_HELPER(jitResolveMethodHandle,3)
 PICBUILDER_SLOW_PATH_ONLY_HELPER(jitResolveInvokeDynamic,3)
@@ -437,7 +458,6 @@ dnl Recompilation helpers
 
 SLOW_PATH_ONLY_HELPER(jitRetranslateCaller,2)
 SLOW_PATH_ONLY_HELPER(jitRetranslateCallerWithPreparation,3)
-SLOW_PATH_ONLY_HELPER(jitRetranslateMethod,3)
 
 dnl Exception throw helpers
 
@@ -495,8 +515,6 @@ FAST_PATH_ONLY_HELPER_NO_RETURN_VALUE(jitWriteBarrierStoreMetronome,3)
 
 dnl Misc
 
-SLOW_PATH_ONLY_HELPER(jitInduceOSRAtCurrentPC,0)
-SLOW_PATH_ONLY_HELPER(jitInduceOSRAtCurrentPCAndRecompile,0)
 SLOW_PATH_ONLY_HELPER(jitNewInstanceImplAccessCheck,3)
 SLOW_PATH_ONLY_HELPER_NO_EXCEPTION_NO_RETURN_VALUE(jitCallCFunction,3)
 SLOW_PATH_ONLY_HELPER_NO_EXCEPTION_NO_RETURN_VALUE(jitCallJitAddPicToPatchOnClassUnload,2)
@@ -512,7 +530,6 @@ UNUSED(jitNewObjectNoTenantInit)
 UNUSED(jitPostJNICallOffloadCheck)
 UNUSED(jitPreJNICallOffloadCheck)
 UNUSED(jitFindFieldSignatureClass)
-UNUSED(icallVMprJavaSendInvokeWithArgumentsHelperL)
 UNUSED(j2iInvokeWithArguments)
 
 START_PROC(jitThrowClassCastException)

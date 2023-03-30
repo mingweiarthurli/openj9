@@ -1,6 +1,6 @@
 
 /*******************************************************************************
- * Copyright (c) 1991, 2014 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -27,8 +27,8 @@
 #include "CollectorLanguageInterfaceImpl.hpp"
 #include "CompactScheme.hpp"
 #include "CompactSchemeFixupObject.hpp"
-#include "Dispatcher.hpp"
 #include "EnvironmentStandard.hpp"
+#include "ParallelDispatcher.hpp"
 #include "RootScanner.hpp"
 
 class MM_CompactSchemeFixupRoots : public MM_RootScanner {
@@ -73,7 +73,6 @@ public:
 	virtual void scanUnfinalizedObjects(MM_EnvironmentBase *env) {
 		/* allow the compact scheme to handle this */
 		reportScanningStarted(RootScannerEntity_UnfinalizedObjects);
-		MM_CompactSchemeFixupObject fixupObject(env, _compactScheme);
 		fixupUnfinalizedObjects(env);
 		reportScanningEnded(RootScannerEntity_UnfinalizedObjects);
 	}
@@ -87,7 +86,6 @@ public:
 	virtual void scanFinalizableObjects(MM_EnvironmentBase *env) {
 		if (_singleThread || J9MODRON_HANDLE_NEXT_WORK_UNIT(env)) {
 			reportScanningStarted(RootScannerEntity_FinalizableObjects);
-			MM_CompactSchemeFixupObject fixupObject(env, _compactScheme);
 			fixupFinalizableObjects(env);
 			reportScanningEnded(RootScannerEntity_FinalizableObjects);
 		}
@@ -98,10 +96,18 @@ public:
 		/* empty, move ownable synchronizer processing in fixupObject */
 	}
 
+	virtual void scanContinuationObjects(MM_EnvironmentBase *env) {
+		/* allow the compact scheme to handle this */
+		reportScanningStarted(RootScannerEntity_ContinuationObjects);
+		fixupContinuationObjects(env);
+		reportScanningEnded(RootScannerEntity_ContinuationObjects);
+	}
+
 private:
 #if defined(J9VM_GC_FINALIZATION)
 	void fixupFinalizableObjects(MM_EnvironmentBase *env);
 	void fixupUnfinalizedObjects(MM_EnvironmentBase *env);
 #endif
+	void fixupContinuationObjects(MM_EnvironmentBase *env);
 };
 #endif /* FIXUPROOTS_HPP_ */

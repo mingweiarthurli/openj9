@@ -1,5 +1,5 @@
 <#--
-Copyright (c) 1998, 2020 IBM Corp. and others
+Copyright (c) 1998, 2022 IBM Corp. and others
 
 This program and the accompanying materials are made available under
 the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@ Exception [1] and GNU General Public License, version 2 with the
 OpenJDK Assembly Exception [2].
 
 [1] https://www.gnu.org/software/classpath/license.html
-[2] http://openjdk.java.net/legal/assembly-exception.html
+[2] https://openjdk.org/legal/assembly-exception.html
 
 SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 -->
@@ -52,14 +52,14 @@ $(UMA_EXETARGET) : $(UMA_OBJECTS) $(UMA_TARGET_LIBRARIES)
 
 </#assign>
 
-<#if uma.spec.flags.opt_useOmrDdr.enabled>
-  CFLAGS   += -Wc,debug
-  CXXFLAGS += -Wc,debug
-</#if>
-
 ifndef UMA_DO_NOT_OPTIMIZE_CCODE
-  UMA_OPTIMIZATION_FLAGS = -O3 -Wc,"ARCH(7)" -Wc,"TUNE(10)"
-  UMA_OPTIMIZATION_LINKER_FLAGS = -Wl,compat=ZOSV1R13
+  ifeq ($(VERSION_MAJOR),8)
+    UMA_OPTIMIZATION_FLAGS = -O3 -Wc,"ARCH(7)" -Wc,"TUNE(10)"
+    UMA_OPTIMIZATION_LINKER_FLAGS = -Wl,compat=ZOSV1R13
+  else
+    UMA_OPTIMIZATION_FLAGS = -O3 -Wc,"ARCH(10)" -Wc,"TUNE(12)"
+    UMA_OPTIMIZATION_LINKER_FLAGS = -Wl,compat=ZOSV2R3
+  endif
 else
   UMA_OPTIMIZATION_FLAGS = -0
 endif
@@ -73,7 +73,12 @@ endif
 UMA_ZOS_FLAGS += -DJ9ZOS390 -DLONGLONG -DJ9VM_TIERED_CODE_CACHE -D_ALL_SOURCE -D_XOPEN_SOURCE_EXTENDED -DIBM_ATOE -D_POSIX_SOURCE -D_ISOC99_SOURCE -D__STDC_LIMIT_MACROS
 UMA_ZOS_FLAGS += -I$(OMR_DIR)/util/a2e/headers $(UMA_OPTIMIZATION_FLAGS) $(UMA_OPTIMIZATION_LINKER_FLAGS) \
 	-Wc,"convlit(ISO8859-1),xplink,rostring,FLOAT(IEEE,FOLD,AFP),enum(4)" -Wa,goff -Wc,NOANSIALIAS -Wc,"inline(auto,noreport,600,5000)"
-UMA_ZOS_FLAGS += -Wc,"SERVICE(j${uma.buildinfo.build_date})" -Wc,"TARGET(zOSV1R13)"
+UMA_ZOS_FLAGS += -Wc,"SERVICE(j${uma.buildinfo.build_date})"
+ifeq ($(VERSION_MAJOR),8)
+  UMA_ZOS_FLAGS += -Wc,"TARGET(zOSV1R13)"
+else
+  UMA_ZOS_FLAGS += -Wc,"TARGET(zOSV2R3)"
+endif
 UMA_ZOS_FLAGS += -Wc,list,offset
 ifdef j9vm_env_data64
   UMA_ZOS_FLAGS += -DJ9ZOS39064 -Wc,lp64 -Wa,"SYSPARM(BIT64)"
@@ -98,6 +103,16 @@ COMMA := ,
 
 # Compile jniargtestssystemlink with non-XPLINK (system) linkage
 ifeq ($(UMA_TARGET_NAME),jniargtestssystemlink)
+  UMA_ZOS_FLAGS := $(subst $(COMMA)xplink,,$(UMA_ZOS_FLAGS))
+  UMA_LINK_FLAGS := $(subst $(COMMA)xplink,,$(UMA_LINK_FLAGS))
+endif
+
+# Compile j9vm31 shim library requires non-XPLINK (system) linkage.
+# As a standalone 31-bit library without access to a2e library,
+# we will default to EBCDIC as convlit settings.
+ifeq ($(UMA_TARGET_NAME),jvm31)
+  UMA_ZOS_FLAGS := $(subst convlit(ISO8859-1),,$(UMA_ZOS_FLAGS))
+  UMA_ZOS_FLAGS := $(subst -I$(OMR_DIR)/util/a2e/headers,,$(UMA_ZOS_FLAGS))
   UMA_ZOS_FLAGS := $(subst $(COMMA)xplink,,$(UMA_ZOS_FLAGS))
   UMA_LINK_FLAGS := $(subst $(COMMA)xplink,,$(UMA_LINK_FLAGS))
 endif
@@ -141,5 +156,8 @@ DebugBytecodeInterpreterFull.o : DebugBytecodeInterpreterFull.cpp
 DebugBytecodeInterpreterCompressed.o : DebugBytecodeInterpreterCompressed.cpp
 	$(CXX) $(SPECIALCXXFLAGS) $(MRABIG) $(NEW_OPTIMIZATION_FLAG) -c $< > $*.asmlist
 
-MHInterpreter$(UMA_DOT_O) : MHInterpreter.cpp
+MHInterpreterFull$(UMA_DOT_O) : MHInterpreterFull.cpp
+	$(CXX) $(SPECIALCXXFLAGS) $(MRABIG) $(NEW_OPTIMIZATION_FLAG) -c $< > $*.asmlist
+
+MHInterpreterCompressed$(UMA_DOT_O) : MHInterpreterCompressed.cpp
 	$(CXX) $(SPECIALCXXFLAGS) $(MRABIG) $(NEW_OPTIMIZATION_FLAG) -c $< > $*.asmlist

@@ -2,7 +2,7 @@
 
 package com.ibm.oti.vm;
 /*******************************************************************************
- * Copyright (c) 1998, 2020 IBM Corp. and others
+ * Copyright (c) 1998, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -18,7 +18,7 @@ package com.ibm.oti.vm;
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -42,8 +42,6 @@ import sun.reflect.CallerSensitive;
 @SuppressWarnings("javadoc")
 public final class VM {
 
-	public static final boolean PACKED_SUPPORT_ENABLED = false;  /* TODO delete this when ARM JCL is updated */
-
 	public static final int J9_JAVA_CLASS_RAM_SHAPE_SHIFT;
 	public static final int OBJECT_HEADER_SHAPE_MASK;
 	public static final int OBJECT_HEADER_SIZE;
@@ -56,7 +54,8 @@ public final class VM {
 	public static final int J9_GC_WRITE_BARRIER_TYPE_CARDMARK;
 	public static final int J9_GC_WRITE_BARRIER_TYPE_CARDMARK_INCREMENTAL;
 	public static final int J9_GC_WRITE_BARRIER_TYPE_CARDMARK_AND_OLDCHECK;
-	public static final int J9_GC_WRITE_BARRIER_TYPE_REALTIME;
+	public static final int J9_GC_WRITE_BARRIER_TYPE_SATB;
+	public static final int J9_GC_WRITE_BARRIER_TYPE_SATB_AND_OLDCHECK;
 
 	public static final int J9_GC_ALLOCATION_TYPE;
 	public static final int J9_GC_ALLOCATION_TYPE_TLH;
@@ -132,9 +131,7 @@ public final class VM {
 	/*[PR CMVC 189091] Perf: EnumSet.allOf() is slow */
 	/*[PR CMVC 191554] Provide access to ClassLoader methods to improve performance */
 	private static VMLangAccess javalangVMaccess;
-	/*[IF Panama]*/
-	private static VMLangInvokeAccess javalanginvokeVMaccess;
-	/*[ENDIF]*/
+
 	static {
 		/* Note this is never called - the VM marks this class as initialized immediately after loading.
 		 * The initializer is here solely to trick the compiler into letting us have static final
@@ -152,7 +149,8 @@ public final class VM {
 		J9_GC_WRITE_BARRIER_TYPE_CARDMARK = 0;
 		J9_GC_WRITE_BARRIER_TYPE_CARDMARK_INCREMENTAL = 0;
 		J9_GC_WRITE_BARRIER_TYPE_CARDMARK_AND_OLDCHECK = 0;
-		J9_GC_WRITE_BARRIER_TYPE_REALTIME = 0;
+		J9_GC_WRITE_BARRIER_TYPE_SATB = 0;
+		J9_GC_WRITE_BARRIER_TYPE_SATB_AND_OLDCHECK = 0;
 
 		J9_GC_ALLOCATION_TYPE = 0;
 		J9_GC_ALLOCATION_TYPE_TLH = 0;
@@ -543,7 +541,7 @@ public static int removeStringDuplicates() {
 }
 
 /*[PR 126182] Do not intern bootstrap class names when loading */
-public static native String getClassNameImpl(Class aClass);
+public static native String getClassNameImpl(Class aClass, boolean internAndAssign);
 
 /*[PR CMVC 189091] Perf: EnumSet.allOf() is slow */
 /*[PR CMVC 191554] Provide access to ClassLoader methods to improve performance */
@@ -559,19 +557,6 @@ public static VMLangAccess getVMLangAccess() {
 	return javalangVMaccess;
 }
 
-/*[IF Panama]*/
-public static void setVMLangInvokeAccess(VMLangInvokeAccess access) {
-	if (javalanginvokeVMaccess != null) {
-		throw new SecurityException(Msg.getString("K05ba")); //$NON-NLS-1$
-	}
-	javalanginvokeVMaccess = access;
-}
-
-public static VMLangInvokeAccess getVMLangInvokeAccess() {
-	return javalanginvokeVMaccess;
-}
-/*[ENDIF]*/
-
 /**
  * Set the current thread as a JVM System Thread
  * @return 0 on success, -1 on failure
@@ -584,5 +569,12 @@ public static int markCurrentThreadAsSystem()
 }
 
 private static native int markCurrentThreadAsSystemImpl();
+
+/**
+ * Gets the J9ConstantPool address from a J9Class address
+ * @param j9clazz J9Class address
+ * @return Address of J9ConstantPool
+ */
+public static native long getJ9ConstantPoolFromJ9Class(long j9clazz);
 
 }

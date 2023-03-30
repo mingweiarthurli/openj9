@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2019 IBM Corp. and others
+ * Copyright (c) 2018, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -205,6 +205,22 @@ public class APITestJava10 extends ThreadMXBeanTestCase {
 		final int REQUESTED_DEPTH = 5;
 		Thread t = new LambdaTestThread(REQUESTED_DEPTH - 2); // Subtract 1 for the run() method and 1 for the lambda.
 		checkThreadInfo(REQUESTED_DEPTH, t);
+	}
+
+	/* ThreadInfo objects contain MonitorInfo objects which carry stack depth info that can be higher than
+	 * max depth passed to dumpAllThreads. dumpAllThreads should still produce the ThreadInfo objects.
+	 * See https://github.com/eclipse-openj9/openj9/issues/10796
+	 */
+	@Test(groups = { "level.extended" })
+	public void testDumpWithMonitorDepthHigherThanLimit() {
+		try {
+			ThreadInfo[] threads = myBean.dumpAllThreads(true, true, 1);
+			for (ThreadInfo thInfo : threads) {
+				Assert.assertTrue(thInfo.getStackTrace().length <= 1, "Stack depth should be truncated to 1");
+			}
+		} catch (ArrayIndexOutOfBoundsException e) {
+			Assert.fail("Failed to dump threads", e);
+		}
 	}
 
 	private void checkThreadInfo(int requestedDepth, Thread t) {

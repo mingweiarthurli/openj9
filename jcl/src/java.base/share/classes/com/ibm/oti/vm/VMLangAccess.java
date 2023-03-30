@@ -1,17 +1,6 @@
 /*[INCLUDE-IF Sidecar16]*/
-package com.ibm.oti.vm;
-
-import java.util.Properties;
-
-/*[IF Sidecar19-SE]*/
-import jdk.internal.reflect.ConstantPool;
-/*[ELSE]*/
-import sun.reflect.ConstantPool;
-/*[ENDIF]*/
-
-
 /*******************************************************************************
- * Copyright (c) 2012, 2019 IBM Corp. and others
+ * Copyright (c) 2012, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -27,10 +16,20 @@ import sun.reflect.ConstantPool;
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
+
+package com.ibm.oti.vm;
+
+import java.util.Properties;
+
+/*[IF Sidecar19-SE]*/
+import jdk.internal.reflect.ConstantPool;
+/*[ELSE]*/
+import sun.reflect.ConstantPool;
+/*[ENDIF]*/
 
 /**
  * Interface to allow privileged access to classes
@@ -130,20 +129,38 @@ public interface VMLangAccess {
 	/*[ENDIF]*/
 	
 	/**
-	 * Returns an InternalRamClass object.
-	 * 
-	 * @param addr - the native addr of the J9Class
-	 * @return An InternalRamClass object
-	 */ 
-	public Object createInternalRamClass(long addr);
-	
+	 * Returns an InternalConstantPool object.
+	 *
+	 * @param addr - the native addr of the J9ConstantPool
+	 * @return An InternalConstantPool object
+	 */
+	public Object createInternalConstantPool(long addr);
+
 	/**
 	 * Returns a ConstantPool object
 	 * 
-	 * @param internalRamClass An object ref to an internalRamClass
+	 * @param internalConstantPool An object ref to an InternalConstantPool
 	 * @return ConstantPool instance
 	 */
-	public ConstantPool getConstantPool(Object internalRamClass);
+	public ConstantPool getConstantPool(Object internalConstantPool);
+
+	/**
+	 * Returns an InternalConstantPool object from a J9Class address. The ConstantPool
+	 * natives expect an InternalConstantPool as the constantPoolOop parameter.
+	 *
+	 * @param j9class the native address of the J9Class
+	 * @return InternalConstantPool a wrapper for a j9constantpool
+	 */
+	public Object getInternalConstantPoolFromJ9Class(long j9class);
+
+	/**
+	 * Returns an InternalConstantPool object from a Class. The ConstantPool
+	 * natives expect an InternalConstantPool as the constantPoolOop parameter.
+	 *
+	 * @param clazz the Class to fetch the constant pool from
+	 * @return an InternalConstantPool wrapper for a j9constantpool
+	 */
+	public Object getInternalConstantPoolFromClass(Class clazz);
 
 	/*[IF Sidecar19-SE]*/
 	/**
@@ -169,4 +186,30 @@ public interface VMLangAccess {
 	 * @return      A java.lang.Thread created
 	 */
 	public Thread createThread(Runnable runnable, String threadName, boolean isSystemThreadGroup, boolean inheritThreadLocals, boolean isDaemon, ClassLoader contextClassLoader);
+
+
+	/**
+	 * Prepare the passed in class
+	 *
+	 * @param theClass The class to prepare
+	 */
+	public void prepare(Class<?> theClass);
+
+	/*[IF JAVA_SPEC_VERSION >= 11]*/
+	/**
+	 * Returns whether the classloader name should be included in the stack trace for the provided StackTraceElement.
+	 *
+	 * @param element The StackTraceElement to check
+	 * @return true if the classloader name should be included, false otherwise
+	 */
+	public boolean getIncludeClassLoaderName(StackTraceElement element);
+
+	/**
+	 * Returns whether the module version should be included in the stack trace for the provided StackTraceElement.
+	 *
+	 * @param element The StackTraceElement to check
+	 * @return true if the module version should be included, false otherwise
+	 */
+	public boolean getIncludeModuleVersion(StackTraceElement element);
+	/*[ENDIF] JAVA_SPEC_VERSION >= 11*/
 }

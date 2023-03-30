@@ -7,6 +7,12 @@
    libffi.
    ----------------------------------------------------------------------- */
 
+/*
+ * ===========================================================================
+ * Copyright (c) 2021, 2022 IBM Corp. and others
+ * ===========================================================================
+ */
+
 #ifndef FFI_COMMON_H
 #define FFI_COMMON_H
 
@@ -81,10 +87,21 @@ void ffi_type_test(ffi_type *a, char *file, int line);
 #define ALIGN(v, a)  (((((size_t) (v))-1) | ((a)-1))+1)
 #define ALIGN_DOWN(v, a) (((size_t) (v)) & -a)
 
+/* v cast to size_t and aligned up to a multiple of a */
+#define FFI_ALIGN  ALIGN
+/* v cast to size_t and aligned down to a multiple of a */
+#define FFI_ALIGN_DOWN  ALIGN_DOWN
+
 /* Perform machine dependent cif processing */
 ffi_status ffi_prep_cif_machdep(ffi_cif *cif);
 ffi_status ffi_prep_cif_machdep_var(ffi_cif *cif,
 	 unsigned int nfixedargs, unsigned int ntotalargs);
+
+#if defined(__aarch64__) || defined(__arm64__)|| defined (_M_ARM64)
+/* Translate a data pointer to a code pointer.  Needed for closures on
+   some targets.  */
+void *ffi_data_to_code_pointer (void *data) FFI_HIDDEN;
+#endif /* (__aarch64__) || defined(__arm64__)|| defined (_M_ARM64)*/
 
 /* Extended cif, used in callback from assembly routine */
 typedef struct

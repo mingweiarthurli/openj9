@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -44,7 +44,7 @@ static bool generatesFear(TR::Compilation *comp, TR_FearPointAnalysis &fearAnaly
 
 static bool hasHCRGuard(TR::Compilation *comp)
    {
-   TR::list<TR_VirtualGuard*> &virtualGuards = comp->getVirtualGuards();
+   const TR::Compilation::GuardSet &virtualGuards = comp->getVirtualGuards();
    for (auto itr = virtualGuards.begin(), end = virtualGuards.end(); itr != end; ++itr)
       {
       if ((*itr)->getKind() == TR_HCRGuard || (*itr)->mergedWithHCRGuard())
@@ -295,18 +295,18 @@ TR_Structure* fakeRegion(TR::Compilation *comp)
    {
    TR::CFG* cfg = comp->getFlowGraph();
    // This is the memory region into which we allocate structure nodes
-   TR::Region &structureRegion = cfg->structureRegion();
+   TR::Region &structureMemoryRegion = cfg->structureMemoryRegion();
    TR::CFGNode *cfgNode;
 
    TR_Array<TR_StructureSubGraphNode*> *blocks =  new (comp->trStackMemory()) TR_Array<TR_StructureSubGraphNode*>(comp->trMemory(), cfg->getNumberOfNodes(), false, stackAlloc);
 
    // This region is the CFG node grouping we are building to facilitate dataflow analysis
    // it is allocated into the memory region for structure nodes
-   TR_RegionStructure *region = new (structureRegion) TR_RegionStructure(comp, 0);
+   TR_RegionStructure *region = new (structureMemoryRegion) TR_RegionStructure(comp, 0);
    for (cfgNode = cfg->getFirstNode(); cfgNode; cfgNode = cfgNode->getNext())
       {
       TR::Block *block = toBlock(cfgNode);
-      (*blocks)[block->getNumber()] = new (structureRegion) TR_StructureSubGraphNode(new (structureRegion) TR_BlockStructure(comp, block->getNumber(), block));
+      (*blocks)[block->getNumber()] = new (structureMemoryRegion) TR_StructureSubGraphNode(new (structureMemoryRegion) TR_BlockStructure(comp, block->getNumber(), block));
       region->addSubNode((*blocks)[block->getNumber()]);
       }
 
@@ -354,7 +354,6 @@ void TR_OSRGuardInsertion::removeHCRGuards(TR_BitVector &fearGeneratingNodes, TR
              && performTransformation(comp(), "O^O HCR GUARD REMOVAL: removing HCRGuard node n%dn\n", node->getGlobalIndex()))
             {
             comp()->addClassForOSRRedefinition(guardInfo->getThisClass());
-            comp()->removeVirtualGuard(guardInfo);
 
             // When removing the HCR branch, first remove the successor edges from the existing HCR block
             // This allows the branch removal operation to skip expensive checks when structure has been modified
@@ -387,7 +386,7 @@ void TR_OSRGuardInsertion::removeHCRGuards(TR_BitVector &fearGeneratingNodes, TR
 
             // if virtual guards kill fear we can short cut additional analysis if the method still has a guard
             // we can mark that guard as an OSR guard and continue without needing a data flow analysis
-            if (TR_FearPointAnalysis::virtualGuardsKillFear()
+            if (TR_FearPointAnalysis::virtualGuardsKillFear(comp())
                 && additionalVirtualGuard
                 && comp()->cg()->supportsMergingGuards())
                {
@@ -405,10 +404,15 @@ void TR_OSRGuardInsertion::removeHCRGuards(TR_BitVector &fearGeneratingNodes, TR
 
             TR::DebugCounter::prependDebugCounter(comp(), TR::DebugCounter::debugCounterName(comp(), "hcrGuardRemoval/success"), cursor->getExit());
             }
-         else if (guardInfo->mergedWithHCRGuard())
+         else if (guardInfo->mergedWithHCRGuard()
+            && performTransformation(
+                  comp(),
+                  "O^O HCR GUARD REMOVAL: removing HCR guard merged into node n%un\n",
+                  node->getGlobalIndex()))
             {
+            comp()->addClassForOSRRedefinition(guardInfo->getThisClass());
             guardInfo->setMergedWithHCRGuard(false);
-            if (TR_FearPointAnalysis::virtualGuardsKillFear())
+            if (TR_FearPointAnalysis::virtualGuardsKillFear(comp()))
                guardInfo->setMergedWithOSRGuard();
             else
                {
@@ -471,7 +475,7 @@ int32_t TR_OSRGuardInsertion::insertOSRGuards(TR_BitVector &fearGeneratingNodes)
          continue;
          }
 
-      if (TR_FearPointAnalysis::virtualGuardsKillFear()
+      if (TR_FearPointAnalysis::virtualGuardsKillFear(comp())
           && cursor->getNode()->isTheVirtualGuardForAGuardedInlinedCall()
           && comp()->cg()->supportsMergingGuards())
          {

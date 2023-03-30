@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -215,11 +215,11 @@ class TR_PatchNOPedGuardSiteOnMethodBreakPoint : public TR::PatchNOPedGuardSite
                        uint8_t *location, uint8_t *destination)
       : TR::PatchNOPedGuardSite(pm, (uintptr_t)j9method, RuntimeAssumptionOnMethodBreakPoint, location, destination) {}
 
-   public: 
+   public:
    static TR_PatchNOPedGuardSiteOnMethodBreakPoint *make(
       TR_FrontEnd *fe, TR_PersistentMemory * pm, TR_OpaqueMethodBlock *j9method, uint8_t *location, uint8_t *destination,
       OMR::RuntimeAssumption **sentinel);
- 
+
    virtual TR_RuntimeAssumptionKind getAssumptionKind() { return RuntimeAssumptionOnMethodBreakPoint; }
    };
 
@@ -407,6 +407,8 @@ class TR_CHTable
 
    void cleanupNewlyExtendedInfo(TR::Compilation *comp);
 
+   bool canSkipCommit(TR::Compilation *comp);
+
    // Commit the CHTable into the persistent table.  This method must be called
    // with the class table mutex in hand.
    // If an unrecoverable problem has occurred - this method will return false
@@ -416,7 +418,8 @@ class TR_CHTable
 
    void commitVirtualGuard(TR_VirtualGuard *info, List<TR_VirtualGuardSite> &sites,
                            TR_PersistentCHTable *table, TR::Compilation *comp);
-   void commitOSRVirtualGuards(TR::Compilation *comp, TR::list<TR_VirtualGuard*> &vguards);
+   void commitOSRVirtualGuards(
+      TR::Compilation *comp, const TR::Compilation::GuardSet &vguards);
 #if defined(J9VM_OPT_JITSERVER)
    CHTableCommitData computeDataForCHTableCommit(TR::Compilation *comp);
 #endif
@@ -431,7 +434,6 @@ class TR_CHTable
    private:
 
    friend class TR_Debug;
-   friend class TR_DebugExt;
 
    TR_Array<TR_ResolvedMethod*> *    _preXMethods;
    TR_Array<TR_OpaqueClassBlock *> * _classes;

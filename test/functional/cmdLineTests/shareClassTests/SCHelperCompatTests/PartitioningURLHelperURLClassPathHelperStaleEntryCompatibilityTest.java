@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -68,7 +68,7 @@ public class PartitioningURLHelperURLClassPathHelperStaleEntryCompatibilityTest 
 		}
 		
 		String numberOfUrlsString = props.getProperty("NumberOfUrls");
-		Integer tempNumberOfUrls = new Integer(numberOfUrlsString);
+		Integer tempNumberOfUrls = Integer.valueOf(numberOfUrlsString);
 		int numberOfUrls = tempNumberOfUrls.intValue();
 		
 		int maxClassesToLoad = 0;		
@@ -78,7 +78,7 @@ public class PartitioningURLHelperURLClassPathHelperStaleEntryCompatibilityTest 
 			urls[index] = props.getProperty("Url"+index);
 			partitionStrings[index] = props.getProperty("urlPartition"+index);
 			String ctl = props.getProperty("NumberOfClassesToLoad"+index);
-			Integer intctl = new Integer(ctl);
+			Integer intctl = Integer.valueOf(ctl);
 			maxClassesToLoad = ((intctl.intValue() > maxClassesToLoad) ? intctl.intValue() : maxClassesToLoad);
 		}
 		
@@ -87,7 +87,7 @@ public class PartitioningURLHelperURLClassPathHelperStaleEntryCompatibilityTest 
 		for(int urlIndex = 0; urlIndex < numberOfUrls; urlIndex++){
 			String loadClasses = props.getProperty("LoadClasses"+urlIndex);
 			String ctl = props.getProperty("NumberOfClassesToLoad"+urlIndex);
-			Integer intctl = new Integer(ctl);
+			Integer intctl = Integer.valueOf(ctl);
 			int numberOfClassesToLoad = intctl.intValue();
 			for(int classToLoadIndex = 0; classToLoadIndex < numberOfClassesToLoad; classToLoadIndex++){
 				classesToLoad[urlIndex][classToLoadIndex] = manipulator.getStringElement(classToLoadIndex, loadClasses);
@@ -98,7 +98,7 @@ public class PartitioningURLHelperURLClassPathHelperStaleEntryCompatibilityTest 
 		String partition = props.getProperty("Partition");
 		
 		String ctf = props.getProperty("NumberOfClassesToFind");
-		Integer intctf = new Integer(ctf);
+		Integer intctf = Integer.valueOf(ctf);
 		int numberOfClassesToFind = intctf.intValue();
 		
 		String classesString = props.getProperty("FindClasses");

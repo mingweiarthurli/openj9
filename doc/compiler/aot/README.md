@@ -1,5 +1,5 @@
 <!--
-Copyright (c) 2020, 2020 IBM Corp. and others
+Copyright (c) 2020, 2022 IBM Corp. and others
 
 This program and the accompanying materials are made available under
 the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@ Exception [1] and GNU General Public License, version 2 with the
 OpenJDK Assembly Exception [2].
 
 [1] https://www.gnu.org/software/classpath/license.html
-[2] http://openjdk.java.net/legal/assembly-exception.html
+[2] https://openjdk.org/legal/assembly-exception.html
 
 SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 -->
@@ -51,9 +51,12 @@ method already exists in the SCC and loads that instead.
 2. [Introduction to AOT](https://blog.openj9.org/2018/10/10/intro-to-ahead-of-time-compilation/)
 3. [AOT: Relocation](https://blog.openj9.org/2018/10/26/ahead-of-time-compilation-relocation/)
 4. [AOT: Validation](https://blog.openj9.org/2018/11/08/ahead-of-time-compilation-validation/)
-5. [Class Chains](https://github.com/eclipse/openj9/blob/master/doc/compiler/aot/ClassChains.md)
-6. [Symbol Validation Manager](https://github.com/eclipse/openj9/blob/master/doc/compiler/aot/SymbolValidationManager.md)
-
+5. [Relocation Records](RelocationRecords.md)
+6. [Class Chains](ClassChains.md)
+7. [Symbol Validation Manager](SymbolValidationManager.md)
+8. [Inlined Methods](InlinedMethods.md)
+9. [Adding New Relocation Records](AddingNewRelocation.md)
+10. [Diagnostics](Diagnostics.md)
 
 <hr/>
 

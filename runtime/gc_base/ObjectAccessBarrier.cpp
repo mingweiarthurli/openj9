@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -49,8 +49,13 @@ MM_ObjectAccessBarrier::initialize(MM_EnvironmentBase *env)
 	_heap = _extensions->heap;
 	J9JavaVM *vm = (J9JavaVM*)env->getOmrVM()->_language_vm;
 	OMR_VM *omrVM = env->getOmrVM();
-	
-#if defined (OMR_GC_COMPRESSED_POINTERS)
+	char *refSignature = (char*) "I";
+
+	if (sizeof(U_64) == J9JAVAVM_REFERENCE_SIZE(vm)) {
+		refSignature = (char *) "J";
+	}
+
+#if defined(OMR_GC_COMPRESSED_POINTERS)
 	if (env->compressObjectReferences()) {
 
 #if defined(J9VM_GC_REALTIME)
@@ -67,27 +72,30 @@ MM_ObjectAccessBarrier::initialize(MM_EnvironmentBase *env)
 		}
 #endif /* J9VM_GC_REALTIME */
 
-#if defined (OMR_GC_FULL_POINTERS)
+#if defined(OMR_GC_FULL_POINTERS)
 		_compressObjectReferences = true;
-#endif /* OMR_GC_FULL_POINTERS */
+#endif /* defined(OMR_GC_FULL_POINTERS) */
 		_compressedPointersShift = omrVM->_compressedPointersShift;
 		vm->compressedPointersShift = omrVM->_compressedPointersShift;
 		Trc_MM_CompressedAccessBarrierInitialized(env->getLanguageVMThread(), 0, _compressedPointersShift);
 	}
-#endif /* OMR_GC_COMPRESSED_POINTERS */
+#endif /* defined(OMR_GC_COMPRESSED_POINTERS) */
 
 	vm->objectAlignmentInBytes = omrVM->_objectAlignmentInBytes;
 	vm->objectAlignmentShift = omrVM->_objectAlignmentShift;
 
 	/* request an extra slot in java/lang/ref/Reference which we will use to maintain linked lists of reference objects */
-	if (0 != vm->internalVMFunctions->addHiddenInstanceField(vm, "java/lang/ref/Reference", "gcLink", "Ljava/lang/ref/Reference;", &_referenceLinkOffset)) {
+	if (0 != vm->internalVMFunctions->addHiddenInstanceField(vm, "java/lang/ref/Reference", "gcLink", refSignature, &_referenceLinkOffset)) {
 		return false;
 	}
 	/* request an extra slot in java/util/concurrent/locks/AbstractOwnableSynchronizer which we will use to maintain linked lists of ownable synchronizer objects */
-	if (0 != vm->internalVMFunctions->addHiddenInstanceField(vm, "java/util/concurrent/locks/AbstractOwnableSynchronizer", "ownableSynchronizerLink", "Ljava/util/concurrent/locks/AbstractOwnableSynchronizer;", &_ownableSynchronizerLinkOffset)) {
+	if (0 != vm->internalVMFunctions->addHiddenInstanceField(vm, "java/util/concurrent/locks/AbstractOwnableSynchronizer", "ownableSynchronizerLink", refSignature, &_ownableSynchronizerLinkOffset)) {
 		return false;
 	}
-	
+	/* request an extra slot in java/lang/VirtualThread$VThreadContinuation which we will use to maintain linked lists of continuation objects */
+	if (0 != vm->internalVMFunctions->addHiddenInstanceField(vm, "jdk/internal/vm/Continuation", "continuationLink", refSignature, &_continuationLinkOffset)) {
+		return false;
+	}
 	return true;
 }
 
@@ -1131,13 +1139,16 @@ MM_ObjectAccessBarrier::indexableStoreI64(J9VMThread *vmThread, J9IndexableObjec
 void
 MM_ObjectAccessBarrier::copyObjectFieldsToFlattenedArrayElement(J9VMThread *vmThread, J9ArrayClass *arrayClazz, j9object_t srcObject, J9IndexableObject *arrayRef, I_32 index)
 {
-	UDATA const objectHeaderSize = J9VMTHREAD_OBJECT_HEADER_SIZE(vmThread);
+	UDATA elementStartOffset = J9VMTHREAD_OBJECT_HEADER_SIZE(vmThread);
 	U_8 *elementAddress = (U_8*)indexableEffectiveAddress(vmThread, arrayRef, index, J9ARRAYCLASS_GET_STRIDE((J9Class *) arrayClazz));
 	IDATA elementOffset = (elementAddress - (U_8*)arrayRef);
 	J9Class *elementClazz = J9GC_J9OBJECT_CLAZZ_THREAD(srcObject, vmThread);
-	Assert_MM_true(J9_IS_J9CLASS_VALUETYPE(elementClazz));
+	Assert_MM_true(J9_IS_J9CLASS_PRIMITIVE_VALUETYPE(elementClazz));
 	Assert_MM_true(elementClazz == arrayClazz->leafComponentType);
-	copyObjectFields(vmThread, elementClazz, srcObject, objectHeaderSize, (j9object_t) arrayRef, elementOffset);
+
+	elementStartOffset += J9CLASS_PREPADDING_SIZE(elementClazz);
+
+	copyObjectFields(vmThread, elementClazz, srcObject, elementStartOffset, (j9object_t) arrayRef, elementOffset);
 }
 
 /**
@@ -1152,13 +1163,16 @@ MM_ObjectAccessBarrier::copyObjectFieldsToFlattenedArrayElement(J9VMThread *vmTh
 void
 MM_ObjectAccessBarrier::copyObjectFieldsFromFlattenedArrayElement(J9VMThread *vmThread, J9ArrayClass *arrayClazz, j9object_t destObject, J9IndexableObject *arrayRef, I_32 index)
 {
-	UDATA const objectHeaderSize = J9VMTHREAD_OBJECT_HEADER_SIZE(vmThread);
+	UDATA elementStartOffset = J9VMTHREAD_OBJECT_HEADER_SIZE(vmThread);
 	U_8 *elementAddress = (U_8*)indexableEffectiveAddress(vmThread, arrayRef, index, J9ARRAYCLASS_GET_STRIDE((J9Class *) arrayClazz));
 	IDATA elementOffset = (elementAddress - (U_8*)arrayRef);
 	J9Class *elementClazz = J9GC_J9OBJECT_CLAZZ_THREAD(destObject, vmThread);
-	Assert_MM_true(J9_IS_J9CLASS_VALUETYPE(elementClazz));
+	Assert_MM_true(J9_IS_J9CLASS_PRIMITIVE_VALUETYPE(elementClazz));
 	Assert_MM_true(elementClazz == arrayClazz->leafComponentType);
-	copyObjectFields(vmThread, elementClazz, (j9object_t) arrayRef, elementOffset, destObject, objectHeaderSize);
+
+	elementStartOffset += J9CLASS_PREPADDING_SIZE(elementClazz);
+
+	copyObjectFields(vmThread, elementClazz, (j9object_t) arrayRef, elementOffset, destObject, elementStartOffset);
 }
 
 
@@ -1385,60 +1399,72 @@ MM_ObjectAccessBarrier::getLockwordAddress(J9VMThread *vmThread, J9Object *objec
 void
 MM_ObjectAccessBarrier::cloneObject(J9VMThread *vmThread, J9Object *srcObject, J9Object *destObject)
 {
-	UDATA const objectHeaderSize = J9VMTHREAD_OBJECT_HEADER_SIZE(vmThread);
-	copyObjectFields(vmThread, J9GC_J9OBJECT_CLAZZ_THREAD(srcObject, vmThread), srcObject, objectHeaderSize, destObject, objectHeaderSize);
+	UDATA elementStartOffset = J9VMTHREAD_OBJECT_HEADER_SIZE(vmThread);
+	J9Class *cloneClazz = J9GC_J9OBJECT_CLAZZ_THREAD(srcObject, vmThread);
+
+	elementStartOffset += J9CLASS_PREPADDING_SIZE(cloneClazz);
+
+	copyObjectFields(vmThread, cloneClazz, srcObject, elementStartOffset, destObject, elementStartOffset);
 }
 
 BOOLEAN
 MM_ObjectAccessBarrier::structuralCompareFlattenedObjects(J9VMThread *vmThread, J9Class *valueClass, j9object_t lhsObject, j9object_t rhsObject, UDATA startOffset)
 {
 	bool result = true;
-	const UDATA *descriptionPtr = (UDATA *) valueClass->instanceDescription;
-	UDATA descriptionBits = 0;
 	bool const compressed = J9VMTHREAD_COMPRESS_OBJECT_REFERENCES(vmThread);
 	UDATA const referenceSize = J9VMTHREAD_REFERENCE_SIZE(vmThread);
-
-	Assert_MM_true(J9_IS_J9CLASS_VALUETYPE(valueClass));
-
-	if(((UDATA)descriptionPtr) & 1) {
-		descriptionBits = ((UDATA)descriptionPtr) >> 1;
-	} else {
-		descriptionBits = *descriptionPtr++;
-	}
-
-	UDATA descriptionIndex = J9_OBJECT_DESCRIPTION_SIZE - 1;
+	bool hasReferences = J9CLASS_HAS_REFERENCES(valueClass);
+	/* for non value-types this is just the instance size */
+	UDATA limit = J9CLASS_UNPADDED_INSTANCE_SIZE(valueClass);
 	UDATA offset = 0;
-	UDATA limit = valueClass->totalInstanceSize;
 
-	U_32 firstFieldOffset = (U_32) valueClass->backfillOffset;
-	if (0 != firstFieldOffset) {
-		/* subtract padding */
-		offset += firstFieldOffset;
-		descriptionBits >>= 1;
-		descriptionIndex -= 1;
-	}
+	Assert_MM_true(J9_IS_J9CLASS_PRIMITIVE_VALUETYPE(valueClass));
 
-	while (offset < limit) {
-		/* Determine if the slot contains an object pointer or not */
-		if(descriptionBits & 1) {
-			if (mixedObjectReadObject(vmThread, lhsObject, startOffset + offset, false) != mixedObjectReadObject(vmThread, rhsObject, startOffset + offset, false)) {
-				result = false;
-				break;
-			}
+	if (hasReferences) {
+		UDATA descriptionIndex = J9_OBJECT_DESCRIPTION_SIZE - 1;
+		const UDATA *descriptionPtr = (UDATA *) valueClass->instanceDescription;
+		UDATA descriptionBits = 0;
+
+		if (((UDATA)descriptionPtr) & 1) {
+			descriptionBits = ((UDATA)descriptionPtr) >> 1;
 		} else {
+			descriptionBits = *descriptionPtr++;
+		}
+
+		while (offset < limit) {
+			/* Determine if the slot contains an object pointer or not */
+			if (descriptionBits & 1) {
+				if (mixedObjectReadObject(vmThread, lhsObject, startOffset + offset, false) != mixedObjectReadObject(vmThread, rhsObject, startOffset + offset, false)) {
+					result = false;
+					break;
+				}
+			} else {
+				fomrobject_t lhsValue = GC_SlotObject::readSlot((fomrobject_t*)((UDATA)lhsObject + startOffset + offset), compressed);
+				fomrobject_t rhsValue = GC_SlotObject::readSlot((fomrobject_t*)((UDATA)rhsObject + startOffset + offset), compressed);
+				if (lhsValue != rhsValue) {
+					result = false;
+					break;
+				}
+			}
+			descriptionBits >>= 1;
+			if (descriptionIndex-- == 0) {
+				descriptionBits = *descriptionPtr++;
+				descriptionIndex = J9_OBJECT_DESCRIPTION_SIZE - 1;
+			}
+			offset += referenceSize;
+		}
+	} else {
+		/* no instanceDescription bits needed on this path */
+
+		while (offset < limit) {
 			fomrobject_t lhsValue = GC_SlotObject::readSlot((fomrobject_t*)((UDATA)lhsObject + startOffset + offset), compressed);
 			fomrobject_t rhsValue = GC_SlotObject::readSlot((fomrobject_t*)((UDATA)rhsObject + startOffset + offset), compressed);
 			if (lhsValue != rhsValue) {
 				result = false;
 				break;
 			}
+			offset += referenceSize;
 		}
-		descriptionBits >>= 1;
-		if(descriptionIndex-- == 0) {
-			descriptionBits = *descriptionPtr++;
-			descriptionIndex = J9_OBJECT_DESCRIPTION_SIZE - 1;
-		}
-		offset += referenceSize;
 	}
 
 	return result;
@@ -1447,7 +1473,10 @@ MM_ObjectAccessBarrier::structuralCompareFlattenedObjects(J9VMThread *vmThread, 
 /**
  * Copy all of the fields of a value class instance to another value class instance.
  * The source or destination may be a flattened value within another object, meaning
- * srcOffset and destOffset need not be equal. This is based on cloneObject(...).
+ * srcOffset and destOffset need not be equal. This is based on cloneObject(...). If
+ * Type has pre-padding the size of the object will be adjusted to remove the padding
+ * bytes. The caller of this API must ensure that the starting offset provided does
+ * not include pre-padding.
  * @TODO This does not currently check if the fields that it is reading are volatile.
  *
  * @oaram objectClass The j9class.
@@ -1455,9 +1484,12 @@ MM_ObjectAccessBarrier::structuralCompareFlattenedObjects(J9VMThread *vmThread, 
  * @param srcOffset The offset of the value class instance fields in srcObject.
  * @param destValue The object containing the value class instance fields being copied to.
  * @param destOffset The offset of the value class instance fields in destObject.
+ * @param objectMapFunction Function to allow replacement of object fields
+ * @param objectMapData Data to pass to objectMapFunction
+ * @param initializeLockWord true to initialize inline lockword, false to copy it
  */
 void
-MM_ObjectAccessBarrier::copyObjectFields(J9VMThread *vmThread, J9Class *objectClass, J9Object *srcObject, UDATA srcOffset, J9Object *destObject, UDATA destOffset)
+MM_ObjectAccessBarrier::copyObjectFields(J9VMThread *vmThread, J9Class *objectClass, J9Object *srcObject, UDATA srcOffset, J9Object *destObject, UDATA destOffset, MM_objectMapFunction objectMapFunction, void *objectMapData, bool initializeLockWord)
 {
 	/* For valueTypes we currently do not make a distinction between values that only contain
 	 * primitives and values that may contain a reference (ie. value vs mixed-value
@@ -1474,73 +1506,114 @@ MM_ObjectAccessBarrier::copyObjectFields(J9VMThread *vmThread, J9Class *objectCl
 	I_32 hashCode = 0;
 	bool isDestObjectPreHashed = false;
 
-	if (!isValueType) {
-		isDestObjectPreHashed = _extensions->objectModel.hasBeenHashed(destObject);
-		if (isDestObjectPreHashed) {
-			hashCode = _extensions->objectModel.getObjectHashCode(vmThread->javaVM, destObject);
-		}
+	isDestObjectPreHashed = _extensions->objectModel.hasBeenHashed(destObject);
+	if (isDestObjectPreHashed) {
+		hashCode = _extensions->objectModel.getObjectHashCode(vmThread->javaVM, destObject);
 	}
 
-	const UDATA *descriptionPtr = (UDATA *) objectClass->instanceDescription;
-	UDATA descriptionBits = 0;
-	if(((UDATA)descriptionPtr) & 1) {
-		descriptionBits = ((UDATA)descriptionPtr) >> 1;
-	} else {
-		descriptionBits = *descriptionPtr++;
-	}
-
-	UDATA descriptionIndex = J9_OBJECT_DESCRIPTION_SIZE - 1;
 	UDATA offset = 0;
-	UDATA limit = objectClass->totalInstanceSize;
+	/* for non value-types this is just the instance size */
+	UDATA limit = J9CLASS_UNPADDED_INSTANCE_SIZE(objectClass);
 	UDATA const referenceSize = J9VMTHREAD_REFERENCE_SIZE(vmThread);
+	bool hasReferences = J9CLASS_HAS_REFERENCES(objectClass);
 
-	if (isValueType) {
-		U_32 firstFieldOffset = (U_32) objectClass->backfillOffset;
-		if (0 != firstFieldOffset) {
-			/* subtract padding */
-			offset += firstFieldOffset;
-			descriptionBits >>= 1;
-			descriptionIndex -= 1;
-		}
-	}
-
-	while (offset < limit) {
-		/* Determine if the slot contains an object pointer or not */
-		if(descriptionBits & 1) {
-			J9Object *objectPtr = mixedObjectReadObject(vmThread, srcObject, srcOffset + offset, false);
-			mixedObjectStoreObject(vmThread, destObject, destOffset + offset, objectPtr, false);
+	if (hasReferences) {
+		const UDATA *descriptionPtr = (UDATA *) objectClass->instanceDescription;
+		UDATA descriptionBits = 0;
+		if (((UDATA)descriptionPtr) & 1) {
+			descriptionBits = ((UDATA)descriptionPtr) >> 1;
 		} else {
+			descriptionBits = *descriptionPtr++;
+		}
+
+		UDATA descriptionIndex = J9_OBJECT_DESCRIPTION_SIZE - 1;
+
+		while (offset < limit) {
+			/* Determine if the slot contains an object pointer or not */
+			if (descriptionBits & 1) {
+				J9Object *objectPtr = mixedObjectReadObject(vmThread, srcObject, srcOffset + offset, false);
+				if (NULL != objectMapFunction) {
+					objectPtr = objectMapFunction(vmThread, objectPtr, objectMapData);
+				}
+				mixedObjectStoreObject(vmThread, destObject, destOffset + offset, objectPtr, false);
+			} else {
+				UDATA srcAddress = (UDATA)srcObject + srcOffset + offset;
+				UDATA destAddress = (UDATA)destObject + destOffset + offset;
+				bool copy64Bits = false;
+				UDATA descriptionBitsNext = descriptionBits;
+				const UDATA *descriptionPtrNext = descriptionPtr;
+				UDATA descriptionIndexNext = descriptionIndex;
+				if (isValueType
+					&& (sizeof(uint32_t) == referenceSize)
+					&& (0 == (srcAddress & 7))
+					&& ((offset + referenceSize) < limit)
+				) {
+					descriptionBitsNext >>= 1;
+					if (descriptionIndexNext-- == 0) {
+						descriptionBitsNext = *(descriptionPtrNext++);
+						descriptionIndexNext = J9_OBJECT_DESCRIPTION_SIZE - 1;
+					}
+					if (0 == (descriptionBitsNext & 1)) {
+						copy64Bits = true;
+					}
+				}
+				if (copy64Bits) {
+					*(uint64_t *)destAddress = *(uint64_t *)srcAddress;
+					descriptionBits = descriptionBitsNext;
+					descriptionPtr = descriptionPtrNext;
+					descriptionIndex = descriptionIndexNext;
+					/**
+					 * When doing 64-bit copy, offset needs to be advanced 8 bytes. referenceSize is 4 bytes here.
+					 * Advance offset 4 bytes here. Another 4 bytes are advanced at the end of the while loop below.
+					 */
+					offset += referenceSize;
+				} else if (sizeof(uint32_t) == referenceSize) {
+					*(uint32_t *)destAddress = *(uint32_t *)srcAddress;
+				} else {
+					*(uintptr_t *)destAddress = *(uintptr_t *)srcAddress;
+				}
+			}
+			descriptionBits >>= 1;
+			if (descriptionIndex-- == 0) {
+				descriptionBits = *descriptionPtr++;
+				descriptionIndex = J9_OBJECT_DESCRIPTION_SIZE - 1;
+			}
+			offset += referenceSize;
+		}
+	} else {
+		/* no instanceDescription bits needed on this path */
+		while (offset < limit) {
 			UDATA srcAddress = (UDATA)srcObject + srcOffset + offset;
 			UDATA destAddress = (UDATA)destObject + destOffset + offset;
-			if (sizeof(uint32_t) == referenceSize) {
-				*(uint32_t *)destAddress = *(uint32_t *)srcAddress;
+			/* prefer to copy 64 bits at a time if possible */
+			if ((sizeof(uint64_t) == referenceSize)
+				|| (isValueType && (0 == (srcAddress & 7)) && ((offset + referenceSize) < limit))
+			) {
+				*(uint64_t *)destAddress = *(uint64_t *)srcAddress;
+				offset += sizeof(uint64_t);
 			} else {
-				*(uintptr_t *)destAddress = *(uintptr_t *)srcAddress;
+				*(uint32_t *)destAddress = *(uint32_t *)srcAddress;
+				offset += sizeof(uint32_t);
 			}
 		}
-		descriptionBits >>= 1;
-		if(descriptionIndex-- == 0) {
-			descriptionBits = *descriptionPtr++;
-			descriptionIndex = J9_OBJECT_DESCRIPTION_SIZE - 1;
-		}
-		offset += referenceSize;
 	}
 
-	if (!isValueType) {
-		/* If an object was pre-hashed and a hash was stored within the fields of the object restore it.*/
-		if (isDestObjectPreHashed) {
-			UDATA hashcodeOffset = _extensions->mixedObjectModel.getHashcodeOffset(destObject);
-			if (hashcodeOffset <= limit) {
-				I_32 *hashcodePointer = (I_32*)((U_8*)destObject + hashcodeOffset);
-				*hashcodePointer = hashCode;
-			}
+	/* If an object was pre-hashed and a hash was stored within the fields of the object restore it.*/
+	if (isDestObjectPreHashed) {
+		UDATA hashcodeOffset = _extensions->mixedObjectModel.getHashcodeOffset(destObject);
+		if (hashcodeOffset <= limit) {
+			I_32 *hashcodePointer = (I_32*)((U_8*)destObject + hashcodeOffset);
+			*hashcodePointer = hashCode;
 		}
-
-		/* initialize lockword, if present */
-		lockwordAddress = getLockwordAddress(vmThread, destObject);
-		if (NULL != lockwordAddress) {
-			j9objectmonitor_t lwValue = VM_ObjectMonitor::getInitialLockword(vmThread->javaVM, objectClass);
-			J9_STORE_LOCKWORD(vmThread, lockwordAddress, lwValue);
+	}
+	if (!isValueType) {
+		if (initializeLockWord) {
+			/* initialize lockword, if present */
+			lockwordAddress = getLockwordAddress(vmThread, destObject);
+			if (NULL != lockwordAddress) {
+				j9objectmonitor_t lwValue = VM_ObjectMonitor::getInitialLockword(vmThread->javaVM, objectClass);
+				J9_STORE_LOCKWORD(vmThread, lockwordAddress, lwValue);
+			}
 		}
 	}
 }
@@ -1551,9 +1624,8 @@ MM_ObjectAccessBarrier::copyObjectFields(J9VMThread *vmThread, J9Class *objectCl
  * @TODO This does not currently check if the fields that it is reading are volatile.
  */
 void 
-MM_ObjectAccessBarrier::cloneIndexableObject(J9VMThread *vmThread, J9IndexableObject *srcObject, J9IndexableObject *destObject)
+MM_ObjectAccessBarrier::cloneIndexableObject(J9VMThread *vmThread, J9IndexableObject *srcObject, J9IndexableObject *destObject, MM_objectMapFunction objectMapFunction, void *objectMapData)
 {
-	j9objectmonitor_t *lockwordAddress = NULL;
 	bool isObjectArray = _extensions->objectModel.isObjectArray(srcObject);
 
 	if (_extensions->objectModel.hasBeenHashed((J9Object*)destObject)) {
@@ -1565,21 +1637,15 @@ MM_ObjectAccessBarrier::cloneIndexableObject(J9VMThread *vmThread, J9IndexableOb
 		I_32 size = (I_32)_extensions->indexableObjectModel.getSizeInElements(srcObject);
 		for (I_32 i = 0; i < size; i++) {
 			J9Object *objectPtr = J9JAVAARRAYOFOBJECT_LOAD(vmThread, srcObject, i);
+			if (NULL != objectMapFunction) {
+				objectPtr = objectMapFunction(vmThread, objectPtr, objectMapData);
+			}
 			J9JAVAARRAYOFOBJECT_STORE(vmThread, destObject, i, objectPtr);
 		}
 	} else {
 		_extensions->indexableObjectModel.memcpyArray(destObject, srcObject);
 	}
 
-	/* initialize lockword, if present */
-	J9Class *objectClass = J9GC_J9OBJECT_CLAZZ_THREAD(destObject, vmThread);
-	lockwordAddress = getLockwordAddress(vmThread, (J9Object*) destObject);
-	if (NULL != lockwordAddress) {
-		j9objectmonitor_t lwValue = VM_ObjectMonitor::getInitialLockword(vmThread->javaVM, objectClass);
-		J9_STORE_LOCKWORD(vmThread, lockwordAddress, lwValue);
-	}
-
-	return;
 }
 
 
@@ -1987,7 +2053,7 @@ MM_ObjectAccessBarrier::postObjectStore(J9VMThread *vmThread, J9Object **destAdd
  * TODO: This should probably be postBatchObjectStore, not pre-.
  */
 bool
-MM_ObjectAccessBarrier::preBatchObjectStore(J9VMThread *vmThread, J9Object *destObject, bool isVolatile)
+MM_ObjectAccessBarrier::postBatchObjectStore(J9VMThread *vmThread, J9Object *destObject, bool isVolatile)
 {
 #if defined(J9VM_GC_COMBINATION_SPEC)
 	/* (assert here to verify that we aren't defaulting to this implementation through some unknown path - delete once combination is stable) */
@@ -1997,7 +2063,7 @@ MM_ObjectAccessBarrier::preBatchObjectStore(J9VMThread *vmThread, J9Object *dest
 }
 
 bool
-MM_ObjectAccessBarrier::preBatchObjectStore(J9VMThread *vmThread, J9Class *destClass, bool isVolatile)
+MM_ObjectAccessBarrier::postBatchObjectStore(J9VMThread *vmThread, J9Class *destClass, bool isVolatile)
 {
 #if defined(J9VM_GC_COMBINATION_SPEC)
 	/* (assert here to verify that we aren't defaulting to this implementation through some unknown path - delete once combination is stable) */
@@ -2196,6 +2262,18 @@ MM_ObjectAccessBarrier::setOwnableSynchronizerLink(j9object_t object, j9object_t
 	}
 	fj9object_t *ownableSynchronizerLink = (fj9object_t*)((UDATA)object + linkOffset);
 	GC_SlotObject slot(_extensions->getOmrVM(), ownableSynchronizerLink);
+	slot.writeReferenceToSlot(value);
+}
+
+void
+MM_ObjectAccessBarrier::setContinuationLink(j9object_t object, j9object_t value)
+{
+	Assert_MM_true(NULL != object);
+	UDATA linkOffset = _continuationLinkOffset;
+	/* offset will be UDATA_MAX until Continuation is loaded */
+	Assert_MM_true(UDATA_MAX != linkOffset);
+	fj9object_t *continuationLink = (fj9object_t*)((UDATA)object + linkOffset);
+	GC_SlotObject slot(_extensions->getOmrVM(), continuationLink);
 	slot.writeReferenceToSlot(value);
 }
 

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2018 IBM Corp. and others
+ * Copyright (c) 2001, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -157,6 +157,22 @@ uintptr_t scan_u64(char **scan_start, uint64_t* result);
 * @return uint32_t
 */
 uintptr_t scan_u32(char **scan_start, uint32_t* result);
+
+/**
+* @brief
+* @param **scan_start
+* @param result
+* @return uintptr_t
+*/
+uintptr_t scan_u64_memory_size(char **scan_start, uint64_t* result);
+
+/**
+* @brief
+* @param **scan_start
+* @param result
+* @return uintptr_t
+*/
+uintptr_t scan_udata_memory_size(char **scan_start, uintptr_t* result);
 
 #ifdef __cplusplus
 } /* extern "C" */

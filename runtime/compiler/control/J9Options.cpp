@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -45,6 +45,7 @@
 #include "env/CompilerEnv.hpp"
 #include "env/IO.hpp"
 #include "env/VMJ9.h"
+#include "env/VerboseLog.hpp"
 #include "env/jittypes.h"
 #include "infra/SimpleRegex.hpp"
 #include "control/CompilationRuntime.hpp"
@@ -99,6 +100,7 @@ int32_t J9::Options::_profilerStackSize = 128;
 
 int32_t J9::Options::_smallMethodBytecodeSizeThreshold = 0;
 int32_t J9::Options::_smallMethodBytecodeSizeThresholdForCold = -1; // -1 means not set (or disabled)
+int32_t J9::Options::_smallMethodBytecodeSizeThresholdForJITServerAOTCache = 0; // 0 means disabled; good values to try 0-32
 
 int32_t J9::Options::_countForMethodsCompiledDuringStartup = 10;
 
@@ -121,6 +123,23 @@ int32_t J9::Options::_bigAppSampleThresholdAdjust = 3; //amount to shift the hot
 int32_t J9::Options::_availableCPUPercentage = 100;
 int32_t J9::Options::_cpuCompTimeExpensiveThreshold = 4000;
 uintptr_t J9::Options::_compThreadAffinityMask = 0;
+
+#if defined(J9VM_OPT_JITSERVER)
+int64_t J9::Options::_oldAge = 1000 * 60 * 1000; // 1000 minutes
+int64_t J9::Options::_oldAgeUnderLowMemory = 1000 * 60 * 5; // 5 minutes
+int64_t J9::Options::_timeBetweenPurges = 1000 * 60 * 1; // 1 minute
+bool J9::Options::_shareROMClasses = false;
+int32_t J9::Options::_sharedROMClassCacheNumPartitions = 16;
+int32_t J9::Options::_reconnectWaitTimeMs = 1000;
+int32_t J9::Options::_highActiveThreadThreshold = -1;
+int32_t J9::Options::_veryHighActiveThreadThreshold = -1;
+int32_t J9::Options::_aotCachePersistenceMinDeltaMethods = 200;
+int32_t J9::Options::_aotCachePersistenceMinPeriodMs = 10000; // ms
+#endif /* defined(J9VM_OPT_JITSERVER) */
+
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+int32_t J9::Options::_sleepMsBeforeCheckpoint = 0;
+#endif
 
 int32_t J9::Options::_interpreterSamplingThreshold = 300;
 int32_t J9::Options::_interpreterSamplingDivisor = TR_DEFAULT_INTERPRETER_SAMPLING_DIVISOR;
@@ -168,6 +187,7 @@ int32_t J9::Options::_qszThresholdToDowngradeOptLevel = -1; // not yet set
 int32_t J9::Options::_qsziThresholdToDowngradeDuringCLP = 0; // -1 or 0 disables the feature and reverts to old behavior
 int32_t J9::Options::_qszThresholdToDowngradeOptLevelDuringStartup = 100000; // a large number disables the feature
 int32_t J9::Options::_cpuUtilThresholdForStarvation = 25; // 25%
+int32_t J9::Options::_qszLimit = 5000; // when limit is reached the JIT will postpone new compilation requests
 
 // If too many GCR are queued we stop counting.
 // Use a large value to disable the feature. 400 is a good default
@@ -201,6 +221,7 @@ int32_t J9::Options::_weightOfAOTLoad = 1; // must be between 0 and 256
 int32_t J9::Options::_weightOfJSR292 = 12; // must be between 0 and 256
 
 TR_YesNoMaybe J9::Options::_hwProfilerEnabled = TR_maybe;
+TR_YesNoMaybe J9::Options::_perfToolEnabled = TR_no;
 int32_t J9::Options::_hwprofilerNumOutstandingBuffers = 256; // 1MB / 4KB buffers
 
 // These numbers are cast into floats divided by 10000
@@ -245,12 +266,15 @@ int32_t J9::Options::_numCodeCachesToCreateAtStartup = 0; // 0 means no change f
 int32_t J9::Options::_dataCacheQuantumSize = 64;
 int32_t J9::Options::_dataCacheMinQuanta = 2;
 
-int32_t J9::Options::_updateFreeMemoryMinPeriod = 500;  // 500 ms
-
+int32_t J9::Options::_updateFreeMemoryMinPeriod = 50;  // 50 ms
 
 size_t J9::Options::_scratchSpaceLimitKBWhenLowVirtualMemory = 64*1024; // 64MB; currently, only used on 32 bit Windows
 
 int32_t J9::Options::_scratchSpaceFactorWhenJSR292Workload = JSR292_SCRATCH_SPACE_FACTOR;
+size_t  J9::Options::_scratchSpaceLimitForHotCompilations = 512 * 1024 * 1024; // 512 MB
+#if defined(J9VM_OPT_JITSERVER)
+int32_t J9::Options::_scratchSpaceFactorWhenJITServerWorkload = 2;
+#endif /* defined(J9VM_OPT_JITSERVER) */
 int32_t J9::Options::_lowVirtualMemoryMBThreshold = 300; // Used on 32 bit Windows, Linux, 31 bit z/OS, Linux
 int32_t J9::Options::_safeReservePhysicalMemoryValue = 32 << 20;  // 32 MB
 
@@ -445,7 +469,7 @@ static const struct vmX vmStateArray[] =
       {J9VMSTATE_GC, "J9VMSTATE_GC", 0},                                                  //2  0x20000
       {J9VMSTATE_GROW_STACK, "J9VMSTATE_GROW_STACK", 0},                                  //3  0x30000
       {J9VMSTATE_JNI, "special", 2},                                                      //4  0x40000
-      {J9VMSTATE_JIT_CODEGEN, "J9VMSTATE_JIT_CODEGEN", 0},                                //5  0x50000
+      {J9VMSTATE_JIT, "J9VMSTATE_JIT", 0},                                                //5  0x50000
       {J9VMSTATE_BCVERIFY, "J9VMSTATE_BCVERIFY", 0},                                      //6  0x60000
       {J9VMSTATE_RTVERIFY, "J9VMSTATE_RTVERIFY", 0},                                      //7  0x70000
       {J9VMSTATE_SHAREDCLASS_FIND, "special", 12},                                        //8  0x80000
@@ -517,15 +541,15 @@ Options::vmStateOption(char * option, void * base, TR::OptionTable *entry)
                      }
                   }
                break;
-            case ((J9VMSTATE_JIT_CODEGEN>>16) & 0xF):
+            case ((J9VMSTATE_JIT >> 16) & 0xF):
                {
                if ((state & 0xFF00) == 0) // ILGeneratorPhase
                   {
                   j9tty_printf(PORTLIB, "vmState [0x%x]: {%s} {ILGeneration}\n", state, vmStateArray[index]._xname);
                   }
-               else if ((state & 0xFF) == 0xFF) // optimizationPhase
+               else if ((state & J9VMSTATE_JIT_OPTIMIZER) == J9VMSTATE_JIT_OPTIMIZER)
                   {
-                  OMR::Optimizations opts = (OMR::Optimizations)((state >> 8) & 0xFF);
+                  OMR::Optimizations opts = static_cast<OMR::Optimizations>((state & 0xFF00) >> 8);
                   if (opts < OMR::numOpts)
                      {
                       j9tty_printf(PORTLIB, "vmState [0x%x]: {%s} {%s}\n", state, vmStateArray[index]._xname, OMR::Optimizer::getOptimizationName(opts));
@@ -533,9 +557,9 @@ Options::vmStateOption(char * option, void * base, TR::OptionTable *entry)
                   else
                      j9tty_printf(PORTLIB, "vmState [0x%x]: {%s} {Illegal optimization number}\n", state, vmStateArray[index]._xname);
                   }
-               else if ((state & 0xFF00) == 0xFF00) //codegenPhase
+               else if ((state & J9VMSTATE_JIT_CODEGEN) == J9VMSTATE_JIT_CODEGEN)
                   {
-                  TR::CodeGenPhase::PhaseValue phase = (TR::CodeGenPhase::PhaseValue)(state & 0xFF);
+                  TR::CodeGenPhase::PhaseValue phase = static_cast<TR::CodeGenPhase::PhaseValue>(state & 0xFF);
                   if ( phase < TR::CodeGenPhase::getNumPhases())
                      j9tty_printf(PORTLIB, "vmState [0x%x]: {%s} {%s}\n", state, vmStateArray[index]._xname, TR::CodeGenPhase::getName(phase));
                   else
@@ -666,12 +690,18 @@ TR::OptionTable OMR::Options::_feOptions[] = {
 
    {"activeThreadsThresholdForInterpreterSampling=", "M<nnn>\tSampling does not affect invocation count beyond this threshold",
         TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_activeThreadsThreshold, 0, "F%d", NOT_IN_SUBSET },
+#if defined(J9VM_OPT_JITSERVER)
+   {"aotCachePersistenceMinDeltaMethods=", "M<nnn>\tnumber of extra AOT methods that need to be added to the JITServer AOT cache before considering a save operation",
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_aotCachePersistenceMinDeltaMethods, 0, "F%d", NOT_IN_SUBSET },
+   {"aotCachePersistenceMinPeriodMs=", "M<nnn>\tmiminum time between two consecutive JITServer AOT cache save operations (ms)",
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_aotCachePersistenceMinPeriodMs, 0, "F%d", NOT_IN_SUBSET },
+#endif /* defined(J9VM_OPT_JITSERVER) */
    {"aotMethodCompilesThreshold=", "R<nnn>\tIf this many AOT methods are compiled before exceeding aotMethodThreshold, don't stop AOT compiling",
-        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_aotMethodCompilesThreshold, 0, " %d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_aotMethodCompilesThreshold, 0, "F%d", NOT_IN_SUBSET},
    {"aotMethodThreshold=", "R<nnn>\tNumber of methods found in shared cache after which we stop AOTing",
-        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_aotMethodThreshold, 0, " %d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_aotMethodThreshold, 0, "F%d", NOT_IN_SUBSET},
    {"aotWarmSCCThreshold=", "R<nnn>\tNumber of methods found in shared cache at startup to declare SCC as warm",
-        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_aotWarmSCCThreshold, 0, " %d", NOT_IN_SUBSET },
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_aotWarmSCCThreshold, 0, "F%d", NOT_IN_SUBSET },
    {"availableCPUPercentage=", "M<nnn>\tUse it when java process has a fraction of a CPU. Number 1..99 ",
         TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_availableCPUPercentage, 0, "F%d", NOT_IN_SUBSET},
    {"bcLimit=",           "C<nnn>\tbytecode size limit",
@@ -680,10 +710,10 @@ TR::OptionTable OMR::Options::_feOptions[] = {
                                    "Used in no AOT cases",
         TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_countForLoopyBootstrapMethods, 250, "F%d", NOT_IN_SUBSET },
    {"bigAppSampleThresholdAdjust=", "O\tadjust the hot and scorching threshold for certain 'big' apps",
-        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_bigAppSampleThresholdAdjust, 0, " %d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_bigAppSampleThresholdAdjust, 0, "F%d", NOT_IN_SUBSET},
    {"catchSamplingSizeThreshold=", "R<nnn>\tThe sample counter will not be decremented in a catch block "
                                    "if the number of nodes in the compiled method exceeds this threshold",
-        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_catchSamplingSizeThreshold, 0, " %d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_catchSamplingSizeThreshold, 0, "F%d", NOT_IN_SUBSET},
    {"classLoadPhaseInterval=", "O<nnn>\tnumber of sampling ticks before we run "
                                "again the code for a class loading phase detection",
         TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_classLoadingPhaseInterval, 0, "P%d", NOT_IN_SUBSET},
@@ -700,21 +730,23 @@ TR::OptionTable OMR::Options::_feOptions[] = {
         TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_classLoadingRateAverage, 0, "F%d", NOT_IN_SUBSET},
    {"clinit",             "D\tforce compilation of <clinit> methods", SET_JITCONFIG_RUNTIME_FLAG(J9JIT_COMPILE_CLINIT) },
    {"code=",              "C<nnn>\tcode cache size, in KB",
-        TR::Options::setJitConfigNumericValue, offsetof(J9JITConfig, codeCacheKB), 0, " %d (KB)"},
+        TR::Options::setJitConfigNumericValue, offsetof(J9JITConfig, codeCacheKB), 0, "F%d (KB)"},
    {"codepad=",              "C<nnn>\ttotal code cache pad size, in KB",
-        TR::Options::setJitConfigNumericValue, offsetof(J9JITConfig, codeCachePadKB), 0, " %d (KB)"},
+        TR::Options::setJitConfigNumericValue, offsetof(J9JITConfig, codeCachePadKB), 0, "F%d (KB)"},
    {"codetotal=",              "C<nnn>\ttotal code memory limit, in KB",
-        TR::Options::setJitConfigNumericValue, offsetof(J9JITConfig, codeCacheTotalKB), 0, " %d (KB)"},
+        TR::Options::setJitConfigNumericValue, offsetof(J9JITConfig, codeCacheTotalKB), 0, "F%d (KB)"},
    {"compilationBudget=",      "O<nnn>\tnumber of usec. Used to better interleave compilation"
                                "with computation. Use 80000 as a starting point",
         TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_compilationBudget, 0, "P%d", NOT_IN_SUBSET},
    {"compilationDelayTime=", "M<nnn>\tnumber of seconds after which we allow compiling",
-        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_compilationDelayTime, 0, " %d", NOT_IN_SUBSET },
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_compilationDelayTime, 0, "F%d", NOT_IN_SUBSET },
    {"compilationExpirationTime=", "R<nnn>\tnumber of seconds after which point we will stop compiling",
-        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_compilationExpirationTime, 0, " %d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_compilationExpirationTime, 0, "F%d", NOT_IN_SUBSET},
    {"compilationPriorityQSZThreshold=", "M<nnn>\tCompilation queue size threshold when priority of post-profiling"
                                "compilation requests is increased",
         TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_compPriorityQSZThreshold , 0, "F%d", NOT_IN_SUBSET},
+   {"compilationQueueSizeLimit=", "R<nnn>\tWhen limit is reached, first-time compilations are postponed by replenishing the invocation count",
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_qszLimit, 0, "F%d", NOT_IN_SUBSET},
    {"compilationThreadAffinityMask=", "M<nnn>\taffinity mask for compilation threads. Use hexa without 0x",
         TR::Options::setStaticHexadecimal, (intptr_t)&TR::Options::_compThreadAffinityMask, 0, "F%d", NOT_IN_SUBSET},
    {"compilationYieldStatsHeartbeatPeriod=", "M<nnn>\tperiodically print stats about compilation yield points "
@@ -739,13 +771,13 @@ TR::OptionTable OMR::Options::_feOptions[] = {
    {"cpuUtilThresholdForStarvation=", "M<nnn>\tThreshold for deciding that a comp thread is not starved",
         TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_cpuUtilThresholdForStarvation , 0, "F%d", NOT_IN_SUBSET},
    {"data=",                          "C<nnn>\tdata cache size, in KB",
-        TR::Options::setJitConfigNumericValue, offsetof(J9JITConfig, dataCacheKB), 0, " %d (KB)"},
+        TR::Options::setJitConfigNumericValue, offsetof(J9JITConfig, dataCacheKB), 0, "F%d (KB)"},
    {"dataCacheMinQuanta=",            "I<nnn>\tMinimum number of quantums per data cache allocation",
-        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_dataCacheMinQuanta, 0, " %d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_dataCacheMinQuanta, 0, "F%d", NOT_IN_SUBSET},
    {"dataCacheQuantumSize=",          "I<nnn>\tLargest guaranteed common byte multiple of data cache allocations.  This value will be rounded up for pointer alignment.",
-        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_dataCacheQuantumSize, 0, " %d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_dataCacheQuantumSize, 0, "F%d", NOT_IN_SUBSET},
    {"datatotal=",              "C<nnn>\ttotal data memory limit, in KB",
-        TR::Options::setJitConfigNumericValue, offsetof(J9JITConfig, dataCacheTotalKB), 0, " %d (KB)"},
+        TR::Options::setJitConfigNumericValue, offsetof(J9JITConfig, dataCacheTotalKB), 0, "F%d (KB)"},
    {"disableIProfilerClassUnloadThreshold=",      "R<nnn>\tNumber of classes that can be unloaded before we disable the IProfiler",
         TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_disableIProfilerClassUnloadThreshold, 0, "F%d", NOT_IN_SUBSET},
    {"dltPostponeThreshold=",      "M<nnn>\tNumber of dlt attempts inv. count for a method is seen not advancing",
@@ -764,6 +796,10 @@ TR::OptionTable OMR::Options::_feOptions[] = {
    {"gcTrace=",           "D<nnn>\ttrace gc stack walks after gc number nnn",
         TR::Options::setJitConfigNumericValue, offsetof(J9JITConfig, gcTraceThreshold), 0, "F%d"},
 #endif
+#if defined(J9VM_OPT_JITSERVER)
+   {"highActiveThreadThreshold=", " \tDefines what is a high Threshold for active compilations",
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_highActiveThreadThreshold, 0, "F%d"},
+#endif /* defined(J9VM_OPT_JITSERVER) */
    {"HWProfilerAOTWarmOptLevelThreshold=", "O<nnn>\tAOT Warm Opt Level Threshold",
         TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_hwprofilerAOTWarmOptLevelThreshold, 0, "F%d", NOT_IN_SUBSET},
    {"HWProfilerBufferMaxPercentageToDiscard=", "O<nnn>\tpercentage of HW profiling buffers "
@@ -774,7 +810,7 @@ TR::OptionTable OMR::Options::_feOptions[] = {
    {"HWProfilerDisableRIOverPrivageLinkage","O<nnn>\tDisable RI over private linkage",
         SET_OPTION_BIT(TR_HWProfilerDisableRIOverPrivateLinkage), "F", NOT_IN_SUBSET},
    {"HWProfilerExpirationTime=", "R<nnn>\t",
-        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_hwProfilerExpirationTime, 0, " %d", NOT_IN_SUBSET },
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_hwProfilerExpirationTime, 0, "F%d", NOT_IN_SUBSET },
    {"HWProfilerHotOptLevelThreshold=", "O<nnn>\tHot Opt Level Threshold",
         TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_hwprofilerHotOptLevelThreshold, 0, "F%d", NOT_IN_SUBSET},
    {"HWProfilerLastOptLevel=",        "O<nnn>\tLast Opt level",
@@ -821,13 +857,13 @@ TR::OptionTable OMR::Options::_feOptions[] = {
    {"inlinefile=",        "D<filename>\tinline filter defined in filename.  "
                           "Use inlinefile=filename", TR::Options::inlinefileOption, 0, 0, "F%s"},
    {"interpreterSamplingDivisor=",    "R<nnn>\tThe divisor used to decrease the invocation count when an interpreted method is sampled",
-        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_interpreterSamplingDivisor, 0, " %d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_interpreterSamplingDivisor, 0, "F%d", NOT_IN_SUBSET},
    {"interpreterSamplingThreshold=",    "R<nnn>\tThe maximum invocation count at which a sampling hit will result in the count being divided by the value of interpreterSamplingDivisor",
-        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_interpreterSamplingThreshold, 0, " %d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_interpreterSamplingThreshold, 0, "F%d", NOT_IN_SUBSET},
    {"interpreterSamplingThresholdInJSR292=",    "R<nnn>\tThe maximum invocation count at which a sampling hit will result in the count being divided by the value of interpreterSamplingDivisor on a MethodHandle-oriented workload",
-        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_interpreterSamplingThresholdInJSR292, 0, " %d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_interpreterSamplingThresholdInJSR292, 0, "F%d", NOT_IN_SUBSET},
    {"interpreterSamplingThresholdInStartupMode=",    "R<nnn>\tThe maximum invocation count at which a sampling hit will result in the count being divided by the value of interpreterSamplingDivisor",
-        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_interpreterSamplingThresholdInStartupMode, 0, " %d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_interpreterSamplingThresholdInStartupMode, 0, "F%d", NOT_IN_SUBSET},
    {"invocationThresholdToTriggerLowPriComp=",    "M<nnn>\tNumber of times a loopy method must be invoked to be eligible for LPQ",
        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_invocationThresholdToTriggerLowPriComp, 0, "F%d", NOT_IN_SUBSET },
    {"iprofilerBufferInterarrivalTimeToExitDeepIdle=", "M<nnn>\tIn ms. If 4 IP buffers arrive back-to-back more frequently than this value, JIT exits DEEP_IDLE",
@@ -836,7 +872,7 @@ TR::OptionTable OMR::Options::_feOptions[] = {
                                        "that JIT is allowed to discard instead of processing",
         TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_iprofilerBufferMaxPercentageToDiscard, 0, "F%d", NOT_IN_SUBSET},
    {"iprofilerBufferSize=", "I<nnn>\t set the size of each iprofiler buffer",
-        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_iprofilerBufferSize, 0, " %d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_iprofilerBufferSize, 0, "F%d", NOT_IN_SUBSET},
    {"iprofilerFailHistorySize=", "I<nnn>\tNumber of entries for the failure history buffer maintained by Iprofiler",
         TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_iprofilerFailHistorySize, 0, "F%d", NOT_IN_SUBSET},
    {"iprofilerFailRateThreshold=", "I<nnn>\tReactivate Iprofiler if fail rate exceeds this threshold. 1-100",
@@ -888,13 +924,13 @@ TR::OptionTable OMR::Options::_feOptions[] = {
    {"lowVirtualMemoryMBThreshold=","M<nnn>\tThreshold when we declare we are running low on virtual memory. Use 0 to disable the feature",
         TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_lowVirtualMemoryMBThreshold, 0, "F%d", NOT_IN_SUBSET},
    {"maxCheckcastProfiledClassTests=", "R<nnn>\tnumber inlined profiled classes for profiledclass test in checkcast/instanceof",
-        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_maxCheckcastProfiledClassTests, 0, "%d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_maxCheckcastProfiledClassTests, 0, "F%d", NOT_IN_SUBSET},
    {"maxOnsiteCacheSlotForInstanceOf=", "R<nnn>\tnumber of onsite cache slots for instanceOf",
-      TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_maxOnsiteCacheSlotForInstanceOf, 0, "%d", NOT_IN_SUBSET},
+      TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_maxOnsiteCacheSlotForInstanceOf, 0, "F%d", NOT_IN_SUBSET},
    {"minSamplingPeriod=", "R<nnn>\tminimum number of milliseconds between samples for hotness",
         TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_minSamplingPeriod, 0, "P%d", NOT_IN_SUBSET},
    {"minSuperclassArraySize=", "I<nnn>\t set the size of the minimum superclass array size",
-        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_minimumSuperclassArraySize, 0, " %d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_minimumSuperclassArraySize, 0, "F%d", NOT_IN_SUBSET},
    {"noregmap",           0, RESET_JITCONFIG_RUNTIME_FLAG(J9JIT_CG_REGISTER_MAPS) },
    {"numCodeCachesOnStartup=",   "R<nnn>\tnumber of code caches to create at startup",
         TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_numCodeCachesToCreateAtStartup, 0, "F%d", NOT_IN_SUBSET},
@@ -902,8 +938,14 @@ TR::OptionTable OMR::Options::_feOptions[] = {
         TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_numDLTBufferMatchesToEagerlyIssueCompReq, 0, "F%d", NOT_IN_SUBSET},
    {"numInterpCompReqToExitIdleMode=", "M<nnn>\tNumber of first time comp. req. that takes the JIT out of idle mode",
         TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_numFirstTimeCompilationsToExitIdleMode, 0, "F%d", NOT_IN_SUBSET },
+#if defined(J9VM_OPT_JITSERVER)
+   {"oldAge=", " \tDefines what an old JITServer cache entry means",
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_oldAge,  0, "F%d"},
+   {"oldAgeUnderLowMemory=", " \tDefines what an old JITServer cache entry means when memory is low",
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_oldAgeUnderLowMemory,  0, "F%d" },
+#endif /* defined(J9VM_OPT_JITSERVER) */
    {"profileAllTheTime=",    "R<nnn>\tInterpreter profiling will be on all the time",
-        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_profileAllTheTime, 0, " %d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_profileAllTheTime, 0, "F%d", NOT_IN_SUBSET},
    {"queuedInvReqThresholdToDowngradeOptLevel=", "M<nnn>\tDowngrade opt level if too many inv req",
         TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_numQueuedInvReqToDowngradeOptLevel , 0, "F%d", NOT_IN_SUBSET},
    {"queueSizeThresholdToDowngradeDuringCLP=", "M<nnn>\tCompilation queue size threshold (interpreted methods) when opt level is downgraded during class load phase",
@@ -912,18 +954,22 @@ TR::OptionTable OMR::Options::_feOptions[] = {
         TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_qszThresholdToDowngradeOptLevel , 0, "F%d", NOT_IN_SUBSET},
    {"queueSizeThresholdToDowngradeOptLevelDuringStartup=", "M<nnn>\tCompilation queue size threshold when opt level is downgraded during startup phase",
         TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_qszThresholdToDowngradeOptLevelDuringStartup , 0, "F%d", NOT_IN_SUBSET },
+#if defined(J9VM_OPT_JITSERVER)
+   {"reconnectWaitTimeMs=", " \tInitial wait time in milliseconds until attempting to reconnect to JITServer",
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_reconnectWaitTimeMs, 0, "F%d", NOT_IN_SUBSET},
+#endif /* defined(J9VM_OPT_JITSERVER) */
    {"regmap",             0, SET_JITCONFIG_RUNTIME_FLAG(J9JIT_CG_REGISTER_MAPS) },
    {"relaxedCompilationLimitsSampleThreshold=", "R<nnn>\tGlobal samples below this threshold means we can use higher compilation limits",
-        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_relaxedCompilationLimitsSampleThreshold, 0, " %d", NOT_IN_SUBSET },
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_relaxedCompilationLimitsSampleThreshold, 0, "F%d", NOT_IN_SUBSET },
    {"resetCountThreshold=", "R<nnn>\tThe number of global samples which if exceed during a method's sampling interval will cause the method's sampling counter to be incremented by the number of samples in a sampling interval",
-        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_resetCountThreshold, 0, " %d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_resetCountThreshold, 0, "F%d", NOT_IN_SUBSET},
    {"rtlog=",             "L<filename>\twrite verbose run-time output to filename",
         TR::Options::setStringForPrivateBase,  offsetof(TR_JitPrivateConfig,rtLogFileName), 0, "P%s"},
    {"rtResolve",          "D\ttreat all data references as unresolved", SET_JITCONFIG_RUNTIME_FLAG(J9JIT_RUNTIME_RESOLVE) },
    {"safeReservePhysicalMemoryValue=",    "C<nnn>\tsafe buffer value before we risk running out of physical memory, in KB",
-        TR::Options::setStaticNumericKBAdjusted, (intptr_t)&TR::Options::_safeReservePhysicalMemoryValue, 0, " %d (KB)"},
+        TR::Options::setStaticNumericKBAdjusted, (intptr_t)&TR::Options::_safeReservePhysicalMemoryValue, 0, "F%d (bytes)"},
    {"sampleDontSwitchToProfilingThreshold=", "R<nnn>\tThe maximum number of global samples taken during a sample interval for which the method is denied swithing to profiling",
-        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_sampleDontSwitchToProfilingThreshold, 0, " %d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_sampleDontSwitchToProfilingThreshold, 0, "F%d", NOT_IN_SUBSET},
    {"sampleThresholdVariationAllowance=",  "R<nnn>\tThe percentage that we add or subtract from"
                                            " the original threshold to adjust for method code size."
                                            " Must be 0--100. Make it 0 to disable this optimization.",
@@ -935,11 +981,17 @@ TR::OptionTable OMR::Options::_feOptions[] = {
    {"samplingHeartbeatInterval=", "R<nnn>\tnumber of 100ms periods before sampling heartbeat",
         TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_sampleHeartbeatInterval, 0, "F%d", NOT_IN_SUBSET},
    {"samplingThreadExpirationTime=", "R<nnn>\tnumber of seconds after which point we will stop the sampling thread",
-        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_samplingThreadExpirationTime, 0, " %d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_samplingThreadExpirationTime, 0, "F%d", NOT_IN_SUBSET},
    {"scorchingSampleThreshold=", "R<nnn>\tThe maximum number of global samples taken during a sample interval for which the method will be recompiled as scorching",
-        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_scorchingSampleThreshold, 0, " %d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_scorchingSampleThreshold, 0, "F%d", NOT_IN_SUBSET},
+#if defined(J9VM_OPT_JITSERVER)
+   {"scratchSpaceFactorWhenJITServerWorkload=","M<nnn>\tMultiplier for scratch space limit at JITServer",
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_scratchSpaceFactorWhenJITServerWorkload, 0, "F%d", NOT_IN_SUBSET},
+#endif /* defined(J9VM_OPT_JITSERVER) */
    {"scratchSpaceFactorWhenJSR292Workload=","M<nnn>\tMultiplier for scratch space limit when MethodHandles are in use",
         TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_scratchSpaceFactorWhenJSR292Workload, 0, "F%d", NOT_IN_SUBSET},
+   {"scratchSpaceLimitKBForHotCompilations=","M<nnn>\tLimit for memory used by JIT when compiling at hot and above (in KB)",
+        TR::Options::setStaticNumericKBAdjusted, (intptr_t)&TR::Options::_scratchSpaceLimitForHotCompilations, 0, "F%d (bytes)", NOT_IN_SUBSET},
    {"scratchSpaceLimitKBWhenLowVirtualMemory=","M<nnn>\tLimit for memory used by JIT when running on low virtual memory",
         TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_scratchSpaceLimitKBWhenLowVirtualMemory, 0, "F%d", NOT_IN_SUBSET},
    {"secondaryClassLoadPhaseThreshold=", "O<nnn>\tWhen class load rate just dropped under the CLP threshold  "
@@ -947,21 +999,36 @@ TR::OptionTable OMR::Options::_feOptions[] = {
         TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_secondaryClassLoadingPhaseThreshold, 0, "F%d", NOT_IN_SUBSET},
    {"seriousCompFailureThreshold=",     "M<nnn>\tnumber of srious compilation failures after which we write a trace point in the snap file",
         TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_seriousCompFailureThreshold, 0, "F%d", NOT_IN_SUBSET},
+#if defined(J9VM_OPT_JITSERVER)
+   {"sharedROMClassCacheNumPartitions=", " \tnumber of JITServer ROMClass cache partitions (each has its own monitor)",
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_sharedROMClassCacheNumPartitions, 0, "F%d", NOT_IN_SUBSET},
+#endif /* defined(J9VM_OPT_JITSERVER) */
    {"singleCache", "C\tallow only one code cache and one data cache to be allocated", RESET_JITCONFIG_RUNTIME_FLAG(J9JIT_GROW_CACHES) },
-   {"smallMethodBytecodeSizeThreshold=", "O<nnn> Threshold for determining small methods\t "
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+   {"sleepMsBeforeCheckpoint=", " O<nnn>\tNumber of milliseconds to sleep before a checkpoint",
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_sleepMsBeforeCheckpoint,  0, "F%d" },
+#endif
+   {"smallMethodBytecodeSizeThreshold=", "O<nnn> \tThreshold for determining small methods "
                                          "(measured in number of bytecodes)",
         TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_smallMethodBytecodeSizeThreshold, 0, "F%d", NOT_IN_SUBSET},
-   {"smallMethodBytecodeSizeThresholdForCold=", "O<nnn> Threshold for determining small methods at cold\t "
+   {"smallMethodBytecodeSizeThresholdForCold=", "O<nnn>\tThreshold for determining small methods at cold "
                                          "(measured in number of bytecodes)",
         TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_smallMethodBytecodeSizeThresholdForCold, 0, "F%d", NOT_IN_SUBSET},
+   {"smallMethodBytecodeSizeThresholdForJITServerAOTCache=", "O<nnn>\tThreshold for determining small methods that should "
+                                         "not be converted to AOT, but rather be jitted remotely",
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_smallMethodBytecodeSizeThresholdForJITServerAOTCache, 0, "F%d", NOT_IN_SUBSET},
    {"stack=",             "C<nnn>\tcompilation thread stack size in KB",
-        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_stackSize, 0, " %d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_stackSize, 0, "F%d", NOT_IN_SUBSET},
 #if defined(J9VM_OPT_JITSERVER)
    {"statisticsFrequency=", "R<nnn>\tnumber of milliseconds between statistics print",
         TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_statisticsFrequency, 0, "F%d", NOT_IN_SUBSET},
 #endif /* defined(J9VM_OPT_JITSERVER) */
-   {"testMode",           "D\tcompile but do not run the compiled code",  SET_JITCONFIG_RUNTIME_FLAG(J9JIT_TESTMODE) },
-#if defined(TR_HOST_X86) || defined(TR_HOST_POWER)
+   {"testMode",           "D\tequivalent to tossCode",  SET_JITCONFIG_RUNTIME_FLAG(J9JIT_TOSS_CODE) },
+#if defined(J9VM_OPT_JITSERVER)
+   {"timeBetweenPurges=", " \tDefines how often we are willing to scan for old entries to be purged",
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_timeBetweenPurges,  0, "F%d"},
+#endif /* defined(J9VM_OPT_JITSERVER) */
+#if defined(TR_HOST_X86) || defined(TR_HOST_POWER) || defined(TR_HOST_ARM64)
    {"tlhPrefetchBoundaryLineCount=",    "O<nnn>\tallocation prefetch boundary line for allocation prefetch",
         TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_TLHPrefetchBoundaryLineCount, 0, "P%d", NOT_IN_SUBSET},
    {"tlhPrefetchLineCount=",    "O<nnn>\tallocation prefetch line count for allocation prefetch",
@@ -979,7 +1046,7 @@ TR::OptionTable OMR::Options::_feOptions[] = {
    {"tprof",              "D\tgenerate time profiles with SWTRACE (requires -Xrunjprof12x:jita2n)",
         TR::Options::tprofOption, 0, 0, "F"},
    {"updateFreeMemoryMinPeriod=", "R<nnn>\tnumber of milliseconds after which point we will update the free physical memory available",
-        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_updateFreeMemoryMinPeriod, 0, " %d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_updateFreeMemoryMinPeriod, 0, "F%d", NOT_IN_SUBSET},
    {"upperBoundNumProcForScaling=", "M<nnn>\tHigher than this numProc we'll use the conservativeScorchingSampleThreshold",
         TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_upperBoundNumProcForScaling, 0, "F%d", NOT_IN_SUBSET},
    { "userClassLoadPhaseThreshold=", "O<nnn>\tnumber of user classes loaded per sampling tick that "
@@ -992,8 +1059,12 @@ TR::OptionTable OMR::Options::_feOptions[] = {
         TR::Options::setVerboseBitsInJitPrivateConfig, offsetof(J9JITConfig, privateConfig), 0, "F"},
    {"version",            "L\tdisplay the jit build version",
         TR::Options::versionOption, 0, 0, "F"},
+#if defined(J9VM_OPT_JITSERVER)
+   {"veryHighActiveThreadThreshold=", " \tDefines what is a very high Threshold for active compilations",
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_veryHighActiveThreadThreshold, 0, "F%d"},
+#endif /* defined(J9VM_OPT_JITSERVER) */
    {"veryHotSampleThreshold=",          "R<nnn>\tThe maximum number of global samples taken during a sample interval for which the method will be recompiled at hot with normal priority",
-        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_veryHotSampleThreshold, 0, " %d", NOT_IN_SUBSET},
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_veryHotSampleThreshold, 0, "F%d", NOT_IN_SUBSET},
    {"vlog=",              "L<filename>\twrite verbose output to filename",
         TR::Options::setString,  offsetof(J9JITConfig,vLogFileName), 0, "F%s"},
    {"vmState=",           "L<vmState>\tdecode a given vmState",
@@ -1018,7 +1089,7 @@ TR::OptionTable OMR::Options::_feOptions[] = {
 
 bool J9::Options::showOptionsInEffect()
    {
-   if (this == TR::Options::getAOTCmdLineOptions() && self()->getOption(TR_NoLoadAOT) &&	self()->getOption(TR_NoStoreAOT))
+   if (this == TR::Options::getAOTCmdLineOptions() && self()->getOption(TR_NoLoadAOT) && self()->getOption(TR_NoStoreAOT))
       return false;
    else
       return (TR::Options::isAnyVerboseOptionSet(TR_VerboseOptions, TR_VerboseExtended));
@@ -1045,9 +1116,13 @@ bool J9::Options::showPID()
 #if defined(J9VM_OPT_JITSERVER)
 static std::string readFileToString(char *fileName)
    {
-   I_32 fileId = j9jit_fopen_existing(fileName);
-   if (fileId == -1)
+   PORT_ACCESS_FROM_PORT(TR::Compiler->portLib);
+   FILE *f = fopen(fileName, "rb");
+   if (!f)
+      {
+      j9tty_printf(PORTLIB, "Fatal Error: Unable to open file (%s)\n", fileName);
       return "";
+      }
    const uint32_t BUFFER_SIZE = 4096; // 4KB
    const uint32_t MAX_FILE_SIZE_IN_PAGES = 16; // 64KB
    char buf[BUFFER_SIZE];
@@ -1055,31 +1130,54 @@ static std::string readFileToString(char *fileName)
    int readSize = 0;
    int iter = 0;
    do {
-      readSize = j9jit_fread(fileId, buf, BUFFER_SIZE);
-      fileStr.append(buf, readSize);
+      readSize = fread(buf, 1, BUFFER_SIZE, f);
+      fileStr = fileStr.append(buf, readSize);
       ++iter;
-   } while ((readSize == BUFFER_SIZE) && (iter < MAX_FILE_SIZE_IN_PAGES));
-   j9jit_fcloseId(fileId);
+   } while ((readSize == BUFFER_SIZE) && (iter <= MAX_FILE_SIZE_IN_PAGES));
+   fclose(f);
 
-   if (iter < MAX_FILE_SIZE_IN_PAGES)
+   if (iter <= MAX_FILE_SIZE_IN_PAGES)
+      {
       return fileStr;
+      }
    else
+      {
+      j9tty_printf(
+         PORTLIB,
+         "Fatal Error: File (%s) is too large, max allowed size is %dKB\n",
+         fileName,
+         BUFFER_SIZE * MAX_FILE_SIZE_IN_PAGES / 1000);
       return "";
+      }
    }
 
-static void JITServerParseCommonOptions(J9JavaVM *vm, TR::CompilationInfo *compInfo)
+static bool JITServerParseCommonOptions(J9JavaVM *vm, TR::CompilationInfo *compInfo)
    {
    const char *xxJITServerPortOption = "-XX:JITServerPort=";
    const char *xxJITServerTimeoutOption = "-XX:JITServerTimeout=";
    const char *xxJITServerSSLKeyOption = "-XX:JITServerSSLKey=";
    const char *xxJITServerSSLCertOption = "-XX:JITServerSSLCert=";
    const char *xxJITServerSSLRootCertsOption = "-XX:JITServerSSLRootCerts=";
+   const char *xxJITServerUseAOTCacheOption = "-XX:+JITServerUseAOTCache";
+   const char *xxDisableJITServerUseAOTCacheOption = "-XX:-JITServerUseAOTCache";
+   const char *xxRequireJITServerOption = "-XX:+RequireJITServer";
+   const char *xxDisableRequireJITServerOption = "-XX:-RequireJITServer";
+   const char *xxJITServerLogConnections = "-XX:+JITServerLogConnections";
+   const char *xxDisableJITServerLogConnections = "-XX:-JITServerLogConnections";
+   const char *xxJITServerAOTmxOption = "-XX:JITServerAOTmx=";
 
    int32_t xxJITServerPortArgIndex = FIND_ARG_IN_VMARGS(STARTSWITH_MATCH, xxJITServerPortOption, 0);
    int32_t xxJITServerTimeoutArgIndex = FIND_ARG_IN_VMARGS(STARTSWITH_MATCH, xxJITServerTimeoutOption, 0);
    int32_t xxJITServerSSLKeyArgIndex = FIND_ARG_IN_VMARGS(STARTSWITH_MATCH, xxJITServerSSLKeyOption, 0);
    int32_t xxJITServerSSLCertArgIndex = FIND_ARG_IN_VMARGS(STARTSWITH_MATCH, xxJITServerSSLCertOption, 0);
    int32_t xxJITServerSSLRootCertsArgIndex = FIND_ARG_IN_VMARGS(STARTSWITH_MATCH, xxJITServerSSLRootCertsOption, 0);
+   int32_t xxJITServerUseAOTCacheArgIndex = FIND_ARG_IN_VMARGS(EXACT_MATCH, xxJITServerUseAOTCacheOption, 0);
+   int32_t xxDisableJITServerUseAOTCacheArgIndex = FIND_ARG_IN_VMARGS(EXACT_MATCH, xxDisableJITServerUseAOTCacheOption, 0);
+   int32_t xxRequireJITServerArgIndex = FIND_ARG_IN_VMARGS(EXACT_MATCH, xxRequireJITServerOption, 0);
+   int32_t xxDisableRequireJITServerArgIndex = FIND_ARG_IN_VMARGS(EXACT_MATCH, xxDisableRequireJITServerOption, 0);
+   int32_t xxJITServerLogConnectionsArgIndex = FIND_ARG_IN_VMARGS(EXACT_MATCH, xxJITServerLogConnections, 0);
+   int32_t xxDisableJITServerLogConnectionsArgIndex = FIND_ARG_IN_VMARGS(EXACT_MATCH, xxDisableJITServerLogConnections, 0);
+   int32_t xxJITServerAOTmxArgIndex = FIND_ARG_IN_VMARGS(STARTSWITH_MATCH, xxJITServerAOTmxOption, 0);
 
    if (xxJITServerPortArgIndex >= 0)
       {
@@ -1087,6 +1185,15 @@ static void JITServerParseCommonOptions(J9JavaVM *vm, TR::CompilationInfo *compI
       IDATA ret = GET_INTEGER_VALUE(xxJITServerPortArgIndex, xxJITServerPortOption, port);
       if (ret == OPTION_OK)
          compInfo->getPersistentInfo()->setJITServerPort(port);
+      }
+
+   if (xxRequireJITServerArgIndex > xxDisableRequireJITServerArgIndex)
+      {
+      // If a debugging option to require JITServer connection is enabled, increase socket timeout,
+      // to prevent false positives from streams failing due to timeout.
+      // User-provided values still take priority.
+      compInfo->getPersistentInfo()->setRequireJITServer(true);
+      compInfo->getPersistentInfo()->setSocketTimeout(60000);
       }
 
    if (xxJITServerTimeoutArgIndex >= 0)
@@ -1112,6 +1219,10 @@ static void JITServerParseCommonOptions(J9JavaVM *vm, TR::CompilationInfo *compI
          compInfo->addJITServerSslKey(key);
          compInfo->addJITServerSslCert(cert);
          }
+      else
+         {
+         return false;
+         }
       }
 
    if (xxJITServerSSLRootCertsArgIndex >= 0)
@@ -1121,72 +1232,58 @@ static void JITServerParseCommonOptions(J9JavaVM *vm, TR::CompilationInfo *compI
       std::string cert = readFileToString(fileName);
       if (!cert.empty())
          compInfo->setJITServerSslRootCerts(cert);
+      else
+         return false;
+      }
+
+   if (xxJITServerUseAOTCacheArgIndex > xxDisableJITServerUseAOTCacheArgIndex)
+      compInfo->getPersistentInfo()->setJITServerUseAOTCache(true);
+   else
+      compInfo->getPersistentInfo()->setJITServerUseAOTCache(false);
+
+   if (xxJITServerLogConnectionsArgIndex > xxDisableJITServerLogConnectionsArgIndex)
+      {
+      TR::Options::setVerboseOption(TR_VerboseJITServerConns);
+      }
+
+   if (xxJITServerAOTmxArgIndex >= 0)
+      {
+      uint32_t aotMaxBytes = 0;
+      if (GET_MEMORY_VALUE(xxJITServerAOTmxArgIndex, xxJITServerAOTmxOption, aotMaxBytes) == OPTION_OK)
+         {
+         JITServerAOTCacheMap::setCacheMaxBytes(aotMaxBytes);
+         }
+      }
+
+   return true;
+   }
+
+static void JITServerParseLocalSyncCompiles(J9JavaVM *vm, TR::CompilationInfo *compInfo, bool isFSDEnabled)
+   {
+   const char *xxJITServerLocalSyncCompilesOption = "-XX:+JITServerLocalSyncCompiles";
+   const char *xxDisableJITServerLocalSyncCompilesOption = "-XX:-JITServerLocalSyncCompiles";
+
+   int32_t xxJITServerLocalSyncCompilesArgIndex = FIND_ARG_IN_VMARGS(EXACT_MATCH, xxJITServerLocalSyncCompilesOption, 0);
+   int32_t xxDisableJITServerLocalSyncCompilesArgIndex = FIND_ARG_IN_VMARGS(EXACT_MATCH, xxDisableJITServerLocalSyncCompilesOption, 0);
+
+   // We either obey the command line option, or make sure to disable LocalSyncCompiles if
+   // something is set that interferes with remote async recompilations.
+   if ((xxDisableJITServerLocalSyncCompilesArgIndex > xxJITServerLocalSyncCompilesArgIndex) ||
+       ((xxJITServerLocalSyncCompilesArgIndex < 0) &&
+        (xxDisableJITServerLocalSyncCompilesArgIndex < 0) &&
+        (!compInfo->asynchronousCompilation() || isFSDEnabled)))
+      {
+      compInfo->getPersistentInfo()->setLocalSyncCompiles(false);
       }
    }
 #endif /* defined(J9VM_OPT_JITSERVER) */
 
-bool
-J9::Options::fePreProcess(void * base)
+void J9::Options::preProcessMmf(J9JavaVM *vm, J9JITConfig *jitConfig)
    {
-   J9JITConfig * jitConfig = (J9JITConfig*)base;
-   J9JavaVM * vm = jitConfig->javaVM;
-
-   PORT_ACCESS_FROM_JAVAVM(vm);
-   OMRPORT_ACCESS_FROM_J9PORT(PORTLIB);
-
-   #if defined(DEBUG) || defined(PROD_WITH_ASSUMES)
-      bool forceSuffixLogs = false;
-   #else
-      bool forceSuffixLogs = true;
-   #endif
-
-
-  /* Using traps on z/OS for NullPointerException and ArrayIndexOutOfBound checks instead of the
-   * old way of using explicit compare and branching off to a helper is causing several issues on z/OS:
-   *
-   * 1. When a trap fires because an exception needs to be thrown, the OS signal has to go through z/OS RTM
-   * (Recovery Termination Management) and in doing so it gets serialized and has to acquire this CML lock.
-   *  When many concurrent exceptions are thrown, this lock gets contention.
-   *
-   * 2. on z/OS Management Facility, disabling traps gave performance boost because of fewer exceptions from the JCL.
-   * The path length on z/OS for a trap is longer than on other operating systems so the trade-off and
-   * penalty for using traps on z/OS is significantly worse than other platforms. This gives the potential
-   * for significant performance loss caused by traps.
-   *
-   * 3. Depending on sysadmin settings, every time a trap fires, the system may get a "system dump"
-   * message which shows a 0C7 abend and with lots of exceptions being thrown this clutters up the syslog.
-   *
-   * 4. Certain products can get in the way of the JIT signal handler so the JIT doesn't
-   * receive the 0C7 signal causing the product process to get killed
-   *
-   * Therefore, the recommendation is to disable traps on z/OS by default.
-   * Users can choose to enable traps using the "enableTraps" option.
-   */
-   #if defined(J9ZOS390)
-      self()->setOption(TR_DisableTraps);
-   #endif
-
-   if (self()->getOption(TR_AggressiveOpts))
-      self()->setOption(TR_DontDowngradeToCold, true);
-
-   if (forceSuffixLogs)
-      self()->setOption(TR_EnablePIDExtension);
-
-   if (jitConfig->runtimeFlags & J9JIT_CG_REGISTER_MAPS)
-      self()->setOption(TR_RegisterMaps);
-
-   jitConfig->tLogFile     = -1;
-   jitConfig->tLogFileTemp = -1;
-
-   TR_J9VMBase * fe = TR_J9VMBase::get(jitConfig, 0);
-   TR::CompilationInfo * compInfo = getCompilationInfo(jitConfig);
-   uint32_t numProc = compInfo->getNumTargetCPUs();
-   TR::Compiler->host.setNumberOfProcessors(numProc);
-   TR::Compiler->target.setNumberOfProcessors(numProc);
-   TR::Compiler->relocatableTarget.setNumberOfProcessors(numProc);
-
    J9MemoryManagerFunctions * mmf = vm->memoryManagerFunctions;
+
 #if defined(J9VM_GC_HEAP_CARD_TABLE)
+   TR_J9VMBase * fe = TR_J9VMBase::get(jitConfig, 0);
    if (!fe->isAOT_DEPRECATED_DO_NOT_USE())
       {
       self()->setGcCardSize(mmf->j9gc_concurrent_getCardSize(vm));
@@ -1229,7 +1326,19 @@ J9::Options::fePreProcess(void * base)
       self()->setIsVariableActiveCardTableBase(true);
       }
 
+   if (J9_ARE_ANY_BITS_SET(vm->extendedRuntimeFlags2, J9_EXTENDED_RUNTIME2_ENABLE_PORTABLE_SHARED_CACHE)
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+       || vm->internalVMFunctions->isCheckpointAllowed(vmThread)
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
+       )
+      {
+      // Disable any fixed-size heap optimizations under portable shared cache mode
+      self()->setIsVariableHeapSizeForBarrierRange0(true);
+      }
+
 #if defined(TR_TARGET_64BIT) && defined(J9ZOS390)
+   PORT_ACCESS_FROM_JAVAVM(vm);
+
    OMROSDesc desc;
    j9sysinfo_get_os_description(&desc);
 
@@ -1241,71 +1350,50 @@ J9::Options::fePreProcess(void * base)
 #endif
 
    // { RTSJ Support Begin
-
-   #if defined(J9VM_OPT_REAL_TIME_LOCKING_SUPPORT)
-      self()->setOption(TR_DisableMonitorOpts);
-   #endif
-
-
    value = mmf->j9gc_modron_getConfigurationValueForKey(vm, j9gc_modron_configuration_allocationType,&value) ?value:0;
    if (j9gc_modron_allocation_type_segregated == value)
       self()->setRealTimeGC(true);
    else
       self()->setRealTimeGC(false);
    // } RTSJ Support End
+   }
 
-   int32_t argIndex;
-   if (FIND_ARG_IN_VMARGS(EXACT_MATCH, "-Xdfpbd", 0) < 0)
-      {
-      // Disable DFP and hysteresis mechanism by default
-      self()->setOption(TR_DisableDFP);
-      self()->setOption(TR_DisableHysteresis);
-      }
-   else if (FIND_ARG_IN_VMARGS(EXACT_MATCH, "-Xhysteresis", 0) < 0)
-      {
-      self()->setOption(TR_DisableHysteresis);
-      }
-
-   if (FIND_ARG_IN_VMARGS(EXACT_MATCH, "-Xnoclassgc", 0) >= 0)
-      self()->setOption(TR_NoClassGC);
-
-
+void J9::Options::preProcessMode(J9JavaVM *vm, J9JITConfig *jitConfig)
+   {
    // Determine the mode we want to be in
-   // Possible options: client/Quickstart, server, aggressive, noquickstart
-   if (jitConfig->runtimeFlags & J9JIT_QUICKSTART)
-      {
-      self()->setQuickStart();
-      }
-   else
-      {
-      // if the server mode is set
-      if ((FIND_ARG_IN_VMARGS(EXACT_MATCH, "-server", 0)) >=0) // I already know I cannot be in -client mode
-         self()->setOption(TR_Server);
-      }
-
    if (vm->runtimeFlags & J9_RUNTIME_AGGRESSIVE)
       {
       self()->setOption(TR_AggressiveOpts);
       }
 
-   // The aggressivenessLevel can only be specified with a VM option (-XaggressivenessLevel)
-   // The level should be only set once (it's a static)
-   // This is a second hand citizen option; if other options contradict it, this option is
-   // ignored even if it appears later
-   if (!self()->getOption(TR_AggressiveOpts) &&
-       !(jitConfig->runtimeFlags & J9JIT_QUICKSTART) &&
-       !self()->getOption(TR_Server))
+   // The _aggressivenessLevel is a static and needs to be set only once
+   if (_aggressivenessLevel == -1) // not yet set
       {
-      // Xtune:virtualized will put us in aggressivenessLevel3, but only if other options
-      // like Xquickstart, -client, -server, -Xaggressive are not specified
-      if (vm->runtimeFlags & J9_RUNTIME_TUNE_VIRTUALIZED)
+      // Start with a default level and override as needed
+      _aggressivenessLevel = TR::Options::TR_AggresivenessLevel::DEFAULT;
+
+      // -Xquickstart/-Xtune:quickstart, -Xtune:virtualized and -Xtune:throughput are mutually exclusive
+      // This is ensured by VM option processing
+      if (J9_ARE_ANY_BITS_SET(jitConfig->runtimeFlags, J9JIT_QUICKSTART))
          {
-         _aggressivenessLevel = TR::Options::AGGRESSIVE_AOT;
+         _aggressivenessLevel = TR::Options::TR_AggresivenessLevel::QUICKSTART;
          }
-      if (_aggressivenessLevel == -1) // not yet set
+      else if (J9_ARE_ANY_BITS_SET(vm->extendedRuntimeFlags2, J9_EXTENDED_RUNTIME2_TUNE_THROUGHPUT))
          {
+         _aggressivenessLevel = TR::Options::TR_AggresivenessLevel::AGGRESSIVE_THROUGHPUT;
+         }
+      else if (J9_ARE_ANY_BITS_SET(vm->runtimeFlags, J9_RUNTIME_TUNE_VIRTUALIZED))
+         {
+         _aggressivenessLevel = TR::Options::TR_AggresivenessLevel::AGGRESSIVE_AOT;
+         _scratchSpaceFactorWhenJSR292Workload = 1;
+         }
+      else
+         {
+         // The aggressivenessLevel can be set directly with -XaggressivenessLevel
+         // This option is a second hand citizen option; if other options contradict it, this option is
+         // ignored even if it appears later
          char *aggressiveOption = "-XaggressivenessLevel";
-         argIndex = FIND_ARG_IN_VMARGS(EXACT_MEMORY_MATCH, aggressiveOption, 0);
+         int32_t argIndex = FIND_ARG_IN_VMARGS(EXACT_MEMORY_MATCH, aggressiveOption, 0);
          if (argIndex >= 0)
             {
             UDATA aggressivenessValue = 0;
@@ -1315,34 +1403,17 @@ J9::Options::fePreProcess(void * base)
                _aggressivenessLevel = aggressivenessValue;
                }
             }
-         else // option not specified on command line
-            {
-            // Automatically set an aggressiveness level based on CPU resources
-#if 0 // Do not change the default behavior just yet; needs more testing
-            if (compInfo->getJvmCpuEntitlement() < 100.0) // less than a processor available
-               _aggressivenessLevel = TR::Options::CONSERVATIVE_QUICKSTART;
-            else if (compInfo->getJvmCpuEntitlement() < 200.0) // less than 2 processors
-               _aggressivenessLevel = TR::Options::AGGRESSIVE_QUICKSTART;
-#endif
-            }
          }
       }
+   }
 
-   char *ccOption = "-Xcodecache";
-   argIndex = FIND_ARG_IN_VMARGS(EXACT_MEMORY_MATCH, ccOption, 0);
-   if (argIndex >= 0)
-      {
-      UDATA ccSize;
-      GET_MEMORY_VALUE(argIndex, ccOption, ccSize);
-      ccSize >>= 10;
-      jitConfig->codeCacheKB = ccSize;
-      }
-
+void J9::Options::preProcessJniAccelerator(J9JavaVM *vm)
+   {
    static bool doneWithJniAcc = false;
    char *jniAccOption = "-XjniAcc:";
    if (!doneWithJniAcc)
       {
-      argIndex = FIND_ARG_IN_VMARGS(STARTSWITH_MATCH, jniAccOption, 0);
+      int32_t argIndex = FIND_ARG_IN_VMARGS(STARTSWITH_MATCH, jniAccOption, 0);
       if (argIndex >= 0)
          {
          char *optValue;
@@ -1368,6 +1439,12 @@ J9::Options::fePreProcess(void * base)
             }
          }
       }
+   }
+
+void J9::Options::preProcessCodeCacheIncreaseTotalSize(J9JavaVM *vm, J9JITConfig *jitConfig)
+   {
+   PORT_ACCESS_FROM_JAVAVM(vm);
+   OMRPORT_ACCESS_FROM_J9PORT(PORTLIB);
 
    // Check for option to increase code cache total size
    static bool codecachetotalAlreadyParsed = false;
@@ -1378,6 +1455,7 @@ J9::Options::fePreProcess(void * base)
       char *xxccOption = "-XX:codecachetotal=";
       int32_t codeCacheTotalArgIndex   = FIND_ARG_IN_VMARGS(EXACT_MEMORY_MATCH, xccOption, 0);
       int32_t XXcodeCacheTotalArgIndex = FIND_ARG_IN_VMARGS(EXACT_MEMORY_MATCH, xxccOption, 0);
+      int32_t argIndex = 0;
       // Check if option is at all specified
       if (codeCacheTotalArgIndex >= 0 || XXcodeCacheTotalArgIndex >= 0)
          {
@@ -1429,7 +1507,10 @@ J9::Options::fePreProcess(void * base)
             }
          }
       }
+   }
 
+void J9::Options::preProcessCodeCachePrintCodeCache(J9JavaVM *vm)
+   {
    // -XX:+PrintCodeCache will be parsed twice into both AOT and JIT options here.
    const char *xxPrintCodeCacheOption = "-XX:+PrintCodeCache";
    const char *xxDisablePrintCodeCacheOption = "-XX:-PrintCodeCache";
@@ -1440,6 +1521,12 @@ J9::Options::fePreProcess(void * base)
       {
       self()->setOption(TR_PrintCodeCacheUsage);
       }
+   }
+
+bool J9::Options::preProcessCodeCacheXlpCodeCache(J9JavaVM *vm, J9JITConfig *jitConfig)
+   {
+   PORT_ACCESS_FROM_JAVAVM(vm);
+   OMRPORT_ACCESS_FROM_J9PORT(PORTLIB);
 
    // Enable on X and Z, also on P.
    // PPC supports -Xlp:codecache option.. since it's set via environment variables.  JVM should always request 4k pages.
@@ -1650,7 +1737,7 @@ J9::Options::fePreProcess(void * base)
                return false;
             }
 
-          // Verify "pagesize=<size>" option. 
+          // Verify "pagesize=<size>" option.
           // This option must be specified for all platforms.
          if (0 == pageSizeHowMany)
             {
@@ -1662,7 +1749,7 @@ J9::Options::fePreProcess(void * base)
          //  [non]pageable option must be specified for Z platforms
          if ((0 == pageableHowMany) && (0 == nonPageableHowMany))
             {
-            // [non]pageable not found 
+            // [non]pageable not found
             char *xlpOptionErrorString = "-Xlp:codecache:";
             char *xlpMissingOptionString = "[non]pageable";
 
@@ -1689,7 +1776,7 @@ J9::Options::fePreProcess(void * base)
          char *lpOption = "-Xlp";
          GET_MEMORY_VALUE(xlpIndex, lpOption, requestedLargeCodePageSize);
          }
-      
+
       if (requestedLargeCodePageSize != 0)
          {
          // Check to see if requested size is valid
@@ -1697,7 +1784,7 @@ J9::Options::fePreProcess(void * base)
          largePageSize = requestedLargeCodePageSize;
          largePageFlags = requestedLargeCodePageFlags;
 
-         
+
          // j9vmem_find_valid_page_size happened to be changed to always return 0
          // However formally the function type still be IDATA so assert if it returns anything else
          j9vmem_find_valid_page_size(J9PORT_VMEM_MEMORY_MODE_EXECUTE, &largePageSize, &largePageFlags, &isRequestedSizeSupported);
@@ -1780,8 +1867,40 @@ J9::Options::fePreProcess(void * base)
          }
       }
 
+      return true;
+   }
+
+bool J9::Options::preProcessCodeCache(J9JavaVM *vm, J9JITConfig *jitConfig)
+   {
+   PORT_ACCESS_FROM_JAVAVM(vm);
+   OMRPORT_ACCESS_FROM_J9PORT(PORTLIB);
+
+   char *ccOption = "-Xcodecache";
+   int32_t argIndex = FIND_ARG_IN_VMARGS(EXACT_MEMORY_MATCH, ccOption, 0);
+   if (argIndex >= 0)
+      {
+      UDATA ccSize;
+      GET_MEMORY_VALUE(argIndex, ccOption, ccSize);
+      ccSize >>= 10;
+      jitConfig->codeCacheKB = ccSize;
+      }
+
+   self()->preProcessCodeCacheIncreaseTotalSize(vm, jitConfig);
+
+   self()->preProcessCodeCachePrintCodeCache(vm);
+
+   if (!self()->preProcessCodeCacheXlpCodeCache(vm, jitConfig))
+      {
+         return false;
+      }
+
+   return true;
+   }
+
+void J9::Options::preProcessSamplingExpirationTime(J9JavaVM *vm)
+   {
    char *samplingOption = "-XsamplingExpirationTime";
-   argIndex = FIND_ARG_IN_VMARGS(EXACT_MEMORY_MATCH, samplingOption, 0);
+   int32_t argIndex = FIND_ARG_IN_VMARGS(EXACT_MEMORY_MATCH, samplingOption, 0);
    if (argIndex >= 0)
       {
       UDATA expirationTime;
@@ -1789,28 +1908,41 @@ J9::Options::fePreProcess(void * base)
       if (ret == OPTION_OK)
          _samplingThreadExpirationTime = expirationTime;
       }
+   }
 
-   char *compThreadsOption = "-XcompilationThreads";
-   argIndex = FIND_ARG_IN_VMARGS(EXACT_MEMORY_MATCH, compThreadsOption, 0);
-   if (argIndex >= 0)
+void J9::Options::preProcessCompilationThreads(J9JavaVM *vm, J9JITConfig *jitConfig)
+   {
+   static bool notYetParsed = true; // We want to avoid duplicate error messages in updateNumUsableCompThreads
+   if (notYetParsed)
       {
-      UDATA numCompThreads;
-      IDATA ret = GET_INTEGER_VALUE(argIndex, compThreadsOption, numCompThreads);
-
-      if (ret == OPTION_OK && numCompThreads > 0)
+      notYetParsed = false;
+      TR::CompilationInfo *compInfo = getCompilationInfo(jitConfig);
+      char *compThreadsOption = "-XcompilationThreads";
+      int32_t argIndex = FIND_ARG_IN_VMARGS(EXACT_MEMORY_MATCH, compThreadsOption, 0);
+      if (argIndex >= 0)
          {
-         _numUsableCompilationThreads = numCompThreads;
-         compInfo->updateNumUsableCompThreads(_numUsableCompilationThreads);
+         UDATA numCompThreads;
+         IDATA ret = GET_INTEGER_VALUE(argIndex, compThreadsOption, numCompThreads);
+
+         if (ret == OPTION_OK && numCompThreads > 0)
+            {
+            _numUsableCompilationThreads = numCompThreads;
+            compInfo->updateNumUsableCompThreads(_numUsableCompilationThreads);
+            }
          }
       }
+   }
 
-#if defined(TR_HOST_X86) || defined(TR_HOST_POWER) || defined(TR_HOST_S390)
+void J9::Options::preProcessTLHPrefetch(J9JavaVM *vm)
+   {
+#if defined(TR_HOST_X86) || defined(TR_HOST_POWER) || defined(TR_HOST_S390) || defined(TR_HOST_ARM64)
    bool preferTLHPrefetch;
 #if defined(TR_HOST_POWER)
    preferTLHPrefetch = TR::Compiler->target.cpu.isAtLeast(OMR_PROCESSOR_PPC_P6) && TR::Compiler->target.cpu.isAtMost(OMR_PROCESSOR_PPC_P7);
 #elif defined(TR_HOST_S390)
-   // TODO: processor arch is not initialized at this point. Once we switch to the new api this problem will go away
-   preferTLHPrefetch = TR::Compiler->target.cpu.getSupportsArch(TR::CPU::z10);
+   preferTLHPrefetch = true;
+#elif defined(TR_HOST_ARM64)
+   preferTLHPrefetch = true;
 #else // TR_HOST_X86
    preferTLHPrefetch = true;
    // Disable TM on x86 because we cannot tell whether a Haswell chip supports TM or not, plus it's killing the performance on dayTrader3
@@ -1834,11 +1966,10 @@ J9::Options::fePreProcess(void * base)
          }
       }
 #endif // defined(TR_HOST_X86) || defined(TR_HOST_POWER) || defined(TR_HOST_S390)
+   }
 
-#if defined(TR_HOST_X86) || defined(TR_TARGET_POWER) || defined (TR_HOST_S390)
-   self()->setOption(TR_ReservingLocks);
-#endif
-
+void J9::Options::preProcessHwProfiler(J9JavaVM *vm)
+   {
    // If the user didn't specifically ask for RI, let's enable it on some well defined platforms
    if (TR::Options::_hwProfilerEnabled == TR_maybe)
       {
@@ -1875,6 +2006,358 @@ J9::Options::fePreProcess(void * base)
       self()->setOption(TR_DisableDynamicRIBufferProcessing);
 #endif
       }
+   }
+
+void J9::Options::preProcessDeterministicMode(J9JavaVM *vm)
+   {
+   // Process the deterministic mode
+   if (TR::Options::_deterministicMode == -1) // not yet set
+      {
+      char *deterministicOption = "-XX:deterministic=";
+      const UDATA MAX_DETERMINISTIC_MODE = 9; // only levels 0-9 are allowed
+      int32_t argIndex = FIND_ARG_IN_VMARGS(EXACT_MEMORY_MATCH, deterministicOption, 0);
+      if (argIndex >= 0)
+         {
+         UDATA deterministicMode;
+         IDATA ret = GET_INTEGER_VALUE(argIndex, deterministicOption, deterministicMode);
+         if (ret == OPTION_OK && deterministicMode <= MAX_DETERMINISTIC_MODE)
+            {
+            TR::Options::_deterministicMode = deterministicMode;
+            }
+         }
+      }
+   }
+
+bool J9::Options::preProcessJitServer(J9JavaVM *vm, J9JITConfig *jitConfig)
+   {
+#if defined(J9VM_OPT_JITSERVER)
+   PORT_ACCESS_FROM_JAVAVM(vm);
+   OMRPORT_ACCESS_FROM_J9PORT(PORTLIB);
+
+   static bool JITServerAlreadyParsed = false;
+   TR::CompilationInfo *compInfo = getCompilationInfo(jitConfig);
+   if (!JITServerAlreadyParsed) // Avoid processing twice for AOT and JIT and produce duplicate messages
+      {
+      JITServerAlreadyParsed = true;
+      bool disabledShareROMClasses = false;
+      if (vm->internalVMFunctions->isJITServerEnabled(vm))
+         {
+         J9::PersistentInfo::_remoteCompilationMode = JITServer::SERVER;
+         // Increase the default timeout value for JITServer.
+         // It can be overridden with -XX:JITServerTimeout= option in JITServerParseCommonOptions().
+         compInfo->getPersistentInfo()->setSocketTimeout(DEFAULT_JITSERVER_TIMEOUT);
+
+         // Check if we should open the port for the MetricsServer
+         const char *xxEnableMetricsServer  = "-XX:+JITServerMetrics";
+         const char *xxDisableMetricsServer = "-XX:-JITServerMetrics";
+         int32_t xxEnableMetricsServerArgIndex  = FIND_ARG_IN_VMARGS(EXACT_MATCH, xxEnableMetricsServer, 0);
+         int32_t xxDisableMetricsServerArgIndex = FIND_ARG_IN_VMARGS(EXACT_MATCH, xxDisableMetricsServer, 0);
+         if (xxEnableMetricsServerArgIndex > xxDisableMetricsServerArgIndex)
+            {
+            // Default port is already set at 38500; see if the user wants to change that
+            const char *xxJITServerMetricsPortOption = "-XX:JITServerMetricsPort=";
+            int32_t xxJITServerMetricsPortArgIndex = FIND_ARG_IN_VMARGS(STARTSWITH_MATCH, xxJITServerMetricsPortOption, 0);
+            if (xxJITServerMetricsPortArgIndex >= 0)
+               {
+               uint32_t port = 0;
+               IDATA ret = GET_INTEGER_VALUE(xxJITServerMetricsPortArgIndex, xxJITServerMetricsPortOption, port);
+               if (ret == OPTION_OK)
+                  compInfo->getPersistentInfo()->setJITServerMetricsPort(port);
+               }
+
+            // For optional metrics server encryption. Key and cert have to be set as a pair.
+            const char *xxJITServerMetricsSSLKeyOption = "-XX:JITServerMetricsSSLKey=";
+            const char *xxJITServerMetricsSSLCertOption = "-XX:JITServerMetricsSSLCert=";
+            int32_t xxJITServerMetricsSSLKeyArgIndex = FIND_ARG_IN_VMARGS(STARTSWITH_MATCH, xxJITServerMetricsSSLKeyOption, 0);
+            int32_t xxJITServerMetricsSSLCertArgIndex = FIND_ARG_IN_VMARGS(STARTSWITH_MATCH, xxJITServerMetricsSSLCertOption, 0);
+
+            if ((xxJITServerMetricsSSLKeyArgIndex >= 0) && (xxJITServerMetricsSSLCertArgIndex >= 0))
+               {
+               char *keyFileName = NULL;
+               char *certFileName = NULL;
+               GET_OPTION_VALUE(xxJITServerMetricsSSLKeyArgIndex, '=', &keyFileName);
+               GET_OPTION_VALUE(xxJITServerMetricsSSLCertArgIndex, '=', &certFileName);
+               std::string key = readFileToString(keyFileName);
+               std::string cert = readFileToString(certFileName);
+
+               if (!key.empty() && !cert.empty())
+                  {
+                  compInfo->addJITServerMetricsSslKey(key);
+                  compInfo->addJITServerMetricsSslCert(cert);
+                  }
+               else
+                  {
+                  j9tty_printf(PORTLIB, "Fatal Error: The metrics server SSL key and cert cannot be empty\n");
+                  return false;
+                  }
+               }
+            }
+         else
+            {
+            compInfo->getPersistentInfo()->setJITServerMetricsPort(0); // This means don't use MetricsServer
+            }
+
+         // Check if cached ROM classes should be shared between clients
+         const char *xxJITServerShareROMClassesOption = "-XX:+JITServerShareROMClasses";
+         const char *xxDisableJITServerShareROMClassesOption = "-XX:-JITServerShareROMClasses";
+
+         int32_t xxJITServerShareROMClassesArgIndex = FIND_ARG_IN_VMARGS(EXACT_MATCH, xxJITServerShareROMClassesOption, 0);
+         int32_t xxDisableJITServerShareROMClassesArgIndex = FIND_ARG_IN_VMARGS(EXACT_MATCH, xxDisableJITServerShareROMClassesOption, 0);
+         if (xxJITServerShareROMClassesArgIndex > xxDisableJITServerShareROMClassesArgIndex)
+            {
+            _shareROMClasses = true;
+            }
+         else if (xxDisableJITServerShareROMClassesArgIndex > xxJITServerShareROMClassesArgIndex)
+            {
+            disabledShareROMClasses = true;
+            }
+
+         // Check if the JITServer AOT cache persistence feature is enabled
+         const char *xxJITServerAOTCachePersistenceOption = "-XX:+JITServerAOTCachePersistence";
+         const char *xxDisableJITServerAOTCachePersistenceOption = "-XX:-JITServerAOTCachePersistence";
+         int32_t xxJITServerAOTCachePersistenceArgIndex = FIND_ARG_IN_VMARGS(EXACT_MATCH, xxJITServerAOTCachePersistenceOption, 0);
+         int32_t xxDisableJITServerAOTCachePersistenceArgIndex = FIND_ARG_IN_VMARGS(EXACT_MATCH, xxDisableJITServerAOTCachePersistenceOption, 0);
+         if (xxJITServerAOTCachePersistenceArgIndex > xxDisableJITServerAOTCachePersistenceArgIndex)
+            {
+            compInfo->getPersistentInfo()->setJITServerUseAOTCachePersistence(true);
+
+            // If enabled, get the name of the directory where the AOT cache files will be stored
+            const char *xxJITServerAOTCacheDirOption = "-XX:JITServerAOTCacheDir=";
+            int32_t xxJITServerAOTCacheDirArgIndex = FIND_ARG_IN_VMARGS(STARTSWITH_MATCH, xxJITServerAOTCacheDirOption, 0);
+            if (xxJITServerAOTCacheDirArgIndex >= 0)
+               {
+               char *directory = NULL;
+               GET_OPTION_VALUE(xxJITServerAOTCacheDirArgIndex, '=', &directory);
+               compInfo->getPersistentInfo()->setJITServerAOTCacheDir(directory);
+               }
+            }
+         }
+      else // Client mode (possibly)
+         {
+         // Check option -XX:+UseJITServer
+         // -XX:-UseJITServer disables JITServer at the client
+         const char *xxUseJITServerOption = "-XX:+UseJITServer";
+         const char *xxDisableUseJITServerOption = "-XX:-UseJITServer";
+
+         int32_t xxUseJITServerArgIndex = FIND_ARG_IN_VMARGS(EXACT_MATCH, xxUseJITServerOption, 0);
+         int32_t xxDisableUseJITServerArgIndex = FIND_ARG_IN_VMARGS(EXACT_MATCH, xxDisableUseJITServerOption, 0);
+
+         bool explicitClientMode = xxUseJITServerArgIndex > xxDisableUseJITServerArgIndex;
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+         struct J9InternalVMFunctions *ifuncs = vm->internalVMFunctions;
+         J9VMThread *currentThread = ifuncs->currentVMThread(vm);
+         // Enable JITServer client mode if
+         // 1) CRIU support is enabled
+         // 2) non-portable restore mode is enabled
+         // 3) client mode is not explicitly disabled
+         // In portable restore mode let the user explicitly decide whether to enable JITServer.
+         bool implicitClientMode = ifuncs->isCRIUSupportEnabled(currentThread) &&
+                                   ifuncs->isNonPortableRestoreMode(currentThread) &&
+                                   (xxUseJITServerArgIndex >= xxDisableUseJITServerArgIndex);
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
+
+         if (explicitClientMode
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+             || implicitClientMode
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
+         )
+            {
+            J9::PersistentInfo::_remoteCompilationMode = JITServer::CLIENT;
+            compInfo->getPersistentInfo()->setSocketTimeout(DEFAULT_JITCLIENT_TIMEOUT);
+
+            // Check if the technology preview message should be displayed.
+            const char *xxJITServerTechPreviewMessageOption = "-XX:+JITServerTechPreviewMessage";
+            const char *xxDisableJITServerTechPreviewMessageOption = "-XX:-JITServerTechPreviewMessage";
+
+            int32_t xxJITServerTechPreviewMessageArgIndex = FIND_ARG_IN_VMARGS(EXACT_MATCH, xxJITServerTechPreviewMessageOption, 0);
+            int32_t xxDisableJITServerTechPreviewMessageArgIndex = FIND_ARG_IN_VMARGS(EXACT_MATCH, xxDisableJITServerTechPreviewMessageOption, 0);
+
+            if (xxJITServerTechPreviewMessageArgIndex > xxDisableJITServerTechPreviewMessageArgIndex)
+               {
+               j9tty_printf(PORTLIB, "JITServer is currently a technology preview. Its use is not yet supported\n");
+               }
+
+            const char *xxJITServerAddressOption = "-XX:JITServerAddress=";
+            int32_t xxJITServerAddressArgIndex = FIND_ARG_IN_VMARGS(STARTSWITH_MATCH, xxJITServerAddressOption, 0);
+
+            if (xxJITServerAddressArgIndex >= 0)
+               {
+               char *address = NULL;
+               GET_OPTION_VALUE(xxJITServerAddressArgIndex, '=', &address);
+               compInfo->getPersistentInfo()->setJITServerAddress(address);
+               }
+
+            const char *xxJITServerAOTCacheNameOption = "-XX:JITServerAOTCacheName=";
+            int32_t xxJITServerAOTCacheNameArgIndex = FIND_ARG_IN_VMARGS(STARTSWITH_MATCH, xxJITServerAOTCacheNameOption, 0);
+
+            if (xxJITServerAOTCacheNameArgIndex >= 0)
+               {
+               char *name = NULL;
+               GET_OPTION_VALUE(xxJITServerAOTCacheNameArgIndex, '=', &name);
+               compInfo->getPersistentInfo()->setJITServerAOTCacheName(name);
+               }
+            }
+         }
+      if (!JITServerParseCommonOptions(vm, compInfo))
+         {
+         // Could not parse JITServer options successfully
+         return false;
+         }
+
+      if (compInfo->getPersistentInfo()->getRemoteCompilationMode() == JITServer::CLIENT ||
+          compInfo->getPersistentInfo()->getRemoteCompilationMode() == JITServer::SERVER)
+         {
+         // Generate a random identifier for this JITServer instance.
+         // Collisions are possible, but very unlikely.
+         // Using more bits for the client UID can reduce the probability of a collision further.
+         std::random_device rd;
+         std::mt19937_64 rng(rd());
+         std::uniform_int_distribution<uint64_t> dist;
+         // Generated uid must not be 0
+         uint64_t uid = dist(rng);
+         while (0 == uid)
+            uid = dist(rng);
+
+         if (compInfo->getPersistentInfo()->getRemoteCompilationMode() == JITServer::CLIENT)
+            {
+            compInfo->getPersistentInfo()->setClientUID(uid);
+            compInfo->getPersistentInfo()->setServerUID(0);
+            jitConfig->clientUID = uid;
+            jitConfig->serverUID = 0;
+
+            // _safeReservePhysicalMemoryValue is set as 0 for the JITClient because compilations
+            // are done remotely. The user can still override it with a command line option
+            J9::Options::_safeReservePhysicalMemoryValue = 0;
+            }
+         else
+            {
+            compInfo->getPersistentInfo()->setClientUID(0);
+            compInfo->getPersistentInfo()->setServerUID(uid);
+            jitConfig->clientUID = 0;
+            jitConfig->serverUID = uid;
+            }
+
+         }
+      else
+         {
+         // clientUID/serverUID == 0 when running a regular JVM
+         compInfo->getPersistentInfo()->setClientUID(0);
+         compInfo->getPersistentInfo()->setServerUID(0);
+         jitConfig->clientUID = 0;
+         jitConfig->serverUID = 0;
+         }
+
+      if ((compInfo->getPersistentInfo()->getRemoteCompilationMode() == JITServer::SERVER) &&
+          compInfo->getPersistentInfo()->getJITServerUseAOTCache() && !disabledShareROMClasses)
+         {
+         // Enable ROMClass sharing at the server by default (unless explicitly disabled) if using AOT cache
+         _shareROMClasses = true;
+         }
+      if ((compInfo->getPersistentInfo()->getRemoteCompilationMode() == JITServer::CLIENT) &&
+           compInfo->getPersistentInfo()->getJITServerUseAOTCache())
+         {
+         // With JITServer AOT cache, the client generates a lot of AOT compilations
+         // that have GCR IL trees in them. Due to the negative affect of GCR counting
+         // we want to limit the amount of time counting takes place.
+         TR::Options::_GCRQueuedThresholdForCounting = 200;
+         }
+      }
+#endif /* defined(J9VM_OPT_JITSERVER) */
+   return true;
+   }
+
+bool
+J9::Options::fePreProcess(void * base)
+   {
+   J9JITConfig * jitConfig = (J9JITConfig*)base;
+   J9JavaVM * vm = jitConfig->javaVM;
+   TR::CompilationInfo * compInfo = getCompilationInfo(jitConfig);
+
+   PORT_ACCESS_FROM_JAVAVM(vm);
+   OMRPORT_ACCESS_FROM_J9PORT(PORTLIB);
+
+   #if defined(DEBUG) || defined(PROD_WITH_ASSUMES)
+      bool forceSuffixLogs = false;
+   #else
+      bool forceSuffixLogs = true;
+   #endif
+
+   const char *xxLateSCCDisclaimTimeOption = "-XX:LateSCCDisclaimTime=";
+   int32_t xxLateSCCDisclaimTime = FIND_ARG_IN_VMARGS(STARTSWITH_MATCH, xxLateSCCDisclaimTimeOption, 0);
+   if (xxLateSCCDisclaimTime >= 0)
+      {
+      uint32_t disclaimMs = 0;
+      IDATA ret = GET_INTEGER_VALUE(xxLateSCCDisclaimTime, xxLateSCCDisclaimTimeOption, disclaimMs);
+      if (ret == OPTION_OK)
+         {
+         compInfo->getPersistentInfo()->setLateSCCDisclaimTime(((uint64_t) disclaimMs) * 1000000);
+         }
+      }
+
+  /* Using traps on z/OS for NullPointerException and ArrayIndexOutOfBound checks instead of the
+   * old way of using explicit compare and branching off to a helper is causing several issues on z/OS:
+   *
+   * 1. When a trap fires because an exception needs to be thrown, the OS signal has to go through z/OS RTM
+   * (Recovery Termination Management) and in doing so it gets serialized and has to acquire this CML lock.
+   *  When many concurrent exceptions are thrown, this lock gets contention.
+   *
+   * 2. on z/OS Management Facility, disabling traps gave performance boost because of fewer exceptions from the JCL.
+   * The path length on z/OS for a trap is longer than on other operating systems so the trade-off and
+   * penalty for using traps on z/OS is significantly worse than other platforms. This gives the potential
+   * for significant performance loss caused by traps.
+   *
+   * 3. Depending on sysadmin settings, every time a trap fires, the system may get a "system dump"
+   * message which shows a 0C7 abend and with lots of exceptions being thrown this clutters up the syslog.
+   *
+   * 4. Certain products can get in the way of the JIT signal handler so the JIT doesn't
+   * receive the 0C7 signal causing the product process to get killed
+   *
+   * Therefore, the recommendation is to disable traps on z/OS by default.
+   * Users can choose to enable traps using the "enableTraps" option.
+   */
+   #if defined(J9ZOS390)
+      self()->setOption(TR_DisableTraps);
+   #endif
+
+   if (forceSuffixLogs)
+      self()->setOption(TR_EnablePIDExtension);
+
+   if (jitConfig->runtimeFlags & J9JIT_CG_REGISTER_MAPS)
+      self()->setOption(TR_RegisterMaps);
+
+   jitConfig->tLogFile     = -1;
+   jitConfig->tLogFileTemp = -1;
+
+   uint32_t numProc = compInfo->getNumTargetCPUs();
+   TR::Compiler->host.setNumberOfProcessors(numProc);
+   TR::Compiler->target.setNumberOfProcessors(numProc);
+   TR::Compiler->relocatableTarget.setNumberOfProcessors(numProc);
+
+   self()->preProcessMmf(vm, jitConfig);
+
+   if (FIND_ARG_IN_VMARGS(EXACT_MATCH, "-Xnoclassgc", 0) >= 0)
+      self()->setOption(TR_NoClassGC);
+
+   self()->preProcessMode(vm, jitConfig);
+
+   self()->preProcessJniAccelerator(vm);
+
+   if (!self()->preProcessCodeCache(vm, jitConfig))
+      {
+         return false;
+      }
+
+   self()->preProcessSamplingExpirationTime(vm);
+
+   self()->preProcessCompilationThreads(vm, jitConfig);
+
+   self()->preProcessTLHPrefetch(vm);
+
+#if defined(TR_HOST_X86) || defined(TR_TARGET_POWER) || defined (TR_HOST_S390)
+   self()->setOption(TR_ReservingLocks);
+#endif
+
+   self()->preProcessHwProfiler(vm);
 
 #if defined (TR_HOST_S390)
    // On z Systems inlining very large compiled bodies proved to be worth a significant amount in terms of throughput
@@ -1948,103 +2431,15 @@ J9::Options::fePreProcess(void * base)
       self()->setOption(TR_EnableSelfTuningScratchMemoryUsageBeforeCompile);
       }
 
-   // Process the deterministic mode
-   if (TR::Options::_deterministicMode == -1) // not yet set
-      {
-      char *deterministicOption = "-XX:deterministic=";
-      const UDATA MAX_DETERMINISTIC_MODE = 9; // only levels 0-9 are allowed
-      argIndex = FIND_ARG_IN_VMARGS(EXACT_MEMORY_MATCH, deterministicOption, 0);
-      if (argIndex >= 0)
-         {
-         UDATA deterministicMode;
-         IDATA ret = GET_INTEGER_VALUE(argIndex, deterministicOption, deterministicMode);
-         if (ret == OPTION_OK && deterministicMode <= MAX_DETERMINISTIC_MODE)
-            {
-            TR::Options::_deterministicMode = deterministicMode;
-            }
-         }
-      }
+   self()->preProcessDeterministicMode(vm);
+
    if (!TR::Compiler->target.cpu.isZ())
       self()->setOption(TR_DisableAOTBytesCompression);
 
-#if defined(J9VM_OPT_JITSERVER)
-   static bool JITServerAlreadyParsed = false;
-   if (!JITServerAlreadyParsed) // Avoid processing twice for AOT and JIT and produce duplicate messages
+   if (!self()->preProcessJitServer(vm, jitConfig))
       {
-      JITServerAlreadyParsed = true;
-      if (vm->internalVMFunctions->isJITServerEnabled(vm))
-         {
-         compInfo->getPersistentInfo()->setRemoteCompilationMode(JITServer::SERVER);
-         // Increase the default timeout value for JITServer.
-         // It can be overridden with -XX:JITServerTimeout= option in JITServerParseCommonOptions().
-         compInfo->getPersistentInfo()->setSocketTimeout(30000);
-         }
-      else
-         {
-         // Check option -XX:+UseJITServer
-         // -XX:-UseJITServer disables JITServer at the client
-         const char *xxUseJITServerOption = "-XX:+UseJITServer";
-         const char *xxDisableUseJITServerOption = "-XX:-UseJITServer";
-
-         int32_t xxUseJITServerArgIndex = FIND_ARG_IN_VMARGS(STARTSWITH_MATCH, xxUseJITServerOption, 0);
-         int32_t xxDisableUseJITServerArgIndex = FIND_ARG_IN_VMARGS(STARTSWITH_MATCH, xxDisableUseJITServerOption, 0);
-
-         // Check if option is at all specified
-         if (xxUseJITServerArgIndex > xxDisableUseJITServerArgIndex)
-            {
-            compInfo->getPersistentInfo()->setRemoteCompilationMode(JITServer::CLIENT);
-
-            // Check if the technology preview message should be displayed.
-            const char *xxJITServerTechPreviewMessageOption = "-XX:+JITServerTechPreviewMessage";
-            const char *xxDisableJITServerTechPreviewMessageOption = "-XX:-JITServerTechPreviewMessage";
-
-            int32_t xxJITServerTechPreviewMessageArgIndex = FIND_ARG_IN_VMARGS(STARTSWITH_MATCH, xxJITServerTechPreviewMessageOption, 0);
-            int32_t xxDisableJITServerTechPreviewMessageArgIndex = FIND_ARG_IN_VMARGS(STARTSWITH_MATCH, xxDisableJITServerTechPreviewMessageOption, 0);
-
-            if (xxJITServerTechPreviewMessageArgIndex >= xxDisableJITServerTechPreviewMessageArgIndex)
-               {
-               j9tty_printf(PORTLIB, "JITServer is currently a technology preview. Its use is not yet supported\n");
-               }
-
-            const char *xxJITServerAddressOption = "-XX:JITServerAddress=";
-            int32_t xxJITServerAddressArgIndex = FIND_ARG_IN_VMARGS(STARTSWITH_MATCH, xxJITServerAddressOption, 0);
-
-            if (xxJITServerAddressArgIndex >= 0)
-               {
-               char *address = NULL;
-               GET_OPTION_VALUE(xxJITServerAddressArgIndex, '=', &address);
-               compInfo->getPersistentInfo()->setJITServerAddress(address);
-               }
-            }
-         }
-      JITServerParseCommonOptions(vm, compInfo);
-      if (compInfo->getPersistentInfo()->getRemoteCompilationMode() == JITServer::CLIENT)
-         {
-         // Generate a random identifier for this JITServer instance.
-         // Collisions are possible, but very unlikely.
-         // Using more bits for the client UID can reduce the probability of a collision further.
-         std::random_device rd;
-         std::mt19937_64 rng(rd());
-         std::uniform_int_distribution<uint64_t> dist;
-         // clientUID != 0 when running in client mode
-         uint64_t clientUID = dist(rng);
-         while (0 == clientUID)
-            clientUID = dist(rng);
-         compInfo->getPersistentInfo()->setClientUID(clientUID);
-         jitConfig->clientUID = clientUID;
-
-         // _safeReservePhysicalMemoryValue is set as 0 for the JITClient because compilations
-         // are done remotely. The user can still override it with a command line option
-         J9::Options::_safeReservePhysicalMemoryValue = 0;
-         }
-      else
-         {
-         // clientUID == 0 when running in server mode / regular JVM
-         compInfo->getPersistentInfo()->setClientUID(0);
-         jitConfig->clientUID = 0;
-         }
+         return false;
       }
-#endif /* defined(J9VM_OPT_JITSERVER) */
 
 #if (defined(TR_HOST_X86) || defined(TR_HOST_S390) || defined(TR_HOST_POWER)) && defined(TR_TARGET_64BIT)
    self()->setOption(TR_EnableSymbolValidationManager);
@@ -2053,34 +2448,16 @@ J9::Options::fePreProcess(void * base)
    return true;
    }
 
-static TR::FILE *fileOpen(TR::Options *options, J9JITConfig *jitConfig, char *name, char *permission, bool b1, bool b2)
-   {
-   PORT_ACCESS_FROM_ENV(jitConfig->javaVM);
-   char tmp[1025];
-
-   if (!options->getOption(TR_EnablePIDExtension))
-      {
-      char *formattedTmp = TR_J9VMBase::getJ9FormattedName(jitConfig, PORTLIB, tmp, 1025, name, NULL, false);
-      return j9jit_fopen(formattedTmp, permission, b1, b2);
-      }
-   else
-     {
-     char *formattedTmp = TR_J9VMBase::getJ9FormattedName(jitConfig, PORTLIB, tmp, 1025, name, options->getSuffixLogsFormat(), true);
-     return j9jit_fopen(formattedTmp, permission, b1, b2);
-     }
-  }
-
-
 void
 J9::Options::openLogFiles(J9JITConfig *jitConfig)
    {
    char *vLogFileName = ((TR_JitPrivateConfig*)jitConfig->privateConfig)->vLogFileName;
    if (vLogFileName)
-      ((TR_JitPrivateConfig*)jitConfig->privateConfig)->vLogFile = fileOpen(self(), jitConfig, vLogFileName, "wb", true, false);
+      ((TR_JitPrivateConfig*)jitConfig->privateConfig)->vLogFile = fileOpen(self(), jitConfig, vLogFileName, "wb", true);
 
    char *rtLogFileName = ((TR_JitPrivateConfig*)jitConfig->privateConfig)->rtLogFileName;
    if (rtLogFileName)
-      ((TR_JitPrivateConfig*)jitConfig->privateConfig)->rtLogFile = fileOpen(self(), jitConfig, rtLogFileName, "wb", true, false);
+      ((TR_JitPrivateConfig*)jitConfig->privateConfig)->rtLogFile = fileOpen(self(), jitConfig, rtLogFileName, "wb", true);
    }
 
 #if defined(J9VM_OPT_JITSERVER)
@@ -2093,7 +2470,6 @@ J9::Options::setupJITServerOptions()
        compInfo->getPersistentInfo()->getRemoteCompilationMode() == JITServer::CLIENT)
       {
       self()->setOption(TR_DisableSamplingJProfiling);
-      self()->setIsVariableHeapBaseForBarrierRange0(true);
       self()->setOption(TR_DisableProfiling); // JITServer limitation, JIT profiling data is not available to remote compiles yet
       self()->setOption(TR_DisableEDO); // JITServer limitation, EDO counters are not relocatable yet
       self()->setOption(TR_DisableMethodIsCold); // Shady heuristic; better to disable to reduce client/server traffic
@@ -2122,19 +2498,20 @@ J9::Options::setupJITServerOptions()
       TR::PersistentInfo *persistentInfo = compInfo->getPersistentInfo();
       if (persistentInfo->getRemoteCompilationMode() == JITServer::SERVER)
          {
+         JITServer::CommunicationStream::printJITServerVersion();
          TR_VerboseLog::writeLineLocked(TR_Vlog_JITServer, "JITServer Server Mode. Port: %d. Connection Timeout %ums",
                persistentInfo->getJITServerPort(), persistentInfo->getSocketTimeout());
          }
       else if (persistentInfo->getRemoteCompilationMode() == JITServer::CLIENT)
          {
+         JITServer::CommunicationStream::printJITServerVersion();
          TR_VerboseLog::writeLineLocked(TR_Vlog_JITServer, "JITServer Client Mode. Server address: %s port: %d. Connection Timeout %ums",
                persistentInfo->getJITServerAddress().c_str(), persistentInfo->getJITServerPort(),
                persistentInfo->getSocketTimeout());
-         TR_VerboseLog::writeLineLocked(TR_Vlog_JITServer, "Identifier for current client JVM: %" OMR_PRIu64 "\n",
-               compInfo->getPersistentInfo()->getClientUID());
+         TR_VerboseLog::writeLineLocked(TR_Vlog_JITServer, "Identifier for current client JVM: %llu\n",
+               (unsigned long long) compInfo->getPersistentInfo()->getClientUID());
          }
       }
-
    }
 #endif /* defined(J9VM_OPT_JITSERVER) */
 
@@ -2189,8 +2566,8 @@ J9::Options::fePostProcessJIT(void * base)
    uint32_t flags = *(uint32_t *)(&jitConfig->runtimeFlags);
    jitConfig->runtimeFlags |= flags;
 
-   if (jitConfig->runtimeFlags & J9JIT_TESTMODE || jitConfig->runtimeFlags & J9JIT_TOSS_CODE)
-      self()->setOption(TR_DisableCompilationThread, true);
+   if (jitConfig->runtimeFlags & J9JIT_TOSS_CODE)
+      self()->setOption(TR_DisableAsyncCompilation, true);
 
    if (jitConfig->runtimeFlags & J9JIT_RUNTIME_RESOLVE)
       jitConfig->gcOnResolveThreshold = 0;
@@ -2204,18 +2581,6 @@ J9::Options::fePostProcessJIT(void * base)
    TR_JitPrivateConfig *privateConfig = (TR_JitPrivateConfig*)jitConfig->privateConfig;
    privateConfig->vLogFileName = jitConfig->vLogFileName;
    self()->openLogFiles(jitConfig);
-
-   if (self()->getOption(TR_OrderCompiles))
-      {
-      // Ordered compiles only make sense if there were sampling points
-      // recorded in the limit file.
-      //
-      if (!TR::Options::getDebug() || !TR::Options::getDebug()->getCompilationFilters()->samplingPoints)
-         {
-         j9tty_printf(PORTLIB, "<JIT: orderCompiles must have a limitfile with sampling points>\n");
-         self()->setOption(TR_OrderCompiles, false);
-         }
-      }
 
    // Copy verbose flags from jitConfig into TR::Options static fields
    //
@@ -2262,25 +2627,6 @@ J9::Options::fePostProcessAOT(void * base)
    return true;
    }
 
-static inline bool jvmpiInterface(J9JavaVM * javaVM)
-   {
-   #ifdef J9VM_PROF_JVMPI
-      return javaVM->jvmpiInterface != 0;
-   #else
-      return false;
-   #endif
-   }
-
-static inline UDATA jvmpiExtensions(J9JITConfig * jitConfig)
-   {
-   #ifdef J9VM_PROF_JVMPI
-      //return javaVM->jvmpiInterface != 0 ? jitConfig->jvmpiExtensions : 0;
-      return enableCompiledMethodLoadHookOnly ? 0 : jitConfig->jvmpiExtensions;
-   #else
-      return 0;
-   #endif
-   }
-
 bool J9::Options::feLatePostProcess(void * base, TR::OptionSet * optionSet)
    {
    // vmPostProcess is called indirectly from the JIT_INITIALIZED phase
@@ -2302,17 +2648,25 @@ bool J9::Options::feLatePostProcess(void * base, TR::OptionSet * optionSet)
 
    // runtimeFlags are properly setup only in fePostProcessJit,
    // so for AOT we can properly set dependent options only here
-   if (jitConfig->runtimeFlags & J9JIT_TESTMODE ||
-       jitConfig->runtimeFlags & J9JIT_TOSS_CODE)
-      self()->setOption(TR_DisableCompilationThread, true);
+   if (jitConfig->runtimeFlags & J9JIT_TOSS_CODE)
+      self()->setOption(TR_DisableAsyncCompilation, true);
 
    PORT_ACCESS_FROM_JAVAVM(jitConfig->javaVM);
    if (vm->isAOT_DEPRECATED_DO_NOT_USE() || (jitConfig->runtimeFlags & J9JIT_TOSS_CODE))
       return true;
 
-#if defined(J9VM_INTERP_ATOMIC_FREE_JNI) && !defined(TR_HOST_S390) && !defined(TR_HOST_POWER) && !defined(TR_HOST_X86)
+#if defined(J9VM_INTERP_ATOMIC_FREE_JNI) && !defined(TR_HOST_S390) && !defined(TR_HOST_POWER) && !defined(TR_HOST_X86) && !defined(TR_HOST_ARM64)
     // Atomic-free JNI dispatch needs codegen support, currently only prototyped on a few platforms
    setOption(TR_DisableDirectToJNI);
+#endif
+
+#if defined(J9VM_ZOS_3164_INTEROPERABILITY)
+   // 31-64 Interop currently lacks codegen DirectToJNI support to invoke cross AMODE calls.
+   // This is a temporarily measure to ensure functional correctness. At the least, we can
+   // enable DirectToJNI for resolved JNI calls to 64-bit targets.
+   if (J9_ARE_ALL_BITS_SET(javaVM->extendedRuntimeFlags2, J9_EXTENDED_RUNTIME2_3164_INTEROPERABILITY)) {
+      setOption(TR_DisableDirectToJNI);
+   }
 #endif
 
    // Determine whether or not to call the hooked helpers
@@ -2333,11 +2687,16 @@ bool J9::Options::feLatePostProcess(void * base, TR::OptionSet * optionSet)
        (*vmHooks)->J9HookDisable(vmHooks, J9HOOK_VM_PUT_STATIC_FIELD) ||
        (*vmHooks)->J9HookDisable(vmHooks, J9HOOK_VM_SINGLE_STEP))
       {
-        static bool TR_DisableFullSpeedDebug = feGetEnv("TR_DisableFullSpeedDebug")?1:0;
-      #if defined(J9VM_JIT_FULL_SPEED_DEBUG)
+         static bool TR_DisableFullSpeedDebug = (feGetEnv("TR_DisableFullSpeedDebug") != NULL);
+         static bool TR_DisableFullSpeedDebugAOT = (feGetEnv("TR_DisableFullSpeedDebugAOT") != NULL);
+#if defined(J9VM_JIT_FULL_SPEED_DEBUG)
          if (TR_DisableFullSpeedDebug)
             {
             return false;
+            }
+         else if (TR_DisableFullSpeedDebugAOT)
+            {
+            doAOT = false;
             }
 
          self()->setOption(TR_FullSpeedDebug);
@@ -2347,10 +2706,9 @@ bool J9::Options::feLatePostProcess(void * base, TR::OptionSet * optionSet)
          //setOption(TR_DisableInterpreterProfiling, true);
 
          initializeFSD(javaVM);
-         doAOT = false;
-      #else
+#else
          return false;
-      #endif
+#endif
       }
 
    bool exceptionEventHooked = false;
@@ -2367,27 +2725,23 @@ bool J9::Options::feLatePostProcess(void * base, TR::OptionSet * optionSet)
       {
       self()->setOption(TR_DisableThrowToGoto);
       self()->setReportByteCodeInfoAtCatchBlock();
-      doAOT = false;
       }
 
    // Determine whether or not to generate method enter and exit hooks
    //
-   if (!jvmpiInterface(javaVM) || (jvmpiExtensions(jitConfig) & J9JIT_JVMPI_GEN_COMPILED_ENTRY_EXIT))
+   if ((*vmHooks)->J9HookDisable(vmHooks, J9HOOK_VM_METHOD_ENTER))
       {
-      if ((*vmHooks)->J9HookDisable(vmHooks, J9HOOK_VM_METHOD_ENTER))
-         {
-         self()->setOption(TR_ReportMethodEnter);
+      self()->setOption(TR_ReportMethodEnter);
 #if !defined(TR_HOST_S390) && !defined(TR_HOST_POWER) && !defined(TR_HOST_X86)
-         doAOT = false;
+      doAOT = false;
 #endif
-         }
-      if ((*vmHooks)->J9HookDisable(vmHooks, J9HOOK_VM_METHOD_RETURN))
-         {
-         self()->setOption(TR_ReportMethodExit);
+      }
+   if ((*vmHooks)->J9HookDisable(vmHooks, J9HOOK_VM_METHOD_RETURN))
+      {
+      self()->setOption(TR_ReportMethodExit);
 #if !defined(TR_HOST_S390) && !defined(TR_HOST_POWER) && !defined(TR_HOST_X86)
-         doAOT = false;
+      doAOT = false;
 #endif
-         }
       }
 
    // Determine whether or not to disable allocation inlining
@@ -2411,6 +2765,28 @@ bool J9::Options::feLatePostProcess(void * base, TR::OptionSet * optionSet)
       doAOT = false;
       }
 #endif
+
+#if defined(J9VM_OPT_JITSERVER)
+   // Change the values of the two thresholds if the user didn't
+   // input values to the options.
+   if (_veryHighActiveThreadThreshold == -1)
+      _veryHighActiveThreadThreshold = getNumUsableCompilationThreads() * 0.9;
+
+   if (_highActiveThreadThreshold == -1)
+      _highActiveThreadThreshold = getNumUsableCompilationThreads() * 0.8;
+
+   // Check if the user inputted the correct values.
+   // If the thresholds are bigger than the usableCompilationThreads, Then set them to be equal to the number of compilation threads.
+   if (_veryHighActiveThreadThreshold > getNumUsableCompilationThreads())
+      _veryHighActiveThreadThreshold = getNumUsableCompilationThreads();
+   if (_highActiveThreadThreshold > getNumUsableCompilationThreads())
+      _highActiveThreadThreshold = getNumUsableCompilationThreads();
+   if (_highActiveThreadThreshold  > _veryHighActiveThreadThreshold)
+      _highActiveThreadThreshold  = _veryHighActiveThreadThreshold;
+
+   // This option needs to be parsed late so that we can account for FullSpeedDebug
+   JITServerParseLocalSyncCompiles(javaVM, compInfo, self()->getOption(TR_FullSpeedDebug));
+#endif /* defined(J9VM_OPT_JITSERVER) */
 
    // Determine whether or not to inline monitor enter/exit
    //
@@ -2480,7 +2856,7 @@ bool J9::Options::feLatePostProcess(void * base, TR::OptionSet * optionSet)
       self()->setOption(TR_DisableNextGenHCR);
       }
 
-#if !defined(TR_HOST_X86) && !defined(TR_HOST_S390) && !defined(TR_HOST_POWER)
+#if !defined(TR_HOST_X86) && !defined(TR_HOST_S390) && !defined(TR_HOST_POWER) && !defined(TR_HOST_ARM64)
    //The bit is set when -XX:+JITInlineWatches is specified
    if (J9_ARE_ANY_BITS_SET(javaVM->extendedRuntimeFlags, J9_EXTENDED_RUNTIME_JIT_INLINE_WATCHES))
       TR_ASSERT_FATAL(false, "this platform doesn't support JIT inline field watch");
@@ -2538,9 +2914,6 @@ bool J9::Options::feLatePostProcess(void * base, TR::OptionSet * optionSet)
                }
             }
          }
-
-      if (self()->getOption(TR_FullSpeedDebug))
-         TR::Options::getAOTCmdLineOptions()->setOption(TR_MimicInterpreterFrameShape);
       }
 #endif
 
@@ -2607,7 +2980,7 @@ bool J9::Options::feLatePostProcess(void * base, TR::OptionSet * optionSet)
       self()->setOption(TR_DisableTraps);
       }
 
-   // Take care of the master option TR_DisableIntrinsics and the two sub-options
+   // Take care of the main option TR_DisableIntrinsics and the two sub-options
    if (self()->getOption(TR_DisableIntrinsics))
       {
       self()->setOption(TR_DisableMarshallingIntrinsics);
@@ -2631,11 +3004,6 @@ bool J9::Options::feLatePostProcess(void * base, TR::OptionSet * optionSet)
       }
 
 #if defined(TR_HOST_ARM64)
-   // Internal Pointers support is not available in AArch64 yet.
-   // OpenJ9 issue #6367 tracks the work to enable.
-   //
-   self()->setOption(TR_DisableInternalPointers);
-
    // ArraySet support is not available in AArch64 yet.
    // OpenJ9 issue #6443 tracks the work to enable.
    //
@@ -2658,7 +3026,7 @@ J9::Options::printPID()
    }
 
 #if defined(J9VM_OPT_JITSERVER)
-void getTRPID(char *buf);
+void getTRPID(char *buf, size_t size);
 
 static void
 appendRegex(TR::SimpleRegex *&regexPtr, uint8_t *&curPos)
@@ -2719,8 +3087,8 @@ J9::Options::packOptions(const TR::Options *origOptions)
       {
       origLogFileName = origOptions->_logFileName;
       char pidBuf[20];
-      memset(pidBuf, 0, 20);
-      getTRPID(pidBuf);
+      memset(pidBuf, 0, sizeof(pidBuf));
+      getTRPID(pidBuf, sizeof(pidBuf));
       logFileNameLength = strlen(origOptions->_logFileName) + strlen(".") + strlen(pidBuf) + strlen(".server") + 1;
       // If logFileNameLength is greater than JITSERVER_LOG_FILENAME_MAX_SIZE, PID might not be appended to the log file name
       // and the log file name could be truncated as well.

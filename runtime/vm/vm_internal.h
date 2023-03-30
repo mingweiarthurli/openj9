@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -140,9 +140,125 @@ void
 sidecarShutdown(J9VMThread* shutdownThread);
 #endif /* J9VM_OPT_SIDECAR */
 
+#if defined(J9VM_ZOS_3164_INTEROPERABILITY)
+/**
+* Helper function to invoke 31-bit target vm->exitHook via CEL4RO31.
+* @param vm J9JavaVM instance
+* @param rc The return code passed to exitHook
+* @return void
+*/
+void
+execute31BitExitHook(J9JavaVM * vm, jint rc);
+#endif /* defined(J9VM_ZOS_3164_INTEROPERABILITY) */
+
+/* ---------------- jnimem.c ----------------- */
+
+/**
+* @brief
+* @param vmThread
+* @param sizeInBytes
+* @return void*
+*/
+void*
+jniArrayAllocateMemory32FromThread(J9VMThread* vmThread, UDATA sizeInBytes);
+
+/**
+* @brief
+* @param vmThread
+* @param location
+* @return void
+*/
+void
+jniArrayFreeMemory32FromThread(J9VMThread* vmThread, void* location);
+
+/* ---------------- jnimisc.cpp -------------- */
+
+#if defined(J9VM_ZOS_3164_INTEROPERABILITY)
+/**
+* @brief
+* @param env
+* @param array
+* @param isCopy
+* @return void*
+*/
+void* JNICALL
+getArrayElements31(JNIEnv *env, jarray array, jboolean *isCopy);
+
+/**
+* @brief
+* @param env
+* @param array
+* @param elems
+* @param mode
+* @return void
+*/
+void JNICALL
+releaseArrayElements31(JNIEnv *env, jarray array, void * elems, jint mode);
+
+/**
+* @brief
+* @param env
+* @param string
+* @param isCopy
+* @return const jchar*
+*/
+const jchar* JNICALL
+getStringChars31(JNIEnv *env, jstring string, jboolean *isCopy);
+
+/**
+* @brief
+* @param env
+* @param string
+* @param chars
+* @return void
+*/
+void JNICALL
+releaseStringChars31(JNIEnv *env, jstring string, const jchar * chars);
+
+/**
+* @brief
+* @param env
+* @param string
+* @param isCopy
+* @return const char*
+*/
+const char* JNICALL
+getStringUTFChars31(JNIEnv *env, jstring string, jboolean *isCopy);
+
+/**
+* @brief
+* @param env
+* @param string
+* @param chars
+* @return void
+*/
+void JNICALL
+releaseStringCharsUTF31(JNIEnv *env, jstring string, const char * chars);
+
+/**
+ * Helper function to query the matching 31-bit JNIEnv* for the given J9VMThread
+ * parameter.  The 31-bit JNIEnv* is needed to pass as the JNIEnv* parameter into
+ * cross-AMODE31 JNI natives.  Upon success, the 31-bit JNIEnv pointer will be
+ * stored into vmThread->jniEnv31.
+ *
+ * @param[in]  vmThread The J9VMThread to query
+ */
+void
+queryJNIEnv31(J9VMThread* vmThread);
+
+/**
+ * Helper function to query the matching 31-bit JavaVM* for the given J9JavaVM
+ * parameter.  The 31-bit JavaVM* is needed to pass as the JavaVM* parameter into
+ * cross-AMODE31 JNI natives.  Upon success, the 31-bit JavaVM pointer will be
+ * stored into vm->javaVM31.
+ *
+ * @param[in]  vm The J9JavaVM to query
+ */
+void
+queryJavaVM31(J9JavaVM* vm);
+#endif /* defined(J9VM_ZOS_3164_INTEROPERABILITY) */
 
 /* ---------------- vmifunc.c ---------------- */
-
 /**
 * @brief
 * @param vm
@@ -202,7 +318,7 @@ lookupJNINative(J9VMThread *currentThread, J9NativeLibrary *nativeLibrary, J9Met
 /* ---------------- logsupport.c ---------------- */
 /**
 * @brief
-* Process the -Xlog: options.
+* Process the -Xsyslog: options.
 * @param vm
 * @return JNI_ERR on error, JNI_OK on success.
 */
@@ -315,6 +431,18 @@ convertByteArrayToCString(J9VMThread *currentThread, j9object_t byteArray);
 j9object_t
 convertCStringToByteArray(J9VMThread *currentThread, const char *byteArray);
 
+/**
+ * Allocate native memory and copy the argument array to it.
+ *
+ * @param currentThread[in] the current J9VMThread
+ * @param argArray[in] the specified argument array (must not be NULL)
+ * @param javaArgs[in] the specified native memory to store the arguments (must not be NULL)
+ *
+ * @returns the newly-allocated memory, or NULL on failure (no exception is set pending)
+ */
+U_64 *
+convertToNativeArgArray(J9VMThread *currentThread, j9object_t argArray, U_64 *javaArgs);
+
 /* ------------------- romclasses.c ----------------- */
 
 /**
@@ -327,6 +455,7 @@ initializeROMClasses(J9JavaVM *vm);
 
 /* ------------------- visible.c ----------------- */
 
+#if JAVA_SPEC_VERSION >= 11
 /**
  * Check module access from srcModule to destModule.
  *
@@ -359,6 +488,7 @@ initializeROMClasses(J9JavaVM *vm);
 
 IDATA
 checkModuleAccess(J9VMThread *currentThread, J9JavaVM* vm, J9ROMClass* srcRomClass, J9Module* srcModule, J9ROMClass* destRomClass, J9Module* destModule, UDATA destPackageID, UDATA lookupOptions);
+#endif /* JAVA_SPEC_VERSION >= 11 */
 
 /* ------------------- guardedstorage.c ----------------- */
 
@@ -409,6 +539,19 @@ j9gs_deinitializeThread(struct J9VMThread *vmThread);
 
 UDATA initializeExclusiveAccess(J9JavaVM *vm);
 void shutDownExclusiveAccess(J9JavaVM *vm);
+
+#if JAVA_SPEC_VERSION >= 16
+/* LayoutFFITypeHelpers.cpp */
+
+/**
+ * Release the memory of struct specific ffi_types if exist in the argument/return types
+ *
+ * @param currentThread[in] the current J9VMThread
+ * @param cifNode[in] the ffi_cif element in cifNativeCalloutDataCache
+ */
+void
+freeAllStructFFITypes(J9VMThread *currentThread, void *cifNode);
+#endif /* JAVA_SPEC_VERSION >= 16 */
 
 #ifdef __cplusplus
 }

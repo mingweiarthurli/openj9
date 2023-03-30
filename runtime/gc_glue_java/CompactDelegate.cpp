@@ -1,6 +1,6 @@
 
 /*******************************************************************************
- * Copyright (c) 2017, 2019 IBM Corp. and others
+ * Copyright (c) 2017, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -64,16 +64,16 @@ MM_CompactDelegate::verifyHeap(MM_EnvironmentBase *env, MM_MarkMap *markMap)
 	 * each pages maps to 2 mark bit slots so heap alignment needs to be a multiple
 	 * of the compaction page size
 	 */
-	assume0(extensions->heapAlignment % (2 * J9BITS_BITS_IN_SLOT * sizeof(UDATA)) == 0);
+	assume0(extensions->heapAlignment % (2 * J9BITS_BITS_IN_SLOT * sizeof(uintptr_t)) == 0);
 
 	MM_HeapRegionManager *regionManager = env->getExtensions()->getHeap()->getHeapRegionManager();
 	GC_HeapRegionIteratorStandard regionIterator(regionManager);
 	MM_HeapRegionDescriptorStandard *region = NULL;
 
-	while(NULL != (region = regionIterator.nextRegion())) {
+	while (NULL != (region = regionIterator.nextRegion())) {
 		void *lowAddress = region->getLowAddress();
 		void *highAddress = region->getHighAddress();
-		MM_HeapMapIterator markedObjectIterator(extensions, markMap, (UDATA *)lowAddress, (UDATA *)highAddress);
+		MM_HeapMapIterator markedObjectIterator(extensions, markMap, (uintptr_t *)lowAddress, (uintptr_t *)highAddress);
 
 		omrobjectptr_t objectPtr = NULL;
 		while (NULL != (objectPtr = markedObjectIterator.nextObject())) {
@@ -82,6 +82,7 @@ MM_CompactDelegate::verifyHeap(MM_EnvironmentBase *env, MM_MarkMap *markMap)
 			case GC_ObjectModel::SCAN_ATOMIC_MARKABLE_REFERENCE_OBJECT:
 			case GC_ObjectModel::SCAN_MIXED_OBJECT:
 			case GC_ObjectModel::SCAN_OWNABLESYNCHRONIZER_OBJECT:
+			case GC_ObjectModel::SCAN_CONTINUATION_OBJECT:
 			case GC_ObjectModel::SCAN_CLASS_OBJECT:
 			case GC_ObjectModel::SCAN_CLASSLOADER_OBJECT:
 			case GC_ObjectModel::SCAN_REFERENCE_MIXED_OBJECT:
@@ -132,7 +133,7 @@ MM_CompactDelegate::workerCleanupAfterGC(MM_EnvironmentBase *env)
 }
 
 void
-MM_CompactDelegate::masterSetupForGC(MM_EnvironmentBase *env)
+MM_CompactDelegate::mainSetupForGC(MM_EnvironmentBase *env)
 {
 	MM_GCExtensionsBase *extensions = env->getExtensions();
 	MM_HeapRegionDescriptorStandard *region = NULL;
@@ -140,8 +141,7 @@ MM_CompactDelegate::masterSetupForGC(MM_EnvironmentBase *env)
 	while (NULL != (region = regionIterator.nextRegion())) {
 		MM_HeapRegionDescriptorStandardExtension *regionExtension = MM_ConfigurationDelegate::getHeapRegionDescriptorStandardExtension(env, region);
 		for (uintptr_t i = 0; i < regionExtension->_maxListIndex; i++) {
-			MM_OwnableSynchronizerObjectList *list = &regionExtension->_ownableSynchronizerObjectLists[i];
-			list->startOwnableSynchronizerProcessing();
+			regionExtension->_ownableSynchronizerObjectLists[i].startOwnableSynchronizerProcessing();
 		}
 	}
 }

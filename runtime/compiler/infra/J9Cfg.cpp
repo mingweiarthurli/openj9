@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -116,7 +116,7 @@ static bool hasJProfilingInfo(TR::Compilation *comp, TR::CFG *cfg)
 bool
 J9::CFG::setFrequencies()
    {
-   if (this == comp()->getFlowGraph() && !comp()->getRecompilationInfo())
+   if (this == comp()->getFlowGraph())
       {
       resetFrequencies();
       }
@@ -858,7 +858,6 @@ J9::CFG::setBlockFrequenciesBasedOnInterpreterProfiler()
             !((temp->asBlock()->getLastRealTreeTop()->getNode()->getOpCode().isBranch()
               && !temp->asBlock()->getLastRealTreeTop()->getNode()->getByteCodeInfo().doNotProfile()) ||
              temp->asBlock()->getLastRealTreeTop()->getNode()->getOpCodeValue() == TR::lookup ||
-             temp->asBlock()->getLastRealTreeTop()->getNode()->getOpCodeValue() == TR::trtLookup ||
              temp->asBlock()->getLastRealTreeTop()->getNode()->getOpCodeValue() == TR::table))
       {
       if (_seenNodes->isSet(temp->getNumber()))
@@ -928,7 +927,6 @@ J9::CFG::setBlockFrequenciesBasedOnInterpreterProfiler()
       }
    else if (temp->asBlock()->getEntry() &&
             (temp->asBlock()->getLastRealTreeTop()->getNode()->getOpCodeValue() == TR::lookup ||
-             temp->asBlock()->getLastRealTreeTop()->getNode()->getOpCodeValue() == TR::trtLookup ||
              temp->asBlock()->getLastRealTreeTop()->getNode()->getOpCodeValue() == TR::table))
       {
       startFrequency = _externalProfiler->getSumSwitchCount(temp->asBlock()->getLastRealTreeTop()->getNode(), comp());
@@ -1107,7 +1105,6 @@ J9::CFG::setBlockFrequenciesBasedOnInterpreterProfiler()
             }
          else if (node->asBlock()->getEntry() &&
                   (node->asBlock()->getLastRealTreeTop()->getNode()->getOpCodeValue() == TR::lookup ||
-                   node->asBlock()->getLastRealTreeTop()->getNode()->getOpCodeValue() == TR::trtLookup ||
                    node->asBlock()->getLastRealTreeTop()->getNode()->getOpCodeValue() == TR::table))
             {
             _seenNodesInCycle->empty();
@@ -1184,7 +1181,6 @@ J9::CFG::setBlockFrequenciesBasedOnInterpreterProfiler()
                  succ->asBlock()->getLastRealTreeTop()->getNode()->getOpCode().isBranch()) ||
                 (succ->asBlock()->getEntry() &&
                   (succ->asBlock()->getLastRealTreeTop()->getNode()->getOpCodeValue() == TR::lookup ||
-                   succ->asBlock()->getLastRealTreeTop()->getNode()->getOpCodeValue() == TR::trtLookup ||
                    succ->asBlock()->getLastRealTreeTop()->getNode()->getOpCodeValue() == TR::table))))
                {
                setBlockFrequency ( succ, edge->getFrequency(), true);
@@ -1305,7 +1301,6 @@ J9::CFG::computeInitialBlockFrequencyBasedOnExternalProfiler(TR::Compilation *co
             !((temp->asBlock()->getLastRealTreeTop()->getNode()->getOpCode().isBranch()
               && !temp->asBlock()->getLastRealTreeTop()->getNode()->getByteCodeInfo().doNotProfile()) ||
              temp->asBlock()->getLastRealTreeTop()->getNode()->getOpCodeValue() == TR::lookup ||
-             temp->asBlock()->getLastRealTreeTop()->getNode()->getOpCodeValue() == TR::trtLookup ||
              temp->asBlock()->getLastRealTreeTop()->getNode()->getOpCodeValue() == TR::table))
       {
       if (_seenNodes->isSet(temp->getNumber()))
@@ -1356,7 +1351,6 @@ J9::CFG::computeInitialBlockFrequencyBasedOnExternalProfiler(TR::Compilation *co
       }
    else if (temp->asBlock()->getEntry() &&
             (temp->asBlock()->getLastRealTreeTop()->getNode()->getOpCodeValue() == TR::lookup ||
-             temp->asBlock()->getLastRealTreeTop()->getNode()->getOpCodeValue() == TR::trtLookup ||
              temp->asBlock()->getLastRealTreeTop()->getNode()->getOpCodeValue() == TR::table))
       {
       startFrequency = _externalProfiler->getSumSwitchCount(temp->asBlock()->getLastRealTreeTop()->getNode(), comp);

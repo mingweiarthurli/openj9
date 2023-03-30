@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2015 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -115,7 +115,7 @@ class GCObjectHeapIteratorSegregated_V1 extends GCObjectHeapIterator
 					allocationCache = allocationCache.add(sizeClass);
 					U8Pointer heapCurrent = U8Pointer.cast(allocationCache.current());
 					U8Pointer heapTop = U8Pointer.cast(allocationCache.top());
-					if(heapCurrent.lt(heapTop)) {
+					if (heapCurrent.lt(heapTop)) {
 						ranges.add(new U8Pointer[] {heapCurrent, heapTop});
 					}
 				}
@@ -170,7 +170,7 @@ class GCObjectHeapIteratorSegregated_V1 extends GCObjectHeapIterator
 				
 				currentObject = J9ObjectPointer.cast(scanPtr);
 				if (MM_HeapRegionDescriptor$RegionType.SEGREGATED_SMALL == type) {
-					if (!ObjectModel.isDeadObject(currentObject)) { 
+					if (!ObjectModel.isHoleObject(currentObject)) {
 						UDATA sizeInBytes = ObjectModel.getConsumedSizeInBytesWithHeader(currentObject);
 						if (sizeInBytes.gt(cellSize)) {
 							/* The size of an object should never be greater than the size of its containing cell. */
@@ -178,11 +178,13 @@ class GCObjectHeapIteratorSegregated_V1 extends GCObjectHeapIterator
 							throw new CorruptDataException("Allocated object at " + scanPtr.getHexAddress() + " has an invalid size of " + sizeInBytes.getHexValue());
 						}
 						scanPtr = scanPtr.add(cellSize);
-						if(includeLiveObjects) {
-							return true;
+						if (includeLiveObjects) {
+							if (includeDeadObjects || !ObjectModel.isDarkMatterObject(currentObject)) {
+								return true;
+							}
 						}
 					} else {
-						UDATA sizeInBytes = ObjectModel.getSizeInBytesDeadObject(currentObject);
+						UDATA sizeInBytes = ObjectModel.getSizeInBytesHoleObject(currentObject);
 						if (sizeInBytes.lt(cellSize)) {
 							/* The size of a hole should always be at least the size of a cell. */
 							currentObject = null;
@@ -193,9 +195,9 @@ class GCObjectHeapIteratorSegregated_V1 extends GCObjectHeapIterator
 							return true;
 						}
 					}
-				} else if(MM_HeapRegionDescriptor$RegionType.SEGREGATED_LARGE == type) {
+				} else if (MM_HeapRegionDescriptor$RegionType.SEGREGATED_LARGE == type) {
 					scanPtr = U8Pointer.cast(scanPtrTop);
-					if(includeLiveObjects) {
+					if (includeLiveObjects) {
 						return true;
 					}
 				}  else {
@@ -237,7 +239,7 @@ class GCObjectHeapIteratorSegregated_V1 extends GCObjectHeapIterator
 	@Override
 	public J9ObjectPointer peek()
 	{
-		if(hasNext()) {
+		if (hasNext()) {
 			return currentObject;
 		} else {
 			throw new NoSuchElementException("There are no more items available through this iterator");

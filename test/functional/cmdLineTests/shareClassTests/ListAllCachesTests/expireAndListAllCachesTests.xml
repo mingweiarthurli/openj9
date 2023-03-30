@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
 
 <!--
-  Copyright (c) 2010, 2018 IBM Corp. and others
+  Copyright (c) 2010, 2021 IBM Corp. and others
 
   This program and the accompanying materials are made available under
   the terms of the Eclipse Public License 2.0 which accompanies this
@@ -17,7 +17,7 @@
   OpenJDK Assembly Exception [2].
 
   [1] https://www.gnu.org/software/classpath/license.html
-  [2] http://openjdk.java.net/legal/assembly-exception.html
+  [2] https://openjdk.org/legal/assembly-exception.html
 
   SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 -->
@@ -25,7 +25,7 @@
 <!DOCTYPE suite SYSTEM "cmdlinetester.dtd">
 
 <!-- #### RUN TokenHelperTests SUITE #### -->
-<suite id="Shared Classes CommandLineOptionTests Suite - Windows Configuration">
+<suite id="Shared Classes CommandLineOptionTests Suite">
 
 	<!-- Our test modes for this suite -->
 	<variable name="mode204" value="-Xshareclasses:name=ShareClassesCMLTests"/>
@@ -57,35 +57,35 @@
 	
 	<test id="Expire & List 1: Create nonpersistent shared cache" timeout="600" runPath=".">
 		<command>$JAVA_EXE$ $currentMode$NP,nonpersistent -version</command>
-		<output type="success" caseSensitive="yes" regex="yes" javaUtilPattern="yes">(java|openjdk) version</output>
+		<output type="success" caseSensitive="no" regex="yes" javaUtilPattern="yes">(java|openjdk|semeru) version</output>
 		<output type="failure" caseSensitive="no" regex="no">Unhandled Exception</output>
 		<output type="failure" caseSensitive="yes" regex="no">Exception:</output>
 	</test>
 	
 	<test id="Expire & List 2: Create Java 6 nonpersistent shared cache" timeout="600" runPath=".">
 		<command>$JAVA6_EXE$ $currentMode$NP,nonpersistent -version</command>
-		<output type="success" caseSensitive="yes" regex="yes" javaUtilPattern="yes">(java|openjdk) version</output>
+		<output type="success" caseSensitive="no" regex="yes" javaUtilPattern="yes">(java|openjdk|semeru) version</output>
 		<output type="failure" caseSensitive="no" regex="no">Unhandled Exception</output>
 		<output type="failure" caseSensitive="yes" regex="no">Exception:</output>
 	</test>
 	
 	<test id="Expire & List 3: Create Java 6 persistent shared cache" timeout="600" runPath=".">
 		<command>$JAVA6_EXE$ $currentMode$P,persistent -version</command>
-		<output type="success" caseSensitive="yes" regex="yes" javaUtilPattern="yes">(java|openjdk) version</output>
+		<output type="success" caseSensitive="no" regex="yes" javaUtilPattern="yes">(java|openjdk|semeru) version</output>
 		<output type="failure" caseSensitive="no" regex="no">Unhandled Exception</output>
 		<output type="failure" caseSensitive="yes" regex="no">Exception:</output>
 	</test>
 	
 	<test id="Expire & List 4: Create persistent shared cache" timeout="600" runPath=".">
 		<command>$JAVA_EXE$ $currentMode$P,persistent -version</command>
-		<output type="success" caseSensitive="yes" regex="yes" javaUtilPattern="yes">(java|openjdk) version</output>
+		<output type="success" caseSensitive="no" regex="yes" javaUtilPattern="yes">(java|openjdk|semeru) version</output>
 		<output type="failure" caseSensitive="no" regex="no">Unhandled Exception</output>
 		<output type="failure" caseSensitive="yes" regex="no">Exception:</output>
 	</test>
 
 	<test id="Expire & List 5: expire persistent cache." timeout="600" runPath=".">
 		<command>$JAVA_EXE$ $currentMode$P,persistent,expire=0 -version</command>
-		<output type="success" caseSensitive="yes" regex="yes" javaUtilPattern="yes">(java|openjdk) version</output>
+		<output type="success" caseSensitive="no" regex="yes" javaUtilPattern="yes">(java|openjdk|semeru) version</output>
 		<output type="failure" caseSensitive="no" regex="no">Unhandled Exception</output>
 		<output type="failure" caseSensitive="yes" regex="no">Exception:</output>
 	</test>

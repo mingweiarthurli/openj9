@@ -1,6 +1,6 @@
-/*[INCLUDE-IF Sidecar17]*/
+/*[INCLUDE-IF Sidecar17 & !OPENJDK_METHODHANDLES]*/
 /*******************************************************************************
- * Copyright (c) 2011, 2019 IBM Corp. and others
+ * Copyright (c) 2011, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -27,6 +27,8 @@ import jdk.internal.ref.Cleaner;
 /*[ELSE]*/
 import sun.misc.Cleaner;
 /*[ENDIF]*/
+
+import static java.lang.invoke.MethodHandleResolver.UNSAFE;
 
 /**
  * A MutableCallSite acts as though its target MethodHandle were a normal variable.
@@ -54,7 +56,7 @@ public class MutableCallSite extends CallSite {
 	private static final long targetFieldOffset = initializeTargetFieldOffset();
 	private static long initializeTargetFieldOffset(){
 		try{
-			return MethodHandle.UNSAFE.objectFieldOffset(MutableCallSite.class.getDeclaredField("target")); //$NON-NLS-1$
+			return UNSAFE.objectFieldOffset(MutableCallSite.class.getDeclaredField("target")); //$NON-NLS-1$
 		} catch (Exception e) {
 			InternalError ie = new InternalError();
 			ie.initCause(e);
@@ -119,7 +121,7 @@ public class MutableCallSite extends CallSite {
 	private static final Object bypassBase = initializeBypassBase();
 	private static Object initializeBypassBase() {
 		try{
-			return MethodHandle.UNSAFE.staticFieldBase(MutableCallSite.class.getDeclaredField("targetFieldOffset")); //$NON-NLS-1$
+			return UNSAFE.staticFieldBase(MutableCallSite.class.getDeclaredField("targetFieldOffset")); //$NON-NLS-1$
 		} catch (Exception e) {
 			InternalError ie = new InternalError();
 			ie.initCause(e);
@@ -160,9 +162,9 @@ public class MutableCallSite extends CallSite {
 					// Equivalence check saved us a thaw, so it's worth doing them every time.
 					equivalenceInterval = 1;
 /*[IF Sidecar19-SE-OpenJ9]*/				
-					MethodHandle.UNSAFE.compareAndSetObject(this, targetFieldOffset, oldTarget, newTarget);
+					UNSAFE.compareAndSetObject(this, targetFieldOffset, oldTarget, newTarget);
 /*[ELSE]
-					MethodHandle.UNSAFE.compareAndSwapObject(this, targetFieldOffset, oldTarget, newTarget);
+					UNSAFE.compareAndSwapObject(this, targetFieldOffset, oldTarget, newTarget);
 /*[ENDIF]*/					
 				} else {
 					thaw(oldTarget, newTarget);
@@ -175,7 +177,7 @@ public class MutableCallSite extends CallSite {
 				thaw(oldTarget, newTarget);
 			}
 			if (globalRefCleaner.bypassOffset != 0) {
-				MethodHandle.UNSAFE.putObject(bypassBase, globalRefCleaner.bypassOffset, newTarget);
+				UNSAFE.putObject(bypassBase, globalRefCleaner.bypassOffset, newTarget);
 			}
 		}
 	}

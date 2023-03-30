@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -42,6 +42,7 @@
 #include "cs2/sparsrbit.h"
 #include "env/StackMemoryRegion.hpp"
 #include "env/TRMemory.hpp"
+#include "env/VerboseLog.hpp"
 #include "il/AliasSetInterface.hpp"
 #include "il/AutomaticSymbol.hpp"
 #include "il/Block.hpp"
@@ -70,6 +71,7 @@
 #include "optimizer/Optimizer.hpp"
 #include "optimizer/SPMDPreCheck.hpp"
 #include "optimizer/Structure.hpp"
+#include "optimizer/TransformUtil.hpp"
 #include "optimizer/UseDefInfo.hpp"
 #include "optimizer/ValueNumberInfo.hpp"
 #include "runtime/J9Runtime.hpp"
@@ -80,6 +82,7 @@
 
 #define INVALID_STRIDE INT_MAX
 #define VECTOR_SIZE 16
+#define VECTOR_LENGTH TR::VectorLength128
 #define INVALID_ADDR  (TR::Node *)-1
 
 namespace TR { class OptimizationManager; }
@@ -268,7 +271,8 @@ bool TR_SPMDKernelParallelizer::isAffineAccess(TR::Compilation *comp, TR::Node *
 void TR_SPMDKernelParallelizer::genVectorAccessForScalar(TR::Node *parent, int32_t childIndex, TR::Node *node)
    {
    //we need to duplicate tree because this node could be commoned with any other expression inside the loop, e.g. address expression. we don't want to vectorize all the common-ed nodes
-   TR::Node *splatsNode = TR::Node::create(TR::vsplats, 1, node->duplicateTree());
+   TR::Node *splatsNode = TR::Node::create(TR::ILOpCode::createVectorOpCode(TR::vsplats, node->getDataType().scalarToVector(VECTOR_LENGTH)),
+                                           1, node->duplicateTree());
    node->recursivelyDecReferenceCount();
    // can visit the commoned node again, if needed.
    _visitedNodes.reset(node->getGlobalIndex());
@@ -330,21 +334,23 @@ bool TR_SPMDKernelParallelizer::visitTreeTopToSIMDize(TR::TreeTop *tt, TR_SPMDKe
          TR::SymbolReference *symRef = node->getSymbolReference();
          TR::SymbolReference *vecSymRef = pSPMDInfo->getVectorSymRef(symRef);
          TR::ILOpCode scalarOp = node->getOpCode();
-         TR::ILOpCodes vectorOpCode = TR::ILOpCode::convertScalarToVector(scalarOp.getOpCodeValue());
+         TR::ILOpCodes vectorOpCode = TR::ILOpCode::convertScalarToVector(scalarOp.getOpCodeValue(), VECTOR_LENGTH);
 
          if (isCheckMode && vectorOpCode == TR::BadILOp)
             return false;
 
          TR_ASSERT(vectorOpCode != TR::BadILOp, "BAD IL Opcode to be assigned during transformation");
 
-         if (isCheckMode && !comp->cg()->getSupportsOpCodeForAutoSIMD(vectorOpCode, node->getDataType()))
+         if (isCheckMode && !comp->cg()->getSupportsOpCodeForAutoSIMD(vectorOpCode))
             return false;
 
          if (!isCheckMode)
             {
             // just convert the original scalar store into vector store
+            // Note: get node type before changing the opcode
+            // TODO: use best vector length available
+            vecSymRef = comp->getSymRefTab()->findOrCreateArrayShadowSymbolRef(node->getDataType().scalarToVector(TR::VectorLength128), NULL);
             TR::Node::recreate(node, vectorOpCode);
-            vecSymRef = comp->getSymRefTab()->findOrCreateArrayShadowSymbolRef(node->getDataType().scalarToVector(), NULL);
             node->setSymbolReference(vecSymRef);
             }
          else if (loop->isExprInvariant(node->getFirstChild()))
@@ -386,6 +392,20 @@ bool TR_SPMDKernelParallelizer::visitTreeTopToSIMDize(TR::TreeTop *tt, TR_SPMDKe
                int32_t pivStride = INVALID_STRIDE;
                bool isAffine = isAffineAccess(comp, node->getFirstChild(), loop, piv, pivStride);
 
+               // if the induction variable is not incremented after the soon to be vectorized instructions, then we bail out (see: openj9/issues/9331)
+               if (isCheckMode)
+                  {
+                  if (!(tt->getNextTreeTop()->getNode()->getOpCode().isBooleanCompare() &&
+                      tt->getNextTreeTop()->getNode()->getOpCode().isBranch() &&
+                      hasPIV(tt->getNextTreeTop()->getNode(), piv)) ||
+                      tt->getNextTreeTop()->getNextTreeTop()->getNode()->getOpCodeValue() != TR::BBEnd)
+                     {
+                     traceMsg(comp, "   Induction variable may be incremented before vectorized operations, "
+                      "this may cause functionally incorrect result. Vectorization not performed. see: openj9/issues/9331.\n");
+                     return false;
+                     }
+                  }
+
                // if this is transformation mode and this PIV is used by a vectorized expression and satisfies
                // affine access conditions, duplicate the trees to create a vectorized loop increment
                // for the vectorized version of the PIV
@@ -405,7 +425,7 @@ bool TR_SPMDKernelParallelizer::visitTreeTopToSIMDize(TR::TreeTop *tt, TR_SPMDKe
                   TR::SymbolReference *vecSymRef = pSPMDInfo->getVectorSymRef(symRef);
                   if (vecSymRef == NULL)
                      {
-                     vecSymRef = comp->cg()->allocateLocalTemp(node->getDataType().scalarToVector()); // need to handle alignment?
+                     vecSymRef = comp->cg()->allocateLocalTemp(node->getDataType().scalarToVector(TR::VectorLength128)); // need to handle alignment?
                      pSPMDInfo->addVectorSymRef(symRef, vecSymRef);
 
                      if (trace)
@@ -413,7 +433,7 @@ bool TR_SPMDKernelParallelizer::visitTreeTopToSIMDize(TR::TreeTop *tt, TR_SPMDKe
                      }
 
                   TR::ILOpCode scalarOp = node->getOpCode();
-                  TR::ILOpCodes vectorOpCode = TR::ILOpCode::convertScalarToVector(scalarOp.getOpCodeValue());
+                  TR::ILOpCodes vectorOpCode = TR::ILOpCode::convertScalarToVector(scalarOp.getOpCodeValue(), VECTOR_LENGTH);
                   TR_ASSERT(vectorOpCode != TR::BadILOp, "BAD IL Opcode to be assigned during transformation");
 
                   dupNode->setSymbolReference(vecSymRef);
@@ -501,7 +521,7 @@ bool TR_SPMDKernelParallelizer::visitTreeTopToSIMDize(TR::TreeTop *tt, TR_SPMDKe
             }
 
          TR::ILOpCode scalarOp = node->getOpCode();
-         TR::ILOpCodes vectorOpCode = TR::ILOpCode::convertScalarToVector(scalarOp.getOpCodeValue());
+         TR::ILOpCodes vectorOpCode = TR::ILOpCode::convertScalarToVector(scalarOp.getOpCodeValue(), VECTOR_LENGTH);
 
          if (isCheckMode && vectorOpCode == TR::BadILOp)
             return false;
@@ -539,7 +559,7 @@ bool TR_SPMDKernelParallelizer::visitTreeTopToSIMDize(TR::TreeTop *tt, TR_SPMDKe
 
          TR_ASSERT_FATAL(vectorOpCode != TR::BadILOp, "BAD IL Opcode to be assigned during transformation");
 
-         if (isCheckMode && !comp->cg()->getSupportsOpCodeForAutoSIMD(vectorOpCode, node->getDataType()))
+         if (isCheckMode && !comp->cg()->getSupportsOpCodeForAutoSIMD(vectorOpCode))
             return false;
 
          if (!isCheckMode)
@@ -547,7 +567,7 @@ bool TR_SPMDKernelParallelizer::visitTreeTopToSIMDize(TR::TreeTop *tt, TR_SPMDKe
             bool createdNewVecSym = false;
             if (vecSymRef == NULL)
                {
-               vecSymRef = comp->cg()->allocateLocalTemp(node->getDataType().scalarToVector()); // need to handle alignment?
+               vecSymRef = comp->cg()->allocateLocalTemp(node->getDataType().scalarToVector(TR::VectorLength128)); // need to handle alignment?
                pSPMDInfo->addVectorSymRef(symRef, vecSymRef);
                createdNewVecSym = true;
 
@@ -581,8 +601,32 @@ bool TR_SPMDKernelParallelizer::visitTreeTopToSIMDize(TR::TreeTop *tt, TR_SPMDKe
          return visitNodeToSIMDize(node, 0, node->getFirstChild(), pSPMDInfo, isCheckMode, loop, comp, usesInLoop, useNodesOfDefsInLoop, useDefInfo, defsInLoop, reductionHashTab, node->getSymbolReference());
          }
       }
-   else if (scalarOp.isBranch() || node->getOpCodeValue()==TR::BBEnd ||
-            node->getOpCodeValue()==TR::BBStart || node->getOpCodeValue()==TR::asynccheck ||
+   else if (node->getOpCodeValue() == TR::asynccheck)
+      {
+      /*
+       * By default, loops with asynccheck nodes are not supported for AutoSIMD.
+       * If TR_enableAutoSIMDSkipAsynccheck is set, the asynccheck nodes will be removed from the loop while vectorizing it.
+       */
+      static bool enableAutoSIMDSkipAsynccheck = feGetEnv("TR_enableAutoSIMDSkipAsynccheck") ? true : false;
+
+      if (enableAutoSIMDSkipAsynccheck)
+         {
+         if (!isCheckMode)
+            {
+            dumpOptDetails(comp, "Removing asynccheck. TreeTop: %p, node: %p\n", tt, node);
+
+            optimizer()->prepareForTreeRemoval(tt);
+            TR::TransformUtil::removeTree(comp, tt);
+            }
+         return true;
+         }
+      else
+         {
+         if (trace) traceMsg(comp, "asynccheck nodes are not supported for AutoSIMD. node: %p\n", node);
+         return false;
+         }
+      }
+   else if (scalarOp.isBranch() || node->getOpCodeValue()==TR::BBEnd || node->getOpCodeValue()==TR::BBStart ||
             (node->getOpCodeValue()==TR::compressedRefs && node->getFirstChild()->getOpCode().isLoad()))
       {
       //Compressed ref treetops with a load can be ignored due to the load
@@ -615,7 +659,7 @@ bool TR_SPMDKernelParallelizer::visitNodeToSIMDize(TR::Node *parent, int32_t chi
 
    TR::SymbolReference *piv = pSPMDInfo->getInductionVariableSymRef();
    TR::ILOpCode scalarOp = node->getOpCode();
-   TR::ILOpCodes vectorOpCode = TR::ILOpCode::convertScalarToVector(scalarOp.getOpCodeValue());
+   TR::ILOpCodes vectorOpCode = TR::ILOpCode::convertScalarToVector(scalarOp.getOpCodeValue(), VECTOR_LENGTH);
    int32_t pivStride = INVALID_STRIDE;
 
    if (trace)
@@ -634,6 +678,16 @@ bool TR_SPMDKernelParallelizer::visitNodeToSIMDize(TR::Node *parent, int32_t chi
 
    if (loop->isExprInvariant(node))
       {
+      TR::DataType vt = node->getDataType().scalarToVector(VECTOR_LENGTH);
+      if (isCheckMode && !comp->cg()->getSupportsOpCodeForAutoSIMD(TR::ILOpCode::createVectorOpCode(TR::vsplats, vt)))
+         {
+         if (trace)
+            {
+            traceMsg(comp,"   [%p]: vsplats Opcode and data type are not supported by this platform\n", node);
+            }
+         return false;
+         }
+
       if (!isCheckMode)
          genVectorAccessForScalar(parent, childIndex, node);
 
@@ -656,8 +710,7 @@ bool TR_SPMDKernelParallelizer::visitNodeToSIMDize(TR::Node *parent, int32_t chi
 
    TR_ASSERT(vectorOpCode != TR::BadILOp, "BAD IL Opcode to be assigned during transformation");
 
-
-   if (isCheckMode && !comp->cg()->getSupportsOpCodeForAutoSIMD(vectorOpCode, node->getDataType()))
+   if (isCheckMode && !comp->cg()->getSupportsOpCodeForAutoSIMD(vectorOpCode))
       {
       if (trace)
          {
@@ -688,19 +741,31 @@ bool TR_SPMDKernelParallelizer::visitNodeToSIMDize(TR::Node *parent, int32_t chi
             if (loadInductionVar)
                {
                // confirm platform supports vectorizing PIV uses
-               bool platformSupport = comp->cg()->getSupportsOpCodeForAutoSIMD(TR::vstore, node->getDataType());
-               platformSupport = platformSupport && comp->cg()->getSupportsOpCodeForAutoSIMD(TR::vsetelem, node->getDataType());
-               platformSupport = platformSupport && comp->cg()->getSupportsOpCodeForAutoSIMD(TR::vadd,     node->getDataType());
-               platformSupport = platformSupport && comp->cg()->getSupportsOpCodeForAutoSIMD(TR::vsplats,  node->getDataType());
+               TR::DataType elementType = node->getDataType();
+
+               if (!elementType.isVectorElement())
+                  {
+                  traceMsg(comp, "   Induction variable type cannot be converted to vector [%p]\n", node);
+                  return false;
+                  }
+
+               TR::DataType vectorType = elementType.scalarToVector(VECTOR_LENGTH);
+
+               bool platformSupport = comp->cg()->getSupportsOpCodeForAutoSIMD(TR::ILOpCode::createVectorOpCode(TR::vstore, vectorType)) &&
+                                      comp->cg()->getSupportsOpCodeForAutoSIMD(TR::ILOpCode::createVectorOpCode(TR::vsetelem, vectorType)) &&
+                                      comp->cg()->getSupportsOpCodeForAutoSIMD(TR::ILOpCode::createVectorOpCode(TR::vadd, vectorType)) &&
+                                      comp->cg()->getSupportsOpCodeForAutoSIMD(TR::ILOpCode::createVectorOpCode(TR::vsplats, vectorType));
 
                if (trace && platformSupport)
 		  traceMsg(comp, "   Found use of induction variable at node [%p]\n", node);
 
 	       if (trace && !platformSupport)
                   traceMsg(comp, "   Found use of induction variable at node [%p] - platform does not support this vectorization\n", node);
+
                if (trace && platformSupport)
                   traceMsg(comp, "   Found use of induction variable at node [%p] - vectorization disabled for now\n", node);
-               return false;  // see : eclipse/openj9/9446
+
+               return false;  // see : eclipse-openj9/openj9/9446
                }
             }
          }
@@ -719,9 +784,10 @@ bool TR_SPMDKernelParallelizer::visitNodeToSIMDize(TR::Node *parent, int32_t chi
 
          if (!vecSymRef)
             {
+            // TODO: use best vector length available
             vecSymRef = scalarOp.isLoadIndirect() ?
-                           comp->getSymRefTab()->findOrCreateArrayShadowSymbolRef(node->getDataType().scalarToVector(), NULL)
-                           : vecSymRef = comp->cg()->allocateLocalTemp(node->getDataType().scalarToVector()); // need to handle alignment?
+                           comp->getSymRefTab()->findOrCreateArrayShadowSymbolRef(node->getDataType().scalarToVector(TR::VectorLength128), NULL)
+               : vecSymRef = comp->cg()->allocateLocalTemp(node->getDataType().scalarToVector(TR::VectorLength128)); // need to handle alignment?
             pSPMDInfo->addVectorSymRef(symRef, vecSymRef);
             createdNewVecSym = true;
 
@@ -759,30 +825,33 @@ bool TR_SPMDKernelParallelizer::visitNodeToSIMDize(TR::Node *parent, int32_t chi
                loopInvariantBlock = createLoopInvariantBlockSIMD(comp, loop);
                }
 
-            TR::Node *splatsNode = TR::Node::create(TR::vsplats, 1, node->duplicateTree());
+            TR::ILOpCodes splatsOpCode = TR::ILOpCode::createVectorOpCode(TR::vsplats, node->getDataType().scalarToVector(VECTOR_LENGTH));
+            TR::ILOpCodes setelemOpCode = TR::ILOpCode::createVectorOpCode(TR::vsetelem, node->getDataType().scalarToVector(VECTOR_LENGTH));
+            TR::Node *splatsNode = TR::Node::create(splatsOpCode, 1, node->duplicateTree());
+            TR::Node *vconstNode = TR::Node::create(splatsOpCode, 1, TR::Node::create(TR::iconst, 0, 0));
 
-            TR::Node *vconstNode = TR::Node::create(TR::vsplats, 1, TR::Node::create(TR::iconst, 0, 0));
-
-            TR::Node *vsetelem1Node = TR::Node::create(TR::vsetelem, 3);
+            TR::Node *vsetelem1Node = TR::Node::create(setelemOpCode, 3);
             vsetelem1Node->setAndIncChild(0, vconstNode);
             vsetelem1Node->setAndIncChild(1, TR::Node::create(TR::iconst, 0, 1));
             vsetelem1Node->setAndIncChild(2, TR::Node::create(TR::iconst, 0, 1));
 
-            TR::Node *vsetelem2Node = TR::Node::create(TR::vsetelem, 3);
+            TR::Node *vsetelem2Node = TR::Node::create(setelemOpCode, 3);
             vsetelem2Node->setAndIncChild(0, vsetelem1Node);
             vsetelem2Node->setAndIncChild(1, TR::Node::create(TR::iconst, 0, 2));
             vsetelem2Node->setAndIncChild(2, TR::Node::create(TR::iconst, 0, 2));
 
-            TR::Node *vsetelem3Node = TR::Node::create(TR::vsetelem, 3);
+            TR::Node *vsetelem3Node = TR::Node::create(setelemOpCode, 3);
             vsetelem3Node->setAndIncChild(0, vsetelem2Node);
             vsetelem3Node->setAndIncChild(1, TR::Node::create(TR::iconst, 0, 3));
             vsetelem3Node->setAndIncChild(2, TR::Node::create(TR::iconst, 0, 3));
 
-            TR::Node *vaddNode   = TR::Node::create(TR::vadd, 2);
+            TR::ILOpCodes vectorAddOpCode = TR::ILOpCode::createVectorOpCode(TR::vadd, TR::DataType::createVectorType(TR::Int32, VECTOR_LENGTH));
+
+            TR::Node *vaddNode   = TR::Node::create(vectorAddOpCode, 2);
             vaddNode->setAndIncChild(0, splatsNode);
             vaddNode->setAndIncChild(1, vsetelem3Node);
 
-            TR::Node *vstoreNode = TR::Node::createWithSymRef(TR::vstore, 1, 1, vaddNode, vecSymRef);
+            TR::Node *vstoreNode = TR::Node::createWithSymRef(TR::ILOpCode::createVectorOpCode(TR::vstore, vecSymRef->getSymbol()->getDataType()), 1, 1, vaddNode, vecSymRef);
 
             TR::TreeTop *insertionPoint = loopInvariantBlock->getEntry();
             TR::Node    *treetopNode = TR::Node::create(TR::treetop, 1, vstoreNode);
@@ -956,27 +1025,37 @@ bool TR_SPMDKernelParallelizer::autoSIMDReductionSupported(TR::Compilation *comp
       }
 
    //These checks are to make sure vector opcodes uses for reduction are supported
-   if (!comp->cg()->getSupportsOpCodeForAutoSIMD(TR::vsplats, node->getDataType()))
+   TR::DataType scalarType = node->getDataType();
+
+   if (!scalarType.isVectorElement())
       {
-      if (trace) traceMsg(comp, "   autoSIMDReductionSupported: vsplats is not supported for dataType: %s\n", node->getDataType().toString());
+      if (trace) traceMsg(comp, "   autoSIMDReductionSupported: vectorization is not supported for dataType: %s\n", scalarType.toString());
       return false;
       }
 
-   if (!comp->cg()->getSupportsOpCodeForAutoSIMD(TR::vstore, node->getDataType()))
+   TR::DataType vectorType = scalarType.scalarToVector(VECTOR_LENGTH);
+
+   if (!comp->cg()->getSupportsOpCodeForAutoSIMD(TR::ILOpCode::createVectorOpCode(TR::vsplats, vectorType)))
       {
-      if (trace) traceMsg(comp, "   autoSIMDReductionSupported: vstore is not supported for dataType: %s\n", node->getDataType().toString());
+      if (trace) traceMsg(comp, "   autoSIMDReductionSupported: vsplats is not supported for dataType: %s\n", scalarType.toString());
       return false;
       }
 
-   if (!comp->cg()->getSupportsOpCodeForAutoSIMD(TR::vload, node->getDataType()))
+   if (!comp->cg()->getSupportsOpCodeForAutoSIMD(TR::ILOpCode::createVectorOpCode(TR::vstore, vectorType)))
       {
-      if (trace) traceMsg(comp, "   autoSIMDReductionSupported: vload is not supported for dataType: %s\n", node->getDataType().toString());
+      if (trace) traceMsg(comp, "   autoSIMDReductionSupported: vstore is not supported for dataType: %s\n", scalarType.toString());
       return false;
       }
 
-   if (!comp->cg()->getSupportsOpCodeForAutoSIMD(TR::getvelem, node->getDataType()))
+   if (!comp->cg()->getSupportsOpCodeForAutoSIMD(TR::ILOpCode::createVectorOpCode(TR::vload, vectorType)))
       {
-      if (trace) traceMsg(comp, "   autoSIMDReductionSupported: getvelem is not supported for dataType: %s\n", node->getDataType().toString());
+      if (trace) traceMsg(comp, "   autoSIMDReductionSupported: vload is not supported for dataType: %s\n", scalarType.toString());
+      return false;
+      }
+
+   if (!comp->cg()->getSupportsOpCodeForAutoSIMD(TR::ILOpCode::createVectorOpCode(TR::vgetelem, vectorType)))
+      {
+      if (trace) traceMsg(comp, "   autoSIMDReductionSupported: vgetelem is not supported for dataType: %s\n", scalarType.toString());
       return false;
       }
 
@@ -1159,7 +1238,9 @@ bool TR_SPMDKernelParallelizer::reductionLoopEntranceProcessing(TR::Compilation 
    TR::ILOpCodes splatConstType = comp->il.opCodeForConst(scalarDataType);
 
    //splat the identity for the initial value
-   TR::Node *splatsNode = TR::Node::create(insertionPoint->getNode(), TR::vsplats, 1);
+   TR::ILOpCodes splatsOpCode = TR::ILOpCode::createVectorOpCode(TR::vsplats, scalarDataType.scalarToVector(VECTOR_LENGTH));
+
+   TR::Node *splatsNode = TR::Node::create(insertionPoint->getNode(), splatsOpCode, 1);
    TR::Node *constNode = TR::Node::create(insertionPoint->getNode(), splatConstType, 0);
    uint8_t identity = 0;
 
@@ -1206,7 +1287,7 @@ bool TR_SPMDKernelParallelizer::reductionLoopEntranceProcessing(TR::Compilation 
 
    splatsNode->setAndIncChild(0, constNode);
 
-   TR::Node *vstoreNode = TR::Node::create(insertionPoint->getNode(), TR::vstore, 1);
+   TR::Node *vstoreNode = TR::Node::create(insertionPoint->getNode(), TR::ILOpCode::createVectorOpCode(TR::vstore, vecSymRef->getSymbol()->getDataType()), 1);
    vstoreNode->setAndIncChild(0, splatsNode);
    vstoreNode->setSymbolReference(vecSymRef);
 
@@ -1323,18 +1404,24 @@ bool TR_SPMDKernelParallelizer::reductionLoopExitProcessing(TR::Compilation *com
 
       //read each element from the vector and perform the reduction operation to combine them
       //only add and mult are supported right now
-      TR::Node *loadVectorNode = TR::Node::create(insertionPoint->getNode(), TR::vload, 0);
+
+      TR::DataType vectorType = vecSymRef->getSymbol()->getDataType();
+
+      TR::Node *loadVectorNode = TR::Node::create(insertionPoint->getNode(), TR::ILOpCode::createVectorOpCode(TR::vload, vectorType), 0);
       loadVectorNode->setSymbolReference(vecSymRef);
 
       TR::Node* topNode = TR::Node::createWithSymRef(insertionPoint->getNode(), loadOp, 0, symRef);
+
+      TR::ILOpCodes vgetelemOpCode = TR::ILOpCode::createVectorOpCode(TR::vgetelem, vectorType);
+
       for (int i = 0; i < numelements; i++)
          {
-         TR::Node *getvelemNode = TR::Node::create(insertionPoint->getNode(), TR::getvelem, 2);
-         getvelemNode->setAndIncChild(0, loadVectorNode);
-         getvelemNode->setAndIncChild(1, TR::Node::create(insertionPoint->getNode(), TR::iconst, 0, i));
+         TR::Node *vgetelemNode = TR::Node::create(insertionPoint->getNode(), vgetelemOpCode, 2);
+         vgetelemNode->setAndIncChild(0, loadVectorNode);
+         vgetelemNode->setAndIncChild(1, TR::Node::create(insertionPoint->getNode(), TR::iconst, 0, i));
 
          TR::Node* opNode = TR::Node::create(insertionPoint->getNode(), scalarReductionOp, 2);
-         opNode->setAndIncChild(0, getvelemNode);
+         opNode->setAndIncChild(0, vgetelemNode);
          opNode->setAndIncChild(1, topNode);
 
          topNode = opNode;
@@ -1352,6 +1439,29 @@ bool TR_SPMDKernelParallelizer::reductionLoopExitProcessing(TR::Compilation *com
       }
 
    return true;
+   }
+
+void TR_SPMDKernelParallelizer::replaceAndAnchorOldNode(TR::Compilation *comp, TR::TreeTop *treeTop, TR::Node *parent, TR::Node *oldNode, TR::Node *newNode, int index)
+   {
+   treeTop->insertBefore(TR::TreeTop::create(comp, TR::Node::create(TR::treetop, 1, oldNode)));
+   oldNode->recursivelyDecReferenceCount();
+   parent->setAndIncChild(index, newNode);
+   }
+
+inline bool TR_SPMDKernelParallelizer::matchIVIncrementPattern(TR::Node *node, TR::SymbolReference *pivSymRef)
+   {
+   return (node->getOpCode().isAdd() || node->getOpCode().isSub()) && node->getFirstChild()->getOpCode().isLoad()
+    && node->getFirstChild()->getSymbolReference() == pivSymRef && node->getSecondChild()->getOpCode().isLoadConst();
+   }
+
+TR::Node * TR_SPMDKernelParallelizer::multiplyLoopStride(TR::Node *parent, int32_t multiple)
+   {
+   TR::Node *constNode = parent->getSecondChild()->duplicateTree();
+   constNode->setInt(constNode->getInt() * multiple);
+   TR::Node *oldNode = parent->getSecondChild();
+   parent->getSecondChild()->recursivelyDecReferenceCount();
+   parent->setAndIncChild(1, constNode);
+   return oldNode;
    }
 
 bool TR_SPMDKernelParallelizer::processSPMDKernelLoopForSIMDize(TR::Compilation *comp, TR::Optimizer *optimizer, TR_RegionStructure *loop,TR_PrimaryInductionVariable *piv, TR_HashTab* reductionHashTab, int32_t peelCount, TR::Block *invariantBlock)
@@ -1412,29 +1522,108 @@ bool TR_SPMDKernelParallelizer::processSPMDKernelLoopForSIMDize(TR::Compilation 
    loop->getBlocks(&blocksInLoop);
    ListIterator<TR::Block> blocksIt1(&blocksInLoop);
 
-
-   // SIMD_TODO: improve this code
+   TR_HashTab* entries = new (comp->trStackMemory()) TR_HashTab(comp->trMemory(), stackAlloc);
 
    for (TR::Block *nextBlock = blocksIt1.getCurrent(); nextBlock; nextBlock=blocksIt1.getNext())
       {
       for (TR::TreeTop *tt = nextBlock->getEntry() ; tt != nextBlock->getExit() ; tt = tt->getNextTreeTop())
          {
          // identify operation for primary induction variable
-         TR::Node *storeNode = tt->getNode();
+         TR::Node *curNode = tt->getNode();
+         if (curNode->getOpCode().isBooleanCompare() && curNode->getOpCode().isBranch())
+            {
+            TR_HashId hashOne = 0;
+            TR_HashId hashTwo = 0;
+            if (entries->locate(curNode->getFirstChild(), hashOne) || entries->locate(curNode->getSecondChild(), hashTwo))
+               {
+               int nodeIndex = entries->locate(curNode->getFirstChild(), hashOne) ? 0 : 1;
+               TR::Node *newNode = nodeIndex == 0 ? reinterpret_cast<TR::Node*>(entries->getData(hashOne)) : reinterpret_cast<TR::Node*>(entries->getData(hashTwo));
+               if (trace())
+                  traceMsg(comp, "Parent node n%dn [%p] will be uncommoned to n%dn [%p]\n", curNode->getChild(nodeIndex)->getGlobalIndex(), curNode->getChild(nodeIndex),
+                   newNode->getGlobalIndex(), newNode);
+               replaceAndAnchorOldNode(comp, tt, curNode, curNode->getChild(nodeIndex), newNode, nodeIndex);
+               }
+            else if (curNode->getFirstChild()->getReferenceCount() > 1 || curNode->getSecondChild()->getReferenceCount() > 1)
+               {
+               TR::Node *oldNode = NULL;
+               TR::Node *newNode = NULL;
+               int32_t childIndex = 0;
+               if (curNode->getFirstChild()->getReferenceCount() > 1 && matchIVIncrementPattern(curNode->getFirstChild(), unroller._piv->getSymRef()))
+                  {
+                  oldNode = curNode->getFirstChild();
+                  childIndex = 0;
+                  }
+               else if (curNode->getSecondChild()->getReferenceCount() > 1 && matchIVIncrementPattern(curNode->getSecondChild(), unroller._piv->getSymRef()))
+                  {
+                  oldNode = curNode->getSecondChild();
+                  childIndex = 1;
+                  }
 
-         if (storeNode->getOpCodeValue() == TR::istore && storeNode->getSymbolReference() == unroller._piv->getSymRef())
+               if (oldNode)
+                  {
+                  // We encountered the node for the first time and it is commoned.
+                  // So, we need to adjust the stride by vectorSize and store the mapping {oldNode, newNode} in the hashTable.
+                  newNode = oldNode->duplicateTree(false);
+                  replaceAndAnchorOldNode(comp, tt, curNode, oldNode, newNode, childIndex);
+                  if (trace())
+                     traceMsg(comp, "Parent node n%dn [%p] was uncommoned to n%dn [%p]\n", oldNode->getGlobalIndex(), oldNode, newNode->getGlobalIndex(), newNode);
+                  _visitedNodes.reset(oldNode->getGlobalIndex());
+                  TR::Node *oldConstNode = multiplyLoopStride(newNode, vectorSize);
+                  _visitedNodes.reset(oldConstNode->getGlobalIndex());
+                  TR_HashId entryHash = entries->calculateHash(oldNode);
+                  entries->add(oldNode, entryHash, newNode);
+                  }
+               }
+            }
+
+         if (curNode->getOpCodeValue() == TR::istore && curNode->getSymbolReference() == unroller._piv->getSymRef())
             {
             // increment of PIV
-            traceMsg(comp, "Reducing the number of iterations of the loop %d at storeNode [%p] by vector length %d \n",loop->getNumber(), storeNode, unrollCount);
-            TR::Node *constNode = storeNode->getFirstChild()->getSecondChild()->duplicateTree();
-            constNode->setInt(constNode->getInt() * vectorSize);
-            storeNode->getFirstChild()->getSecondChild()->recursivelyDecReferenceCount();
-            //can visit the commoned node again
-            _visitedNodes.reset(storeNode->getFirstChild()->getSecondChild()->getGlobalIndex());
-            storeNode->getFirstChild()->setAndIncChild(1,constNode);
-
+            traceMsg(comp, "Reducing the number of iterations of the loop %d at storeNode [%p] by vector length %d \n",loop->getNumber(), curNode, unrollCount);
+            TR_ASSERT_FATAL(curNode->getFirstChild()->getOpCode().isAdd() || curNode->getFirstChild()->getOpCode().isSub(), "PIV increment should be simple (either by add or by sub");
+            TR_ASSERT_FATAL(curNode->getFirstChild()->getFirstChild()->getOpCode().isLoad(), "PIV increment should have load");
+            TR_ASSERT_FATAL(curNode->getFirstChild()->getSecondChild()->getOpCode().isLoadConst(), "PIV increment should have const increment value");
+            TR::Node *newNode = NULL;
+            TR::Node *oldNode = NULL;
+            if (curNode->getFirstChild()->getReferenceCount() > 1)
+               {
+               // We need to uncommon the parent node only (isub/iadd), but keep the commoned children (if it has any such child).
+               // Uncommoning of parent node prevents the propagation of loop stride to other parts in the block. For example, if the
+               // parent commoned node was used in address calculation, then changing the stride will introduce bug as the address calculation
+               // will be affected.
+               // Keeping the commoned children prevents unwanted side effect. For example, commoned iload should stay the same,
+               // even if isub/iadd is uncommoned. That way we know it will use the old iload value, not load the value again.
+               // Const node will be uncommoned before changing the stride to match with vector operations, so we don't need to uncommon it
+               // here.
+               oldNode = curNode->getFirstChild();
+               TR_HashId hashOne = 0;
+               if (entries->locate(oldNode, hashOne))
+                  {
+                  newNode = reinterpret_cast<TR::Node *>(entries->getData(hashOne));
+                  replaceAndAnchorOldNode(comp, tt, curNode, oldNode, newNode, 0);
+                  }
+               else
+                  {
+                  newNode = oldNode->duplicateTree(false);
+                  replaceAndAnchorOldNode(comp, tt, curNode, oldNode, newNode, 0);
+                  _visitedNodes.reset(oldNode->getGlobalIndex());
+                  TR::Node *oldConstNode = multiplyLoopStride(newNode, vectorSize);
+                  _visitedNodes.reset(oldConstNode->getGlobalIndex());
+                  TR_HashId entryHash = entries->calculateHash(oldNode);
+                  entries->add(oldNode, entryHash, newNode);
+                  }
+               if (trace())
+                  traceMsg(comp, "Parent node n%dn [%p] was uncommoned to n%dn [%p]\n", oldNode->getGlobalIndex(), oldNode,
+                   newNode->getGlobalIndex(), newNode);
+               }
+            else
+               {
+               TR::Node *oldConstNode = multiplyLoopStride(curNode->getFirstChild(), vectorSize);
+               _visitedNodes.reset(oldConstNode->getGlobalIndex());
+               }
             }
          }
+         entries->clear();
       }
 
    ListIterator<TR::Block> blocksIt(&blocksInLoop);
@@ -2158,7 +2347,7 @@ void TR_SPMDKernelParallelizer::insertGPUEstimate(TR::Node *firstNode, TR::Block
    TR::ILOpCodes addressLoadOpCode = TR::lload;
 
    TR::Node *estimateGPUNode = TR::Node::create(firstNode, TR::icall, 7);
-   helper = comp()->getSymRefTab()->findOrCreateRuntimeHelper(TR_estimateGPU, false, false, false);
+   helper = comp()->getSymRefTab()->findOrCreateRuntimeHelper(TR_estimateGPU);
    helper->getSymbol()->castToMethodSymbol()->setLinkage(_helperLinkage);
    estimateGPUNode->setSymbolReference(helper);
 
@@ -2204,7 +2393,7 @@ void TR_SPMDKernelParallelizer::insertGPUParmsAllocate(TR::Node *firstNode, TR::
    TR::ILOpCodes addressLoadOpCode = TR::lload;
 
    TR::Node *allocateParmsNode = TR::Node::create(firstNode, addressCallOpCode, 2);
-   helper = comp()->getSymRefTab()->findOrCreateRuntimeHelper(TR_allocateGPUKernelParms, false, false, false);
+   helper = comp()->getSymRefTab()->findOrCreateRuntimeHelper(TR_allocateGPUKernelParms);
    helper->getSymbol()->castToMethodSymbol()->setLinkage(_helperLinkage);
    allocateParmsNode->setSymbolReference(helper);
 
@@ -2251,7 +2440,7 @@ void TR_SPMDKernelParallelizer::insertGPUInvalidateSequence(TR::Node *firstNode,
       if (hoistAccess) continue;
 
       invalidateGPUNode = TR::Node::create(firstNode, addressCallOpCode, 2);
-      helper = comp()->getSymRefTab()->findOrCreateRuntimeHelper(TR_invalidateGPU, false, false, false);
+      helper = comp()->getSymRefTab()->findOrCreateRuntimeHelper(TR_invalidateGPU);
       helper->getSymbol()->castToMethodSymbol()->setLinkage(_helperLinkage/*@*/);
       invalidateGPUNode->setSymbolReference(helper);
 
@@ -2274,7 +2463,7 @@ void TR_SPMDKernelParallelizer::insertGPUErrorHandler(TR::Node *firstNode, TR::B
    TR::CFG *cfg = comp()->getFlowGraph();
 
    TR::Node *getStateGPUNode = TR::Node::create(firstNode, TR::icall, 2);
-   helper = comp()->getSymRefTab()->findOrCreateRuntimeHelper(TR_getStateGPU, false, false, false);
+   helper = comp()->getSymRefTab()->findOrCreateRuntimeHelper(TR_getStateGPU);
    helper->getSymbol()->castToMethodSymbol()->setLinkage(_helperLinkage);
    getStateGPUNode->setSymbolReference(helper);
 
@@ -2346,7 +2535,7 @@ void TR_SPMDKernelParallelizer::insertGPUCopyFromSequence(TR::Node *firstNode, T
          }
 
       TR::Node *copyFromGPUNode = TR::Node::create(firstNode, TR::icall, 7);
-      helper = comp()->getSymRefTab()->findOrCreateRuntimeHelper(TR_copyFromGPU, false, false, false);
+      helper = comp()->getSymRefTab()->findOrCreateRuntimeHelper(TR_copyFromGPU);
       helper->getSymbol()->castToMethodSymbol()->setLinkage(_helperLinkage);
       copyFromGPUNode->setSymbolReference(helper);
 
@@ -2459,7 +2648,7 @@ void TR_SPMDKernelParallelizer::insertGPUCopyToSequence(TR::Node *firstNode, TR:
 
       TR::Node *copyToGPUNode = TR::Node::create(firstNode, addressCallOpCode, 10);
 
-      helper = comp()->getSymRefTab()->findOrCreateRuntimeHelper(TR_copyToGPU, false, false, false);
+      helper = comp()->getSymRefTab()->findOrCreateRuntimeHelper(TR_copyToGPU);
       helper->getSymbol()->castToMethodSymbol()->setLinkage(_helperLinkage);
       copyToGPUNode->setSymbolReference(helper);
 
@@ -2527,7 +2716,7 @@ void TR_SPMDKernelParallelizer::insertGPUKernelLaunch(TR::SymbolReference *alloc
    TR::SymbolReference *helper;
    TR::Node *launchGPUKernelNode = TR::Node::create(firstNode, TR::icall, 8);
 
-   helper = comp()->getSymRefTab()->findOrCreateRuntimeHelper(TR_launchGPUKernel, false, false, false);
+   helper = comp()->getSymRefTab()->findOrCreateRuntimeHelper(TR_launchGPUKernel);
    helper->getSymbol()->castToMethodSymbol()->setLinkage(_helperLinkage);
    launchGPUKernelNode->setSymbolReference(helper);
 
@@ -2574,7 +2763,7 @@ void TR_SPMDKernelParallelizer::insertGPURegionEntry(TR::Block * loopInvariantBl
 
    TR::Node* regionEntryGPUNode = TR::Node::create(insertionPoint->getNode(), addressCallOpCode, 5);
 
-   helper = comp()->getSymRefTab()->findOrCreateRuntimeHelper(TR_regionEntryGPU, false, false, false);
+   helper = comp()->getSymRefTab()->findOrCreateRuntimeHelper(TR_regionEntryGPU);
    helper->getSymbol()->castToMethodSymbol()->setLinkage(_helperLinkage/*@*/);
    regionEntryGPUNode->setSymbolReference(helper);
 
@@ -2627,7 +2816,7 @@ TR::Node* TR_SPMDKernelParallelizer::insertFlushGPU(TR::Block* flushGPUBlock, TR
    TR::TreeTop *insertionPoint = flushGPUBlock->getEntry();
 
    TR::Node* flushGPUNode = TR::Node::create(insertionPoint->getNode(), TR::icall, 2);
-   helper = comp()->getSymRefTab()->findOrCreateRuntimeHelper(TR_flushGPU, false, false, false);
+   helper = comp()->getSymRefTab()->findOrCreateRuntimeHelper(TR_flushGPU);
    helper->getSymbol()->castToMethodSymbol()->setLinkage(_helperLinkage/*@*/);
    flushGPUNode->setSymbolReference(helper);
 
@@ -2710,7 +2899,7 @@ void TR_SPMDKernelParallelizer::insertGPURegionExits(List<TR::Block>* exitBlocks
       TR::TreeTop *insertionPoint = exitBlock->getEntry();
 
       TR::Node* regionExitGPUNode = TR::Node::create(insertionPoint->getNode(), TR::icall, 4);
-      helper = comp()->getSymRefTab()->findOrCreateRuntimeHelper(TR_regionExitGPU, false, false, false);
+      helper = comp()->getSymRefTab()->findOrCreateRuntimeHelper(TR_regionExitGPU);
       helper->getSymbol()->castToMethodSymbol()->setLinkage(_helperLinkage/*@*/);
       regionExitGPUNode->setSymbolReference(helper);
 
@@ -2780,7 +2969,7 @@ void TR_SPMDKernelParallelizer::insertGPURegionExitInRegionExits(List<TR::Block>
       TR::TreeTop *insertionPoint = regionExitGPUBlock->getEntry();
 
       TR::Node* regionExitGPUNode = TR::Node::create(insertionPoint->getNode(), TR::icall, 4);
-      helper = comp()->getSymRefTab()->findOrCreateRuntimeHelper(TR_regionExitGPU, false, false, false);
+      helper = comp()->getSymRefTab()->findOrCreateRuntimeHelper(TR_regionExitGPU);
       helper->getSymbol()->castToMethodSymbol()->setLinkage(_helperLinkage/*@*/);
       regionExitGPUNode->setSymbolReference(helper);
 
@@ -3506,7 +3695,7 @@ bool TR_SPMDKernelParallelizer::visitCPUNode(TR::Node *node, int32_t visitCount,
 
       if (method)
          {
-         if (trace()) 
+         if (trace())
             traceMsg(comp(), "inside IntPipeline%s.forEach\n",
                method->getRecognizedMethod() == TR::java_util_stream_IntPipelineHead_forEach ? "$Head" : "");
 
@@ -3527,7 +3716,7 @@ bool TR_SPMDKernelParallelizer::visitCPUNode(TR::Node *node, int32_t visitCount,
 
          TR::Method * method = node->getSymbolReference()->getSymbol()->castToMethodSymbol()->getMethod();
          const char * signature = method->signature(comp()->trMemory(), stackAlloc);
-         
+
          if (trace())
             traceMsg(comp(), "signature: %s\n", signature ? signature : "NULL");
 
@@ -4002,6 +4191,9 @@ int TR_SPMDKernelParallelizer::symbolicEvaluateTree(TR::Node *node)
       case TR::isub:
       case TR::lsub:
          return (c1-c2);
+
+      default:
+         break;
       }
 
    return 0;
@@ -4014,9 +4206,9 @@ TR::Node* TR_SPMDKernelParallelizer::findSingleLoopVariant(TR::Node *node, TR_Re
    if (node->getNumChildren() >= 1) node1 = findSingleLoopVariant(node->getFirstChild(), loop, sign, constantsOnly);
    if (node->getNumChildren() == 2)
       {
-      *sign = (*sign)^(node->getOpCode().isSub());
+      *sign = (*sign)^(node->getOpCode().isSub() ? 1 : 0);
       node2 = findSingleLoopVariant(node->getSecondChild(), loop, sign, constantsOnly);
-      if (node2 == NULL && node1 == NULL) *sign = (*sign)^(node->getOpCode().isSub());
+      if (node2 == NULL && node1 == NULL) *sign = (*sign)^(node->getOpCode().isSub() ? 1 : 0);
       }
 
    if (*constantsOnly == 1 || (node->getNumChildren() == 0 && node->getOpCodeValue() != TR::lconst && node->getOpCodeValue() != TR::iconst && loop->isExprInvariant(node)))
@@ -4127,7 +4319,7 @@ bool TR_SPMDKernelParallelizer::checkIndependence(TR_RegionStructure *loop, TR_U
             {
             if (trace())
                traceMsg(comp, "SPMD DEPENDENCE ANALYSIS: Testing (def %p, def %p) for dependence\n", defs[dc], defs[dc2]);
-            
+
             if (!loop->isExprInvariant(defs[dc]->getFirstChild()) &&
                 !loop->isExprInvariant(defs[dc2]->getFirstChild()) &&
                 areNodesEquivalent(comp,defs[dc]->getFirstChild(), defs[dc2]->getFirstChild()))
@@ -4145,7 +4337,7 @@ bool TR_SPMDKernelParallelizer::checkIndependence(TR_RegionStructure *loop, TR_U
                traceMsg(comp, "SPMD DEPENDENCE ANALYSIS: def %p and def %p are dependent\n", defs[dc], defs[dc2]);
                traceMsg(comp, "SPMD DEPENDENCE ANALYSIS: will not vectorize\n");
                }
-            
+
             return false;
             }
          }
@@ -4190,7 +4382,18 @@ bool TR_SPMDKernelParallelizer::checkIndependence(TR_RegionStructure *loop, TR_U
       for (cursor.SetToFirstOne(); cursor.Valid(); cursor.SetToNextOne())
          {
          int32_t defIndex = (int32_t) cursor ;
-         defsOfDefsInLoop[useDefInfo->getNode(defIndex)->getGlobalIndex()]=true;
+         TR::Node *useDefNode = useDefInfo->getNode(defIndex);
+
+         if (!useDefNode)
+            {
+            if (trace())
+               {
+               traceMsg(comp, "Def #%d (from method entry) reaches a use inside loop %d\n", defIndex, loop->getNumber());
+               }
+            return false;
+            }
+
+         defsOfDefsInLoop[useDefNode->getGlobalIndex()]=true;
          }
 
       }

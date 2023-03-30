@@ -1,6 +1,6 @@
-/*[INCLUDE-IF Sidecar17]*/
+/*[INCLUDE-IF Sidecar17 & !OPENJDK_METHODHANDLES]*/
 /*******************************************************************************
- * Copyright (c) 2009, 2019 IBM Corp. and others
+ * Copyright (c) 2009, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -24,6 +24,8 @@ package java.lang.invoke;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
+
+import static java.lang.invoke.MethodHandleResolver.UNSAFE;
 
 /*
  * MethodHandle subclass that is able to set the value of
@@ -57,42 +59,47 @@ final class FieldSetterHandle extends FieldHandle {
 	// {{{ JIT support
 	@FrameIteratorSkip
 	private final void invokeExact_thunkArchetype_V(Object receiver, int    newValue, int argPlaceholder) {
-		if (isVolatile)
+		if (isVolatile) {
 			UNSAFE.putIntVolatile(receiver, vmSlot + HEADER_SIZE, newValue);
-		else
-			UNSAFE.putInt        (receiver, vmSlot + HEADER_SIZE, newValue);
+		} else {
+			UNSAFE.putInt(receiver, vmSlot + HEADER_SIZE, newValue);
+		}
 	}
 	
 	@FrameIteratorSkip
 	private final void invokeExact_thunkArchetype_V(Object receiver, long   newValue, int argPlaceholder) {
-		if (isVolatile)
+		if (isVolatile) {
 			UNSAFE.putLongVolatile(receiver, vmSlot + HEADER_SIZE, newValue);
-		else
-			UNSAFE.putLong        (receiver, vmSlot + HEADER_SIZE, newValue);
+		} else {
+			UNSAFE.putLong(receiver, vmSlot + HEADER_SIZE, newValue);
+		}
 	}
 
 	@FrameIteratorSkip
 	private final void invokeExact_thunkArchetype_V(Object receiver, float  newValue, int argPlaceholder) {
-		if (isVolatile)
+		if (isVolatile) {
 			UNSAFE.putFloatVolatile(receiver, vmSlot + HEADER_SIZE, newValue);
-		else
-			UNSAFE.putFloat        (receiver, vmSlot + HEADER_SIZE, newValue);
+		} else {
+			UNSAFE.putFloat(receiver, vmSlot + HEADER_SIZE, newValue);
+		}
 	}
 
 	@FrameIteratorSkip
 	private final void invokeExact_thunkArchetype_V(Object receiver, double newValue, int argPlaceholder) {
-		if (isVolatile)
+		if (isVolatile) {
 			UNSAFE.putDoubleVolatile(receiver, vmSlot + HEADER_SIZE, newValue);
-		else
-			UNSAFE.putDouble        (receiver, vmSlot + HEADER_SIZE, newValue);
+		} else {
+			UNSAFE.putDouble(receiver, vmSlot + HEADER_SIZE, newValue);
+		}
 	}
 
 	@FrameIteratorSkip
 	private final void invokeExact_thunkArchetype_V(Object receiver, Object newValue, int argPlaceholder) {
-		if (isVolatile)
+		if (isVolatile) {
 			UNSAFE.putObjectVolatile(receiver, vmSlot + HEADER_SIZE, newValue);
-		else
-			UNSAFE.putObject        (receiver, vmSlot + HEADER_SIZE, newValue);
+		} else {
+			UNSAFE.putObject(receiver, vmSlot + HEADER_SIZE, newValue);
+		}
 	}
 
 	private static final ThunkTable _thunkTable = new ThunkTable();

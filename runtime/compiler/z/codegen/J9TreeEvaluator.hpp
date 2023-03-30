@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -36,6 +36,7 @@ namespace J9 { typedef J9::Z::TreeEvaluator TreeEvaluatorConnector; }
 
 #include "codegen/Snippet.hpp"
 #include "compiler/codegen/J9TreeEvaluator.hpp"  // include parent
+#include "il/MethodSymbol.hpp"
 
 #define INSN_HEAP cg->trHeapMemory()
 
@@ -48,6 +49,156 @@ namespace Z
 class OMR_EXTENSIBLE TreeEvaluator: public J9::TreeEvaluator
    {
    public:
+
+   static void inlineEncodeASCII(TR::Node *node, TR::CodeGenerator *cg);
+
+   /** \brief
+    *     Evaluates a sequence of instructions which generate the current time in terms of 1/2048 of micro-seconds.
+    *
+    *  \param cg
+    *     The code generator used to generate the instructions.
+    *
+    *  \param node
+    *     The node with which to associate the generated instructions with.
+    *
+    *  \return
+    *     A register (or register pair for 31-bit) containing the current time in terms of 1/2048 of micro-seconds.
+    */
+   static TR::Register *inlineCurrentTimeMaxPrecision(TR::CodeGenerator *cg, TR::Node *node);
+   /**
+    * generate a single precision sqrt instruction
+    */
+   static TR::Register *inlineSinglePrecisionSQRT(TR::Node *node, TR::CodeGenerator *cg);
+   /*
+    * Inline Java's (Java 11 onwards) StringLatin1.inflate([BI[CII)V
+    */
+   static TR::Register *inlineStringLatin1Inflate(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *VMinlineCompareAndSwap( TR::Node *node, TR::CodeGenerator *cg, TR::InstOpCode::Mnemonic casOp, bool isObj);
+   static TR::Register *inlineAtomicOps(TR::Node *node, TR::CodeGenerator *cg, int8_t size, TR::MethodSymbol *method, bool isArray = false);
+   static TR::Register *inlineAtomicFieldUpdater(TR::Node *node, TR::CodeGenerator *cg, TR::MethodSymbol *method);
+   static TR::Register *inlineKeepAlive(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *inlineConcurrentLinkedQueueTMOffer(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *inlineConcurrentLinkedQueueTMPoll(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *toUpperIntrinsic(TR::Node *node, TR::CodeGenerator *cg, bool isCompressedString);
+   static TR::Register *toLowerIntrinsic(TR::Node *node, TR::CodeGenerator *cg, bool isCompressedString);
+
+   /**
+    * \brief
+    *
+    * Use vector instructions to find the index of a sub-string inside
+    * a string assuming both strings have the same element size. Each element
+    * is 1-byte for compact strings and 2-bytes for non-compressed strings.
+    *
+    * \details
+    *
+    * The vector sequence searches for the first character of the sub-string
+    * inside the source/main string. If the first character is located, it'll
+    * perform iterative vector binary compares to match the rest of the sub-string
+    * starting from the first character position.
+    *
+    * This evaluator inlines the following Java intrinsic methods:
+    *
+    * <verbatim>
+    * For Java 9 and above:
+    *
+    * StringLatin1.indexOf(s1Value, s1Length, s2Value, s2Length, fromIndex);
+    * StringUTF16.indexOf(s1Value, s1Length, s2Value, s2Length, fromIndex);
+    *
+    * For Java 8:
+    * com.ibm.jit.JITHelpers.intrinsicIndexOfStringLatin1(Object s1Value, int s1len, Object s2Value, int s2len, int start);
+    * com.ibm.jit.JITHelpers.intrinsicIndexOfStringUTF16(Object s1Value, int s1len, Object s2Value, int s2len, int start);
+    *
+    * Assumptions:
+    *
+    * -# 0 <= fromIndex < s1Length
+    * -# s1Length could be anything: positive, negative or 0.
+    * -# s2Length > 0
+    * -# s1Value and s2Value are non-null arrays and are interpreted as byte arrays.
+    * -# s1Length and s2Length are not related. i.e. s1Length could be smallers than s2Length.
+    *
+    * <\verbatim>
+    *
+    * \param node the intrinsic function call node
+    * \param cg the code generator
+    * \param isUTF16 true if the string is a decompressed string.
+    *
+    * \return a register for that contains the indexOf() result.
+    */
+   static TR::Register *inlineVectorizedStringIndexOf(TR::Node *node, TR::CodeGenerator *cg, bool isCompressed);
+   static TR::Register *inlineIntrinsicIndexOf(TR::Node *node, TR::CodeGenerator *cg, bool isLatin1);
+   static TR::Register *inlineDoubleMax(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *inlineDoubleMin(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *inlineMathFma(TR::Node *node, TR::CodeGenerator *cg);
+
+   /* This Evaluator generates the SIMD routine for methods
+    * java/lang/String.hashCodeImplCompressed and
+    * java/lang/String.hashCodeImplDecompressed depending on the "isCompressed"
+    * parameter passed to it.
+    */
+   static TR::Register *inlineStringHashCode(TR::Node *node, TR::CodeGenerator *cg, bool isCompressed);
+   static TR::Register *inlineUTF16BEEncodeSIMD(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register* inlineUTF16BEEncode    (TR::Node *node, TR::CodeGenerator *cg);
+
+   static TR::Register *zdloadEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *zdloadiEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *zdstoreEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *zdstoreiEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *zdsleLoadEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *zdslsLoadEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *zdstsLoadEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *zdsleLoadiEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *zdslsLoadiEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *zdstsLoadiEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *zdsleStoreEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *zdslsStoreEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *zdstsStoreEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *zdsleStoreiEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *zdslsStoreiEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *zdstsStoreiEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *zd2zdsleEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *zd2zdstsEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *zdsle2pdEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *zdsts2pdEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *zdsts2zdEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *pd2zdslsSetSignEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *pd2zdstsEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *pd2zdstsSetSignEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *udLoadEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *udslLoadEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *udstLoadEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *udLoadiEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *udslLoadiEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *udstLoadiEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *udStoreEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *udslStoreEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *udstStoreEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *udStoreiEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *udslStoreiEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *udstStoreiEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *pd2udstEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *udsl2udEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *udst2udEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *udst2pdEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *pdloadiEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *pdstoreiEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *pddivEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *pdremEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *pdabsEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *pdshrSetSignEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *pdshlSetSignEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *pdshlOverflowEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *pd2iOverflowEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *pd2iuEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *iu2pdEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *pd2lOverflowEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *pd2luEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *lu2pdEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *pd2fEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *pd2dEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *f2pdEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *d2pdEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *pdcleanEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *pdclearSetSignEvaluator(TR::Node *node, TR::CodeGenerator *cg);
 
    static TR::Register *monentEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *monexitEvaluator(TR::Node *node, TR::CodeGenerator *cg);
@@ -159,15 +310,14 @@ class OMR_EXTENSIBLE TreeEvaluator: public J9::TreeEvaluator
       setSign       // force positive or negative
       };
 
-   static TR::Register *df2zdEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *zd2ddEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *zdsls2zdEvaluator(TR::Node * node, TR::CodeGenerator * cg);
    static TR::Register *zd2zdslsEvaluator(TR::Node * node, TR::CodeGenerator * cg);
    static TR::Register *pd2zdslsEvaluator(TR::Node * node, TR::CodeGenerator * cg);
    static TR::Register *zdsls2pdEvaluator(TR::Node * node, TR::CodeGenerator * cg);
    static void zonedToZonedSeparateSignHelper(TR::Node *node, TR_PseudoRegister *srcReg, TR_PseudoRegister *targetReg, TR::MemoryReference *sourceMR, TR::MemoryReference *destMR, TR::CodeGenerator * cg);
    static TR::MemoryReference *packedToZonedHelper(TR::Node *node, TR_PseudoRegister *targetReg, TR::MemoryReference *sourceMR, TR_PseudoRegister *childReg, TR::CodeGenerator * cg);
-   static void pd2zdSignFixup(TR::Node *node, TR::MemoryReference *destMR, TR::CodeGenerator * cg);
+   static void pd2zdSignFixup(TR::Node *node, TR::MemoryReference *destMR, TR::CodeGenerator * cg, bool useLeftAlignedMR);
+   static TR::Register *zdstoreiVectorEvaluatorHelper(TR::Node *node, TR::CodeGenerator *cg);
 
    static void zonedSeparateSignToPackedOrZonedHelper(TR::Node *node, TR_PseudoRegister *targetReg, TR::MemoryReference *sourceMR, TR::MemoryReference *destMR, TR::CodeGenerator * cg);
    static TR::Register *zdsle2zdEvaluator(TR::Node *node, TR::CodeGenerator *cg);
@@ -204,8 +354,6 @@ class OMR_EXTENSIBLE TreeEvaluator: public J9::TreeEvaluator
                                             bool isUseVector,
                                             bool isVariableParam);
 
-   static TR::Register *df2pdEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *pd2ddEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *pd2iEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *pd2lEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *i2pdEvaluator(TR::Node *node, TR::CodeGenerator *cg);
@@ -328,78 +476,6 @@ class OMR_EXTENSIBLE TreeEvaluator: public J9::TreeEvaluator
    static TR::Register *pdSetSignEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    /*           END BCD Evaluators          */
 
-
-   /*           START DFP evaluators          */
-   static TR::Register *deconstEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *deloadEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *destoreEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *deRegLoadEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *deRegStoreEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *df2fEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *f2dfEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *i2ddEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *l2ddEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *lu2ddEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *dd2lEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *dd2luEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *df2ddEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *df2deEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *dd2dfEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *dd2deEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *de2ddEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *de2dxHelperAndSetRegister(TR::Register *targetReg, TR::Register *srcReg, TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *dfaddEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *ddaddEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *deaddEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *dfsubEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *ddsubEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *desubEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *dfmulEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *ddmulEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *demulEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *dfdivEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *ifddcmpeqEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *ifddcmpneEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *ifddcmpltEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *ifddcmpgeEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *ifddcmpgtEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *ifddcmpleEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *ifddcmpequEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *ifddcmpneuEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *ifddcmpltuEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *ifddcmpgeuEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *ifddcmpgtuEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *ifddcmpleuEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *ddcmpeqEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *ddcmpneEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *ddcmpltEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *ddcmpgeEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *ddcmpgtEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *ddcmpleEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *ddcmpequEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *ddcmpneuEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *ddcmpltuEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *ddcmpgeuEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *ddcmpgtuEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *ddcmpleuEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *ddnegEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-
-   static TR::Register *ddInsExpEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *dffloorEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *ddfloorEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *defloorEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *ddshlEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *ddshrEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *ddshrRoundedEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *ddSetNegativeEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *ddModifyPrecisionEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *ddcleanEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *decleanEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *dd2iEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   static TR::Register *de2iEvaluator(TR::Node *node, TR::CodeGenerator *cg);
-   /*           END DFP evaluators          */
-
-
    static TR::Register *countDigitsEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    static void          countDigitsHelper(TR::Node * node, TR::CodeGenerator * cg,
                                           int32_t memRefIndex, TR::MemoryReference * memRef,
@@ -478,6 +554,10 @@ class OMR_EXTENSIBLE TreeEvaluator: public J9::TreeEvaluator
    static TR::Register *dwrtbariEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *awrtbarEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *awrtbariEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+
+   static TR::Register *inlineIntegerStringSize(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *inlineIntegerToCharsForLatin1Strings(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *inlineIntegerToCharsForUTF16Strings(TR::Node *node, TR::CodeGenerator *cg);
    };
 }
 

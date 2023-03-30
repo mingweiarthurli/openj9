@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2014 IBM Corp. and others
+ * Copyright (c) 2001, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -105,7 +105,7 @@ public class J9DDRStructureStore {
 	 * @param structureFileName - Full path to a structure file
 	 * @param inService - True if the structure is for an in-service (non-DDR enabled VM), false otherwise
 	 * @throws StructureMismatchError - If key exists in the database but refers to a blob that is NOT identical to blob.
-	 * @throws IOException - If there is a problem storing the the blob
+	 * @throws IOException - If there is a problem storing the blob
 	 * @throws  
 	 */
 	public void add(StructureKey key, String structureFileName, boolean inService) throws IOException, StructureMismatchError 
@@ -536,16 +536,4 @@ public class J9DDRStructureStore {
 		return this.supersetFilename;
 	}
 
-	@Deprecated
-	public void close() throws IOException {
-//		if (zipOutputStream != null) {
-//			zipOutputStream.close();
-//			zipOutputStream = null;
-//		}
-		
-//		if (zipFile != null) {
-//			zipFile.close();
-//			zipFile = null;
-//		}
-	}
 }

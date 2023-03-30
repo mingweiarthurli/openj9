@@ -1,6 +1,6 @@
-/*[INCLUDE-IF Sidecar18-SE]*/
+/*[INCLUDE-IF JAVA_SPEC_VERSION >= 8]*/
 /*******************************************************************************
- * Copyright (c) 2011, 2020 IBM Corp. and others
+ * Copyright (c) 2011, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -34,11 +34,13 @@ import java.io.File;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.util.Iterator;
+import java.util.Properties;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-import com.ibm.dtfj.image.DataUnavailable;
 import com.ibm.dtfj.image.CorruptData;
+import com.ibm.dtfj.image.CorruptDataException;
+import com.ibm.dtfj.image.DataUnavailable;
 import com.ibm.dtfj.image.Image;
 import com.ibm.dtfj.image.ImageAddressSpace;
 import com.ibm.dtfj.image.ImageFactory;
@@ -57,17 +59,18 @@ import com.ibm.jvm.dtfjview.spi.ISession;
 public class OpenCommand extends BaseJdmpviewCommand {
 	private static final String CMD_NAME = "open";
 	private static final String defaultFactoryName = "com.ibm.dtfj.image.j9.ImageFactory";
-	
+
 	private String factoryName = System.getProperty(SYSPROP_FACTORY, defaultFactoryName);
-	private int apiLevelMajor = 0;					//DTFJ API level from the ImageAddressFactory
+	private int apiLevelMajor = 0; // DTFJ API level from the ImageAddressFactory
 	private int apiLevelMinor = 0;
-	private ImageFactory factory = null;
-	
-	{
-		addCommand(CMD_NAME, "[path to core or zip]","opens the specified core or zip file");
+	private ImageFactory factory;
+
+	public OpenCommand() {
+		addCommand(CMD_NAME, "[path to core or zip]", "opens the specified core or zip file");
 		factory = getFactory();
 	}
-	
+
+	@Override
 	public void run(String command, String[] args, IContext context, PrintStream out) throws CommandException {
 		if (initCommand(command, args, context, out)) {
 			return; // processing already handled by super class
@@ -95,15 +98,15 @@ public class OpenCommand extends BaseJdmpviewCommand {
 
 		out.println(Version.getAllVersionInfo(factory));
 		out.println("Loading image from DTFJ...\n");
-		
+
 		try {
 			if (ctx.hasPropertyBeenSet(VERBOSE_MODE_PROPERTY)) {
 				// If we are using DDR this will enable warnings.
 				// (If not it's irrelevant.)
 				Logger.getLogger("j9ddr.view.dtfj").setLevel(Level.WARNING);
 			}
-			//at this point the existence of either -core or -zip has been checked
-			long current = System.currentTimeMillis();
+			// at this point the existence of either -core or -zip has been checked
+			final long current = System.nanoTime();
 			File file1 = new File(args[0]);
 			Image[] images = new Image[1]; // default to a single image
 			if (args.length == 1) {
@@ -116,7 +119,8 @@ public class OpenCommand extends BaseJdmpviewCommand {
 				File file2 = new File(args[1]);
 				images[0] = factory.getImage(file1, file2);
 			}
-			logger.fine(String.format("Time taken to load image %d ms", System.currentTimeMillis() - current));
+			final long duration = System.nanoTime() - current;
+			logger.fine(String.format("Time taken to load image %d ns", duration));
 			for (Image image : images) {
 				createContexts(image, args[0]);
 			}
@@ -151,8 +155,7 @@ public class OpenCommand extends BaseJdmpviewCommand {
 		}
 		return factory;
 	}
-	
-	
+
 	private void createContexts(Image loadedImage, String coreFilePath) {
 		if (loadedImage == null) {
 			// cannot create any contexts as an image has not been obtained
@@ -210,18 +213,30 @@ public class OpenCommand extends BaseJdmpviewCommand {
 				}
 			}
 		}
+
 		if (!hasContexts) {
 			if (ctx.hasPropertyBeenSet(VERBOSE_MODE_PROPERTY)) {
 				out.println("Warning: no contexts were found, is this a valid core file?");
 			}
+		} else if (loadedImage.isTruncated()) {
+			out.println("Warning: dump file is truncated. Extracted information may be incomplete.");
+			out.println();
 		} else {
-			if (loadedImage.isTruncated()) {
-				out.println("Warning: dump file is truncated. Extracted information may be incomplete.");
-				out.println();
+			// check compatibility of this VM with the VM that created the core file
+			String thisVmName = System.getProperty("java.vm.name");
+			String coreVmName = ctx.getProperties().getProperty("java.vm.name");
+
+			if (thisVmName == null || coreVmName == null || !thisVmName.equals(coreVmName)) {
+				out.format("Warning: dump file was produced by a different, possibly incompatible, VM.%n" //$NON-NLS-1$
+						+ "  core file: %s%n" //$NON-NLS-1$
+						+ "  this VM:   %s%n" //$NON-NLS-1$
+						+ "%n", //$NON-NLS-1$
+						coreVmName == null ? "(unknown)" : coreVmName, //$NON-NLS-1$
+						thisVmName == null ? "(unknown)" : thisVmName); //$NON-NLS-1$
 			}
 		}
 	}
-	
+
 	private void createCombinedContext(final Image loadedImage, final int major, final int minor, final ImageAddressSpace space, final ImageProcess proc, final JavaRuntime rt, String coreFilePath) {
 		// take the DTFJ context and attempt to combine it with a DDR interactive one
 		Object obj = ctx.getProperties().get(SessionProperties.SESSION_PROPERTY);
@@ -241,7 +256,21 @@ public class OpenCommand extends BaseJdmpviewCommand {
 		if (ctx.hasPropertyBeenSet(VERBOSE_MODE_PROPERTY)) {
 			cc.getProperties().put(VERBOSE_MODE_PROPERTY, "true");
 		}
-		
+
+		if (rt != null && cc.isDDRAvailable()) {
+			// attempt to retrieve the system property "java.vm.name"
+			// from the VM that produced the core file
+			try {
+				String vmName = rt.getSystemProperty("java.vm.name");
+
+				if (vmName != null) {
+					ctx.getProperties().put("java.vm.name", vmName);
+				}
+			} catch (CorruptDataException | DataUnavailable e) {
+				// ignore
+			}
+		}
+
 		try {
 			boolean hasLibError = true; // flag to indicate if native libs are required but not present
 			String os = cc.getImage().getSystemType().toLowerCase();

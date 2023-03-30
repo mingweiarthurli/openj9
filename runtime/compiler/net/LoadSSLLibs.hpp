@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2019, 2019 IBM Corp. and others
+ * Copyright (c) 2019, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -24,6 +24,7 @@
 
 #include <stdint.h>
 #include <openssl/ssl.h>
+#include <openssl/evp.h>
 
 typedef const char * OOpenSSL_version_t(int);
 
@@ -64,6 +65,7 @@ typedef int OSSL_accept_t(SSL *ssl);
 typedef int OSSL_connect_t(SSL *ssl);
 typedef X509 * OSSL_get_peer_certificate_t(const SSL *ssl);
 typedef long OSSL_get_verify_result_t(const SSL *ssl);
+typedef int OSSL_get_error_t(const SSL *ssl, int ret);
 
 typedef SSL_CTX * OSSL_CTX_new_t(const SSL_METHOD *method);
 typedef int OSSL_CTX_set_session_id_context_t(SSL_CTX *ctx, const unsigned char *sid_ctx, unsigned int sid_ctx_len);
@@ -79,6 +81,10 @@ typedef void OBIO_free_all_t(BIO *a);
 typedef BIO * OBIO_new_ssl_t(SSL_CTX *ctx, int client);
 typedef int OBIO_write_t(BIO *b, const void *data, int dlen);
 typedef int OBIO_read_t(BIO *b, void *data, int dlen);
+typedef int OBIO_test_flags_t(const BIO *b, int flags);
+typedef int OBIO_should_retry_t(BIO *b);
+typedef int OBIO_should_read_t(BIO *b);
+typedef int OBIO_should_write_t(BIO *b);
 
 typedef EVP_PKEY * OPEM_read_bio_PrivateKey_t(BIO *bp, EVP_PKEY **x, pem_password_cb *cb, void *u);
 typedef X509 * OPEM_read_bio_X509_t(BIO *bp, X509 **x, pem_password_cb *cb, void *u);
@@ -87,6 +93,13 @@ typedef STACK_OF(X509_INFO) *OPEM_X509_INFO_read_bio_t(BIO *bp, STACK_OF(X509_IN
 typedef int OX509_STORE_add_cert_t(X509_STORE *ctx, X509 *x);
 typedef int OX509_STORE_add_crl_t(X509_STORE *ctx, X509_CRL *x);
 typedef void OX509_free_t(X509 *a);
+
+typedef EVP_MD_CTX * OEVP_MD_CTX_new_t(void);
+typedef void OEVP_MD_CTX_free_t(EVP_MD_CTX *ctx);
+typedef int OEVP_DigestInit_ex_t(EVP_MD_CTX *ctx, const EVP_MD *type, ENGINE *impl);
+typedef int OEVP_DigestUpdate_t(EVP_MD_CTX *ctx, const void *d, size_t cnt);
+typedef int OEVP_DigestFinal_ex_t(EVP_MD_CTX *ctx, unsigned char *md, unsigned int *s);
+typedef const EVP_MD * OEVP_sha256_t(void);
 
 typedef void OERR_print_errors_fp_t(FILE *fp);
 
@@ -121,6 +134,7 @@ extern "C" OSSL_accept_t * OSSL_accept;
 extern "C" OSSL_connect_t * OSSL_connect;
 extern "C" OSSL_get_peer_certificate_t * OSSL_get_peer_certificate;
 extern "C" OSSL_get_verify_result_t * OSSL_get_verify_result;
+extern "C" OSSL_get_error_t * OSSL_get_error;
 
 extern "C" OSSLv23_server_method_t * OSSLv23_server_method;
 extern "C" OSSLv23_client_method_t * OSSLv23_client_method;
@@ -139,6 +153,10 @@ extern "C" OBIO_free_all_t * OBIO_free_all;
 extern "C" OBIO_new_ssl_t * OBIO_new_ssl;
 extern "C" OBIO_write_t * OBIO_write;
 extern "C" OBIO_read_t * OBIO_read;
+extern "C" OBIO_test_flags_t * OBIO_test_flags;
+extern "C" OBIO_should_retry_t * OBIO_should_retry;
+extern "C" OBIO_should_read_t * OBIO_should_read;
+extern "C" OBIO_should_write_t * OBIO_should_write;
 
 extern "C" OPEM_read_bio_PrivateKey_t * OPEM_read_bio_PrivateKey;
 extern "C" OPEM_read_bio_X509_t * OPEM_read_bio_X509;
@@ -148,7 +166,12 @@ extern "C" OX509_STORE_add_cert_t * OX509_STORE_add_cert;
 extern "C" OX509_STORE_add_crl_t * OX509_STORE_add_crl;
 extern "C" OX509_free_t * OX509_free;
 
-extern "C" OEVP_cleanup_t * OEVP_cleanup;
+extern "C" OEVP_MD_CTX_new_t * OEVP_MD_CTX_new;
+extern "C" OEVP_MD_CTX_free_t * OEVP_MD_CTX_free;
+extern "C" OEVP_DigestInit_ex_t * OEVP_DigestInit_ex;
+extern "C" OEVP_DigestUpdate_t * OEVP_DigestUpdate;
+extern "C" OEVP_DigestFinal_ex_t * OEVP_DigestFinal_ex;
+extern "C" OEVP_sha256_t * OEVP_sha256;
 
 extern "C" OERR_print_errors_fp_t * OERR_print_errors_fp;
 

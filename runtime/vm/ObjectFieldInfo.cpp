@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2015, 2019 IBM Corp. and others
+ * Copyright (c) 2015, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -49,17 +49,37 @@ ObjectFieldInfo::countInstanceFields(void)
 				J9UTF8 *fieldSig = J9ROMFIELDSHAPE_SIGNATURE(field);
 				U_8 *fieldSigBytes = J9UTF8_DATA(J9ROMFIELDSHAPE_SIGNATURE(field));
 				if ('Q' == *fieldSigBytes) {
-					J9Class *fieldClass = NULL;
-					fieldClass = findJ9ClassInFlattenedClassCache(_flattenedClassCache, fieldSigBytes + 1, J9UTF8_LENGTH(fieldSig) - 2);
-					if (J9_ARE_NO_BITS_SET(fieldClass->classFlags, J9ClassIsFlattened)) {
+					J9Class *fieldClass = findJ9ClassInFlattenedClassCache(_flattenedClassCache, fieldSigBytes + 1, J9UTF8_LENGTH(fieldSig) - 2);
+					U_32 size = (U_32)fieldClass->totalInstanceSize;
+					if (!J9_IS_FIELD_FLATTENED(fieldClass, field)) {
 						_instanceObjectCount += 1;
 						_totalObjectCount += 1;
-					} else if (J9_ARE_ALL_BITS_SET(fieldClass->classFlags, J9ClassLargestAlignmentConstraintDouble)) {
-						_totalFlatFieldDoubleBytes += (U_32) ROUND_UP_TO_POWEROF2(fieldClass->totalInstanceSize - fieldClass->backfillOffset, sizeof(U_64));
-					} else if (J9_ARE_ALL_BITS_SET(fieldClass->classFlags, J9ClassLargestAlignmentConstraintReference)) {
-						_totalFlatFieldRefBytes += (U_32) ROUND_UP_TO_POWEROF2(fieldClass->totalInstanceSize - fieldClass->backfillOffset, _referenceSize);
 					} else {
-						_totalFlatFieldSingleBytes += (U_32) (fieldClass->totalInstanceSize - fieldClass->backfillOffset);
+						bool forceDoubleAlignment = false;
+						if (sizeof(U_32) == _referenceSize) {
+							/* Flattened volatile valueType that is 8 bytes should be put at 8-byte aligned address. Currently flattening is disabled
+							 * for such valueType > 8 bytes.
+							 */
+							forceDoubleAlignment = (J9_ARE_ALL_BITS_SET(field->modifiers, J9AccVolatile) && (sizeof(U_64) == J9CLASS_UNPADDED_INSTANCE_SIZE(fieldClass)));
+						} else {
+							/* copyObjectFields() uses U_64 load/store. Put all nested fields at 8-byte aligned address. */
+							forceDoubleAlignment = true;
+						}
+						if (forceDoubleAlignment
+							|| J9_ARE_ALL_BITS_SET(fieldClass->classFlags, J9ClassLargestAlignmentConstraintDouble)
+						) {
+							if (J9CLASS_HAS_4BYTE_PREPADDING(fieldClass)) {
+								size -= sizeof(U_32);
+							}
+							_totalFlatFieldDoubleBytes += (U_32) ROUND_UP_TO_POWEROF2(size, sizeof(U_64));
+						} else if (J9_ARE_ALL_BITS_SET(fieldClass->classFlags, J9ClassLargestAlignmentConstraintReference)) {
+							size = (U_32) ROUND_UP_TO_POWEROF2(size, (UDATA)_referenceSize);
+							_totalFlatFieldRefBytes += size;
+							setPotentialFlatObjectInstanceBackfill(size);
+						} else {
+							_totalFlatFieldSingleBytes += size;
+							setPotentialFlatSingleInstanceBackfill(size);
+						}
 					}
 				} else
 #endif /* J9VM_OPT_VALHALLA_VALUE_TYPES */
@@ -162,12 +182,31 @@ ObjectFieldInfo::calculateTotalFieldsSizeAndBackfill()
 #ifdef J9VM_OPT_VALHALLA_VALUE_TYPES
 		} else {
 			/* If the first field does not start at zero, this means we added padding to satisfy
-			 * alignment requirements of double slot fields. Since values cannot be subclassed we can use
-			 * the _subclassBackfillOffset to denote where the first field actually starts.
+			 * alignment requirements of double slot fields. We will use the J9ClassHasPrePadding flag
+			 * to denote this.
 			 */
 			U_32 firstFieldOffset = calculateFieldDataStart();
-			accumulator += firstFieldOffset;
-			_subclassBackfillOffset = firstFieldOffset;
+			if (0 < firstFieldOffset) {
+				if (isBackfillSuitableFieldAvailable()) {
+					/*
+					 * If the class is a valuetype and it has at least one single or object aligned field, instead of pre-padding
+					 * the field with the smaller alignment constraint will be placed first.
+					 */
+					_myBackfillOffset = 0;
+
+					/*
+					 * Backfill may not be end-aligned, ie 8, 16, 24btye types since  backfill begins on a (4 == offset %8) boundary.
+					 * In these cases the types are post-padded so doubles can start on a 8byte boundary.
+					 */
+					if (isBackFillPostPadded()) {
+						accumulator += BACKFILL_SIZE;
+					}
+				} else {
+					/* Add pre-padding, firstFieldOffset can only be 4bytes here */
+					accumulator += firstFieldOffset;
+					setClassRequiresPrePadding();
+				}
+			}
 		}
 #endif /* J9VM_OPT_VALHALLA_VALUE_TYPES */
 	}

@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2017, 2020 IBM Corp. and others
+# Copyright (c) 2017, 2022 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,29 +15,82 @@
 # OpenJDK Assembly Exception [2].
 #
 # [1] https://www.gnu.org/software/classpath/license.html
-# [2] http://openjdk.java.net/legal/assembly-exception.html
+# [2] https://openjdk.org/legal/assembly-exception.html
 #
 # SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 ################################################################################
 
 omr_add_tracegen(j9vm.tdf)
-j9vm_add_library(j9vm SHARED
-	OUTPUT_NAME j9vm${J9VM_VERSION_SUFFIX}
+
+if(OMR_TOOLCONFIG STREQUAL "msvc")
+	# bypass omr provided warning flag handling, because we don't want
+	# the warning flags to get passed to clang.
+	# Note: the updated variables are scoped to this directory
+	set(OMR_ENHANCED_WARNINGS OFF)
+	set(OMR_WARNINGS_AS_ERRORS OFF)
+	omr_append_flags(CMAKE_C_FLAGS ${OMR_C_ENHANCED_WARNINGS_FLAG} ${OMR_C_WARNINGS_AS_ERROR_FLAG})
+	omr_append_flags(CMAKE_CXX_FLAGS ${OMR_CXX_ENHANCED_WARNINGS_FLAG} ${OMR_CXX_WARNINGS_AS_ERROR_FLAG})
+endif()
+
+set(interp_flags_to_remove) # list of flags removed when compiling the interpreter
+set(interp_new_flags) # flags to be added when compiling the interpreter
+
+# Note: the uma makefiles also specify this for pLinux, however it appears we no longer
+# support building the interpreter with xlc on linux
+if(OMR_ARCH_POWER AND OMR_OS_AIX)
+	if(OMR_TOOLCONFIG STREQUAL "xlc")
+		list(APPEND interp_flags_to_remove "-O3" "-g")
+		list(APPEND interp_new_flags "-O2" "-qdebug=lincomm:ptranl:tfbagg")
+		# Note: the following code is specified in the UMA builds, however,
+		# it isn't currently reachable, so it is block commneted out ( #[[ ]] )
+		#[[
+		if(OMR_OS_LINUX)
+			# TODO -qpic=large -> -qpic
+			# however at the moment all plinux builds with xlc use -qpic anyway
+			list(APPEND interp_new_flags "-qmaxmem=-1")
+		endif()
+		]]
+	endif()
+elseif(OMR_OS_ZOS)
+	# TODO need to handle optimized debug info
+	list(APPEND interp_flags_to_remove "-O3" "-g" "-qdebug=nohook")
+
+	list(APPEND interp_new_flags
+		-O2
+		"\"-Wc,TBYDBG(-qdebug=MRABIG)\""
+		"\"-Wc,TBYDBG(-qdebug=lincomm:ptranl:tfbagg)\""
+		"\"-Wc,FEDBG(-qxflag=InlineDespiteVolatileInArgs)\""
+	)
+endif()
+
+if(interp_flags_to_remove)
+	# Keep track of which flags we have actually removed from CMAKE_CXX_FLAGS,
+	# so that later we don't try re-adding flags that never existed
+	set(removed_flags)
+	foreach(flag IN LISTS interp_flags_to_remove)
+		set(old_cxx_flags ${CMAKE_CXX_FLAGS})
+		omr_remove_flags(CMAKE_CXX_FLAGS "${flag}")
+		if(NOT old_cxx_flags STREQUAL CMAKE_CXX_FLAGS)
+			list(APPEND removed_flags "${flag}")
+		endif()
+	endforeach()
+
+	set(interp_flags_to_remove ${removed_flags})
+endif()
+
+set(main_sources
 	annsup.c
 	AsyncMessageHandler.cpp
 	bchelper.c
 	bindnatv.cpp
-	BytecodeInterpreterFull.cpp
-	BytecodeInterpreterCompressed.cpp
 	callin.cpp
 	classallocation.c
 	ClassInitialization.cpp
 	classloadersearch.c
+	classname.cpp
 	classseg.c
 	classsupport.c
 	createramclass.cpp
-	DebugBytecodeInterpreterFull.cpp
-	DebugBytecodeInterpreterCompressed.cpp
 	description.c
 	dllsup.c
 	drophelp.c
@@ -80,13 +133,13 @@ j9vm_add_library(j9vm SHARED
 	jvminitcommon.c
 	jvmrisup.c
 	KeyHashTable.c
+	LayoutFFITypeHelpers.cpp
 	leconditionexceptionsup.c
 	linearswalk.c
 	lockwordconfig.c
 	logsupport.c
 	lookuphelper.c
 	lookupmethod.c
-	MHInterpreter.cpp
 	ModularityHashTables.c
 	monhelpers.c
 	montable.c
@@ -96,6 +149,9 @@ j9vm_add_library(j9vm SHARED
 	OutOfLineINL_com_ibm_jit_JITHelpers.cpp
 	OutOfLineINL_java_lang_invoke_NativeMethodHandle.cpp
 	OutOfLineINL_jdk_internal_misc_Unsafe.cpp
+	OutOfLineINL_openj9_internal_foreign_abi_InternalDowncallHandler.cpp
+	OutOfLineINL_openj9_internal_foreign_abi_InternalUpcallHandler.cpp
+	OutOfLineINL_openj9_internal_foreign_abi_UpCallMHMetaData.cpp
 	ownedmonitors.c
 	profilingbc.c
 	rasdump.c
@@ -112,6 +168,8 @@ j9vm_add_library(j9vm SHARED
 	threadhelp.cpp
 	threadpark.c
 	throwexception.c
+	UpcallThunkMem.cpp
+	UpcallVMHelpers.cpp
 	ValueTypeHelpers.cpp
 	visible.c
 	VMAccess.cpp
@@ -123,21 +181,82 @@ j9vm_add_library(j9vm SHARED
 	vmprops.c
 	vmruntimestate.c
 	vmthinit.c
-	vmthread.c
+	vmthread.cpp
 	xcheck.c
 
 	${CMAKE_CURRENT_BINARY_DIR}/ut_j9vm.c
 )
 
+if(J9VM_OPT_CRIU_SUPPORT)
+	list(APPEND main_sources
+		CRIUHelpers.cpp
+	)
+endif()
 
-# JIT helper methods require us to disable buffer security checks on Windows
-# See https://github.com/eclipse/openj9/pull/1494 for rationale
+if(NOT JAVA_SPEC_VERSION LESS 19)
+	list(APPEND main_sources
+		ContinuationHelpers.cpp
+	)
+endif()
+
+set(interpreter_sources
+	BytecodeInterpreterCompressed.cpp
+	BytecodeInterpreterFull.cpp
+	DebugBytecodeInterpreterCompressed.cpp
+	DebugBytecodeInterpreterFull.cpp
+)
+
+if(J9VM_OPT_METHOD_HANDLE)
+	list(APPEND interpreter_sources
+		MHInterpreterCompressed.cpp
+		MHInterpreterFull.cpp
+	)
+endif()
+
+j9vm_add_library(j9vm SHARED
+	OUTPUT_NAME j9vm${J9VM_VERSION_SUFFIX}
+	${main_sources}
+	${interpreter_sources}
+)
+
+if(interp_flags_to_remove)
+	# Since we removed the flags from CMAKE_CXX_FLAGS, we need to add them back
+	# to everything except the compiler
+	set(cpp_sources)
+	foreach(srcfile IN LISTS main_sources)
+		get_filename_component(extension "${srcfile}" EXT)
+		if(extension STREQUAL ".cpp")
+			list(APPEND cpp_sources "${srcfile}")
+		endif()
+	endforeach()
+
+	# COMPILE_FLAGS property expects a string, not a list
+	omr_stringify(flags_str ${interp_flags_to_remove})
+	set_property(SOURCE ${cpp_sources} APPEND_STRING PROPERTY COMPILE_FLAGS " ${flags_str}")
+endif()
+
+if(interp_new_flags)
+	# COMPILE_FLAGS property expects a string, not a list
+	omr_stringify(flags_str ${interp_new_flags})
+	set_property(SOURCE ${interpreter_sources} APPEND_STRING PROPERTY COMPILE_FLAGS " ${flags_str}")
+endif()
+
 if(OMR_OS_WINDOWS AND (OMR_TOOLCONFIG STREQUAL "msvc"))
+	# JIT helper methods require us to disable buffer security checks on Windows
+	# See https://github.com/eclipse-openj9/openj9/pull/1494 for rationale
 	set_property(
 		SOURCE
 			cnathelp.cpp
 			SharedService.c
 		APPEND PROPERTY COMPILE_FLAGS "/GS-"
+	)
+
+	# Use J9VM_CXX compiler (aka clang) to build the interpreter
+	enable_language(J9VM_CXX)
+	set_source_files_properties(
+		${interpreter_sources}
+		PROPERTIES
+		LANGUAGE J9VM_CXX
 	)
 endif()
 
@@ -149,9 +268,23 @@ if(OMR_ARCH_X86)
 			xa64/stackswap.m4
 			xa64/unsafeHelper.m4
 		)
-		target_sources(j9vm PRIVATE unsafeHelper.s)
-	elseif(OMR_OS_WINDOWS AND OMR_ENV_DATA64)
-		j9vm_gen_asm(wa64/stackswap.m4)
+		target_sources(j9vm PRIVATE
+			unsafeHelper.s
+			xa64/UpcallThunkGen.cpp
+		)
+	elseif(OMR_OS_WINDOWS)
+		if(OMR_ENV_DATA64)
+			j9vm_gen_asm(wa64/stackswap.m4)
+			target_sources(j9vm PRIVATE wa64/UpcallThunkGen.cpp)
+		else()
+			j9vm_gen_asm(wi32/stackswap.m4)
+			target_sources(j9vm PRIVATE
+				wi32/inlineseh.c
+				safeseh.asm
+			)
+
+			set_source_files_properties(safeseh.asm PROPERTIES LANGUAGE ASM_MASM)
+		endif()
 	else()
 		message(SEND_ERROR "Unsupported platform")
 	endif()
@@ -168,10 +301,16 @@ elseif(OMR_ARCH_POWER)
 		if(NOT (OMR_ENV_DATA64 AND OMR_ENV_LITTLE_ENDIAN))
 			message(SEND_ERROR "Only PPC64 LE is currently supported")
 		endif()
-		target_sources(j9vm PRIVATE xl64/unsafeHelper.s)
+		target_sources(j9vm PRIVATE
+			xl64/unsafeHelper.s
+			xl64/UpcallThunkGen.cpp
+		)
 	elseif(OMR_OS_AIX)
 		if(OMR_ENV_DATA64)
-			target_sources(j9vm PRIVATE ap64/unsafeHelper.s)
+			target_sources(j9vm PRIVATE
+				ap64/unsafeHelper.s
+				ap64/UpcallThunkGen.cpp
+			)
 		else()
 			target_sources(j9vm PRIVATE ap32/unsafeHelper.s)
 		endif()
@@ -187,13 +326,19 @@ elseif(OMR_ARCH_S390)
 	target_sources(j9vm PRIVATE zcinterp.s)
 	if(OMR_OS_LINUX)
 		if(OMR_ENV_DATA64)
-			target_sources(j9vm PRIVATE xz64/unsafeHelper.s)
+			target_sources(j9vm PRIVATE
+				xz64/unsafeHelper.s
+				xz64/UpcallThunkGen.cpp
+			)
 		else()
 			target_sources(j9vm PRIVATE xz31/unsafeHelper.s)
 		endif()
 	elseif(OMR_OS_ZOS)
 		if(OMR_ENV_DATA64)
-			target_sources(j9vm PRIVATE mz64/unsafeHelper.s)
+			target_sources(j9vm PRIVATE
+				mz64/unsafeHelper.s
+				mz64/UpcallThunkGen.cpp
+			)
 		else()
 			target_sources(j9vm PRIVATE
 				mz31/unsafeHelper.s
@@ -215,10 +360,26 @@ elseif(OMR_ARCH_ARM)
 elseif(OMR_ARCH_AARCH64)
 	j9vm_gen_asm(arm64cinterp.m4)
 	target_sources(j9vm PRIVATE arm64cinterp.s)
-	if(OMR_OS_LINUX)
-		target_sources(j9vm PRIVATE xr64/unsafeHelper.s)
+	if(OMR_OS_LINUX OR OMR_OS_OSX)
+		j9vm_gen_asm(xr64/unsafeHelper.m4)
+		target_sources(j9vm PRIVATE
+			unsafeHelper.s
+			xr64/UpcallThunkGen.cpp
+			)
 	else()
 		message(SEND_ERROR "Unsupported OS")
+	endif()
+elseif(OMR_ARCH_RISCV)
+	if(OMR_ENV_DATA64)
+		j9vm_gen_asm(riscvcinterp.m4)
+		target_sources(j9vm PRIVATE riscvcinterp.s)
+		if(OMR_OS_LINUX)
+			target_sources(j9vm PRIVATE rv64/unsafeHelper.s)
+		else()
+			message(SEND_ERROR "Unsupported OS")
+		endif()
+	else()
+		message(SEND_ERROR "Unsupported platform: RV32")
 	endif()
 else()
 	message(SEND_ERROR "Unsupported platform")
@@ -244,7 +405,6 @@ target_link_libraries(j9vm
 		j9hashtable
 		j9pool
 		j9stackmap
-		j9trc
 		j9hookable
 		j9prt
 		j9bcv
@@ -263,6 +423,11 @@ target_link_libraries(j9vm
 		j9dyn
 		j9util
 		j9thr
+)
+
+target_compile_definitions(j9vm
+	PRIVATE
+		-DJ9_EXTENDED_DEBUG
 )
 
 omr_add_exports(j9vm

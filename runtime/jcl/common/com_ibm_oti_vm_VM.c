@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1998, 2018 IBM Corp. and others
+ * Copyright (c) 1998, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -155,4 +155,21 @@ Java_com_ibm_oti_vm_VM_markCurrentThreadAsSystemImpl(JNIEnv *env)
 	rc = (jint) omrthread_set_category(vmThread->osThread, J9THREAD_CATEGORY_SYSTEM_THREAD, J9THREAD_TYPE_SET_CREATE);
 
 	return rc;
+}
+
+/**
+ * Gets the J9ConstantPool address from a J9Class address
+ * @param j9clazz J9Class address
+ * @return address of J9ConstantPool
+ */
+jlong JNICALL
+Java_com_ibm_oti_vm_VM_getJ9ConstantPoolFromJ9Class(JNIEnv *env, jclass unused, jlong j9clazz)
+{
+	J9Class *clazz = (J9Class *)(IDATA)j9clazz;
+	/*
+	 * Casting to UDATA first means the value will be zero-extended
+	 * instead of sign-extended on platforms where jlong and UDATA
+	 * are different sizes.
+	 */
+	return (jlong)(UDATA)clazz->ramConstantPool;
 }

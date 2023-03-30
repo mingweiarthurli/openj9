@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2010, 2019 IBM Corp. and others
+ * Copyright (c) 2010, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -165,7 +165,7 @@ public class TestUtils {
 		    }
 		    else
 		    {
-		    	if (isOpenJ9()) {
+				if (false == isDefaultDirTmp()) {
 		    		config.put("defaultCacheGroupAccessLocation","/tmp/");
 			    } 
 		    	config.put("defaultCacheLocation","/tmp/"); 
@@ -605,7 +605,7 @@ public class TestUtils {
 		//NOTE: use above statics to save some time when running tests ...
 		
 		String cmd = "";
-		if ( isOpenJ9() && cachename.indexOf("groupaccess") != -1 ) {
+		if ( false == isDefaultDirTmp() && cachename.indexOf("groupaccess") != -1 ) {
 			if (persistent==true)
 			{
 				cmd = getCommand("getCacheFileNameGroupAccess",cachename);
@@ -1528,8 +1528,9 @@ public class TestUtils {
 		return RunCommand.lastCommandStderrLines;
 	}
 	
-	public static boolean isOpenJ9() {
-		return System.getProperty("java.vm.vendor").toLowerCase().contains("openj9");
+	public static boolean isDefaultDirTmp() {
+		// ibm 11+ has the same -DOPENJ9_BUILD as openj9
+		return System.getProperty("java.vm.vendor").toLowerCase().contains("ibm") && System.getProperty("java.specification.version").contains("1.8") || isMVS();
 	}
 	
 	public static String removeJavaSharedResourcesDir(String dir) {

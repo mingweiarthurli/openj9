@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -1628,12 +1628,12 @@ j9shmem_test15(J9PortLibrary *portLibrary, char* argv0)
 			}
 			case 4: {
 				outputComment(PORTLIB, "\tSub Test %d: test a uid change\n", i+1);
-				newfileinfo.uid = 0;
+				newfileinfo.uid += 1;
 				break;
 			}
 			case 5: {
 				outputComment(PORTLIB, "\tSub Test %d:test a gid change\n", i+1);
-				newfileinfo.gid = 0;
+				newfileinfo.gid += 1;
 				break;
 			}
 			case 6: {

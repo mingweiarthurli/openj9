@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2017, 2019 IBM Corp. and others
+ * Copyright (c) 2017, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -180,8 +180,8 @@ findModuleForPackage(J9VMThread *currentThread, J9ClassLoader *classLoader, U_8 
 
 	PORT_ACCESS_FROM_JAVAVM(javaVM);
 
-	if ((packageNameLen + sizeof(packageNameUTF8->length) + 1) > sizeof(buf)) {
-		packageNameUTF8 = (J9UTF8 *) j9mem_allocate_memory(packageNameLen + 1 + sizeof(packageNameUTF8->length), J9MEM_CATEGORY_CLASSES);
+	if ((packageNameLen + sizeof(J9UTF8) + 1) > sizeof(buf)) {
+		packageNameUTF8 = (J9UTF8 *) j9mem_allocate_memory(packageNameLen + 1 + sizeof(J9UTF8), J9MEM_CATEGORY_CLASSES);
 	}
 	if (NULL != packageNameUTF8) {
 		memcpy(J9UTF8_DATA(packageNameUTF8), packageName, packageNameLen);

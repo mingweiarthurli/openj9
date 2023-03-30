@@ -1,7 +1,6 @@
 /*[INCLUDE-IF Sidecar18-SE]*/
-package openj9.internal.tools.attach.target;
 /*******************************************************************************
- * Copyright (c) 2009, 2019 IBM Corp. and others
+ * Copyright (c) 2009, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -17,10 +16,11 @@ package openj9.internal.tools.attach.target;
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
+package openj9.internal.tools.attach.target;
 
 import static openj9.internal.tools.attach.target.IPC.LOGGING_DISABLED;
 import static openj9.internal.tools.attach.target.IPC.loggingStatus;
@@ -40,8 +40,8 @@ public abstract class CommonDirectory {
 	private static final String COM_IBM_TOOLS_ATTACH_DIRECTORY = "com.ibm.tools.attach.directory"; //$NON-NLS-1$
 	private static final int COMMON_DIRECTORY_PERMISSIONS = 01777; /* allow anyone to create directories, but only owner can delete */
 	private static final int COMMON_LOCK_FILE_PERMISSIONS = 0666; /* allow anyone to create and use the file */
-	private static final String MASTER_LOCKFILE = "_master"; //$NON-NLS-1$
-	static final String MASTER_NOTIFIER = "_notifier"; //$NON-NLS-1$
+	private static final String CONTROLLER_LOCKFILE = "_controller"; //$NON-NLS-1$
+	static final String CONTROLLER_NOTIFIER = "_notifier"; //$NON-NLS-1$
 	static final int SEMAPHORE_OKAY = 0;
 	private static final String TRASH_PREFIX = ".trash_"; //$NON-NLS-1$
 
@@ -49,9 +49,9 @@ public abstract class CommonDirectory {
 	private static final syncObject accessorMutex = new syncObject();
 	private static FileLock attachLock;
 	private static File commonDirFile; /* file where all IPC files are held */
-	private static FileLock masterLock;
+	private static FileLock controllerLock;
 	private static String semaphoreId;
-	private static int masterLockCount = 0;
+	private static int controllerLockCount = 0;
 	/**
 	 * default name of directories where VMs place their advertisements
 	 */
@@ -137,79 +137,84 @@ public abstract class CommonDirectory {
 		/*[PR Jazz 30075] setupSemaphore was redundant. */
 	}
 	/**
-	 * Lock the master lock file. Create the lockfile if necessary.
+	 * Lock the controller lock file. Create the lockfile if necessary.
+	 * @param callSite caller info
 	 * @throws IOException if the file is already locked.
 	 */
-	public static void obtainMasterLock() throws IOException {
-		FileLock masterLockCopy = null;
+	public static void obtainControllerLock(String callSite) throws IOException {
+		FileLock controllerLockCopy = null;
 		synchronized (accessorMutex) {
-			++masterLockCount;
-			if (1 == masterLockCount) {
-				masterLockCopy = getMasterLock();
+			++controllerLockCount;
+			if (1 == controllerLockCount) {
+				controllerLockCopy = getControllerLock();
 			}
 		}
-		if (null != masterLockCopy) { /* first entry */
-			masterLockCopy.lockFile(true);
+		if (null != controllerLockCopy) { /* first entry */
+			controllerLockCopy.lockFile(true, callSite + "_obtainControllerLock"); //$NON-NLS-1$
 		}
 	}
 
 	/**
-	 * non-blocking lock the master lockfile. 
+	 * non-blocking lock the controller lockfile. 
 	 * Create the lockfile if necessary.
+	 * @param callSite caller info
 	 * @return true if lock obtained
 	 */
-	static boolean tryObtainMasterLock() {
-		boolean masterLockEntered = true;
+	static boolean tryObtainControllerLock(String callSite) {
+		boolean controllerLockEntered = true;
 		synchronized (accessorMutex) {
-			++masterLockCount; /* optimistically assume we enter the lock */
-			if (1 == masterLockCount) { /* first time in */
+			++controllerLockCount; /* optimistically assume we enter the lock */
+			if (1 == controllerLockCount) { /* first time in */
 				try {
-					masterLockEntered = getMasterLock().lockFile(false);
-					if (!masterLockEntered) { /* lock failed, so revert */
-						--masterLockCount;
+					controllerLockEntered = getControllerLock().lockFile(false, callSite + "_tryObtainControllerLock"); //$NON-NLS-1$
+					if (!controllerLockEntered) { /* lock failed, so revert */
+						--controllerLockCount;
 					}
 				} catch (IOException e) { /* this shouldn't happen */
-					masterLockEntered = false;
-					IPC.logMessage("IOException in tryObtainMasterLock," //$NON-NLS-1$
-							+ " masterLockCount=" +masterLockCount, e); //$NON-NLS-1$
+					controllerLockEntered = false;
+					IPC.logMessage("IOException in tryObtainControllerLock," //$NON-NLS-1$
+							+ " controllerLockCount=" +controllerLockCount, e); //$NON-NLS-1$
 				}
 			}
-			return masterLockEntered;		
+			return controllerLockEntered;		
 		}
 	}
 
 	/**
-	 * Release the lock on the master lock file
+	 * Release the lock on the controller lock file
+	 * @param callSite caller info
 	 */
-	public static void releaseMasterLock() {
+	public static void releaseControllerLock(String callSite) {
 		synchronized (accessorMutex) {
-			if (masterLockCount <= 0) {
-				IPC.logMessage("releaseMasterLock: Illegal value for masterLockCount", masterLockCount); //$NON-NLS-1$
+			if (controllerLockCount <= 0) {
+				IPC.logMessage("releaseControllerLock: Illegal value for controllerLockCount", controllerLockCount); //$NON-NLS-1$
 				return;
 			}
-			--masterLockCount;
-			if (Objects.nonNull(masterLock) && (0 == masterLockCount)) {
-				masterLock.unlockFile();
-				masterLock = null;
+			--controllerLockCount;
+			if (Objects.nonNull(controllerLock) && (0 == controllerLockCount)) {
+				controllerLock.unlockFile(callSite + "_releaseControllerLock"); //$NON-NLS-1$
+				controllerLock = null;
 			}
 		}
 	}
 
 	/**
 	 * Lock the attach lockfile. Create the lockfile if necessary.
+	 * @param callSite caller info
 	 * @throws IOException if file already locked
 	 */
 	 
-	public static void obtainAttachLock() throws IOException {
-		getAttachLock().lockFile(true);
+	public static void obtainAttachLock(String callSite) throws IOException {
+		getAttachLock().lockFile(true, callSite + "_obtainAttachLock"); //$NON-NLS-1$
 	}
 
 	/**
 	 * Release the lock on the attach lock file
+	 * @param callSite caller info
 	 */
-	public static void releaseAttachLock() {
+	public static void releaseAttachLock(String callSite) {
 		try {
-			getAttachLock().unlockFile();	
+			getAttachLock().unlockFile(callSite + "_releaseAttachLock"); //$NON-NLS-1$
 		} catch (NullPointerException e) {
 			return;
 		}
@@ -219,9 +224,9 @@ public abstract class CommonDirectory {
 	 * Create the control file for the semaphore
 	 * @throws IOException
 	 */
-	 /*[PR Jazz 30075] refactored out of obtainMasterLock */
+	 /*[PR Jazz 30075] refactored out of obtainControllerLock */
 	static void createNotificationFile() throws IOException {
-		File notifierFile = new File(getCommonDirFileObject(), MASTER_NOTIFIER);
+		File notifierFile = new File(getCommonDirFileObject(), CONTROLLER_NOTIFIER);
 		if (notifierFile.createNewFile()) {
 			IPC.chmod(notifierFile.getAbsolutePath(), COMMON_LOCK_FILE_PERMISSIONS);
 		}
@@ -231,10 +236,10 @@ public abstract class CommonDirectory {
 	 * @param obtainLock 
 	 * @return name of semaphore
 	 * @throws IOException if mkdir fails
-	 * Caller is responsible for ensuring that the master lockfile is held.
+	 * Caller is responsible for ensuring that the controller lockfile is held.
 	 */
 	static String openSemaphore() throws IOException {
-		String semName = MASTER_NOTIFIER; /*[PR Jazz 48044] semaphore name is a constant */
+		String semName = CONTROLLER_NOTIFIER; /*[PR Jazz 48044] semaphore name is a constant */
 		int status = IPC.openSemaphore(getCommonDirFileObject().getAbsolutePath(), semName, true);
 		/*[MSG "K0538", "semaphore {0} status= {1}"]*/
 		if (SEMAPHORE_OKAY != status) {
@@ -251,7 +256,7 @@ public abstract class CommonDirectory {
 		int status = 0;
 		IPC.logMessage("reopenSemaphore"); //$NON-NLS-1$
 		closeSemaphore();
-		status = IPC.openSemaphore(getCommonDirFileObject().getAbsolutePath(), MASTER_NOTIFIER, true);		
+		status = IPC.openSemaphore(getCommonDirFileObject().getAbsolutePath(), CONTROLLER_NOTIFIER, true);		
 		return status;
 	}
 
@@ -273,13 +278,13 @@ public abstract class CommonDirectory {
 	 * Open the semaphore, post to it, and close it
 	 * @param numberOfTargets number of times to post to the semaphore
 	 * @param global Use the global semaphore (Windows only)
+	 * @param callSite caller info
 	 * @return 0 on success
 	 */
-	public static int notifyVm(int numberOfTargets, boolean global) {
-		if (LOGGING_DISABLED != loggingStatus) {
-			IPC.logMessage("notifyVm ", numberOfTargets, " targets"); //$NON-NLS-1$ //$NON-NLS-2$
-		}
-		return IPC.notifyVm(getCommonDirFileObject().getAbsolutePath(), MASTER_NOTIFIER, numberOfTargets, global);
+	public static int notifyVm(int numberOfTargets, boolean global, String callSite) {
+		IPC.logMessage(callSite + "_notifyVm ", numberOfTargets, " targets"); //$NON-NLS-1$ //$NON-NLS-2$
+		IPC.logMessage(getCommonDirFileObject().getAbsolutePath() + ", global = " + global); //$NON-NLS-1$
+		return IPC.notifyVm(getCommonDirFileObject().getAbsolutePath(), CONTROLLER_NOTIFIER, numberOfTargets, global);
 	}
 
 	/**
@@ -289,7 +294,7 @@ public abstract class CommonDirectory {
 	 * @return 0 on success
 	 */
 	public static int cancelNotify(int numberOfTargets, boolean global) {
-		return IPC.cancelNotify(getCommonDirPath(), MASTER_NOTIFIER, numberOfTargets, global);
+		return IPC.cancelNotify(getCommonDirPath(), CONTROLLER_NOTIFIER, numberOfTargets, global);
 	}
 
 	/**
@@ -334,8 +339,8 @@ public abstract class CommonDirectory {
 	}
 
 	static private boolean isCommonControlFile(String dirMemberName) {
-		return (ATTACH_LOCK.equalsIgnoreCase(dirMemberName) || MASTER_LOCKFILE.equalsIgnoreCase(dirMemberName) 
-				|| MASTER_NOTIFIER.equalsIgnoreCase(dirMemberName));
+		return (ATTACH_LOCK.equalsIgnoreCase(dirMemberName) || CONTROLLER_LOCKFILE.equalsIgnoreCase(dirMemberName) 
+				|| CONTROLLER_NOTIFIER.equalsIgnoreCase(dirMemberName));
 	}
 
 	/**
@@ -344,6 +349,9 @@ public abstract class CommonDirectory {
 	 */
 	static void deleteStaleDirectories(String myId) {
 		long myUid = IPC.getUid();
+		if (LOGGING_DISABLED != loggingStatus) {
+			IPC.logMessage("deleting stale dirs, myId = " + myId + ", myUid = " + myUid); //$NON-NLS-1$ //$NON-NLS-2$
+		}
 		File[] vmDirs = getCommonDirFileObject().listFiles(new DirectorySampler());
 		if (null == vmDirs) {
 			return;
@@ -351,6 +359,7 @@ public abstract class CommonDirectory {
 		for (File dirMember: vmDirs) {
 			/*[PR 169137 abort if we shutting down while checking]*/
 			if (AttachHandler.isAttachApiTerminated()) {
+				IPC.logMessage("deleteStaleDirectories aborted due to AttachAPI is terminated"); //$NON-NLS-1$
 				break;
 			}
 
@@ -440,7 +449,7 @@ public abstract class CommonDirectory {
 		pid = advert.getProcessId();
 		long uid = advert.getUid();
 		if (LOGGING_DISABLED != loggingStatus) {
-			IPC.logMessage("getPidFromFile pid = ", (int) pid, dirMember.getName()); //$NON-NLS-1$
+			IPC.logMessage("getPidFromFile pid = ", (int) pid, ", fileNmae = " + dirMember.getName()); //$NON-NLS-1$ //$NON-NLS-2$
 		}
 		/*advertisement is from an older version or is corrupt, or claims to be owned by root.  Get the owner via file stat ]*/
 		if (0 == uid) {
@@ -473,13 +482,13 @@ public abstract class CommonDirectory {
 	 * @return FileLock object
 	 * @note this is not thread safe.  This should be called while holding accessorMutex.
 	 */
-	private static FileLock getMasterLock() {
-		if (null == masterLock) {
-			File commonDirFileObject = new File(getCommonDirFileObject(), MASTER_LOCKFILE);
+	private static FileLock getControllerLock() {
+		if (null == controllerLock) {
+			File commonDirFileObject = new File(getCommonDirFileObject(), CONTROLLER_LOCKFILE);
 			String commonDirPath = commonDirFileObject.getAbsolutePath();
-			masterLock = new FileLock(commonDirPath, COMMON_LOCK_FILE_PERMISSIONS);
+			controllerLock = new FileLock(commonDirPath, COMMON_LOCK_FILE_PERMISSIONS);
 		}
-		return masterLock;
+		return controllerLock;
 	}
 	
 	/**

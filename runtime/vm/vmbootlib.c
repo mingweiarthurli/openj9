@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -31,6 +31,10 @@
 #include "ut_j9vm.h"
 #include "vm_internal.h"
 #include "vmaccess.h"
+
+#if defined(J9VM_ZOS_3164_INTEROPERABILITY)
+#include "ffi.h"
+#endif
 
 #ifdef BREW
 #define MAX_PATH_SIZE 40
@@ -80,8 +84,7 @@ static UDATA classLoaderRegisterLibrary(void *voidVMThread, J9ClassLoader *class
 static BOOLEAN isAbsolutePath (const char *path);
 static J9ClassLoader* findLoadedSharedLibrary(J9VMThread* vmThread, const char* sharedLibraryName, J9NativeLibrary** libraryPtr);
 static void freeSharedLibrary(J9VMThread *vmThread, J9ClassLoader* classLoader, J9NativeLibrary* library);
-static UDATA    openNativeLibrary (J9JavaVM* vm, J9ClassLoader * classLoader, const char * libName, char * libraryPath, J9NativeLibrary** libraryPtr, openFunc_t openFunction, void* userData, char* errorBuffer, UDATA bufferLength);
-static char * getBootLibraryPath(JavaVMInitArgs *vmInitArgs);
+static UDATA openNativeLibrary(J9JavaVM *vm, J9ClassLoader *classLoader, const char *libName, const char *libraryPath, J9NativeLibrary **libraryPtr, openFunc_t openFunction, void *userData, char *errorBuffer, UDATA bufferLength);
 static void reportError(char* errorBuffer, const char* message, UDATA bufferLength);
 
 /* Callbacks used in library management */
@@ -144,14 +147,49 @@ sendLifecycleEventCallback(struct J9VMThread* vmThread, struct J9NativeLibrary* 
 	if (0 == j9sl_lookup_name(library->handle, (char*)functionName, (void*)&JNI_Load, "VLL")) {
 		Trc_VM_sendLifecycleEventCallback_Event1(vmThread, functionName, library->handle);
 
-		/* Check whether the return type for the callee lifecycle event is void; return 0 to indicate 
-		 * success instead of an undefined return value.
-		 */
-		if (0 == strncmp(functionName, J9DYNAMIC_ONUNLOAD, J9DYNAMIC_ONUNLOAD_LENGTH)) {
-			JNI_Load((JavaVM*)vmThread->javaVM, NULL);
-			result = 0;
-		} else {
-			result = JNI_Load((JavaVM*)vmThread->javaVM, NULL);
+#if defined(J9VM_ZOS_3164_INTEROPERABILITY)
+		if (J9_IS_31BIT_INTEROP_TARGET(JNI_Load)) {
+			ffi_type* args[2];
+			void* values[2];
+			U_32 nullSecondParam = 0;
+			UDATA returnValue = 0;
+			ffi_cif cif_t;
+			ffi_cif * const cif = &cif_t;
+
+			if (0 == vmThread->javaVM->javaVM31) {
+				queryJavaVM31(vmThread->javaVM);
+			}
+			args[0]= &ffi_type_sint32;
+			args[1]= &ffi_type_sint32;
+			values[0] = (void*)&(vmThread->javaVM->javaVM31);
+			values[1] = (void*)&nullSecondParam;
+
+			/* Check whether the return type for the callee lifecycle event is void; return 0 to indicate
+			 * success instead of an undefined return value.
+			 */
+			if (0 == strncmp(functionName, J9DYNAMIC_ONUNLOAD, J9DYNAMIC_ONUNLOAD_LENGTH)) {
+				if (FFI_OK == ffi_prep_cif(cif, FFI_CEL4RO31, 2, &ffi_type_void, args)) {
+					ffi_call(cif, FFI_FN(JNI_Load), NULL, values);
+					result = 0;
+				}
+			} else {
+				if (FFI_OK == ffi_prep_cif(cif, FFI_CEL4RO31, 2, &ffi_type_sint32, args)) {
+					ffi_call(cif, FFI_FN(JNI_Load), &returnValue, values);
+					result = returnValue;
+				}
+			}
+		} else
+#endif /* defined(J9VM_ZOS_3164_INTEROPERABILITY) */
+		{
+			/* Check whether the return type for the callee lifecycle event is void; return 0 to indicate
+			 * success instead of an undefined return value.
+			 */
+			if (0 == strncmp(functionName, J9DYNAMIC_ONUNLOAD, J9DYNAMIC_ONUNLOAD_LENGTH)) {
+				JNI_Load((JavaVM*)vmThread->javaVM, NULL);
+				result = 0;
+			} else {
+				result = JNI_Load((JavaVM*)vmThread->javaVM, NULL);
+			}
 		}
 	}
 
@@ -175,22 +213,22 @@ sendLifecycleEventCallback(struct J9VMThread* vmThread, struct J9NativeLibrary* 
  * \return
  */
 static UDATA   
-openNativeLibrary(J9JavaVM* vm, J9ClassLoader * classLoader, const char * libName, char * libraryPath, J9NativeLibrary** libraryPtr, openFunc_t openFunction, void* userData, char* errorBuffer, UDATA bufferLength)
+openNativeLibrary(J9JavaVM *vm, J9ClassLoader *classLoader, const char *libName, const char *libraryPath, J9NativeLibrary **libraryPtr, openFunc_t openFunction, void *userData, char *errorBuffer, UDATA bufferLength)
 {
-	UDATA result;
+	UDATA result = 0;
 	/* systemClassLoader always uses immediate symbol resolution, others determined by vmargs or defaults. */
 	UDATA lazy = ((classLoader != vm->systemClassLoader)
-				  && (vm->extendedRuntimeFlags & J9_EXTENDED_RUNTIME_LAZY_SYMBOL_RESOLUTION)) ? J9PORT_SLOPEN_LAZY : 0;
+		&& (vm->extendedRuntimeFlags & J9_EXTENDED_RUNTIME_LAZY_SYMBOL_RESOLUTION)) ? J9PORT_SLOPEN_LAZY : 0;
 
 #if defined(J9VM_INTERP_MINIMAL_JNI)
 	char *fullPath = NULL;
 	char *fullPathPtr = libName;
 #else
-	char fullPath[MAX_PATH_SIZE + 1];
+	char fullPath[MAX_PATH_SIZE + 1] = {0};
 	char *fullPathPtr = fullPath;
 	UDATA fullPathBufferLength = MAX_PATH_SIZE;
-	char c;
-	char *search;
+	char c = 0;
+	const char *search = NULL;
 	UDATA expectedPathLength = 0;
 	PORT_ACCESS_FROM_JAVAVM(vm);
 
@@ -203,6 +241,13 @@ openNativeLibrary(J9JavaVM* vm, J9ClassLoader * classLoader, const char * libNam
 
 	/* If a library path was specified and the library name is not an absolute path,
    * search all entries in the library path for the library */
+
+	UDATA flags = lazy;
+#if defined(J9VM_ZOS_3164_INTEROPERABILITY)
+	if (J9_ARE_ALL_BITS_SET(vm->extendedRuntimeFlags2, J9_EXTENDED_RUNTIME2_3164_INTEROPERABILITY)) {
+		flags |= OMRPORT_SLOPEN_ATTEMPT_31BIT_OPEN;
+	}
+#endif /* defined(J9VM_ZOS_3164_INTEROPERABILITY) */
 
 	if (libraryPath && (!isAbsolutePath(libName))) {
 		char classPathSeparator = (char) j9sysinfo_get_classpathSeparator();
@@ -248,9 +293,9 @@ openNativeLibrary(J9JavaVM* vm, J9ClassLoader * classLoader, const char * libNam
 					fullPathBufferLength = expectedPathLength;
 				}
 				j9str_printf(PORTLIB, fullPathPtr, expectedPathLength, "%.*s%s%s", pathLength, libraryPath, dirSeparator, libName);
-				result = openFunction(userData, classLoader, libName, fullPathPtr, libraryPtr, errorBuffer, bufferLength, lazy | J9PORT_SLOPEN_DECORATE | J9PORT_SLOPEN_NO_LOOKUP_MSG_FOR_NOT_FOUND);
+				result = openFunction(userData, classLoader, libName, fullPathPtr, libraryPtr, errorBuffer, bufferLength, flags | J9PORT_SLOPEN_DECORATE | J9PORT_SLOPEN_NO_LOOKUP_MSG_FOR_NOT_FOUND);
 				if(result == J9NATIVELIB_LOAD_ERR_NOT_FOUND) {
-					result = openFunction(userData, classLoader, libName, fullPathPtr, libraryPtr, errorBuffer, bufferLength, lazy | J9PORT_SLOPEN_NO_LOOKUP_MSG_FOR_NOT_FOUND);
+					result = openFunction(userData, classLoader, libName, fullPathPtr, libraryPtr, errorBuffer, bufferLength, flags | J9PORT_SLOPEN_NO_LOOKUP_MSG_FOR_NOT_FOUND);
 					if(result != J9NATIVELIB_LOAD_ERR_NOT_FOUND) {
 						goto exit;
 					}
@@ -279,9 +324,9 @@ openNativeLibrary(J9JavaVM* vm, J9ClassLoader * classLoader, const char * libNam
 
 	/* No library path specified, just add the extension and try that */
 	/* temp fix.  Remove the second openFunc call once apps like javah have bootLibraryPaths */
-	result = openFunction(userData, classLoader, libName, (char *)libName, libraryPtr, errorBuffer, bufferLength, lazy);
+	result = openFunction(userData, classLoader, libName, (char *)libName, libraryPtr, errorBuffer, bufferLength, flags);
 	if(result == J9NATIVELIB_LOAD_ERR_NOT_FOUND) {
-		result = openFunction(userData, classLoader, libName, (char *)libName, libraryPtr, errorBuffer, bufferLength, lazy | J9PORT_SLOPEN_DECORATE);
+		result = openFunction(userData, classLoader, libName, (char *)libName, libraryPtr, errorBuffer, bufferLength, flags | J9PORT_SLOPEN_DECORATE);
 	}
 	
 exit:
@@ -320,32 +365,9 @@ reportError(char* errorBuffer, const char* message, UDATA bufferLength) {
  * \return One of the LOAD_* constants returned by \sa openNativeLibrary()
  */
 UDATA
-registerNativeLibrary(J9VMThread * vmThread, J9ClassLoader * classLoader, const char * libName, char * libraryPath, J9NativeLibrary** libraryPtr, char* errorBuffer, UDATA bufferLength)
+registerNativeLibrary(J9VMThread *vmThread, J9ClassLoader *classLoader, const char *libName, const char *libraryPath, J9NativeLibrary **libraryPtr, char *errorBuffer, UDATA bufferLength)
 {
 	return openNativeLibrary(vmThread->javaVM, classLoader, libName, libraryPath, libraryPtr, classLoaderRegisterLibrary, vmThread, errorBuffer, bufferLength);
-}
-
-/**
- * Look for the boot library path system property starting
- * at the bottom of the vmInitArgs->options array
- *
- * @return	The string corresponding to the "com.ibm.oti.vm.bootstrap.library.path"
- *          or NULL
- */
-static char *
-getBootLibraryPath(JavaVMInitArgs *vmInitArgs)
-{
-	char * bootLibraryPath = NULL;
-	jint count = vmInitArgs->nOptions;
-
-	for ( count = (vmInitArgs->nOptions - 1) ; count >= 0 ; count-- ) {
-		JavaVMOption* option = &(vmInitArgs->options[count]);
-		bootLibraryPath = getDefineArgument(option->optionString, "com.ibm.oti.vm.bootstrap.library.path");
-		if (bootLibraryPath){
-			break;
-		}
-	}
-	return bootLibraryPath;
 }
 
 /**
@@ -357,27 +379,25 @@ getBootLibraryPath(JavaVMInitArgs *vmInitArgs)
  * \return One of the LOAD_* constants returned by \sa openNativeLibrary()
  */
 UDATA
-registerBootstrapLibrary(J9VMThread * vmThread, const char * libName, J9NativeLibrary** libraryPtr, UDATA suppressError)
+registerBootstrapLibrary(J9VMThread *vmThread, const char *libName, J9NativeLibrary **libraryPtr, UDATA suppressError)
 {
-	char * bootLibraryPath = NULL;
-	UDATA result;
-	char errorBuffer[512];
+	const char *bootLibraryPath = NULL;
+	UDATA result = 0;
+	char errorBuffer[512] = {0};
+	JavaVMInitArgs *vmInitArgs = (JavaVMInitArgs *) vmThread->javaVM->vmArgsArray->actualVMArgs;
 
-	JavaVMInitArgs  *vmInitArgs = (JavaVMInitArgs  *) vmThread->javaVM->vmArgsArray->actualVMArgs;
-
+	Trc_VM_registerBootstrapLibrary_Entry(vmThread, libName, (NULL == libraryPtr) ? NULL : *libraryPtr);
 	/* Look for the boot library path system property */
-	if (vmInitArgs) {
-		bootLibraryPath = getBootLibraryPath(vmInitArgs);
+	if (NULL != vmInitArgs) {
+		bootLibraryPath = getDefinedArgumentFromJavaVMInitArgs(vmInitArgs, "com.ibm.oti.vm.bootstrap.library.path");
 	}
-	
 	Assert_VM_mustNotHaveVMAccess(vmThread);
-
 	result = registerNativeLibrary(vmThread, vmThread->javaVM->systemClassLoader, libName, bootLibraryPath, libraryPtr, errorBuffer, sizeof(errorBuffer));
-
 	if (result && !suppressError) {
 		PORT_ACCESS_FROM_VMC(vmThread);
 		j9tty_printf(PORTLIB, "<error: unable to load %s (%s)>\n", libName, errorBuffer);
 	}
+	Trc_VM_registerBootstrapLibrary_Exit(vmThread, libName, (NULL == libraryPtr) ? NULL : *libraryPtr, result);
 
 	return result;
 }
@@ -453,10 +473,10 @@ static UDATA
 classLoaderRegisterLibrary(void *voidVMThread, J9ClassLoader *classLoader, const char* logicalName, char *physicalName, J9NativeLibrary** libraryPtr, char* errBuf, UDATA bufLen, UDATA flags)
 {
 	J9VMThread * vmThread = voidVMThread;
-	UDATA rc = 0;
+	UDATA rc = J9NATIVELIB_LOAD_OK;
 	J9JavaVM* javaVM = vmThread->javaVM;
 	J9NativeLibrary* newNativeLibrary = NULL;
-	J9ClassLoader* aClassLoader;
+	J9ClassLoader* aClassLoader = NULL;
 	BOOLEAN loadWasIntercepted = FALSE;
 	UDATA jniVersion = (UDATA) -1;
 	UDATA slOpenResult = J9PORT_SL_FOUND;
@@ -480,14 +500,14 @@ classLoaderRegisterLibrary(void *voidVMThread, J9ClassLoader *classLoader, const
 
 #ifdef J9VM_GC_DYNAMIC_CLASS_UNLOADING
 	/* if another ClassLoader has loaded this library attempt to force it to be unloaded before reporting an error */
-	if ( (aClassLoader != NULL) && (aClassLoader != classLoader) ) {
+	if ((NULL != aClassLoader) && (aClassLoader != classLoader)) {
 		javaVM->memoryManagerFunctions->forceClassLoaderUnload(vmThread, aClassLoader);
 		/* try to find the loaded shared library again */
 		aClassLoader = findLoadedSharedLibrary(vmThread, physicalName, libraryPtr);
 	}
 #endif
 
-	if (aClassLoader != NULL) {
+	if (NULL != aClassLoader) {
 		RELEASE_CLASS_LOADER_BLOCKS_MUTEX(javaVM);
 		if (aClassLoader == classLoader) {
 			/* Loading a library multiple times in a ClassLoader is NOP. */
@@ -506,21 +526,22 @@ classLoaderRegisterLibrary(void *voidVMThread, J9ClassLoader *classLoader, const
 	/*
 	 * Create an entry for this library.
 	 */
-	if (classLoader->sharedLibraries == NULL) {
+	if (NULL == classLoader->sharedLibraries) {
 		classLoader->sharedLibraries = pool_new(sizeof(J9NativeLibrary),  0, 0, 0, J9_GET_CALLSITE(), J9MEM_CATEGORY_CLASSES,
-				(j9memAlloc_fptr_t)pool_portLibAlloc, (j9memFree_fptr_t)pool_portLibFree, PORTLIB);
+			(j9memAlloc_fptr_t)pool_portLibAlloc, (j9memFree_fptr_t)pool_portLibFree, PORTLIB);
 	}
 
-	if (classLoader->sharedLibraries != NULL) {
+	if (NULL != classLoader->sharedLibraries) {
 		newNativeLibrary = pool_newElement(classLoader->sharedLibraries);
 	}
 
 	if (NULL == newNativeLibrary) {
 		reportError(errBuf, "Failed allocating memory for native library", bufLen);
 		rc = J9NATIVELIB_LOAD_ERR_OUT_OF_MEMORY;
+		goto leave_routine;
 	}
 
-	if (0 == rc) {
+	if (J9NATIVELIB_LOAD_OK == rc) {
 		/* Initialize the structure with default values */
 		javaVM->internalVMFunctions->initializeNativeLibrary(javaVM, newNativeLibrary);
 
@@ -529,6 +550,7 @@ classLoaderRegisterLibrary(void *voidVMThread, J9ClassLoader *classLoader, const
 		if (NULL == newNativeLibrary->name) {
 			reportError(errBuf, "Failed allocating memory for native library name", bufLen);
 			rc = J9NATIVELIB_LOAD_ERR_OUT_OF_MEMORY;
+			goto leave_routine;
 		} else {
 			strcpy(newNativeLibrary->name, physicalName);
 		}
@@ -538,10 +560,10 @@ classLoaderRegisterLibrary(void *voidVMThread, J9ClassLoader *classLoader, const
 		if (NULL == newNativeLibrary->logicalName) {
 			reportError(errBuf, "Failed allocating memory for native library logical name", bufLen);
 			rc = J9NATIVELIB_LOAD_ERR_OUT_OF_MEMORY;
+			goto leave_routine;
 		} else {
 			strcpy(newNativeLibrary->logicalName, logicalName);
 		}
-
 	}
 
 	/**
@@ -703,15 +725,18 @@ classLoaderRegisterLibrary(void *voidVMThread, J9ClassLoader *classLoader, const
 #if defined(J9VM_INTERP_ATOMIC_FREE_JNI)
 			exitVMToJNI(vmThread);
 #endif /* J9VM_INTERP_ATOMIC_FREE_JNI */
+#if JAVA_SPEC_VERSION < 15
+			/* JDK 15+ NativeLibraries is going to call JNI_Onload depending on JNI flag */
 			jniVersion = (*newNativeLibrary->send_lifecycle_event)(vmThread,
 																   newNativeLibrary,
 																   J9DYNAMIC_ONLOAD,
 																   JNI_VERSION_1_1);
+#endif /* JAVA_SPEC_VERSION < 15 */
 #if defined(J9VM_INTERP_ATOMIC_FREE_JNI)
 			enterVMFromJNI(vmThread);
 			releaseVMAccess(vmThread);
 #endif /* J9VM_INTERP_ATOMIC_FREE_JNI */
-
+#if JAVA_SPEC_VERSION < 15
 			if ((FALSE == jniVersionIsValid(jniVersion)) || (NULL != vmThread->currentException)) {
 				char msgBuffer[MAXIMUM_MESSAGE_LENGTH];
 
@@ -729,15 +754,15 @@ classLoaderRegisterLibrary(void *voidVMThread, J9ClassLoader *classLoader, const
 				rc = J9NATIVELIB_LOAD_ERR_JNI_ONLOAD_FAILED;
 				reportError(errBuf, msgBuffer, bufLen);
 			}
+#endif /* JAVA_SPEC_VERSION < 15 */
 		}
 	}
 
-	if ( (rc != J9NATIVELIB_LOAD_OK) && (newNativeLibrary != NULL) ) {
-		freeSharedLibrary(vmThread, classLoader, newNativeLibrary);
-	} else {
+	Trc_VM_classLoaderRegisterLibrary_newNativeLibrary(vmThread, newNativeLibrary, newNativeLibrary->handle, newNativeLibrary->logicalName, newNativeLibrary->name, rc);
+	if (J9NATIVELIB_LOAD_OK == rc) {
 		issueWriteBarrier();
 		ACQUIRE_CLASS_LOADER_BLOCKS_MUTEX(javaVM);
-		if (classLoader->librariesTail == NULL) {
+		if (NULL == classLoader->librariesTail) {
 			classLoader->librariesHead = classLoader->librariesTail = newNativeLibrary;
 		} else {
 			classLoader->librariesTail->next = newNativeLibrary;
@@ -747,6 +772,9 @@ classLoaderRegisterLibrary(void *voidVMThread, J9ClassLoader *classLoader, const
 	}
 
 leave_routine:
+	if ((J9NATIVELIB_LOAD_OK != rc) && (NULL != newNativeLibrary)) {
+		freeSharedLibrary(vmThread, classLoader, newNativeLibrary);
+	}
 	omrthread_monitor_exit(javaVM->nativeLibraryMonitor);
 	if (NULL != onloadRtnName) {
 		j9mem_free_memory(onloadRtnName);

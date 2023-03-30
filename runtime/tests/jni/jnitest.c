@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -26,7 +26,7 @@
 #include "vmi.h"
 /*
  * jvm.h is required by MemoryAllocator_allocateMemory:
- * https://github.com/eclipse/openj9/issues/1377
+ * https://github.com/eclipse-openj9/openj9/issues/1377
  */
 #include "../j9vm/jvm.h"
 #if defined(WIN32)
@@ -1021,4 +1021,19 @@ Java_j9vm_test_jni_PthreadTest_attachAndDetach(JNIEnv *env, jclass clazz)
     }
     return worked;
 #endif /* defined(WIN32) */
+}
+
+jboolean JNICALL
+Java_org_openj9_test_jep425_VirtualThreadTests_lockSupportPark(JNIEnv *env, jclass cls)
+{
+	jboolean result = JNI_FALSE;
+	jclass clazz = (*env)->FindClass(env, "java/util/concurrent/locks/LockSupport");
+	if (NULL != clazz) {
+		jmethodID method = (*env)->GetStaticMethodID(env, clazz, "park", "()V");
+		if (NULL != method) {
+			(*env)->CallStaticObjectMethod(env, clazz, method);
+			result = JNI_TRUE;
+		}
+	}
+	return result;
 }

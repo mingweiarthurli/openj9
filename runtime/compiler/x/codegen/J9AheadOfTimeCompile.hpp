@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2018 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -45,16 +45,19 @@ class OMR_EXTENSIBLE AheadOfTimeCompile  : public J9::AheadOfTimeCompile
    {
    public:
    AheadOfTimeCompile(TR::CodeGenerator *cg)
-      : J9::AheadOfTimeCompile(_relocationTargetTypeToHeaderSizeMap, cg->comp()),
+      : J9::AheadOfTimeCompile(NULL, cg->comp()),
         _cg(cg)
       {
       }
 
    virtual void     processRelocations();
-   virtual uint8_t *initializeAOTRelocationHeader(TR::IteratedExternalRelocation *relocation);
+
+   /**
+    * @brief Refer to J9::AheadOfTimeCompile::initializePlatformSpecificAOTRelocationHeader
+    */
+   bool initializePlatformSpecificAOTRelocationHeader(TR::IteratedExternalRelocation *relocation, TR_RelocationTarget *reloTarget, TR_RelocationRecord *reloRecord, uint8_t targetKind);
 
    private:
-   static uint32_t _relocationTargetTypeToHeaderSizeMap[TR_NumExternalRelocationKinds];
 
    TR::CodeGenerator *_cg;
    };

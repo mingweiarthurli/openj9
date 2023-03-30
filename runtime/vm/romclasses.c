@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -127,6 +127,10 @@ initializeArrayROMClass(J9ROMArrayClass *romClass, J9UTF8 *className, U_32 array
 	NNSRP_SET(romClass->className, className);
 	NNSRP_SET(romClass->superclassName, &arrayROMClasses.objectClassName);
 	romClass->modifiers = J9AccFinal | J9AccPublic | J9AccClassArray | J9AccAbstract;
+#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+	/* Arrays are always identity classes. */
+	romClass->modifiers |= J9AccClassHasIdentity;
+#endif /* defined(J9VM_OPT_VALHALLA_VALUE_TYPES) */
 	romClass->extraModifiers = J9AccClassCloneable | J9AccClassIsUnmodifiable;
 	romClass->interfaceCount = sizeof(arrayROMClasses.interfaceClasses) / sizeof(J9SRP);
 	NNSRP_SET(romClass->interfaces, &arrayROMClasses.interfaceClasses);
@@ -182,15 +186,15 @@ initializeROMClasses(J9JavaVM *vm)
 	NNSRP_SET(arrayROMClasses.interfaceClasses.cloneable, &arrayROMClasses.cloneableClassName);
 	NNSRP_SET(arrayROMClasses.interfaceClasses.serializeable, &arrayROMClasses.serializeableClassName);
 	/* Initialize the array classes */
-	initializeArrayROMClass(&arrayROMClasses.objectArrayROMClass, (J9UTF8*)&arrayROMClasses.objectArrayClassName, (sizeof(U_32) == referenceSize) ? J9ArraySizeLongs : J9ArraySizeDoubles, OBJECT_HEADER_SHAPE_POINTERS, sizeof(J9ROMArrayClass));
-	initializeArrayROMClass(&arrayROMClasses.booleanArrayROMClass, (J9UTF8*)&arrayROMClasses.booleanArrayClassName, J9ArraySizeBytes, OBJECT_HEADER_SHAPE_BYTES, sizeof(J9ROMArrayClass));
-	initializeArrayROMClass(&arrayROMClasses.charArrayROMClass, (J9UTF8*)&arrayROMClasses.charArrayClassName, J9ArraySizeWords, OBJECT_HEADER_SHAPE_WORDS, sizeof(J9ROMArrayClass));
-	initializeArrayROMClass(&arrayROMClasses.floatArrayROMClass, (J9UTF8*)&arrayROMClasses.floatArrayClassName, J9ArraySizeLongs, OBJECT_HEADER_SHAPE_LONGS, sizeof(J9ROMArrayClass));
-	initializeArrayROMClass(&arrayROMClasses.doubleArrayROMClass, (J9UTF8*)&arrayROMClasses.doubleArrayClassName, J9ArraySizeDoubles, OBJECT_HEADER_SHAPE_DOUBLES, sizeof(J9ROMArrayClass));
-	initializeArrayROMClass(&arrayROMClasses.byteArrayROMClass, (J9UTF8*)&arrayROMClasses.byteArrayClassName, J9ArraySizeBytes, OBJECT_HEADER_SHAPE_BYTES, sizeof(J9ROMArrayClass));
-	initializeArrayROMClass(&arrayROMClasses.shortArrayROMClass, (J9UTF8*)&arrayROMClasses.shortArrayClassName, J9ArraySizeWords, OBJECT_HEADER_SHAPE_WORDS, sizeof(J9ROMArrayClass));
-	initializeArrayROMClass(&arrayROMClasses.intArrayROMClass, (J9UTF8*)&arrayROMClasses.intArrayClassName, J9ArraySizeLongs, OBJECT_HEADER_SHAPE_LONGS, sizeof(J9ROMArrayClass));
-	initializeArrayROMClass(&arrayROMClasses.longArrayROMClass, (J9UTF8*)&arrayROMClasses.longArrayClassName, J9ArraySizeDoubles, OBJECT_HEADER_SHAPE_DOUBLES, sizeof(J9ArrayROMClasses) - offsetof(J9ArrayROMClasses, longArrayROMClass));
+	initializeArrayROMClass(&arrayROMClasses.objectArrayROMClass, (J9UTF8*)&arrayROMClasses.objectArrayClassName, (sizeof(U_32) == referenceSize) ? J9ArrayShape32Bit : J9ArrayShape64Bit, OBJECT_HEADER_SHAPE_POINTERS, sizeof(J9ROMArrayClass));
+	initializeArrayROMClass(&arrayROMClasses.booleanArrayROMClass, (J9UTF8*)&arrayROMClasses.booleanArrayClassName, J9ArrayShape8Bit, OBJECT_HEADER_SHAPE_BYTES, sizeof(J9ROMArrayClass));
+	initializeArrayROMClass(&arrayROMClasses.charArrayROMClass, (J9UTF8*)&arrayROMClasses.charArrayClassName, J9ArrayShape16Bit, OBJECT_HEADER_SHAPE_WORDS, sizeof(J9ROMArrayClass));
+	initializeArrayROMClass(&arrayROMClasses.floatArrayROMClass, (J9UTF8*)&arrayROMClasses.floatArrayClassName, J9ArrayShape32Bit, OBJECT_HEADER_SHAPE_LONGS, sizeof(J9ROMArrayClass));
+	initializeArrayROMClass(&arrayROMClasses.doubleArrayROMClass, (J9UTF8*)&arrayROMClasses.doubleArrayClassName, J9ArrayShape64Bit, OBJECT_HEADER_SHAPE_DOUBLES, sizeof(J9ROMArrayClass));
+	initializeArrayROMClass(&arrayROMClasses.byteArrayROMClass, (J9UTF8*)&arrayROMClasses.byteArrayClassName, J9ArrayShape8Bit, OBJECT_HEADER_SHAPE_BYTES, sizeof(J9ROMArrayClass));
+	initializeArrayROMClass(&arrayROMClasses.shortArrayROMClass, (J9UTF8*)&arrayROMClasses.shortArrayClassName, J9ArrayShape16Bit, OBJECT_HEADER_SHAPE_WORDS, sizeof(J9ROMArrayClass));
+	initializeArrayROMClass(&arrayROMClasses.intArrayROMClass, (J9UTF8*)&arrayROMClasses.intArrayClassName, J9ArrayShape32Bit, OBJECT_HEADER_SHAPE_LONGS, sizeof(J9ROMArrayClass));
+	initializeArrayROMClass(&arrayROMClasses.longArrayROMClass, (J9UTF8*)&arrayROMClasses.longArrayClassName, J9ArrayShape64Bit, OBJECT_HEADER_SHAPE_DOUBLES, sizeof(J9ArrayROMClasses) - offsetof(J9ArrayROMClasses, longArrayROMClass));
 	vm->arrayROMClasses = &arrayROMClasses.header;
 	/* Initialize UTF data for the primitive classes */
 	INIT_UTF8(baseTypePrimitiveROMClasses.voidClassName, VOID_CLASS_NAME);

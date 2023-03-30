@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -43,6 +43,9 @@
 #include "control/CompilationRuntime.hpp"
 #include "env/VMJ9.h"
 #include "env/j9method.h"
+#include "env/VerboseLog.hpp"
+#include "omrformatconsts.h"
+
 
 uint32_t TR_HWProfiler::_STATS_TotalBuffersProcessed = 0;
 uint32_t TR_HWProfiler::_STATS_BuffersProcessedByAppThread = 0;
@@ -697,21 +700,10 @@ TR_OpaqueMethodBlock *
 TR_HWProfiler::getMethodFromBCInfo(TR_ByteCodeInfo &bcInfo, TR::Compilation *comp)
    {
    TR_OpaqueMethodBlock *method = NULL;
-
-   if (comp->fej9()->isAOT_DEPRECATED_DO_NOT_USE())
-      {
-      if (bcInfo.getCallerIndex() >= 0)
-         method = (TR_OpaqueMethodBlock *)(((TR_AOTMethodInfo *)comp->getInlinedCallSite(bcInfo.getCallerIndex())._vmMethodInfo)->resolvedMethod->getNonPersistentIdentifier());
-      else
-         method = (TR_OpaqueMethodBlock *)(comp->getCurrentMethod()->getNonPersistentIdentifier());
-      }
+   if (bcInfo.getCallerIndex() >= 0)
+      method = comp->getInlinedCallSite(bcInfo.getCallerIndex())._methodInfo;
    else
-      {
-      if (bcInfo.getCallerIndex() >= 0)
-         method = (TR_OpaqueMethodBlock *)(comp->getInlinedCallSite(bcInfo.getCallerIndex())._vmMethodInfo);
-      else
-         method = (TR_OpaqueMethodBlock *)(comp->getCurrentMethod()->getPersistentIdentifier());
-      }
+      method = comp->getCurrentMethod()->getPersistentIdentifier();
 
    return method;
    }
@@ -733,7 +725,7 @@ TR_HWProfiler::getBytecodePCFromIA(J9VMThread *vmThread, uint8_t *IA)
       J9JITExceptionTable *metaData = _jitConfig->jitGetExceptionTableFromPC(vmThread, (UDATA) IA);
       if (metaData &&
           metaData->riData &&
-          ((TR_HWPBytecodePCToIAMap *)metaData->riData)->_bytecodePC == (void *)METADATA_MAPPING_EYECATCHER)
+          ((TR_HWPBytecodePCToIAMap *)metaData->riData)->_bytecodePC == reinterpret_cast<void *>(static_cast<intptr_t>(METADATA_MAPPING_EYECATCHER)))
          {
          TR_HWPBytecodePCToIAMap *cursor = (TR_HWPBytecodePCToIAMap *)metaData->riData;
          uintptr_t arraySize = (uintptr_t)cursor->_instructionAddr;
@@ -790,7 +782,7 @@ TR_HWProfiler::registerRecords(J9JITExceptionTable *metaData, TR::Compilation *c
       uint32_t arraySize                      = maps->size();
 
       // Initialize the special first element
-      cursor->_bytecodePC = (void *)METADATA_MAPPING_EYECATCHER;
+      cursor->_bytecodePC = reinterpret_cast<void *>(static_cast<intptr_t>(METADATA_MAPPING_EYECATCHER));
       cursor->_instructionAddr = (void *)(uintptr_t)arraySize;
       cursor++;
 
@@ -864,22 +856,22 @@ TR_HWProfiler::createRecords(TR::Compilation *comp)
 void
 TR_HWProfiler::printStats()
    {
-   printf("Number of recompilations induced = %llu\n",                   _numRecompilationsInduced);
-   printf("Number of reduced warm recompilations induced = %llu\n",      _numReducedWarmRecompilationsInduced);
-   printf("Number of reduced warm recompilations upgraded = %llu\n",     _numReducedWarmRecompilationsUpgraded);
-   printf("Number of recompilations induced due to jitSampling = %d\n",   TR::Recompilation::jitRecompilationsInduced);
-   printf("TR::Recompilation::jitGlobalSampleCount = %d\n",               TR::Recompilation::jitGlobalSampleCount);
-   printf("TR::Recompilation::hwpGlobalSampleCount = %d\n",               TR::Recompilation::hwpGlobalSampleCount);
-   printf("Number of buffers completely filled = %llu\n",                _numBuffersCompletelyFilled);
-   printf("Average buffer filled percentage = %f\n",                     _bufferSizeSum ? (((float)_bufferFilledSum) / ((float)_bufferSizeSum) * 100) : 0);
-   printf("Number of requests = %llu\n",                                 _numRequests);
-   printf("Number of requests skipped = %llu\n",                         _numRequestsSkipped);
-   printf("Memory used by metadata bytecodePC to IA mapping = %llu B\n", _totalMemoryUsedByMetadataMapping);
-   printf("Total buffers processed = %llu\n",                            _STATS_TotalBuffersProcessed);
-   printf("Total buffers processed by App Thread= %llu\n",               _STATS_BuffersProcessedByAppThread);
-   printf("Total event records: %llu\n",                                 _STATS_TotalEntriesProcessed);
-   printf("Total instructions tracked: %u\n",                            _STATS_TotalInstructionsTracked);
-   printf("Total downgrades due to RI: %u\n",                            _STATS_NumCompDowngradesDueToRI);
-   printf("Total upgrades due to RI: %u\n",                              _STATS_NumUpgradesDueToRI);
+   printf("Number of recompilations induced = %" OMR_PRIu64 "\n",                   _numRecompilationsInduced);
+   printf("Number of reduced warm recompilations induced = %" OMR_PRIu64 "\n",      _numReducedWarmRecompilationsInduced);
+   printf("Number of reduced warm recompilations upgraded = %" OMR_PRIu64 "\n",     _numReducedWarmRecompilationsUpgraded);
+   printf("Number of recompilations induced due to jitSampling = %d\n",             TR::Recompilation::jitRecompilationsInduced);
+   printf("TR::Recompilation::jitGlobalSampleCount = %d\n",                         TR::Recompilation::jitGlobalSampleCount);
+   printf("TR::Recompilation::hwpGlobalSampleCount = %d\n",                         TR::Recompilation::hwpGlobalSampleCount);
+   printf("Number of buffers completely filled = %" OMR_PRIu32 "\n",                _numBuffersCompletelyFilled);
+   printf("Average buffer filled percentage = %f\n",                               _bufferSizeSum ? (((float)_bufferFilledSum) / ((float)_bufferSizeSum) * 100) : 0);
+   printf("Number of requests = %" OMR_PRIu64 "\n",                                 _numRequests);
+   printf("Number of requests skipped = %" OMR_PRIu64 "\n",                         _numRequestsSkipped);
+   printf("Memory used by metadata bytecodePC to IA mapping = %" OMR_PRIu64 " B\n", _totalMemoryUsedByMetadataMapping);
+   printf("Total buffers processed = %" OMR_PRIu32 "\n",                            _STATS_TotalBuffersProcessed);
+   printf("Total buffers processed by App Thread= %" OMR_PRIu32 "\n",               _STATS_BuffersProcessedByAppThread);
+   printf("Total event records: %" OMR_PRIu64 "\n",                                 _STATS_TotalEntriesProcessed);
+   printf("Total instructions tracked: %u\n",                                      _STATS_TotalInstructionsTracked);
+   printf("Total downgrades due to RI: %u\n",                                      _STATS_NumCompDowngradesDueToRI);
+   printf("Total upgrades due to RI: %u\n",                                        _STATS_NumUpgradesDueToRI);
    printf("\n");
    }

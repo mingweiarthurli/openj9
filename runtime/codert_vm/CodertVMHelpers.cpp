@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -232,45 +232,37 @@ jitMethodTranslated(J9VMThread *currentThread, J9Method *method, void *jitStartA
 	}
 }
 
-#if defined(J9VM_JIT_NEW_INSTANCE_PROTOTYPE)
 J9_EXTERN_BUILDER_SYMBOL(jitTranslateNewInstanceMethod);
 J9_EXTERN_BUILDER_SYMBOL(jitInterpretNewInstanceMethod);
-#endif /* J9VM_JIT_NEW_INSTANCE_PROTOTYPE */
 
 void*
 jitNewInstanceMethodStartAddress(J9VMThread *currentThread, J9Class *clazz)
 {
 	void *addr = NULL;
-#if defined(J9VM_JIT_NEW_INSTANCE_PROTOTYPE)
 	addr = (void*)clazz->romableAotITable;
 	if (addr == J9_BUILDER_SYMBOL(jitTranslateNewInstanceMethod)) {
 		addr = NULL;
 	}
-#endif /* J9VM_JIT_NEW_INSTANCE_PROTOTYPE */
 	return addr;
 }
 
 void
 jitNewInstanceMethodTranslated(J9VMThread *currentThread, J9Class *clazz, void *jitStartAddress)
 {
-#if defined(J9VM_JIT_NEW_INSTANCE_PROTOTYPE)
 	clazz->romableAotITable = (UDATA)VM_VMHelpers::jitToJitStartAddress(jitStartAddress);
-#endif /* J9VM_JIT_NEW_INSTANCE_PROTOTYPE */
 }
 
 void
 jitNewInstanceMethodTranslateFailed(J9VMThread *currentThread, J9Class *clazz)
 {
-#if defined(J9VM_JIT_NEW_INSTANCE_PROTOTYPE)
 	clazz->romableAotITable = (UDATA)J9_BUILDER_SYMBOL(jitInterpretNewInstanceMethod);
-#endif /* J9VM_JIT_NEW_INSTANCE_PROTOTYPE */
 }
 
 UDATA
 jitTranslateMethod(J9VMThread *currentThread, J9Method *method)
 {
 	UDATA oldState = currentThread->omrVMThread->vmState;
-	currentThread->omrVMThread->vmState = J9VMSTATE_JIT_CODEGEN;
+	currentThread->omrVMThread->vmState = J9VMSTATE_JIT;
 	J9JavaVM *vm = currentThread->javaVM;
 	J9JITConfig *jitConfig = vm->jitConfig;
 	UDATA jitStartPC = jitConfig->entryPoint(jitConfig, currentThread, method, 0);
@@ -331,7 +323,7 @@ jitGetExceptionCatcher(J9VMThread *currentThread, void *handlerPC, J9JITExceptio
 	 * because jitGetMapsFromPC is expecting a return address, so it subtracts 1.  The value passed in is
 	 * the start address of the compiled exception handler.
 	 */
-	jitGetMapsFromPC(currentThread->javaVM, metaData, (UDATA)handlerPC + 1, &stackMap, &inlineMap);
+	jitGetMapsFromPC(currentThread, currentThread->javaVM, metaData, (UDATA)handlerPC + 1, &stackMap, &inlineMap);
 	Assert_CodertVM_false(NULL == inlineMap);
 	if (NULL != getJitInlinedCallInfo(metaData)) {
 		inlinedCallSite = getFirstInlinedCallSite(metaData, inlineMap);

@@ -15,7 +15,7 @@
 # OpenJDK Assembly Exception [2].
 #
 # [1] https://www.gnu.org/software/classpath/license.html
-# [2] http://openjdk.java.net/legal/assembly-exception.html
+# [2] https://openjdk.org/legal/assembly-exception.html
 #
 # SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 ###############################################################################
@@ -94,3 +94,9 @@ CONFIGURE_ARGS += 'OMR_HOST_OS=win'
 CONFIGURE_ARGS += 'OMR_HOST_ARCH=x86'
 CONFIGURE_ARGS += 'OMR_TARGET_DATASIZE=$(TEMP_TARGET_DATASIZE)'
 CONFIGURE_ARGS += 'OMR_TOOLCHAIN=msvc'
+
+CONFIGURE_ARGS += 'OMR_COMPANY_NAME=International Business Machines Corporation'
+CONFIGURE_ARGS += 'OMR_COMPANY_COPYRIGHT=Copyright (c) 1991, $(shell date "+%Y") IBM Corp. and others'
+CONFIGURE_ARGS += 'OMR_PRODUCT_NAME=IBM SDK, Java(tm) 2 Technology Edition'
+CONFIGURE_ARGS += 'OMR_PRODUCT_DESCRIPTION=J9 Virtual Machine Runtime'
+CONFIGURE_ARGS += 'OMR_PRODUCT_VERSION=$(OPENJDK_VERSION_NUMBER_FOUR_POSITIONS)'

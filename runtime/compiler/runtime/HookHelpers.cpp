@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -41,6 +41,8 @@
 #include "runtime/RuntimeAssumptions.hpp"
 #include "env/VMJ9.h"
 #include "env/j9method.h"
+#include "env/VerboseLog.hpp"
+
 
 namespace  {
 
@@ -77,7 +79,7 @@ namespace  {
             ALWAYS_TRIGGER_J9HOOK_VM_DYNAMIC_CODE_UNLOAD
                (vm->hookInterface, vmThread, metaData->ramMethod,
                 (U_8*)metaData->startColdPC);
-         // At this point the the bodyInfo may have already been reclaimed
+         // At this point the bodyInfo may have already been reclaimed
          // The bodyInfo is reclaimed only for class unloading, not for recompilation
          if (ccMethodHeader && (metaData->bodyInfo != NULL))
             {
@@ -445,8 +447,7 @@ void vlogReclamation(const char * prefix, J9JITExceptionTable *metaData, size_t 
    {
    if (TR::Options::getVerboseOption(TR_VerboseReclamation))
       {
-
-      TR_VerboseLog::vlogAcquire();
+      TR_VerboseLog::CriticalSection vlogLock;
       TR_VerboseLog::write(
          TR_Vlog_RECLAMATION,
          "%s %.*s.%.*s%.*s @ %s [" POINTER_PRINTF_FORMAT "-",
@@ -468,7 +469,5 @@ void vlogReclamation(const char * prefix, J9JITExceptionTable *metaData, size_t 
       TR_VerboseLog::writeLine(
          POINTER_PRINTF_FORMAT "]",
          metaData->endPC);
-
-      TR_VerboseLog::vlogRelease();
       }
    }

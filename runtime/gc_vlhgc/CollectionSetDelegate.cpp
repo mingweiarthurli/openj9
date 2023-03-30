@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -46,7 +46,7 @@
 #include "HeapRegionManager.hpp"
 #include "HeapRegionManagerTarok.hpp"
 #include "MarkMap.hpp"
-#include "MemoryPoolBumpPointer.hpp"
+#include "MemoryPool.hpp"
 #include "RegionValidator.hpp"
 
 MM_CollectionSetDelegate::MM_CollectionSetDelegate(MM_EnvironmentBase *env, MM_HeapRegionManager *manager)
@@ -164,9 +164,8 @@ MM_CollectionSetDelegate::createNurseryCollectionSet(MM_EnvironmentVLHGC *env)
 			bool regionHasCriticalRegions = (0 != region->_criticalRegionsInUse);
 			bool isSelectionForCopyForward = env->_cycleState->_shouldRunCopyForward;
 
-			/* For CopyForwardHybrid mode we allow eden regions, which has jniCritical,to be part of nursery collectionSet, those regions would be marked instead of copyforwarded.
-			 * For Non CopyForwardHybrid mode we do not check Eden regions with jniCritical here, because we have already set MarkCompact PGC mode for the case in early. */
-			if (region->getRememberedSetCardList()->isAccurate() && (!isSelectionForCopyForward || !regionHasCriticalRegions || (regionHasCriticalRegions && (_extensions->tarokEnableCopyForwardHybrid || (0 != _extensions->fvtest_forceCopyForwardHybridRatio)) && region->isEden()))) {
+			/* We allow eden regions, which have jniCritical, to be part of nursery collectionSet; those regions would be marked instead of copyforwarded. */
+			if (region->getRememberedSetCardList()->isAccurate() && (!isSelectionForCopyForward || !regionHasCriticalRegions || (regionHasCriticalRegions && region->isEden()))) {
 
 				if(MM_CompactGroupManager::isRegionInNursery(env, region)) {
 					UDATA compactGroup = MM_CompactGroupManager::getCompactGroupNumber(env, region);
@@ -223,8 +222,7 @@ MM_CollectionSetDelegate::selectRegionsForBudget(MM_EnvironmentVLHGC *env, UDATA
 
 			UDATA tableIndex = _regionManager->mapDescriptorToRegionTableIndex(regionSelectionPtr);
 			UDATA compactGroup = MM_CompactGroupManager::getCompactGroupNumber(env, regionSelectionPtr);
-			MM_MemoryPoolBumpPointer *memoryPool = (MM_MemoryPoolBumpPointer *)regionSelectionPtr->getMemoryPool();
-			UDATA freeMemory = memoryPool->getFreeMemoryAndDarkMatterBytes();
+			UDATA freeMemory = regionSelectionPtr->getMemoryPool()->getFreeMemoryAndDarkMatterBytes();
 			_extensions->compactGroupPersistentStats[compactGroup]._regionsInRegionCollectionSetForPGC += 1;
 
 			Trc_MM_CollectionSetDelegate_selectRegionsForBudget(env->getLanguageVMThread(), tableIndex, compactGroup, (100 * freeMemory)/regionSize, (UDATA) 0, (UDATA) 0);
@@ -457,7 +455,7 @@ MM_CollectionSetDelegate::deleteRegionCollectionSetForPartialGC(MM_EnvironmentVL
 	MM_HeapRegionDescriptorVLHGC *region = NULL;
 	while (NULL != (region = regionIterator.nextRegion())) {
 		/* there shouldn't be any regions that have some occupancy but not marked left if the increment is done */
-		Assert_MM_false(MM_HeapRegionDescriptor::BUMP_ALLOCATED == region->getRegionType());
+		Assert_MM_false(MM_HeapRegionDescriptor::ADDRESS_ORDERED == region->getRegionType());
 		Assert_MM_true(MM_RegionValidator(region).validate(env));
 
 		region->_markData._shouldMark = false;
@@ -492,7 +490,7 @@ MM_CollectionSetDelegate::deleteRegionCollectionSetForGlobalGC(MM_EnvironmentVLH
 	MM_HeapRegionDescriptorVLHGC *region = NULL;
 	while (NULL != (region = regionIterator.nextRegion())) {
 		/* there shouldn't be any regions that have some occupancy but not marked left */
-		Assert_MM_false(MM_HeapRegionDescriptor::BUMP_ALLOCATED == region->getRegionType());
+		Assert_MM_false(MM_HeapRegionDescriptor::ADDRESS_ORDERED == region->getRegionType());
 		Assert_MM_true(MM_RegionValidator(region).validate(env));
 
 		region->_reclaimData._shouldReclaim = false;
@@ -529,7 +527,7 @@ MM_CollectionSetDelegate::rateOfReturnCalculationBeforeSweep(MM_EnvironmentVLHGC
 		while (NULL != (region = regionIterator.nextRegion())) {
 			if(region->containsObjects()) {
 				SetSelectionData *stats = &_setSelectionDataTable[MM_CompactGroupManager::getCompactGroupNumber(env, region)];
-				MM_MemoryPoolBumpPointer *memoryPool = (MM_MemoryPoolBumpPointer *)region->getMemoryPool();
+				MM_MemoryPool *memoryPool = region->getMemoryPool();
 
 				stats->_reclaimStats._regionCountBefore += 1;
 				if(!region->_sweepData._alreadySwept) {
@@ -572,7 +570,7 @@ MM_CollectionSetDelegate::rateOfReturnCalculationAfterSweep(MM_EnvironmentVLHGC 
 			if(region->containsObjects()) {
 				UDATA compactGroup = MM_CompactGroupManager::getCompactGroupNumber(env, region);
 				SetSelectionData *stats = &_setSelectionDataTable[compactGroup];
-				MM_MemoryPoolBumpPointer *memoryPool = (MM_MemoryPoolBumpPointer *)region->getMemoryPool();
+				MM_MemoryPool *memoryPool = region->getMemoryPool();
 
 				stats->_reclaimStats._regionCountAfter += 1;
 

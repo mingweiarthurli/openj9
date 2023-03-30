@@ -1,6 +1,5 @@
-
 /*******************************************************************************
- * Copyright (c) 1991, 2018 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -48,13 +47,13 @@
 class MM_CardCleaner;
 class MM_Collector;
 class MM_CycleState;
-class MM_Dispatcher;
 class MM_GlobalGCStats;
 class MM_GlobalMarkingScheme;
 class MM_GlobalMarkingSchemeRootMarker;
 class MM_GlobalMarkingSchemeRootClearer;
 class MM_InterRegionRememberedSet;
 class MM_MarkMap;
+class MM_ParallelDispatcher;
 class MM_ReferenceStats;
 class MM_RootScanner;
 class MM_SublistPool;
@@ -89,12 +88,12 @@ public:
 	virtual void setup(MM_EnvironmentBase *env);
 	virtual void cleanup(MM_EnvironmentBase *env);
 	
-	virtual void masterSetup(MM_EnvironmentBase *env);
-	virtual void masterCleanup(MM_EnvironmentBase *env);
+	virtual void mainSetup(MM_EnvironmentBase *env);
+	virtual void mainCleanup(MM_EnvironmentBase *env);
 
 #if defined(J9MODRON_TGC_PARALLEL_STATISTICS)
 	virtual void synchronizeGCThreads(MM_EnvironmentBase *env, const char *id);
-	virtual bool synchronizeGCThreadsAndReleaseMaster(MM_EnvironmentBase *env, const char *id);
+	virtual bool synchronizeGCThreadsAndReleaseMain(MM_EnvironmentBase *env, const char *id);
 	virtual bool synchronizeGCThreadsAndReleaseSingleThread(MM_EnvironmentBase *env, const char *id);
 #endif /* J9MODRON_TGC_PARALLEL_STATISTICS */
 
@@ -109,7 +108,7 @@ public:
 	 * Create a ParallelMarkTask object.
 	 */
 	MM_ParallelGlobalMarkTask(MM_EnvironmentBase *env,
-			MM_Dispatcher *dispatcher, 
+			MM_ParallelDispatcher *dispatcher, 
 			MM_GlobalMarkingScheme *markingScheme, 
 			MarkAction action,
 			I_64 timeThreshold,
@@ -162,7 +161,7 @@ public:
 	 * Create a MM_ConcurrentGlobalMarkTask object.
 	 */
 	MM_ConcurrentGlobalMarkTask(MM_EnvironmentBase *env,
-			MM_Dispatcher *dispatcher, 
+			MM_ParallelDispatcher *dispatcher, 
 			MM_GlobalMarkingScheme *markingScheme, 
 			MarkAction action,
 			UDATA bytesToScan,
@@ -274,13 +273,19 @@ private:
 	 */
 	void scanOwnableSynchronizerObjects(MM_EnvironmentVLHGC *env);
 
+	/**
+	 * Scan all continuation objects in the collection set.
+	 * @param env[in] the current thread
+	 */
+	void scanContinuationObjects(MM_EnvironmentVLHGC *env);
+
 	bool isMarked(J9Object *objectPtr);
 
 	/**
 	 * Handling of Work Packets overflow case
 	 * Active STW Card Based Overflow Handler only.
 	 * For other types of STW Overflow Handlers always return false
-	 * @param env[in] The master GC thread
+	 * @param env[in] The main GC thread
 	 * @return true if overflow flag is set
 	 */
 	bool handleOverflow(MM_EnvironmentVLHGC *env);
@@ -314,6 +319,9 @@ private:
 	 */
 	void scanMixedObject(MM_EnvironmentVLHGC *env, J9Object *objectPtr, ScanReason reason);
 	
+	void scanContinuationNativeSlots(MM_EnvironmentVLHGC *env, J9Object *objectPtr, ScanReason reason);
+	void scanContinuationObject(MM_EnvironmentVLHGC *env, J9Object *objectPtr, ScanReason reason);
+
 	/**
 	 * Scan the specified instance of java.lang.Class.
 	 * 1. Scan the object itself, as in scanMixedObject()
@@ -430,8 +438,8 @@ public:
 	static MM_GlobalMarkingScheme *newInstance(MM_EnvironmentVLHGC *env); 
 	virtual void kill(MM_EnvironmentVLHGC *env);
 	
-	void masterSetupForGC(MM_EnvironmentVLHGC *env);
-	void masterCleanupAfterGC(MM_EnvironmentVLHGC *env);
+	void mainSetupForGC(MM_EnvironmentVLHGC *env);
+	void mainCleanupAfterGC(MM_EnvironmentVLHGC *env);
 	void workerSetupForGC(MM_EnvironmentVLHGC *env);
 
 	/**
@@ -464,7 +472,7 @@ public:
 	 *  Scan (complete)
 	 *  Process all work packets from queue, including classes and work generated during this phase.
 	 *  On return, all live objects will be marked, although some unreachable objects (such as finalizable 
-	 *  objects) may still be revived by by subsequent stages.   
+	 *  objects) may still be revived by subsequent stages.
 	 *  @param[in] env - passed Environment 
 	 */
 	void markLiveObjectsScan(MM_EnvironmentVLHGC *env);
@@ -505,6 +513,7 @@ public:
 	 */
 	void flushBuffers(MM_EnvironmentVLHGC *env);
 	
+	void doStackSlot(MM_EnvironmentVLHGC *env, J9Object *fromObject, J9Object** slotPtr, J9StackWalkState *walkState, const void *stackLocation);
 	/**
 	 * Create a GlobalMarkingScheme object.
 	 */
@@ -532,5 +541,10 @@ public:
 	friend class MM_GlobalMarkingSchemeRootClearer;
 };
 
-#endif /* GLOBALMARKINGSCHEME_HPP_ */
+typedef struct StackIteratorData4GlobalMarkingScheme {
+	MM_GlobalMarkingScheme *globalMarkingScheme;
+	MM_EnvironmentVLHGC *env;
+	J9Object *fromObject;
+} StackIteratorData4GlobalMarkingScheme;
 
+#endif /* GLOBALMARKINGSCHEME_HPP_ */

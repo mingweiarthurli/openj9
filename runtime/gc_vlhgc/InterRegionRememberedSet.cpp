@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -35,10 +35,10 @@
 #include "ClassLoaderRememberedSet.hpp"
 #include "CollectionStatisticsVLHGC.hpp"
 #include "CycleState.hpp"
-#include "Dispatcher.hpp"
 #include "EnvironmentVLHGC.hpp"
 #include "HeapRegionIteratorVLHGC.hpp"
 #include "MixedObjectIterator.hpp"
+#include "ParallelDispatcher.hpp"
 #include "PointerArrayIterator.hpp"
 #include "RememberedSetCardListBufferIterator.hpp"
 #include "RememberedSetCardListCardIterator.hpp"
@@ -56,9 +56,6 @@ MM_InterRegionRememberedSet::MM_InterRegionRememberedSet(MM_HeapRegionManager *h
 	, _overflowedListTail(NULL)
 	, _regionSize(0)
 	, _shouldFlushBuffersForDecommitedRegions(false)
-#if defined(OMR_GC_COMPRESSED_POINTERS) && defined(OMR_GC_FULL_POINTERS)
-	, _compressObjectReferences(false)
-#endif /* defined(OMR_GC_COMPRESSED_POINTERS) && defined(OMR_GC_FULL_POINTERS) */
 	, _overflowedRegionCount(0)
 	, _stableRegionCount(0)
 	, _beingRebuiltRegionCount(0)
@@ -69,6 +66,9 @@ MM_InterRegionRememberedSet::MM_InterRegionRememberedSet(MM_HeapRegionManager *h
 	, _cardToRegionDisplacement(0)
 	, _cardTable(NULL)
 	, _rememberedSetCardBucketPool(NULL)
+#if defined(OMR_GC_COMPRESSED_POINTERS) && defined(OMR_GC_FULL_POINTERS)
+	, _compressObjectReferences(false)
+#endif /* defined(OMR_GC_COMPRESSED_POINTERS) && defined(OMR_GC_FULL_POINTERS) */
 {
 	_typeId = __FUNCTION__;
 }
@@ -450,15 +450,15 @@ MM_InterRegionRememberedSet::releaseCardBufferControlBlockLocalPools(MM_Environm
 	GC_VMThreadListIterator vmThreadListIterator((J9JavaVM *)env->getLanguageVM());
 	J9VMThread *aThread;
 
-	/* release all slave-GC-thread local buffers */
+	/* release all worker-GC-thread local buffers */
 	while((aThread = vmThreadListIterator.nextVMThread()) != NULL) {
 		MM_EnvironmentVLHGC *threadEnvironment = MM_EnvironmentVLHGC::getEnvironment(aThread);
-		if (GC_SLAVE_THREAD == threadEnvironment->getThreadType()) {
+		if (GC_WORKER_THREAD == threadEnvironment->getThreadType()) {
 			releaseCardBufferControlBlockListForThread(env, threadEnvironment);
 		}
 	}
 
-	/* do the same for master-GC-thread */
+	/* do the same for main-GC-thread */
 	releaseCardBufferControlBlockListForThread(env, env);
 
 	_overflowedListHead = NULL;
@@ -509,8 +509,7 @@ MM_InterRegionRememberedSet::overflowIfStableRegion(MM_EnvironmentVLHGC *env, MM
 		MM_RememberedSetCardList *rscl = region->getRememberedSetCardList();
 
 		if (rscl->isAccurate()) {
-			MM_MemoryPoolBumpPointer *pool = (MM_MemoryPoolBumpPointer *)region->getMemoryPool();
-			IDATA unusedSize = pool->getDarkMatterBytes() + pool->getActualFreeMemorySize();
+			IDATA unusedSize = region->getMemoryPool()->getFreeMemoryAndDarkMatterBytes();
 			if (unusedSize < (IDATA)(_regionSize * _unusedRegionThreshold)) {
 				rscl->setAsStable();
 				_stableRegionCount += 1;
@@ -589,7 +588,7 @@ MM_InterRegionRememberedSet::findRsclToOverflow(MM_EnvironmentVLHGC *env)
 		while (NULL != (region = regionIterator.nextRegion())) {
 			MM_RememberedSetCardList *rscl = region->getRememberedSetCardList();
 
-			if ((MM_HeapRegionDescriptor::BUMP_ALLOCATED_MARKED == region->getRegionType()) && (0 < rscl->mapToBucket(env)->_bufferCount)) {
+			if ((MM_HeapRegionDescriptor::ADDRESS_ORDERED_MARKED == region->getRegionType()) && (0 < rscl->mapToBucket(env)->_bufferCount)) {
 				if (NULL == listToOverflow || (listToOverflow->getBufferCount() < rscl->getBufferCount())) {
 					listToOverflow = rscl;
 				}

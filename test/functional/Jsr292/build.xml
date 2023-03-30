@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 
 <!--
-  Copyright (c) 2016, 2019 IBM Corp. and others
+  Copyright (c) 2016, 2022 IBM Corp. and others
 
   This program and the accompanying materials are made available under
   the terms of the Eclipse Public License 2.0 which accompanies this
@@ -17,7 +17,7 @@
   OpenJDK Assembly Exception [2].
 
   [1] https://www.gnu.org/software/classpath/license.html
-  [2] http://openjdk.java.net/legal/assembly-exception.html
+  [2] https://openjdk.org/legal/assembly-exception.html
 
   SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 -->
@@ -27,7 +27,6 @@
 	<description>
 		Build J9 JSR 292 Tests 
 	</description>
-	<import file="${TEST_ROOT}/functional/build.xml"/>
 
 	<!-- set global properties for this build -->
 	<property name="DEST" value="${BUILD_ROOT}/functional/Jsr292" />
@@ -41,6 +40,8 @@
 	<property name="bootstrapBuild" location="./bootstrap_bin"/>
 	<property name="transformerListener" location="${TEST_ROOT}/Utils/src"/>
 	<property name="TestUtilities" location="../TestUtilities/src"/> 
+	<property name="LIB" value="junit4,asm_all,jcommander,testng"/>
+	<import file="${TEST_ROOT}/TKG/scripts/getDependencies.xml"/>
 
 	<target name="init">
 		<mkdir dir="${DEST}"/>
@@ -48,7 +49,7 @@
 		<mkdir dir="${bootstrapBuild}"/>
 	</target>
 
-	<target name="compile_generator" depends="init" description="Compile SimpleIndyGenerator">
+	<target name="compile_generator" depends="init,getDependentLibs" description="Compile SimpleIndyGenerator">
 		<echo>Compiling Everything but IndyTest and ComplexIndyTest</echo>
 		<echo>Ant version is ${ant.version}</echo>
 		<property name="compiler.javac" value="${TEST_JDK_HOME}/bin/javac" />
@@ -188,30 +189,36 @@
 				</javac>
 			</then>
 			<else>
-				<javac srcdir="${src}" destdir="${build}" debug="true" fork="true" executable="${compiler.javac}" includeAntRuntime="false" encoding="ISO-8859-1">
-					<src path="${src}" />
-					<src path="${transformerListener}" />
-					<src path="${TestUtilities}" /> 
-					<!-- exclude non test files for indyn test -->
-					<exclude name="**/indyn/BootstrapMethods.java" />
-					<exclude name="**/indyn/ComplexIndyGenerator.java" />
-					<exclude name="**/indyn/Helper.java" />
-					<exclude name="**/indyn/SimpleIndyGenerator.java" />
-					<exclude name="**/CrossPackageHelper.java"/>
-					<exclude name="**/attachAPI/**" />
-					<classpath>
-						<pathelement location="${bootstrapBuild}"/>
-						<pathelement location="${LIB_DIR}/asm-all.jar" />
-						<pathelement location="${LIB_DIR}/junit4.jar" />
-						<pathelement location="${LIB_DIR}/testng.jar"/>
-						<pathelement location="${LIB_DIR}/jcommander.jar"/>
-					</classpath>
-				</javac>
+				<property name="srcpath" location="${src}:${transformerListener}:${TestUtilities}" />
+				<!-- exclude non test files for indyn test -->
+				<property name="commonExcludes" value="**/indyn/BootstrapMethods.java,**/indyn/ComplexIndyGenerator.java,**/indyn/Helper.java,**/indyn/SimpleIndyGenerator.java,**/CrossPackageHelper.java,**/attachAPI/**" />
+				<path id="build.cp">
+					<pathelement location="${bootstrapBuild}/"/>
+					<fileset dir="${LIB_DIR}/" includes="asm-all.jar"/>
+					<fileset dir="${LIB_DIR}/" includes="junit4.jar"/>
+					<fileset dir="${LIB_DIR}/" includes="testng.jar"/>
+					<fileset dir="${LIB_DIR}/" includes="jcommander.jar"/>
+				</path>
+				<if>
+					<matches string="${JDK_VERSION}" pattern="^(9|(1[0-8]))$$" />
+					<then>
+						<!-- Java 9-18 -->
+						<javac srcdir="${srcpath}" excludes="${commonExcludes}" destdir="${build}" debug="true" fork="true" executable="${compiler.javac}" includeAntRuntime="false" encoding="ISO-8859-1" classpathref="build.cp">
+						</javac>
+					</then>
+					<else>
+						<!-- Java 19+ (SecurityManager removed) -->
+						<javac srcdir="${srcpath}" excludes="${commonExcludes}" destdir="${build}" debug="true" fork="true" executable="${compiler.javac}" includeAntRuntime="false" encoding="ISO-8859-1" classpathref="build.cp">
+							<!-- exclude tests that depend on SecurityManager -->
+							<exclude name="com/ibm/j9/jsr292/MethodTypeTests_SM.java"/>
+						</javac>
+					</else>
+				</if>
 			</else>
 		</if>
 	</target>
 
-	<target name="dist" depends="compile,dist_functional" description="generate the distribution" >
+	<target name="dist" depends="compile" description="generate the distribution" >
 		<copy todir="${DEST}">
 			<fileset dir="${src}/../" includes="*.xml,*.policy" />
 			<fileset dir="${src}/../" includes="*.mk" />

@@ -1,27 +1,25 @@
-<?xml version="1.0" encoding="UTF-8"?>
-
+<?xml version='1.0' encoding='UTF-8'?>
 <!--
-  Copyright (c) 2016, 2020 IBM Corp. and others
+Copyright (c) 2016, 2022 IBM Corp. and others
 
-  This program and the accompanying materials are made available under
-  the terms of the Eclipse Public License 2.0 which accompanies this
-  distribution and is available at https://www.eclipse.org/legal/epl-2.0/
-  or the Apache License, Version 2.0 which accompanies this distribution and
-  is available at https://www.apache.org/licenses/LICENSE-2.0.
+This program and the accompanying materials are made available under
+the terms of the Eclipse Public License 2.0 which accompanies this
+distribution and is available at https://www.eclipse.org/legal/epl-2.0/
+or the Apache License, Version 2.0 which accompanies this distribution and
+is available at https://www.apache.org/licenses/LICENSE-2.0.
 
-  This Source Code may also be made available under the following
-  Secondary Licenses when the conditions for such availability set
-  forth in the Eclipse Public License, v. 2.0 are satisfied: GNU
-  General Public License, version 2 with the GNU Classpath
-  Exception [1] and GNU General Public License, version 2 with the
-  OpenJDK Assembly Exception [2].
+This Source Code may also be made available under the following
+Secondary Licenses when the conditions for such availability set
+forth in the Eclipse Public License, v. 2.0 are satisfied: GNU
+General Public License, version 2 with the GNU Classpath
+Exception [1] and GNU General Public License, version 2 with the
+OpenJDK Assembly Exception [2].
 
-  [1] https://www.gnu.org/software/classpath/license.html
-  [2] http://openjdk.java.net/legal/assembly-exception.html
+[1] https://www.gnu.org/software/classpath/license.html
+[2] https://openjdk.org/legal/assembly-exception.html
 
-  SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
+SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 -->
-
 <playlist xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../TKG/playlist.xsd">
 	<test>
 		<testCaseName>J9vmTest</testCaseName>
@@ -66,15 +64,17 @@
 		<groups>
 			<group>functional</group>
 		</groups>
-		<subsets>
-			<subset>11+</subset>
-		</subsets>
+		<types>
+			<type>native</type>
+		</types>
+		<versions>
+			<version>11+</version>
+		</versions>
 		<impls>
 			<impl>openj9</impl>
 			<impl>ibm</impl>
 		</impls>
 	</test>
-
 	<test>
 		<testCaseName>ThreadRegressionTests</testCaseName>
 		<variations>
@@ -99,7 +99,6 @@
 			<impl>ibm</impl>
 		</impls>
 	</test>
-
 	<test>
 		<testCaseName>SharedClassesSysVTesting</testCaseName>
 		<command>perl $(JVM_TEST_ROOT)$(D)TestConfig$(D)scripts$(D)tools$(D)sysvcleanup.pl all ; \
@@ -113,11 +112,6 @@
 		<groups>
 			<group>functional</group>
 		</groups>
-		<subsets>
-			<subset>8</subset>
-			<subset>9</subset>
-			<subset>11+</subset>
-		</subsets>
 		<impls>
 			<impl>openj9</impl>
 			<impl>ibm</impl>
@@ -125,6 +119,11 @@
 	</test>
 	<test>
 		<testCaseName>recreateClassTest</testCaseName>
+		<disables>
+			<disable>
+				<comment>excluded OpenJ9 tests</comment>
+			</disable>
+		</disables>
 		<variations>
 			<variation>NoOptions</variation>
 		</variations>
@@ -139,18 +138,21 @@
 		<groups>
 			<group>functional</group>
 		</groups>
-		<subsets>
-			<subset>8</subset>
-		</subsets>
-		<disabled>excluded OpenJ9 tests</disabled>
+		<versions>
+			<version>8</version>
+		</versions>
 		<impls>
 			<impl>openj9</impl>
 			<impl>ibm</impl>
 		</impls>
 	</test>
-
 	<test>
 		<testCaseName>CFdumptest</testCaseName>
+		<disables>
+			<disable>
+				<comment>excluded OpenJ9 tests</comment>
+			</disable>
+		</disables>
 		<command>$(JAVA_COMMAND) $(JVM_OPTIONS) \
 	-cp $(Q)$(TEST_RESROOT)$(D)VM_Test.jar$(P)$(LIB_DIR)$(D)junit4.jar$(Q) \
 	junit.textui.TestRunner com.ibm.j9.cfdump.tests.CfdumpTestSuite; \
@@ -161,14 +163,90 @@
 		<groups>
 			<group>functional</group>
 		</groups>
-		<subsets>
-			<subset>8</subset>
-		</subsets>
-		<disabled>excluded OpenJ9 tests</disabled>
+		<versions>
+			<version>8</version>
+		</versions>
 		<impls>
 			<impl>openj9</impl>
 			<impl>ibm</impl>
 		</impls>
 	</test>
-
+	<test>
+		<testCaseName>j9vmClassUnloading</testCaseName>
+		<variations>
+			<variation>Mode110</variation>
+			<variation>Mode301</variation>
+			<variation>Mode351</variation>
+			<variation>Mode501</variation>
+			<variation>Mode551</variation>
+			<variation>Mode610</variation>
+		</variations>
+		<command>$(JAVA_COMMAND) -Xdump -Xint -Dj9vm.testing.tests.path=$(TEST_RESROOT) \
+	-cp $(Q)$(TEST_RESROOT)$(D)VM_Test.jar$(P)$(LIB_DIR)$(D)asm-all.jar$(Q)  \
+	j9vm.runner.Menu -exe=$(Q)$(JAVA_COMMAND) $(JVM_OPTIONS) -Xdump$(Q) -jar=$(Q)$(TEST_RESROOT)$(D)VM_Test.jar$(Q) -test=$(Q)j9vm.test.classunloading.testcases$(Q) \
+	-xids=all,$(PLATFORM),$(VARIATION); \
+	$(TEST_STATUS)</command>
+		<levels>
+			<level>extended</level>
+		</levels>
+		<groups>
+			<group>functional</group>
+		</groups>
+		<impls>
+			<impl>openj9</impl>
+			<impl>ibm</impl>
+		</impls>
+	</test>
+	<test>
+		<testCaseName>xlpTests</testCaseName>
+		<disables>
+			<disable>
+				<comment>https://github.com/eclipse-openj9/openj9/issues/11374</comment>
+				<platform>.*mac.*</platform>
+			</disable>
+		</disables>
+		<variations>
+			<variation>Mode110</variation>
+			<variation>Mode610</variation>
+		</variations>
+		<command>$(JAVA_COMMAND) -Dplatform=$(PLATFORM) -cp $(Q)$(TEST_RESROOT)$(D)VM_Test.jar$(Q) \
+	j9vm.runner.Menu -test=$(Q)j9vm.test.xlp$(Q) -exe=$(Q)$(JAVA_COMMAND) $(JVM_OPTIONS) -Xdump$(Q) \
+	-jar=$(Q)$(TEST_RESROOT)$(D)VM_Test.jar$(Q) \
+	-xids=all,$(PLATFORM),$(VARIATION); \
+	$(TEST_STATUS)</command>
+		<levels>
+			<level>extended</level>
+		</levels>
+		<groups>
+			<group>functional</group>
+		</groups>
+		<impls>
+			<impl>openj9</impl>
+			<impl>ibm</impl>
+		</impls>
+	</test>
+	<test>
+		<testCaseName>xlpCodeCacheTests</testCaseName>
+		<variations>
+			<variation>Mode109</variation>
+			<variation>Mode110</variation>
+			<variation>Mode609</variation>
+			<variation>Mode610</variation>
+		</variations>
+		<command>$(JAVA_COMMAND) -Dplatform=$(PLATFORM) -cp $(Q)$(TEST_RESROOT)$(D)VM_Test.jar$(Q) \
+	j9vm.runner.Menu -test=$(Q)j9vm.test.xlpcodecache$(Q) -exe=$(Q)$(JAVA_COMMAND) $(JVM_OPTIONS) -Xdump$(Q) \
+	-jar=$(Q)$(TEST_RESROOT)$(D)VM_Test.jar$(Q) \
+	-xids=all,$(PLATFORM),$(VARIATION); \
+	$(TEST_STATUS)</command>
+		<levels>
+			<level>extended</level>
+		</levels>
+		<groups>
+			<group>functional</group>
+		</groups>
+		<impls>
+			<impl>openj9</impl>
+			<impl>ibm</impl>
+		</impls>
+	</test>
 </playlist>

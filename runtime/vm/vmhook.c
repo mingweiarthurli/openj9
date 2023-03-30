@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2017 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -120,6 +120,13 @@ hookAboutToBootstrapEvent(J9HookInterface** hook, UDATA eventNum, void* voidEven
 
 	/* these hooks must be reserved by now. Attempt to disable them so that they're in a well-known state after this */
 	(*hookInterface)->J9HookDisable(hookInterface, J9HOOK_VM_MONITOR_CONTENDED_EXIT);
+
+	/* The instrumentable object allocate hook disables safepoint OSR */
+	if ((*hookInterface)->J9HookDisable(hookInterface, J9HOOK_VM_OBJECT_ALLOCATE_INSTRUMENTABLE)) {
+		omrthread_monitor_enter(vm->runtimeFlagsMutex);
+		vm->extendedRuntimeFlags &= ~(UDATA)(J9_EXTENDED_RUNTIME_OSR_SAFE_POINT| J9_EXTENDED_RUNTIME_OSR_SAFE_POINT_FV);
+		omrthread_monitor_exit(vm->runtimeFlagsMutex);
+	}
 
 	if ((*hookInterface)->J9HookDisable(hookInterface, J9HOOK_VM_METHOD_ENTER)
 		|| (*hookInterface)->J9HookDisable(hookInterface, J9HOOK_VM_METHOD_RETURN)

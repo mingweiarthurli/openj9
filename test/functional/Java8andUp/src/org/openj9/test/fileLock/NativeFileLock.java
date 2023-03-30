@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2019 IBM Corp. and others
+ * Copyright (c) 2001, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -40,25 +40,25 @@ public class NativeFileLock extends GenericFileLock {
 		Constructor<?> nflConstructor = nativeFileLock.getDeclaredConstructor(
 				java.lang.String.class, int.class);
 		nflConstructor.setAccessible(true);
-		fileLockObject = nflConstructor.newInstance(lockFile.getAbsolutePath(), new Integer(mode));
+		fileLockObject = nflConstructor.newInstance(lockFile.getAbsolutePath(), Integer.valueOf(mode));
 		lockFileMethod = nativeFileLock.getDeclaredMethod("lockFile",
-				boolean.class);
+				boolean.class, String.class);
 		lockFileMethod.setAccessible(true);
-		unlockFileMethod = nativeFileLock.getDeclaredMethod("unlockFile");
+		unlockFileMethod = nativeFileLock.getDeclaredMethod("unlockFile", String.class);
 		unlockFileMethod.setAccessible(true);
 		TestFileLocking.logger.debug("exit NativeFileLock");
 	}
 
 	@Override
 	public boolean lockFile(boolean blocking) throws Exception {
-		Boolean result = new Boolean(true);
+		Boolean result = Boolean.valueOf(true);
 		TestFileLocking.logger.debug("lockfile blocking =" + blocking);
-		result = (Boolean) lockFileMethod.invoke(fileLockObject, new Boolean(blocking));
+		result = (Boolean) lockFileMethod.invoke(fileLockObject, Boolean.valueOf(blocking), "NativeFileLock.lockFile()");
 		return result.booleanValue();
 	}
 
 	@Override
 	public void unlockFile() throws Exception {
-		unlockFileMethod.invoke(fileLockObject);
+		unlockFileMethod.invoke(fileLockObject, "NativeFileLock.unlockFile()");
 	}
 }

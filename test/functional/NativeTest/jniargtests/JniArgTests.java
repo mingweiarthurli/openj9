@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2004, 2019 IBM Corp. and others
+ * Copyright (c) 2004, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -2786,12 +2786,10 @@ public class JniArgTests {
 			logRetValError("Return value error:  nativeZIZIZIZIZIrZ got: " + retval_boolean + " expected: " + test_jboolean[0]);
 		}
 		
-		
 		retval_boolean = nativeIZIZIZIZIZrZ(test_jint[1], test_jboolean[1], test_jint[2], test_jboolean[0], test_jint[3], test_jboolean[1], test_jint[4], test_jboolean[0], test_jint[5], test_jboolean[1]);
 		if (retval_boolean != test_jboolean[1]) {
 			logRetValError("Return value error:  nativeIZIZIZIZIZrZ got: " + retval_boolean + " expected: " + test_jboolean[1]);
 		}
-
 		
 		retval_boolean = nativeZZZZZZZZZZrZ(test_jboolean[1], test_jboolean[0], test_jboolean[1], test_jboolean[0], test_jboolean[1], test_jboolean[0], test_jboolean[1], test_jboolean[0], test_jboolean[1], test_jboolean[0]);
 		if (retval_boolean != test_jboolean[0]) {

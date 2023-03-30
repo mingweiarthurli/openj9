@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -36,11 +36,22 @@ struct TR_CallTarget;
 
 #define MAX_ECS_RECURSION_DEPTH 30
 
+enum EcsCleanupErrorStates {
+   ECS_NORMAL = 0,
+   ECS_RECURSION_DEPTH_THRESHOLD_EXCEEDED,
+   ECS_OPTIMISTIC_SIZE_THRESHOLD_EXCEEDED,
+   ECS_VISITED_COUNT_THRESHOLD_EXCEEDED,
+   ECS_REAL_SIZE_THRESHOLD_EXCEEDED,
+   ECS_ARGUMENTS_INCOMPATIBLE,
+   ECS_CALLSITES_CREATION_FAILED
+};
+
 class TR_EstimateCodeSize
    {
    public:
 
    void * operator new (size_t size, TR::Allocator allocator) { return allocator.allocate(size); }
+   void operator delete (void *, TR::Allocator allocator) {}
 
    //    {
    //    TR_EstimateCodeSize::raiiWrapper lexicalScopeObject(....);
@@ -78,7 +89,7 @@ class TR_EstimateCodeSize
 
    int32_t getSize()                   { return _realSize; }
    virtual int32_t getOptimisticSize() { return 0; } // override in subclasses that support partial inlining
-   int32_t getError()                  { return _error; }
+   const char *getError();
    int32_t getSizeThreshold()          { return _sizeThreshold; }
    bool aggressivelyInlineThrows()     { return _aggressivelyInlineThrows; }
    bool recursedTooDeep()              { return _recursedTooDeep; }
@@ -93,6 +104,7 @@ class TR_EstimateCodeSize
 
    TR::Compilation *comp()              { return _inliner->comp(); }
    TR_InlinerTracer *tracer()          { return _tracer; }
+   TR_InlinerBase* getInliner()        { return _inliner; }
 
    protected:
 
@@ -102,10 +114,10 @@ class TR_EstimateCodeSize
    /*
     *  \brief common tasks requiring completion before returning from estimation
     *
-    *  \param errorNumber
-    *       an unique number used to identify where estimate code size bailed out
+    *  \param errorState
+    *       an unique state used to identify where estimate code size bailed out
     */
-   bool returnCleanup(int32_t errorNumber );
+   bool returnCleanup(EcsCleanupErrorStates errorState);
 
    /* Fields */
 
@@ -121,7 +133,7 @@ class TR_EstimateCodeSize
 
    int32_t _sizeThreshold;
    int32_t _realSize;        // size once we know if we're doing a partial inline or not
-   int32_t _error;
+   EcsCleanupErrorStates _error;
 
    int32_t _totalBCSize;     // Pure accumulation of the bytecode size. Used by HW-based inlining.
 

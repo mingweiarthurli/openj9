@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2017, 2018 IBM Corp. and others
+ * Copyright (c) 2017, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -48,8 +48,8 @@ OutOfLineINL_java_lang_invoke_NativeMethodHandle_initJ9NativeCalloutDataRef(J9VM
 	Assert_VM_Null(J9VMJAVALANGINVOKENATIVEMETHODHANDLE_J9NATIVECALLOUTDATAREF(currentThread, methodHandle));
 
 	j9object_t methodType = J9VMJAVALANGINVOKEMETHODHANDLE_TYPE(currentThread, methodHandle);
-	J9Class *returnTypeClass = J9VM_J9CLASS_FROM_HEAPCLASS(currentThread, J9VMJAVALANGINVOKEMETHODTYPE_RETURNTYPE(currentThread, methodType));
-	j9object_t argTypesObject = J9VMJAVALANGINVOKEMETHODTYPE_ARGUMENTS(currentThread, methodType);
+	J9Class *returnTypeClass = J9VM_J9CLASS_FROM_HEAPCLASS(currentThread, J9VMJAVALANGINVOKEMETHODTYPE_RTYPE(currentThread, methodType));
+	j9object_t argTypesObject = J9VMJAVALANGINVOKEMETHODTYPE_PTYPES(currentThread, methodType);
 
 	FFITypeHelpers FFIHelpers = FFITypeHelpers(currentThread);
 	j9object_t argLayoutStringsObject = *(j9object_t*)currentThread->sp;
@@ -165,14 +165,21 @@ OutOfLineINL_java_lang_invoke_NativeMethodHandle_freeJ9NativeCalloutDataRef(J9VM
 	j9object_t methodHandle = *(j9object_t*)currentThread->sp;
 
 	j9object_t methodType = J9VMJAVALANGINVOKEMETHODHANDLE_TYPE(currentThread, methodHandle);
-	j9object_t argTypesObject = J9VMJAVALANGINVOKEMETHODTYPE_ARGUMENTS(currentThread, methodType);
+	j9object_t argTypesObject = J9VMJAVALANGINVOKEMETHODTYPE_PTYPES(currentThread, methodType);
 	U_32 argumentCount = J9INDEXABLEOBJECT_SIZE(currentThread, argTypesObject) + 1;
 	J9NativeCalloutData *nativeCalloutData = J9VMJAVALANGINVOKENATIVEMETHODHANDLE_J9NATIVECALLOUTDATAREF(currentThread, methodHandle);
 
 	/* Manually synchronize methodHandle since declaring the method as synchronized in Java will have no effect (for all INLs). */
 	j9object_t methodHandleLock = (j9object_t)objectMonitorEnter(currentThread, methodHandle);
-	if (NULL == methodHandleLock) {
-		setNativeOutOfMemoryError(currentThread, J9NLS_VM_FAILED_TO_ALLOCATE_MONITOR);
+	if (J9_OBJECT_MONITOR_ENTER_FAILED(methodHandleLock)) {
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+		if (J9_OBJECT_MONITOR_CRIU_SINGLE_THREAD_MODE_THROW == (UDATA)methodHandleLock) {
+			setCRIUSingleThreadModeJVMCRIUException(currentThread, 0, 0);
+		} else
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
+		if (J9_OBJECT_MONITOR_OOM == (UDATA)methodHandleLock) {
+			setNativeOutOfMemoryError(currentThread, J9NLS_VM_FAILED_TO_ALLOCATE_MONITOR);
+		}
 		goto done;
 	}
 

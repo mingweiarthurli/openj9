@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2020 IBM Corp. and others
+ * Copyright (c) 2001, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -38,6 +38,8 @@
 #define CM_READ_CACHE_FAILED -1
 #define CM_CACHE_CORRUPT -2
 #define CM_CACHE_STORE_PREREQ_ID_FAILED -3
+
+#define CM_CACHE_MAX_METADATA_RELEASES 2
 
 /*
  * The maximum width of the hexadecimal representation of a value of type 'T'.
@@ -88,11 +90,6 @@ public:
 	static UDATA getRequiredConstrBytes(bool startupForStats);
 
 	IDATA startup(J9VMThread* currentThread, J9SharedClassPreinitConfig* piconfig, const char* rootName, const char* cacheDirName, UDATA cacheDirPerm, BlockPtr cacheMemoryUT, bool* cacheHasIntegrity);
-
-#if defined(J9SHR_CACHELET_SUPPORT)
-	/* @see SharedCache.hpp */
-	virtual bool serializeSharedCache(J9VMThread* currentThread);
-#endif
 
 	/* @see SharedCache.hpp */
 	virtual IDATA enterLocalMutex(J9VMThread* currentThread, omrthread_monitor_t monitor, const char* name, const char* caller);
@@ -203,12 +200,7 @@ public:
 	virtual void notifyClasspathEntryStateChange(J9VMThread* currentThread, const char* path, UDATA newState);
 	
 	static IDATA createPathString(J9VMThread* currentThread, J9SharedClassConfig* config, char** pathBuf, UDATA pathBufSize, ClasspathEntryItem* cpei, const char* className, UDATA classNameLen, bool* doFreeBuffer);
-	
-#if defined(J9SHR_CACHELET_SUPPORT)
-	/* @see SharedCache.hpp */
-	virtual IDATA startupCachelet(J9VMThread* currentThread, SH_CompositeCache* cachelet);
-#endif
-	
+
 	/* @see SharedCache.hpp */
 	virtual IDATA getAndStartManagerForType(J9VMThread* currentThread, UDATA dataType, SH_Manager** startedManager);
 
@@ -299,10 +291,6 @@ private:
 	J9SharedClassConfig* _sharedClassConfig;
 	
 	SH_CompositeCacheImpl* _ccHead;				/* head of supercache list */
-	SH_CompositeCacheImpl* _cacheletHead;		/* head of all known cachelets */
-	SH_CompositeCacheImpl* _ccCacheletHead;		/* head of cachelet list for current cache */
-	SH_CompositeCacheImpl* _cacheletTail;		/* tail of all known cachelets */
-	SH_CompositeCacheImpl* _prevCClastCachelet;	/* Reference to the last allocated cachelet in the last supercache */
 	SH_CompositeCacheImpl* _ccTail;
 		
 	CacheAddressRange _cacheAddressRangeArray[J9SH_LAYER_NUM_MAX_VALUE + 1];
@@ -333,33 +321,9 @@ private:
 	UDATA _verboseFlags;
 	UDATA _bytesRead;
 	U_32 _actualSize;
-	UDATA _cacheletCntr;
 	J9Pool* _ccPool;
-	bool _metadataReleased;
-	
-	/* True iff (*_runtimeFlags & J9SHR_RUNTIMEFLAG_ENABLE_NESTED). Set in startup().
-	 * This flag is a misnomer. It indicates the cache is growable (chained), which also
-	 * implies it contains cachelets. However, the cache may contain cachelets even
-	 * if this flag is not set.
-	 * NOT equivalent to SH_Manager::_isRunningNested.
-	 */
-	bool _runningNested;
-	
-	/* True iff we allow growing the cache via chained supercaches. Set in startup().
-	 * _runningNested requests the growing capability, but _growEnabled controls the
-	 * support for it.
-	 * Currently always false, because cache growing is unstable.
-	 * Internal: Requires cachelets.
-	 */
-	bool _growEnabled;
-	
-	/* For growable caches, the cache can only be serialized once, because serialization "corrupts"
-	 * the original cache and renders it unusable. e.g. We fix up offsets in AOT methods.
-	 * This flag indicates whether the cache has already been serialized.
-	 * Access to this is not currently synchronized.
-	 */
-	bool _isSerialized;
-	
+	int32_t _metadataReleaseCounter;
+
 	bool _isAssertEnabled; /* flag to turn on/off assertion before acquiring local mutex */
 	
 	SH_Managers * _managers;
@@ -443,47 +407,9 @@ private:
 
 	void updateAverageWriteHashTime(UDATA actualTimeMicros);
 
-#if defined(J9SHR_CACHELET_SUPPORT)
-	UDATA startAllManagers(J9VMThread* currentThread);
-
-	void getBoundsForCache(SH_CompositeCacheImpl* cache, BlockPtr* cacheStart, BlockPtr* romClassEnd, BlockPtr* metaStart, BlockPtr* cacheEnd);
-
-	J9SharedClassCacheDescriptor* appendCacheDescriptorList(J9VMThread* currentThread, J9SharedClassConfig* sharedClassConfig);
-#endif
-
 	J9SharedClassCacheDescriptor* appendCacheDescriptorList(J9VMThread* currentThread, J9SharedClassConfig* sharedClassConfig, SH_CompositeCacheImpl* ccToUse);
 	
 	void resetCacheDescriptorList(J9VMThread* currentThread, J9SharedClassConfig* sharedClassConfig);
-	
-#if defined(J9SHR_CACHELET_SUPPORT)
-	SH_CompositeCacheImpl* initCachelet(J9VMThread* currentThread, BlockPtr cacheletMemory, bool creatingCachelet);
-
-	SH_CompositeCacheImpl* createNewCachelet(J9VMThread* currentThread); 
-	
-	IDATA readCacheletHints(J9VMThread* currentThread, SH_CompositeCacheImpl* cachelet, CacheletWrapper* cacheletWrapper);
-	bool readCacheletSegments(J9VMThread* currentThread, SH_CompositeCacheImpl* cachelet, CacheletWrapper* cacheletWrapper);
-
-	IDATA buildCacheletMetadata(J9VMThread* currentThread, SH_Manager::CacheletMetadataArray** metadataArray);
-	IDATA writeCacheletMetadata(J9VMThread* currentThread, SH_Manager::CacheletMetadata* cacheletMetadata);
-	void freeCacheletMetadata(J9VMThread* currentThread, SH_Manager::CacheletMetadataArray* metaArray);
-	void fixupCacheletMetadata(J9VMThread* currentThread, SH_Manager::CacheletMetadataArray* metaArray,
-		SH_CompositeCacheImpl* serializedCache, IDATA metadataOffset);
-
-	bool serializeOfflineCache(J9VMThread* currentThread);
-
-	SH_CompositeCacheImpl* createNewChainedCache(J9VMThread* currentThread, UDATA requiredSize);
-
-	void setDeployedROMClassStarts(J9VMThread* currentThread, void* serializedROMClassStartAddress);
-	IDATA fixupCompiledMethodsForSerialization(J9VMThread* currentThread, void* serializedROMClassStartAddress);
-	
-#if defined(J9SHR_CACHELETS_SAVE_READWRITE_AREA)
-	void fixCacheletReadWriteOffsets(J9VMThread* currentThread);
-#endif
-	
-#if 0
-	IDATA growCacheInPlace(J9VMThread* currentThread, UDATA rwGrowth, UDATA freeGrowth);
-#endif
-#endif
 
 	const J9ROMClass* allocateROMClassOnly(J9VMThread* currentThread, U_32 sizeToAlloc, U_16 classnameLength, const char* classnameData, ClasspathWrapper* cpw, const J9UTF8* partitionInCache, const J9UTF8* modContextInCache, IDATA callerHelperID, bool modifiedNoContext, void * &newItemInCache, void * &cacheAreaForAllocate);
 
@@ -510,10 +436,6 @@ private:
 	const bool parseWildcardMethodSpecTable(MethodSpecTable* specTable, IDATA numSpecs);
 
 	static void updateLocalHintsData(J9VMThread* currentThread, J9SharedLocalStartupHints* localHints, const J9SharedStartupHintsDataDescriptor* hintsDataInCache, bool overwrite);
-
-#if defined(J9SHR_CACHELET_SUPPORT)
-	IDATA startupCacheletForStats(J9VMThread* currentThread, SH_CompositeCache* cachelet);
-#endif /*J9SHR_CACHELET_SUPPORT*/
 
 	IDATA getPrereqCache(J9VMThread* currentThread, const char* cacheDir, SH_CompositeCacheImpl* ccToUse, bool startupForStats, const char** prereqCacheID, UDATA* idLen, bool *isCacheUniqueIdStored);
 

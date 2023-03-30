@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -88,7 +88,7 @@ static jclass proxyDefineClass(
 		defineClassOptions |= J9_FINDCLASS_FLAG_UNSAFE;
 	}
 #endif /* JAVA_SPEC_VERSION == 8 */
-	return defineClassCommon(env, classLoader, className, classBytes, offset, length, pd, defineClassOptions, NULL, NULL);
+	return defineClassCommon(env, classLoader, className, classBytes, offset, length, pd, &defineClassOptions, NULL, NULL, FALSE);
 }
 
 jclass JNICALL Java_java_lang_reflect_Proxy_defineClassImpl(JNIEnv * env, jclass recvClass, jobject classLoader, jstring className, jbyteArray classBytes)
@@ -119,7 +119,7 @@ Java_java_lang_reflect_Proxy_defineClass0__Ljava_lang_ClassLoader_2Ljava_lang_St
 			defineClassOptions |= J9_FINDCLASS_FLAG_UNSAFE;
 		}
 #endif /* JAVA_SPEC_VERSION == 8 */
-		return defineClassCommon(env, classLoader, className, classBytes, offset, length, pd, defineClassOptions, NULL, NULL);
+		return defineClassCommon(env, classLoader, className, classBytes, offset, length, pd, &defineClassOptions, NULL, NULL, FALSE);
 	}
 }
 

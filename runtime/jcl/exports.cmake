@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2019, 2020 IBM Corp. and others
+# Copyright (c) 2019, 2022 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
 # OpenJDK Assembly Exception [2].
 #
 # [1] https://www.gnu.org/software/classpath/license.html
-# [2] http://openjdk.java.net/legal/assembly-exception.html
+# [2] https://openjdk.org/legal/assembly-exception.html
 #
 # SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 ################################################################################
@@ -44,9 +44,9 @@ omr_add_exports(jclse
 	Java_com_ibm_java_lang_management_internal_MemoryMXBeanImpl_createMemoryManagers
 	Java_com_ibm_java_lang_management_internal_MemoryMXBeanImpl_createMemoryPools
 	Java_com_ibm_java_lang_management_internal_MemoryMXBeanImpl_getCurrentGCThreadsImpl
-	Java_com_ibm_java_lang_management_internal_MemoryMXBeanImpl_getGCMasterThreadCpuUsedImpl
+	Java_com_ibm_java_lang_management_internal_MemoryMXBeanImpl_getGCMainThreadCpuUsedImpl
 	Java_com_ibm_java_lang_management_internal_MemoryMXBeanImpl_getGCModeImpl
-	Java_com_ibm_java_lang_management_internal_MemoryMXBeanImpl_getGCSlaveThreadsCpuUsedImpl
+	Java_com_ibm_java_lang_management_internal_MemoryMXBeanImpl_getGCWorkerThreadsCpuUsedImpl
 	Java_com_ibm_java_lang_management_internal_MemoryMXBeanImpl_getHeapMemoryUsageImpl
 	Java_com_ibm_java_lang_management_internal_MemoryMXBeanImpl_getMaxHeapSizeImpl
 	Java_com_ibm_java_lang_management_internal_MemoryMXBeanImpl_getMaxHeapSizeLimitImpl
@@ -140,8 +140,6 @@ omr_add_exports(jclse
 	Java_com_ibm_jit_JITHelpers_j9ThreadJ9JavaVMOffset
 	Java_com_ibm_jit_JITHelpers_javaLangClassJ9ClassOffset
 	Java_com_ibm_jit_JITHelpers_javaLangThreadJ9ThreadOffset
-	Java_com_ibm_jit_JITHelpers_objectHeaderHasBeenHashedInClass
-	Java_com_ibm_jit_JITHelpers_objectHeaderHasBeenMovedInClass
 	Java_com_ibm_jvm_Dump_HeapDumpImpl
 	Java_com_ibm_jvm_Dump_JavaDumpImpl
 	Java_com_ibm_jvm_Dump_SnapDumpImpl
@@ -230,7 +228,6 @@ omr_add_exports(jclse
 	Java_com_ibm_lang_management_internal_ExtendedOperatingSystemMXBeanImpl_getTotalPhysicalMemoryImpl
 	Java_com_ibm_lang_management_internal_ExtendedOperatingSystemMXBeanImpl_getTotalProcessorUsageImpl
 	Java_com_ibm_lang_management_internal_ExtendedOperatingSystemMXBeanImpl_isDLPAREnabled
-	Java_com_ibm_lang_management_internal_ExtendedRuntimeMXBeanImpl_getProcessIDImpl
 	Java_com_ibm_lang_management_internal_ExtendedRuntimeMXBeanImpl_getVMIdleStateImpl
 	Java_com_ibm_lang_management_internal_JvmCpuMonitor_getThreadCategoryImpl
 	Java_com_ibm_lang_management_internal_JvmCpuMonitor_getThreadsCpuUsageImpl
@@ -258,12 +255,14 @@ omr_add_exports(jclse
 	Java_com_ibm_oti_reflect_TypeAnnotationParser_getTypeAnnotationsDataImpl__Ljava_lang_reflect_Method_2
 	Java_com_ibm_oti_shared_SharedAbstractHelper_getIsVerboseImpl
 	Java_com_ibm_oti_shared_SharedClassAbstractHelper_initializeShareableClassloaderImpl
+	Java_com_ibm_oti_shared_SharedClassStatistics_cachePathImpl
 	Java_com_ibm_oti_shared_SharedClassStatistics_freeSpaceBytesImpl
 	Java_com_ibm_oti_shared_SharedClassStatistics_maxAotBytesImpl
 	Java_com_ibm_oti_shared_SharedClassStatistics_maxJitDataBytesImpl
 	Java_com_ibm_oti_shared_SharedClassStatistics_maxSizeBytesImpl
 	Java_com_ibm_oti_shared_SharedClassStatistics_minAotBytesImpl
 	Java_com_ibm_oti_shared_SharedClassStatistics_minJitDataBytesImpl
+	Java_com_ibm_oti_shared_SharedClassStatistics_numberAttachedImpl
 	Java_com_ibm_oti_shared_SharedClassStatistics_softmxBytesImpl
 	Java_com_ibm_oti_shared_SharedClassTokenHelperImpl_findSharedClassImpl2
 	Java_com_ibm_oti_shared_SharedClassTokenHelperImpl_storeSharedClassImpl2
@@ -300,6 +299,7 @@ omr_add_exports(jclse
 	Java_com_ibm_oti_vm_VM_localGC
 	Java_com_ibm_oti_vm_VM_markCurrentThreadAsSystemImpl
 	Java_com_ibm_oti_vm_VM_setCommonData
+	Java_com_ibm_oti_vm_VM_getJ9ConstantPoolFromJ9Class
 	Java_com_ibm_rmi_io_IIOPInputStream_00024LUDCLStackWalkOptimizer_LUDCLMarkFrame
 	Java_com_ibm_rmi_io_IIOPInputStream_00024LUDCLStackWalkOptimizer_LUDCLUnmarkFrameImpl
 	Java_com_ibm_virtualization_management_internal_GuestOS_retrieveMemoryUsageImpl
@@ -334,7 +334,8 @@ omr_add_exports(jclse
 	Java_java_lang_Class_getVirtualMethodCountImpl
 	Java_java_lang_Class_getVirtualMethodsImpl
 	Java_java_lang_Class_isClassADeclaredClass
-	Java_java_lang_Class_getRecordComponentsImpl
+	Java_java_lang_Class_isClassAnEnclosedClass
+	Java_java_lang_Class_isCircularDeclaringClass
 	Java_java_lang_Class_permittedSubclassesImpl
 	Java_java_lang_Compiler_commandImpl
 	Java_java_lang_Compiler_compileClassImpl
@@ -344,7 +345,7 @@ omr_add_exports(jclse
 	Java_java_lang_J9VMInternals_dumpString
 	Java_java_lang_J9VMInternals_getStackTrace
 	Java_java_lang_J9VMInternals_newInstance
-	Java_java_lang_System_getEncoding
+	Java_java_lang_System_getSysPropBeforePropertiesInitialized
 	Java_java_lang_System_getPropertyList
 	Java_java_lang_System_mapLibraryName
 	Java_java_lang_System_rasInitializeVersion
@@ -354,33 +355,14 @@ omr_add_exports(jclse
 	Java_java_lang_Thread_getStateImpl
 	Java_java_lang_Thread_holdsLock
 	Java_java_lang_Thread_interruptImpl
-	Java_java_lang_Thread_resumeImpl
 	Java_java_lang_Thread_setNameImpl
 	Java_java_lang_Thread_setPriorityNoVMAccessImpl
 	Java_java_lang_Thread_startImpl
-	Java_java_lang_Thread_stopImpl
-	Java_java_lang_Thread_suspendImpl
 	Java_java_lang_Thread_yield
-	Java_java_lang_invoke_InterfaceHandle_registerNatives
-	Java_java_lang_invoke_MethodHandle_getCPClassNameAt
-	Java_java_lang_invoke_MethodHandle_getCPMethodHandleAt
-	Java_java_lang_invoke_MethodHandle_getCPMethodTypeAt
-	Java_java_lang_invoke_MethodHandle_getCPTypeAt
-	Java_java_lang_invoke_MethodHandle_invoke
-	Java_java_lang_invoke_MethodHandle_invokeExact
-	Java_java_lang_invoke_MethodHandle_requestCustomThunkFromJit
-	Java_java_lang_invoke_MethodHandle_vmRefFieldOffset
-	Java_java_lang_invoke_MethodType_makeTenured
-	Java_java_lang_invoke_MutableCallSite_freeGlobalRef
-	Java_java_lang_invoke_MutableCallSite_registerNatives
-	Java_java_lang_invoke_PrimitiveHandle_lookupField
-	Java_java_lang_invoke_PrimitiveHandle_lookupMethod
-	Java_java_lang_invoke_PrimitiveHandle_setVMSlotAndRawModifiersFromConstructor
-	Java_java_lang_invoke_PrimitiveHandle_setVMSlotAndRawModifiersFromField
-	Java_java_lang_invoke_PrimitiveHandle_setVMSlotAndRawModifiersFromMethod
-	Java_java_lang_invoke_PrimitiveHandle_setVMSlotAndRawModifiersFromSpecialHandle
-	Java_java_lang_invoke_ThunkTuple_registerNatives
-	Java_java_lang_ref_Finalizer_runAllFinalizersImpl
+	Java_java_lang_invoke_MethodHandleResolver_getCPClassNameAt
+	Java_java_lang_invoke_MethodHandleResolver_getCPMethodHandleAt
+	Java_java_lang_invoke_MethodHandleResolver_getCPMethodTypeAt
+	Java_java_lang_invoke_MethodHandleResolver_getCPTypeAt
 	Java_java_lang_ref_Finalizer_runFinalizationImpl
 	Java_java_lang_ref_Reference_reprocess
 	Java_java_lang_ref_Reference_waitForReferenceProcessingImpl
@@ -397,7 +379,7 @@ omr_add_exports(jclse
 	Java_jdk_internal_misc_Unsafe_freeDBBMemory
 	Java_jdk_internal_misc_Unsafe_reallocateDBBMemory
 	Java_jdk_internal_misc_Unsafe_registerNatives
-	Java_jdk_internal_misc_Unsafe_shouldBeInitialized
+	Java_sun_misc_Unsafe_shouldBeInitialized
 	Java_jdk_internal_perf_Perf_registerNatives
 	Java_sun_misc_Perf_attach
 	Java_sun_misc_Perf_createByteArray
@@ -408,9 +390,7 @@ omr_add_exports(jclse
 	Java_sun_misc_Perf_registerNatives
 	Java_sun_misc_Unsafe_allocateDBBMemory
 	Java_sun_misc_Unsafe_allocateMemory
-	Java_sun_misc_Unsafe_allocateMemoryNoException
 	Java_sun_misc_Unsafe_copyMemory__Ljava_lang_Object_2JLjava_lang_Object_2JJ
-	Java_sun_misc_Unsafe_defineAnonymousClass
 	Java_sun_misc_Unsafe_defineClass__Ljava_lang_String_2_3BIILjava_lang_ClassLoader_2Ljava_security_ProtectionDomain_2
 	Java_sun_misc_Unsafe_ensureClassInitialized
 	Java_sun_misc_Unsafe_freeDBBMemory
@@ -450,6 +430,44 @@ omr_add_exports(jclse
 	Java_sun_reflect_ConstantPool_getStringAt0
 	Java_sun_reflect_ConstantPool_getUTF8At0
 )
+
+if(JAVA_SPEC_VERSION LESS 17)
+omr_add_exports(jclse
+	Java_sun_misc_Unsafe_defineAnonymousClass
+)
+endif()
+
+if(JAVA_SPEC_VERSION LESS 19)
+omr_add_exports(jclse
+	Java_com_ibm_lang_management_internal_ExtendedRuntimeMXBeanImpl_getProcessIDImpl
+)
+endif()
+
+if(JAVA_SPEC_VERSION LESS 20)
+omr_add_exports(jclse
+	Java_java_lang_Thread_resumeImpl
+	Java_java_lang_Thread_stopImpl
+	Java_java_lang_Thread_suspendImpl
+)
+endif()
+
+if(J9VM_OPT_METHOD_HANDLE)
+	omr_add_exports(jclse
+		Java_java_lang_invoke_InterfaceHandle_registerNatives
+		Java_java_lang_invoke_MethodHandle_requestCustomThunkFromJit
+		Java_java_lang_invoke_MethodHandle_vmRefFieldOffset
+		Java_java_lang_invoke_MethodType_makeTenured
+		Java_java_lang_invoke_MutableCallSite_freeGlobalRef
+		Java_java_lang_invoke_MutableCallSite_registerNatives
+		Java_java_lang_invoke_PrimitiveHandle_lookupField
+		Java_java_lang_invoke_PrimitiveHandle_lookupMethod
+		Java_java_lang_invoke_PrimitiveHandle_setVMSlotAndRawModifiersFromConstructor
+		Java_java_lang_invoke_PrimitiveHandle_setVMSlotAndRawModifiersFromField
+		Java_java_lang_invoke_PrimitiveHandle_setVMSlotAndRawModifiersFromMethod
+		Java_java_lang_invoke_PrimitiveHandle_setVMSlotAndRawModifiersFromSpecialHandle
+		Java_java_lang_invoke_ThunkTuple_registerNatives
+	)
+endif()
 
 if(J9VM_OPT_SIDECAR)
 	omr_add_exports(jclse
@@ -516,18 +534,25 @@ else()
 	)
 endif()
 
-
 if(JAVA_SPEC_VERSION EQUAL 8)
 	omr_add_exports(jclse Java_sun_misc_URLClassPath_getLookupCacheURLs)
 endif()
 
 # java 9+
 if(NOT JAVA_SPEC_VERSION LESS 9)
+	if(J9VM_OPT_METHOD_HANDLE)
+		omr_add_exports(jclse
+			Java_java_lang_invoke_FieldVarHandle_lookupField
+			Java_java_lang_invoke_FieldVarHandle_unreflectField
+		)
+		if(J9VM_OPT_PANAMA)
+			omr_add_exports(jclse Java_java_lang_invoke_MethodHandles_findNativeAddress)
+		endif()
+	endif()
+
 	omr_add_exports(jclse
 		Java_java_lang_StackWalker_getImpl
 		Java_java_lang_StackWalker_walkWrapperImpl
-		Java_java_lang_invoke_FieldVarHandle_lookupField
-		Java_java_lang_invoke_FieldVarHandle_unreflectField
 		Java_java_lang_invoke_VarHandle_addAndGet
 		Java_java_lang_invoke_VarHandle_compareAndExchange
 		Java_java_lang_invoke_VarHandle_compareAndExchangeAcquire
@@ -565,16 +590,101 @@ if(NOT JAVA_SPEC_VERSION LESS 9)
 		Java_jdk_internal_reflect_ConstantPool_getNameAndTypeRefInfoAt0
 		Java_jdk_internal_reflect_ConstantPool_getTagAt0
 	)
-	if(J9VM_OPT_PANAMA)
-		omr_add_exports(jclse Java_java_lang_invoke_MethodHandles_findNativeAddress)
-	endif()
 endif()
 
-#java 11+
+# java 11+
 if(NOT JAVA_SPEC_VERSION LESS 11)
 	omr_add_exports(jclse
 		Java_java_lang_Class_getNestHostImpl
 		Java_java_lang_Class_getNestMembersImpl
-		Java_java_lang_invoke_MethodHandle_getCPConstantDynamicAt
+		Java_java_lang_invoke_MethodHandleResolver_getCPConstantDynamicAt
+		Java_java_lang_System_initJCLPlatformEncoding
+	)
+endif()
+
+# java 15+
+if(NOT JAVA_SPEC_VERSION LESS 15)
+	omr_add_exports(jclse
+		Java_java_lang_Class_getRecordComponentsImpl
+		Java_java_lang_Class_isHiddenImpl
+		Java_java_lang_ClassLoader_defineClassImpl1
+	)
+	if(J9VM_OPT_METHOD_HANDLE)
+		omr_add_exports(jclse
+			Java_java_lang_invoke_MethodHandleNatives_checkClassBytes
+		)
+	endif()
+endif()
+
+# java 16+
+if(NOT JAVA_SPEC_VERSION LESS 16)
+	omr_add_exports(jclse
+		Java_java_lang_ref_Reference_refersTo
+		Java_jdk_internal_foreign_abi_UpcallStubs_registerNatives
+		Java_jdk_internal_foreign_abi_UpcallStubs_freeUpcallStub0
+		Java_jdk_internal_misc_ScopedMemoryAccess_registerNatives
+		Java_jdk_internal_misc_ScopedMemoryAccess_closeScope0
+		Java_jdk_internal_vm_vector_VectorSupport_registerNatives
+		Java_jdk_internal_vm_vector_VectorSupport_getMaxLaneCount
+	)
+endif()
+
+# OpenJDK methodhandle support
+if(J9VM_OPT_OPENJDK_METHODHANDLE)
+	omr_add_exports(jclse
+		Java_java_lang_invoke_MethodHandleNatives_init
+		Java_java_lang_invoke_MethodHandleNatives_expand
+		Java_java_lang_invoke_MethodHandleNatives_resolve
+		Java_java_lang_invoke_MethodHandleNatives_getMembers
+		Java_java_lang_invoke_MethodHandleNatives_objectFieldOffset
+		Java_java_lang_invoke_MethodHandleNatives_staticFieldOffset
+		Java_java_lang_invoke_MethodHandleNatives_staticFieldBase
+		Java_java_lang_invoke_MethodHandleNatives_getMemberVMInfo
+		Java_java_lang_invoke_MethodHandleNatives_setCallSiteTargetNormal
+		Java_java_lang_invoke_MethodHandleNatives_setCallSiteTargetVolatile
+		Java_java_lang_invoke_MethodHandleNatives_getNamedCon
+		Java_java_lang_invoke_MethodHandleNatives_registerNatives
+	)
+	if(JAVA_SPEC_VERSION EQUAL 8)
+		omr_add_exports(jclse Java_java_lang_invoke_MethodHandleNatives_getConstant)
+	else()
+		omr_add_exports(jclse
+			Java_java_lang_invoke_MethodHandleNatives_copyOutBootstrapArguments
+			Java_java_lang_invoke_MethodHandleNatives_clearCallSiteContext
+		)
+	endif()
+endif()
+
+# Shared by OpenJ9 & OpenJDK MethodHandle impl
+if(J9VM_OPT_OPENJDK_METHODHANDLE OR J9VM_OPT_METHOD_HANDLE)
+	omr_add_exports(jclse
+		Java_java_lang_invoke_MethodHandle_invoke
+		Java_java_lang_invoke_MethodHandle_invokeExact
+	)
+endif()
+
+# J9VM_OPT_CRIU_SUPPORT
+if(J9VM_OPT_CRIU_SUPPORT)
+	omr_add_exports(jclse
+		Java_openj9_internal_criu_InternalCRIUSupport_getCheckpointRestoreNanoTimeDeltaImpl
+		Java_openj9_internal_criu_InternalCRIUSupport_isCheckpointAllowedImpl
+		Java_openj9_internal_criu_InternalCRIUSupport_isCRIUSupportEnabledImpl
+	)
+endif()
+
+# java 19+
+if(NOT JAVA_SPEC_VERSION LESS 19)
+	omr_add_exports(jclse
+		Java_java_lang_StackWalker_walkContinuationImpl
+		Java_java_lang_Thread_currentCarrierThread
+		Java_java_lang_Thread_dumpThreads
+		Java_java_lang_Thread_extentLocalCache
+		Java_java_lang_Thread_getNextThreadIdOffset
+		Java_java_lang_Thread_getThreads
+		Java_java_lang_Thread_setExtentLocalCache
+		Java_java_lang_Thread_registerNatives
+		Java_jdk_internal_vm_Continuation_createContinuationImpl
+		Java_jdk_internal_vm_Continuation_pin
+		Java_jdk_internal_vm_Continuation_unpin
 	)
 endif()

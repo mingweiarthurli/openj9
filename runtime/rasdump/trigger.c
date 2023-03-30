@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -85,8 +85,6 @@ UDATA rasDumpPendingHooks = 0;
 
 /* Cached VM event handlers for use by J9VMRASdumpHooks */
 UDATA rasDumpUnhookedEvents = J9RAS_DUMP_ON_ANY;
-void *rasDumpOldHooks[J9RAS_DUMP_HOOK_TABLE_SIZE];
-
 
 static void rasDumpHookVmInit (J9HookInterface** hookInterface, UDATA eventNum, void* eventData, void* userData);
 static void rasDumpHookGCInitialized(J9HookInterface** hookInterface, UDATA eventNum, void* eventData, void* userData);
@@ -109,11 +107,9 @@ static void rasDumpHookMonitorContendedEnter (J9HookInterface** hookInterface, U
 static void rasDumpHookCorruptCache(J9HookInterface** hookInterface, UDATA eventNum, void* eventData, void* userData);
 static void rasDumpHookExcessiveGC(J9HookInterface** hookInterface, UDATA eventNum, void* eventData, void* userData);
 
-extern omr_error_t doHeapDump (J9RASdumpAgent *agent, char *label, J9RASdumpContext *context);
-extern omr_error_t doSystemDump (J9RASdumpAgent *agent, char *label, J9RASdumpContext *context);
+extern omr_error_t doHeapDump(J9RASdumpAgent *agent, char *label, J9RASdumpContext *context);
 extern omr_error_t doSilentDump(J9RASdumpAgent *agent, char *label, J9RASdumpContext *context);
-extern omr_error_t doCEEDump (J9RASdumpAgent *agent, char *label, J9RASdumpContext *context);
-extern omr_error_t doToolDump (J9RASdumpAgent *agent, char *label, J9RASdumpContext *context);
+extern omr_error_t doToolDump(J9RASdumpAgent *agent, char *label, J9RASdumpContext *context);
 
 extern void setAllocationThreshold(J9VMThread *vmThread, UDATA min, UDATA max);
 
@@ -388,7 +384,7 @@ matchesExceptionFilter(J9VMThread *vmThread, J9RASdumpEventData *eventData, UDAT
 				}
 			} else {
 				/* For other events, walk the stack to find the desired frame */
-				vmThread->javaVM->internalVMFunctions->iterateStackTrace(vmThread, (j9object_t*) eventData->exceptionRef, countExceptionStackFrame, &throwSite, TRUE);
+				vmThread->javaVM->internalVMFunctions->iterateStackTrace(vmThread, (j9object_t*) eventData->exceptionRef, countExceptionStackFrame, &throwSite, TRUE, FALSE);
 			}
 		}
 
@@ -501,7 +497,6 @@ matchesFilter(J9VMThread *vmThread, J9RASdumpEventData *eventData, UDATA eventFl
 	return J9RAS_DUMP_NO_MATCH;
 }
 
-#if (defined(J9VM_RAS_DUMP_AGENTS)) 
 omr_error_t
 printLabelSpec(struct J9JavaVM *vm)
 {
@@ -534,10 +529,7 @@ printLabelSpec(struct J9JavaVM *vm)
 	j9tty_err_printf(PORTLIB, labelSpec);
 	return OMR_ERROR_NONE;
 }
-#endif /* J9VM_RAS_DUMP_AGENTS */
 
-
-#if (defined(J9VM_RAS_DUMP_AGENTS)) 
 UDATA
 prepareForDump(struct J9JavaVM *vm, struct J9RASdumpAgent *agent, struct J9RASdumpContext *context, UDATA state)
 {
@@ -609,15 +601,15 @@ prepareForDump(struct J9JavaVM *vm, struct J9RASdumpAgent *agent, struct J9RASdu
 		 */
 
 		/* Share exclusive access when it's a "slow entry" or "user" event, as there may be a deadlock */
-		UDATA shareVMAccess = exclusiveHeld &&
-				( (context->eventFlags & J9RAS_DUMP_ON_USER_SIGNAL) ||
-				(context->eventFlags & J9RAS_DUMP_ON_SLOW_EXCLUSIVE_ENTER) );
+		UDATA shareVMAccess = exclusiveHeld
+				&& OMR_ARE_ANY_BITS_SET(context->eventFlags, J9RAS_DUMP_ON_USER_SIGNAL | J9RAS_DUMP_ON_SLOW_EXCLUSIVE_ENTER);
 
 		if ( shareVMAccess == 0 ) {
 
 			/* Deferred attach of SigQuit thread, needed if we're preparing to walk the heap (GC pre-req) */
-			if ( (agent->requestMask & (J9RAS_DUMP_DO_PREPARE_HEAP_FOR_WALK | J9RAS_DUMP_DO_COMPACT_HEAP | J9RAS_DUMP_DO_ATTACH_THREAD)) &&
-			(context->eventFlags & J9RAS_DUMP_ON_USER_SIGNAL ) ) {
+			if (OMR_ARE_ANY_BITS_SET(agent->requestMask, J9RAS_DUMP_DO_PREPARE_HEAP_FOR_WALK | J9RAS_DUMP_DO_COMPACT_HEAP | J9RAS_DUMP_DO_ATTACH_THREAD)
+					&& OMR_ARE_ANY_BITS_SET(context->eventFlags, J9RAS_DUMP_ON_USER_SIGNAL | J9RAS_DUMP_ON_USER2_SIGNAL)
+			) {
 
 				JavaVMAttachArgs attachArgs;
 
@@ -693,20 +685,9 @@ prepareForDump(struct J9JavaVM *vm, struct J9RASdumpAgent *agent, struct J9RASdu
 		}
 	}
 
-	if ( (agent->requestMask & J9RAS_DUMP_DO_HALT_ALL_THREADS) &&
-	(state & J9RAS_DUMP_THREADS_HALTED) == 0 ) {
-
-		/**** NOT YET IMPLEMENTED (removed from -Xdump:request) ****/
-
-		newState |= J9RAS_DUMP_THREADS_HALTED;
-	}
-
 	return newState;
 }
-#endif /* J9VM_RAS_DUMP_AGENTS */
 
-
-#if (defined(J9VM_RAS_DUMP_AGENTS)) 
 UDATA
 unwindAfterDump(struct J9JavaVM *vm, struct J9RASdumpContext *context, UDATA state)
 {
@@ -718,13 +699,6 @@ unwindAfterDump(struct J9JavaVM *vm, struct J9RASdumpContext *context, UDATA sta
 	/*
 	 * Must be in reverse order to the requested actions
 	 */
-
-	if (state & J9RAS_DUMP_THREADS_HALTED) {
-
-		/**** NOT YET IMPLEMENTED (removed from -Xdump:request) ****/
-
-		newState &= ~J9RAS_DUMP_THREADS_HALTED;
-	}
 
 	if (state & J9RAS_DUMP_GOT_EXCLUSIVE_VM_ACCESS) {
 
@@ -774,10 +748,7 @@ unwindAfterDump(struct J9JavaVM *vm, struct J9RASdumpContext *context, UDATA sta
 
 	return newState;
 }
-#endif /* J9VM_RAS_DUMP_AGENTS */
 
-
-#if (defined(J9VM_RAS_DUMP_AGENTS))
 /*
  * Function : dumpLabel()
  * Convert a dump label template into an actual dump label by expanding all the tokens.
@@ -868,11 +839,7 @@ dumpLabel(struct J9JavaVM *vm, J9RASdumpAgent *agent, J9RASdumpContext *context,
 
 	return OMR_ERROR_NONE;
 }
-#endif /* J9VM_RAS_DUMP_AGENTS */
 
-
-
-#if (defined(J9VM_RAS_DUMP_AGENTS)) 
 omr_error_t
 triggerOneOffDump(struct J9JavaVM *vm, char *optionString, char *caller, char *fileName, size_t fileNameLength)
 {
@@ -934,10 +901,7 @@ triggerOneOffDump(struct J9JavaVM *vm, char *optionString, char *caller, char *f
 
 	return retVal;
 }
-#endif /* J9VM_RAS_DUMP_AGENTS */
 
-
-#if (defined(J9VM_RAS_DUMP_AGENTS)) 
 omr_error_t
 triggerDumpAgents(struct J9JavaVM *vm, struct J9VMThread *self, UDATA eventFlags, struct J9RASdumpEventData *eventData)
 {
@@ -1035,10 +999,37 @@ triggerDumpAgents(struct J9JavaVM *vm, struct J9VMThread *self, UDATA eventFlags
 							((node->stopOnCount < node->startOnCount) || (newCount <= node->stopOnCount))) {
 						if (printed == 0) {
 							if (node->dumpFn != doSilentDump) {
+								OMRPORT_ACCESS_FROM_J9PORT(PORTLIB);
 								char dateStamp[64];
-								j9str_ftime(dateStamp, sizeof(dateStamp), "%Y/%m/%d %H:%M:%S", now);
-								j9nls_printf(PORTLIB, J9NLS_INFO | J9NLS_STDERR | J9NLS_VITAL, J9NLS_DMP_PROCESSING_EVENT_TIME, mapDumpEvent(eventFlags), detailLength, detailData, dateStamp);
-								printed = 1;
+								omrstr_ftime_ex(dateStamp, sizeof(dateStamp), "%Y/%m/%d %H:%M:%S", now, OMRSTR_FTIME_FLAG_LOCAL);
+
+								/* If there are more details about the event, print them.
+								 * During abort event detailData is empty string - skip the abort event.
+								 */
+								if (('\0' != *detailData) && (NULL != eventData->exceptionRef) && (NULL != *eventData->exceptionRef)) {
+									j9object_t emessage = J9VMJAVALANGTHROWABLE_DETAILMESSAGE(self, *eventData->exceptionRef);
+									if (NULL != emessage) {
+										char stackBuffer[256];
+										UDATA extraDetailLength = 0;
+										char *extraDetail = self->javaVM->internalVMFunctions->copyStringToUTF8WithMemAlloc(self, emessage,
+												J9_STR_NULL_TERMINATE_RESULT, "", 0, stackBuffer,
+												sizeof(stackBuffer), &extraDetailLength);
+										if (NULL != extraDetail) {
+											j9nls_printf(PORTLIB, J9NLS_INFO | J9NLS_STDERR | J9NLS_VITAL,
+													J9NLS_DMP_PROCESSING_DETAILED_EVENT_TIME, mapDumpEvent(eventFlags),
+													detailLength, detailData, extraDetailLength, extraDetail, dateStamp);
+											if (stackBuffer != extraDetail) {
+												j9mem_free_memory(extraDetail);
+											}
+											printed = 1;
+										}
+									}
+								}
+								if (0 == printed) {
+									j9nls_printf(PORTLIB, J9NLS_INFO | J9NLS_STDERR | J9NLS_VITAL, J9NLS_DMP_PROCESSING_EVENT_TIME,
+											mapDumpEvent(eventFlags), detailLength, detailData, dateStamp);
+									printed = 1;
+								}
 							}
 						}
 
@@ -1072,8 +1063,6 @@ triggerDumpAgents(struct J9JavaVM *vm, struct J9VMThread *self, UDATA eventFlags
 
 	return OMR_ERROR_INTERNAL;
 }
-#endif /* J9VM_RAS_DUMP_AGENTS */
-
 
 omr_error_t
 rasDumpEnableHooks(J9JavaVM *vm, UDATA eventFlags)
@@ -1081,7 +1070,7 @@ rasDumpEnableHooks(J9JavaVM *vm, UDATA eventFlags)
 	omr_error_t retVal = OMR_ERROR_NONE;
 	PORT_ACCESS_FROM_JAVAVM(vm);
 
-	const UDATA hookFlags = J9RAS_DUMP_ON_ANY & ~J9RAS_DUMP_ON_GP_FAULT & ~J9RAS_DUMP_ON_USER_SIGNAL;
+	const UDATA hookFlags = J9RAS_DUMP_ON_ANY & ~J9RAS_DUMP_ON_GP_FAULT & ~J9RAS_DUMP_ON_USER_SIGNAL & ~J9RAS_DUMP_ON_USER2_SIGNAL;
 
 	if (eventFlags & hookFlags) {
 		J9HookInterface** vmHooks = vm->internalVMFunctions->getVMHookInterface(vm);

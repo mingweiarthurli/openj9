@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-Copyright (c) 2006, 2020 IBM Corp. and others
+Copyright (c) 2006, 2021 IBM Corp. and others
 
 This program and the accompanying materials are made available under
 the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@ Exception [1] and GNU General Public License, version 2 with the
 OpenJDK Assembly Exception [2].
 
 [1] https://www.gnu.org/software/classpath/license.html
-[2] http://openjdk.java.net/legal/assembly-exception.html
+[2] https://openjdk.org/legal/assembly-exception.html
 
 SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 -->
@@ -42,7 +42,7 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 		<property name="graph_commands.chroot" value=""/>
 		<property name="graph_commands.win.postamble" value="&quot;MACHINE_TYPE=win&quot;"/>
 		<property name="graph_datamines" value="commands.win.datamine,site-ottawa-win.datamine,use.local.datamine"/>
-		<property name="graph_enable_gcc7_cmd" value=""/>
+		<property name="graph_enable_compiler_cmd" value=""/>
 		<property name="graph_label.classlib" value="150"/>
 		<property name="graph_label.java5" value="j9vmwi3224"/>
 		<property name="graph_label.java6" value="pwi3260"/>
@@ -65,7 +65,7 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 		<property name="graph_req.build2" value="{$common.req.build.java8$}"/>
 		<property name="graph_req.machine" value=""/>
 		<property name="graph_req.machine.test" value="{$spec.property.graph_req.machine$}"/>
-		<property name="graph_req.os" value="{$machine_mapping.win$}"/>
+		<property name="graph_req.os" value="os:win"/>
 		<property name="graph_req.os.build" value="os:win"/>
 		<property name="graph_req.os.perf" value="{$spec.property.graph_req.os$}"/>
 		<property name="graph_se_classlib.java5" value="jcl_se.zip"/>
@@ -226,7 +226,6 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 		<flag id="module_shared_servicetest" value="true"/>
 		<flag id="module_shared_test" value="true"/>
 		<flag id="module_shared_util" value="true"/>
-		<flag id="module_thrtrace" value="true"/>
 		<flag id="module_verbose" value="true"/>
 		<flag id="module_zip" value="true"/>
 		<flag id="module_zlib" value="true"/>
@@ -240,7 +239,6 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 		<flag id="opt_jvmti" value="true"/>
 		<flag id="opt_jxeLoadSupport" value="true"/>
 		<flag id="opt_memoryCheckSupport" value="true"/>
-		<flag id="opt_methodHandle" value="true"/>
 		<flag id="opt_multiVm" value="true"/>
 		<flag id="opt_panama" value="false"/>
 		<flag id="opt_nativeCharacterConverter" value="true"/>
@@ -260,8 +258,6 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 		<flag id="port_omrsigSupport" value="true"/>
 		<flag id="port_signalSupport" value="true"/>
 		<flag id="prof_eventReporting" value="true"/>
-		<flag id="ras_dumpAgents" value="true"/>
-		<flag id="ras_eyecatchers" value="true"/>
 		<flag id="size_optimizeSendTargets" value="true"/>
 		<flag id="test_cunit" value="true"/>
 		<flag id="test_jvmti" value="true"/>

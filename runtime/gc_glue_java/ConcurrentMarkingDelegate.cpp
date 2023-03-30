@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -31,6 +31,7 @@
 #include "HeapRegionIteratorStandard.hpp"
 #include "ReferenceObjectList.hpp"
 #include "StackSlotValidator.hpp"
+#include "VMAccess.hpp"
 #include "VMInterface.hpp"
 #include "VMThreadListIterator.hpp"
 
@@ -124,37 +125,6 @@ MM_ConcurrentMarkingDelegate::signalThreadsToDeactivateWriteBarrier(MM_Environme
 	}
 }
 
-void
-MM_ConcurrentMarkingDelegate::signalThreadsToDirtyCards(MM_EnvironmentBase *env)
-{
-	MM_GCExtensions *extensions = MM_GCExtensions::getExtensions(env);
-	GC_VMInterface::lockVMThreadList(extensions);
-
-	J9VMThread *walkThread;
-	GC_VMThreadListIterator vmThreadListIterator(_javaVM);
-	while((walkThread = vmThreadListIterator.nextVMThread()) != NULL) {
-		walkThread->privateFlags |= J9_PRIVATE_FLAGS_CONCURRENT_MARK_ACTIVE;
-	}
-	GC_VMInterface::unlockVMThreadList(extensions);
-}
-
-void
-MM_ConcurrentMarkingDelegate::signalThreadsToStopDirtyingCards(MM_EnvironmentBase *env)
-{
-	MM_GCExtensions *extensions = MM_GCExtensions::getExtensions(_javaVM);
-	if (extensions->optimizeConcurrentWB) {
-		GC_VMInterface::lockVMThreadList(extensions);
-		GC_VMThreadListIterator vmThreadListIterator(_javaVM);
-		J9VMThread *walkThread;
-
-		/* Reset vmThread flag so mutators don't dirty cards until next concurrent KO */
-		while((walkThread = vmThreadListIterator.nextVMThread()) != NULL) {
-			walkThread->privateFlags &= ~J9_PRIVATE_FLAGS_CONCURRENT_MARK_ACTIVE;
-		}
-		GC_VMInterface::unlockVMThreadList(extensions);
-	}
-}
-
 bool
 MM_ConcurrentMarkingDelegate::scanThreadRoots(MM_EnvironmentBase *env)
 {
@@ -182,7 +152,14 @@ MM_ConcurrentMarkingDelegate::scanThreadRoots(MM_EnvironmentBase *env)
 	markSchemeStackIteratorData localData;
 	localData.markingScheme = _markingScheme;
 	localData.env = env;
+	/* In a case this thread is a carrier thread, and a virtual thread is mounted, we will scan virtual thread's stack. */
 	GC_VMThreadStackSlotIterator::scanSlots(vmThread, vmThread, (void *)&localData, concurrentStackSlotIterator, true, false);
+
+#if JAVA_SPEC_VERSION >= 19
+	if (NULL != vmThread->currentContinuation) {
+		GC_VMThreadStackSlotIterator::scanSlots(vmThread, vmThread->currentContinuation, (void *)&localData, concurrentStackSlotIterator, true, false);
+	}
+#endif /* JAVA_SPEC_VERSION >= 19 */
 
 	return true;
 }
@@ -229,13 +206,8 @@ MM_ConcurrentMarkingDelegate::collectClassRoots(MM_EnvironmentBase *env, bool *c
 	*completedClassRoots = false;
 	*classesMarkedAsRoots = false;
 	MM_GCExtensions *extensions = MM_GCExtensions::getExtensions(env);
-#if defined(J9VM_GC_DYNAMIC_CLASS_UNLOADING)
-	MM_GCExtensions::DynamicClassUnloading dynamicClassUnloadingFlag = (MM_GCExtensions::DynamicClassUnloading )extensions->dynamicClassUnloading;
-	if (MM_GCExtensions::DYNAMIC_CLASS_UNLOADING_NEVER != dynamicClassUnloadingFlag) {
-		_scanClassesMode.setScanClassesMode(MM_ScanClassesMode::SCAN_CLASSES_NEED_TO_BE_EXECUTED);
-	} else
-#endif /* J9VM_GC_DYNAMIC_CLASS_UNLOADING */
-	{
+
+	if (!setupClassScanning(env)) {
 		/* mark classes as roots, scanning classes is disabled by default */
 		*classesMarkedAsRoots = true;
 
@@ -374,6 +346,22 @@ MM_ConcurrentMarkingDelegate::abortCollection(MM_EnvironmentBase *env)
 	}
 }
 
+
+bool
+MM_ConcurrentMarkingDelegate::setupClassScanning(MM_EnvironmentBase *env)
+{
+#if defined(J9VM_GC_DYNAMIC_CLASS_UNLOADING)
+	MM_GCExtensions *extensions = MM_GCExtensions::getExtensions(env);
+	MM_GCExtensions::DynamicClassUnloading dynamicClassUnloadingFlag = (MM_GCExtensions::DynamicClassUnloading )extensions->dynamicClassUnloading;
+	if (MM_GCExtensions::DYNAMIC_CLASS_UNLOADING_NEVER != dynamicClassUnloadingFlag) {
+		setConcurrentScanning(env);
+		return true;
+	}
+#endif /* J9VM_GC_DYNAMIC_CLASS_UNLOADING */
+
+	return false;
+}
+
 #if defined(J9VM_GC_DYNAMIC_CLASS_UNLOADING)
 uintptr_t
 MM_ConcurrentMarkingDelegate::concurrentClassMark(MM_EnvironmentBase *env, bool *completedClassMark)
@@ -384,9 +372,10 @@ MM_ConcurrentMarkingDelegate::concurrentClassMark(MM_EnvironmentBase *env, bool 
 
 	Trc_MM_concurrentClassMarkStart(env->getLanguageVMThread());
 
-	Assert_GC_true_with_message(env, ((J9VMThread *)env->getLanguageVMThread())->privateFlags & J9_PRIVATE_FLAGS_CONCURRENT_MARK_ACTIVE, "MM_ConcurrentStats::_executionMode = %zu\n", _collector->getConcurrentGCStats()->getExecutionMode());
-
 	MM_GCExtensions *extensions = MM_GCExtensions::getExtensions(env);
+
+	Assert_GC_true_with_message(env, (((J9VMThread *)env->getLanguageVMThread())->privateFlags & J9_PRIVATE_FLAGS_CONCURRENT_MARK_ACTIVE) || (extensions->isSATBBarrierActive()), "MM_ConcurrentStats::_executionMode = %zu\n", _collector->getConcurrentGCStats()->getExecutionMode());
+
 	GC_VMInterface::lockClasses(extensions);
 	GC_VMInterface::lockClassLoaders(extensions);
 
@@ -420,7 +409,7 @@ MM_ConcurrentMarkingDelegate::concurrentClassMark(MM_EnvironmentBase *env, bool 
 				 * so, if this pointer happened to be NULL at this point let it crash here
 				 */
 				Assert_MM_true(NULL != classLoader->classHashTable);
-				clazz = _javaVM->internalVMFunctions->hashClassTableStartDo(classLoader, &walkState);
+				clazz = _javaVM->internalVMFunctions->hashClassTableStartDo(classLoader, &walkState, 0);
 				while (NULL != clazz) {
 					sizeTraced += sizeof(uintptr_t);
 					_markingScheme->markObject(env, (j9object_t)clazz->classObject);
@@ -448,6 +437,10 @@ MM_ConcurrentMarkingDelegate::concurrentClassMark(MM_EnvironmentBase *env, bool 
 						}
 						modulePtr = (J9Module**)hashTableNextDo(&moduleWalkState);
 					}
+
+					if (classLoader == _javaVM->systemClassLoader) {
+						_markingScheme->markObject(env, _javaVM->unamedModuleForSystemLoader->moduleObject);
+					}
 				}
 
 				classLoader->gcFlags |= J9_GC_CLASS_LOADER_SCANNED;
@@ -464,5 +457,20 @@ quitConcurrentClassMark:
 	return sizeTraced;
 }
 #endif /* J9VM_GC_DYNAMIC_CLASS_UNLOADING */
+
+void
+MM_ConcurrentMarkingDelegate::acquireExclusiveVMAccessAndSignalThreadsToActivateWriteBarrier(MM_EnvironmentBase *env)
+{
+	J9VMThread *vmThread = (J9VMThread *)env->getLanguageVMThread();
+
+	VM_VMAccess::setPublicFlags(vmThread, J9_PUBLIC_FLAGS_NOT_AT_SAFE_POINT);
+	_collector->acquireExclusiveVMAccessAndSignalThreadsToActivateWriteBarrier(env);
+	VM_VMAccess::clearPublicFlags(vmThread, J9_PUBLIC_FLAGS_NOT_AT_SAFE_POINT);
+
+	if (J9_ARE_ANY_BITS_SET(vmThread->publicFlags, J9_PUBLIC_FLAGS_HALT_THREAD_ANY) && (0 == vmThread->omrVMThread->exclusiveCount)) {
+		vmThread->javaVM->internalVMFunctions->internalReleaseVMAccess(vmThread);
+		vmThread->javaVM->internalVMFunctions->internalAcquireVMAccess(vmThread);
+	}
+}
 
 #endif /* defined(OMR_GC_MODRON_CONCURRENT_MARK) */

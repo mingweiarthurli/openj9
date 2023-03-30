@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -28,6 +28,7 @@
 
 #include "j9cfg.h"
 #include "j9.h"
+
 #include "ModronAssertions.h"
 #include "AllocateDescription.hpp"
 #include "AllocationContextTarok.hpp"
@@ -42,9 +43,11 @@
 #include "ClassLoaderIterator.hpp"
 #include "ClassLoaderRememberedSet.hpp"
 #include "CompactGroupManager.hpp"
+#include "ContinuationObjectBuffer.hpp"
+#include "ContinuationObjectList.hpp"
+#include "VMHelpers.hpp"
 #include "WriteOnceCompactor.hpp"
 #include "Debug.hpp"
-#include "Dispatcher.hpp"
 #if defined(J9VM_GC_FINALIZATION)
 #include "FinalizableObjectBuffer.hpp"
 #include "FinalizableReferenceBuffer.hpp"
@@ -68,6 +71,7 @@
 #include "ObjectAccessBarrier.hpp"
 #include "ObjectHeapIteratorAddressOrderedList.hpp"
 #include "ObjectModel.hpp"
+#include "ParallelDispatcher.hpp"
 #include "PacketSlotIterator.hpp"
 #include "PointerArrayIterator.hpp"
 #include "PointerArrayletInlineLeafIterator.hpp"
@@ -96,7 +100,7 @@ void
 MM_ParallelWriteOnceCompactTask::setup(MM_EnvironmentBase *envBase)
 {
 	MM_EnvironmentVLHGC *env = MM_EnvironmentVLHGC::getEnvironment(envBase);
-	if (!env->isMasterThread()) {
+	if (!env->isMainThread()) {
 		env->_cycleState = _cycleState;
 	}
 	env->_compactVLHGCStats.clear();
@@ -110,7 +114,7 @@ MM_ParallelWriteOnceCompactTask::cleanup(MM_EnvironmentBase *envBase)
 	static_cast<MM_CycleStateVLHGC*>(env->_cycleState)->_vlhgcIncrementStats._compactStats.merge(&env->_compactVLHGCStats);
 	static_cast<MM_CycleStateVLHGC*>(env->_cycleState)->_vlhgcIncrementStats._irrsStats.merge(&env->_irrsStats);
 
-	if(!env->isMasterThread()) {
+	if(!env->isMainThread()) {
 		env->_cycleState = NULL;
 	}
 
@@ -118,11 +122,11 @@ MM_ParallelWriteOnceCompactTask::cleanup(MM_EnvironmentBase *envBase)
 }
 
 void
-MM_ParallelWriteOnceCompactTask::masterSetup(MM_EnvironmentBase *envBase)
+MM_ParallelWriteOnceCompactTask::mainSetup(MM_EnvironmentBase *envBase)
 {
 	MM_EnvironmentVLHGC *env = MM_EnvironmentVLHGC::getEnvironment(envBase);
 	_compactScheme->setCycleState(_cycleState, _nextMarkMap);
-	_compactScheme->masterSetupForGC(env);
+	_compactScheme->mainSetupForGC(env);
 #if defined(DEBUG)
 	_compactScheme->verifyHeap(env, true);
 #endif /* DEBUG */
@@ -130,7 +134,7 @@ MM_ParallelWriteOnceCompactTask::masterSetup(MM_EnvironmentBase *envBase)
 }
 
 void
-MM_ParallelWriteOnceCompactTask::masterCleanup(MM_EnvironmentBase *envBase)
+MM_ParallelWriteOnceCompactTask::mainCleanup(MM_EnvironmentBase *envBase)
 {
 	MM_EnvironmentVLHGC *env = MM_EnvironmentVLHGC::getEnvironment(envBase);
 
@@ -440,7 +444,7 @@ MM_WriteOnceCompactor::clearCycleState()
 }
 
 void
-MM_WriteOnceCompactor::masterSetupForGC(MM_EnvironmentVLHGC *env)
+MM_WriteOnceCompactor::mainSetupForGC(MM_EnvironmentVLHGC *env)
 {
 	_compactTable = (WriteOnceCompactTableEntry*)_nextMarkMap->getMarkBits();
 	/* the move work stack is a simple structure shared by all threads so set it up prior to going multi-threaded */
@@ -468,6 +472,7 @@ MM_WriteOnceCompactor::initRegionCompactDataForCompactSet(MM_EnvironmentVLHGC *e
 			region->_compactData._blockedList = NULL;
 			region->getUnfinalizedObjectList()->startUnfinalizedProcessing();
 			region->getOwnableSynchronizerObjectList()->startOwnableSynchronizerProcessing();
+			region->getContinuationObjectList()->startProcessing();
 			
 			/* clear all reference lists in compacted regions, since the GMP will need to rediscover all of these objects */
 			region->getReferenceObjectList()->startWeakReferenceProcessing();
@@ -728,28 +733,13 @@ MM_WriteOnceCompactor::evacuatePage(MM_EnvironmentVLHGC *env, void *page, J9MM_F
 			UDATA objectSize = _extensions->objectModel.getConsumedSizeInBytesWithHeader(objectPtr);
 			J9Object *nextLocation = (J9Object *)((UDATA)newLocation + objectSize);
 			if (newLocation != objectPtr) {
-				UDATA objectSizeAfterMove = _extensions->objectModel.getConsumedSizeInBytesWithHeaderForMove(objectPtr);
-				bool hasBeenHashed = _extensions->objectModel.hasBeenHashed(objectPtr);
-				bool hasBeenMoved = _extensions->objectModel.hasBeenMoved(objectPtr);
-				I_32 hashCode = 0;
-				if (hasBeenHashed && !hasBeenMoved) {
-					hashCode = computeObjectAddressToHash(_javaVM, objectPtr);
-				}
+				UDATA objectSizeAfterMove = 0;
+				preObjectMove(env, objectPtr, &objectSizeAfterMove);
+
 				/* copy objectPtr to newLocation */
 				memmove(newLocation, objectPtr, objectSize);
-				/* the object has just moved so we can't trust the remembered bit.  Clear it and it will be re-added, during fixup, if required */
-				if (_extensions->objectModel.isRemembered(newLocation)) {
-					_extensions->objectModel.clearRemembered(newLocation);
-				}
-				if(_extensions->objectModel.isIndexable(newLocation)) {
-					updateInternalLeafPointersAfterCopy((J9IndexableObject*) newLocation, (J9IndexableObject*) objectPtr);
-				}
-				if (hasBeenHashed && !hasBeenMoved) {
-					/* add the hash */
-					UDATA hashOffset = _extensions->objectModel.getHashcodeOffset(newLocation);
-					*(I_32*)((U_8*)newLocation + hashOffset) = hashCode;
-					_extensions->objectModel.setObjectHasBeenMoved(newLocation);
-				}
+
+				postObjectMove(env, newLocation, objectPtr);
 				nextLocation = (J9Object *)((UDATA)newLocation + objectSizeAfterMove);
 			}
 			/* fixup this object's fields, whether it moved or not */
@@ -1182,6 +1172,24 @@ MM_WriteOnceCompactor::fixupObjectsInRange(MM_EnvironmentVLHGC *env, void *lowAd
 	}
 }
 
+MMINLINE void
+MM_WriteOnceCompactor::preObjectMove(MM_EnvironmentVLHGC* env, J9Object *objectPtr, UDATA *objectSizeAfterMove)
+{
+	*objectSizeAfterMove = _extensions->objectModel.getConsumedSizeInBytesWithHeaderForMove(objectPtr);
+	env->preObjectMoveForCompact(objectPtr);
+}
+
+MMINLINE void
+MM_WriteOnceCompactor::postObjectMove(MM_EnvironmentVLHGC* env, J9Object *newLocation, J9Object *objectPtr)
+{
+	/* the object has just moved so we can't trust the remembered bit.  Clear it and it will be re-added, during fixup, if required */
+	if (_extensions->objectModel.isRemembered(newLocation)) {
+		_extensions->objectModel.clearRemembered(newLocation);
+	}
+
+	env->postObjectMoveForCompact(newLocation, objectPtr);
+}
+
 void
 MM_WriteOnceCompactor::fixupMixedObject(MM_EnvironmentVLHGC* env, J9Object *objectPtr, J9MM_FixupCache *cache)
 {
@@ -1199,6 +1207,54 @@ MM_WriteOnceCompactor::fixupMixedObject(MM_EnvironmentVLHGC* env, J9Object *obje
 			_interRegionRememberedSet->rememberReferenceForCompact(env, objectPtr, forwardedPtr);
 		}
 	}
+}
+
+void
+MM_WriteOnceCompactor::doStackSlot(MM_EnvironmentVLHGC *env, J9Object *fromObject, J9Object** slot)
+{
+	J9Object *pointer = *slot;
+	if (NULL != pointer) {
+		J9Object *forwardedPtr = getForwardingPtr(pointer);
+		if (pointer != forwardedPtr) {
+			*slot = forwardedPtr;
+		}
+		_interRegionRememberedSet->rememberReferenceForCompact(env, fromObject, forwardedPtr);
+	}
+}
+
+/**
+ * @todo Provide function documentation
+ */
+void
+stackSlotIteratorForWriteOnceCompactor(J9JavaVM *javaVM, J9Object **slotPtr, void *localData, J9StackWalkState *walkState, const void *stackLocation)
+{
+	StackIteratorData4WriteOnceCompactor *data = (StackIteratorData4WriteOnceCompactor *)localData;
+	data->writeOnceCompactor->doStackSlot(data->env, data->fromObject, slotPtr);
+}
+
+void
+MM_WriteOnceCompactor::fixupContinuationNativeSlots(MM_EnvironmentVLHGC* env, J9Object *objectPtr, J9MM_FixupCache *cache)
+{
+	J9VMThread *currentThread = (J9VMThread *)env->getLanguageVMThread();
+	/* In sliding compaction we must fix slots exactly once. Since we will fixup stack slots of
+	 * mounted Virtual threads later during root fixup, we will skip it during this heap fixup pass
+	 * (hence passing true for scanOnlyUnmounted parameter).
+	 */
+	if (VM_VMHelpers::needScanStacksForContinuation(currentThread, objectPtr)) {
+		StackIteratorData4WriteOnceCompactor localData;
+		localData.writeOnceCompactor = this;
+		localData.env = env;
+		localData.fromObject = objectPtr;
+
+		GC_VMThreadStackSlotIterator::scanSlots(currentThread, objectPtr, (void *)&localData, stackSlotIteratorForWriteOnceCompactor, false, false);
+	}
+}
+
+void
+MM_WriteOnceCompactor::fixupContinuationObject(MM_EnvironmentVLHGC* env, J9Object *objectPtr, J9MM_FixupCache *cache)
+{
+	fixupContinuationNativeSlots(env, objectPtr, cache);
+	fixupMixedObject(env, objectPtr, cache);
 }
 
 #if defined (J9ZOS39064)
@@ -1298,6 +1354,15 @@ MM_WriteOnceCompactor::fixupClassLoaderObject(MM_EnvironmentVLHGC* env, J9Object
 
 				modulePtr = (J9Module**)hashTableNextDo(&walkState);
 			}
+
+			if (classLoader == _javaVM->systemClassLoader) {
+				slotPtr = &_javaVM->unamedModuleForSystemLoader->moduleObject;
+
+				originalObject = *slotPtr;
+				J9Object* forwardedObject = getForwardWrapper(env, originalObject, cache);
+				*slotPtr = forwardedObject;
+				_interRegionRememberedSet->rememberReferenceForCompact(env, classLoaderObject, forwardedObject);
+			}
 		}
 
 		/* We can't fixup remembered set for defined and referenced classes here since we 
@@ -1391,7 +1456,9 @@ MM_WriteOnceCompactor::fixupObject(MM_EnvironmentVLHGC* env, J9Object *objectPtr
 		addOwnableSynchronizerObjectInList(env, objectPtr);
 		fixupMixedObject(env, objectPtr, cache);
 		break;
-
+	case GC_ObjectModel::SCAN_CONTINUATION_OBJECT:
+		fixupContinuationObject(env, objectPtr, cache);
+		break;
 	case GC_ObjectModel::SCAN_CLASS_OBJECT:
 		fixupClassObject(env, objectPtr, cache);
 		break;
@@ -1821,6 +1888,7 @@ MM_WriteOnceCompactor::verifyHeap(MM_EnvironmentVLHGC *env, bool beforeCompactio
 			case GC_ObjectModel::SCAN_ATOMIC_MARKABLE_REFERENCE_OBJECT:
 			case GC_ObjectModel::SCAN_MIXED_OBJECT:
 			case GC_ObjectModel::SCAN_OWNABLESYNCHRONIZER_OBJECT:
+			case GC_ObjectModel::SCAN_CONTINUATION_OBJECT:
 			case GC_ObjectModel::SCAN_CLASS_OBJECT:
 			case GC_ObjectModel::SCAN_CLASSLOADER_OBJECT:
 			case GC_ObjectModel::SCAN_REFERENCE_MIXED_OBJECT:
@@ -1850,7 +1918,7 @@ MM_WriteOnceCompactor::recycleFreeRegionsAndFixFreeLists(MM_EnvironmentVLHGC *en
 	MM_HeapRegionDescriptorVLHGC *region = NULL;
 	while(NULL != (region = regionIterator.nextRegion())) {
 		if (region->_compactData._shouldCompact) {
-			MM_MemoryPoolBumpPointer *regionPool = (MM_MemoryPoolBumpPointer *)region->getMemoryPool();
+			MM_MemoryPool *regionPool = region->getMemoryPool();
 			Assert_MM_true(NULL != regionPool);
 			Assert_MM_true(region->isCommitted());
 			void *currentFreeBase = region->_compactData._compactDestination;
@@ -1863,6 +1931,8 @@ MM_WriteOnceCompactor::recycleFreeRegionsAndFixFreeLists(MM_EnvironmentVLHGC *en
 				region->getSubSpace()->recycleRegion(env, region);
 				/* mark bits will be cleared during the rebuilding phase */
 			} else {
+				static_cast<MM_CycleStateVLHGC*>(env->_cycleState)->_vlhgcIncrementStats._compactStats._survivorRegionCount += 1;
+
 				if (NULL != region->_compactData._previousContext) {
 					/* we migrated this region into a new context so ask its previous owner to migrate the contexts' views of the region's ownership to make the meta-structures consistent */
 					region->_compactData._previousContext->migrateRegionToAllocationContext(region, region->_allocateData._owningContext);
@@ -1872,48 +1942,14 @@ MM_WriteOnceCompactor::recycleFreeRegionsAndFixFreeLists(MM_EnvironmentVLHGC *en
 				UDATA currentFreeSize = (NULL == currentFreeBase) ? 0 : ((UDATA)highAddress - (UDATA)currentFreeBase);
 				void *byteAfterFreeEntry = (void *)((UDATA)currentFreeBase + currentFreeSize);
 
+				regionPool->reset(MM_MemoryPool::forCompact);
 				if (currentFreeSize > regionPool->getMinimumFreeEntrySize()) {
-					/* The MemoryPoolBumpPointer doesn't require that its memory be walkable so just update the top pointer (which is more for consistency of the meta-structure than anything else) */
-					regionPool->setAllocationPointer(env, currentFreeBase);
-					regionPool->setFreeMemorySize(currentFreeSize);
-					regionPool->setFreeEntryCount(1);
-					regionPool->setLargestFreeEntry(currentFreeSize);
+					regionPool->recycleHeapChunk(env, currentFreeBase, byteAfterFreeEntry);
+					regionPool->updateMemoryPoolStatistics(env, currentFreeSize, 1, currentFreeSize);
 				} else {
 					regionPool->abandonHeapChunk(currentFreeBase, byteAfterFreeEntry);
-					regionPool->setAllocationPointer(env, highAddress);
-					regionPool->setFreeMemorySize(0);
-					regionPool->setFreeEntryCount(0);
-					regionPool->setLargestFreeEntry(0);
+					regionPool->updateMemoryPoolStatistics(env, 0, 0, 0);
 				}
-			}
-		}
-	}
-}
-
-/**
- * Updates leaf pointers that point to an address located within the indexable object.  For example,
- * when the array layout is either inline continuous or hybrid, there will be leaf pointers that point
- * to data that is contained within the indexable object.  These internal leaf pointers are updated by
- * calculating their offset within the source arraylet, then updating the destination arraylet pointers 
- * to use the same offset.
- * 
- * @param destinationPtr Pointer to the new indexable object
- * @param sourcePtr	Pointer to the original indexable object that was copied
- */
-void
-MM_WriteOnceCompactor::updateInternalLeafPointersAfterCopy(J9IndexableObject *destinationPtr, J9IndexableObject *sourcePtr)
-{
-	if (_extensions->indexableObjectModel.hasArrayletLeafPointers(destinationPtr)) {
-		GC_ArrayletLeafIterator leafIterator(_javaVM, destinationPtr);
-		GC_SlotObject *leafSlotObject = NULL;
-		UDATA sourceStartAddress = (UDATA) sourcePtr;
-		UDATA sourceEndAddress = sourceStartAddress + _extensions->indexableObjectModel.getSizeInBytesWithHeader(destinationPtr);
-
-		while(NULL != (leafSlotObject = leafIterator.nextLeafPointer())) {
-			UDATA leafAddress = (UDATA)leafSlotObject->readReferenceFromSlot();
-
-			if ((sourceStartAddress < leafAddress) && (leafAddress < sourceEndAddress)) {
-				leafSlotObject->writeReferenceToSlot((J9Object*)((UDATA)destinationPtr + (leafAddress - sourceStartAddress)));
 			}
 		}
 	}
@@ -2005,11 +2041,27 @@ MM_WriteOnceCompactor::fixupArrayletLeafRegionContentsAndObjectLists(MM_Environm
 					}
 				}
 			}
+			if (!region->getContinuationObjectList()->wasEmpty()) {
+				if (J9MODRON_HANDLE_NEXT_WORK_UNIT(env)) {
+					J9Object *pointer = region->getContinuationObjectList()->getPriorList();
+					while (NULL != pointer) {
+						Assert_MM_true(region->isAddressInRegion(pointer));
+						J9Object* forwardedPtr = getForwardingPtr(pointer);
+
+						/* read the next link out of the moved copy of the object before we add it to the buffer */
+						pointer = _extensions->accessBarrier->getContinuationLink(forwardedPtr);
+
+						/* store the object in this thread's buffer. It will be flushed to the appropriate list when necessary. */
+						env->getGCEnvironment()->_continuationObjectBuffer->add(env, forwardedPtr);
+					}
+				}
+			}
 		}
 	}
 
 	/* restore everything to a flushed state before exiting */
 	env->getGCEnvironment()->_unfinalizedObjectBuffer->flush(env);
+	env->getGCEnvironment()->_continuationObjectBuffer->flush(env);
 }
 
 void
@@ -2320,7 +2372,7 @@ MM_WriteOnceCompactor::doPlanSlide(MM_EnvironmentVLHGC *env, void *copyDestinati
 void
 MM_WriteOnceCompactor::setupMoveWorkStack(MM_EnvironmentVLHGC *env)
 {
-	Assert_MM_true(env->isMasterThread());
+	Assert_MM_true(env->isMainThread());
 	MM_HeapRegionDescriptorVLHGC *region = NULL;
 	GC_HeapRegionIteratorVLHGC regionIterator(_regionManager);
 	MM_HeapRegionDescriptorVLHGC *endOfQueue = NULL;

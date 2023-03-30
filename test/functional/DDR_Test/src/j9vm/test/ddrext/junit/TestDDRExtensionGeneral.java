@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2020 IBM Corp. and others
+ * Copyright (c) 2001, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -136,7 +136,7 @@ public class TestDDRExtensionGeneral extends DDRExtTesterBase {
 	public void testByteCodes() {
 		String methodForNameOutput = exec(Constants.METHODFORNAME_CMD,
 				new String[] { Constants.METHODFORNAME_METHOD });
-		String methodAddr = MethodForNameOutputParser.extractMethodAddress(methodForNameOutput, null);
+		String methodAddr = MethodForNameOutputParser.extractMethodAddress(methodForNameOutput, null, null);
 		if (methodAddr == null || methodAddr == "") {
 			fail("Failed to obtain method address for method : "
 					+ Constants.METHODFORNAME_METHOD
@@ -580,5 +580,20 @@ public class TestDDRExtensionGeneral extends DDRExtTesterBase {
 			fail("\"!nativememinfo\" output is null");
 		}
 		assertTrue(validate(nativeMemInfoOutput, Constants.NATIVEMEMINFO_SUCCESS_KEYS, Constants.NATIVEMEMINFO_FAILURE_KEYS));
+	}
+
+	/**
+	 * This junit method tests the !versioninfo output for "IBM J9 VM" or "Eclipse OpenJ9 VM"
+	 */
+	public void testVersionInfo()
+	{
+		String versionInfoOutput = exec(Constants.COREINFO_CMD, new String[] {});
+		String impl = System.getProperty("java.vm.name");
+		if (impl.contains("Eclipse OpenJ9 VM")){
+			assertTrue(validate(versionInfoOutput, Constants.COREINFO_VERSION_OPENJ9_SUCCESS_KEYS, Constants.COREINFO_VERSION_FAILURE_KEYS));
+		}
+		else {
+			assertTrue(validate(versionInfoOutput, Constants.COREINFO_VERSION_IBM_SUCCESS_KEYS, Constants.COREINFO_VERSION_FAILURE_KEYS));
+		}
 	}
 }

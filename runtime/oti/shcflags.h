@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2019 IBM Corp. and others
+ * Copyright (c) 2001, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -78,7 +78,7 @@
 #define J9SHR_RUNTIMEFLAG_ENABLE_NONFATAL  0x2000
 #define J9SHR_RUNTIMEFLAG_DO_DESTROY_CONFIG  0x4000
 #define J9SHR_RUNTIMEFLAG_BLOCK_SPACE_FULL  0x8000
-#define J9SHR_RUNTIMEFLAG_ENABLE_NESTED  0x10000
+// Available  0x10000
 #define J9SHR_RUNTIMEFLAG_ENABLE_AOT  0x20000
 #define J9SHR_RUNTIMEFLAG_ENABLE_PERSISTENT_CACHE  0x40000
 #define J9SHR_RUNTIMEFLAG_ENABLE_GROUP_ACCESS  0x80000
@@ -151,6 +151,8 @@
 #define J9SHR_LOADTYPE_NORMAL  1
 #define J9SHR_LOADTYPE_REDEFINED  2
 #define J9SHR_LOADTYPE_RETRANSFORMED  3
+/* class is not loaded from class path or module path */
+#define J9SHR_LOADTYPE_NOT_FROM_PATH  4
 
 #define J9SHR_HEADER_STRING_TABLE_INITIALIZED 1
 

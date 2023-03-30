@@ -1,5 +1,4 @@
-/*[INCLUDE-IF Java11 & !Java14]*/
-
+/*[INCLUDE-IF (11 <= JAVA_SPEC_VERSION) & (JAVA_SPEC_VERSION < 14) & !OPENJDK_METHODHANDLES]*/
 /*******************************************************************************
  * Copyright (c) 2017, 2020 IBM Corp. and others
  *
@@ -17,8 +16,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
-

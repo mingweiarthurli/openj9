@@ -1,5 +1,5 @@
 <#--
-Copyright (c) 1998, 2020 IBM Corp. and others
+Copyright (c) 1998, 2021 IBM Corp. and others
 
 This program and the accompanying materials are made available under
 the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@ Exception [1] and GNU General Public License, version 2 with the
 OpenJDK Assembly Exception [2].
 
 [1] https://www.gnu.org/software/classpath/license.html
-[2] http://openjdk.java.net/legal/assembly-exception.html
+[2] https://openjdk.org/legal/assembly-exception.html
 
 SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 -->
@@ -153,7 +153,7 @@ endif
   CFLAGS+=-D_X86_=1
   CXXFLAGS+=-D_X86_=1
   ifdef USE_CLANG
-    CLANG_CXXFLAGS+=-D_X86_=1 -DJ9X86 -march=pentium4 -mtune=prescott -msse2
+    CLANG_CXXFLAGS+=-D_X86_=1 -DJ9X86 -m32 -march=pentium4 -mtune=prescott -msse2
   endif
 </#if>
 
@@ -193,10 +193,14 @@ ifdef USE_CLANG
   CLANG_CXXFLAGS+=-DWINVER=$(UMA_WINVER) -D_WIN32_WINNT=$(UMA_WINVER) -D_WIN32_WINDOWS=$(UMA_WINVER)
 endif
 
-# -Zm200 max memory is 200% default
-# -Zi add debug symbols
-CFLAGS+=  -D_MT -D_WINSOCKAPI_ -Zm400 -W3 -Zi
-CXXFLAGS+=-D_MT -D_WINSOCKAPI_ -Zm400 -W3 -Zi
+# Option   Meaning
+# ------   -------
+# -Zm400   max memory is 400% default
+# -W3      enable warnings up to level 3
+# -Zi      add debug symbols
+# -wd4200  disable warnings regarding flexible array members
+CFLAGS   += -D_MT -D_WINSOCKAPI_ -Zm400 -W3 -Zi -wd4200
+CXXFLAGS += -D_MT -D_WINSOCKAPI_ -Zm400 -W3 -Zi -wd4200
 ifdef USE_CLANG
   CLANG_CXXFLAGS+=-D_MT -D_WINSOCKAPI_
 endif

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2020 IBM Corp. and others
+ * Copyright (c) 2001, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,33 +15,35 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
 package j9vm.test.ddrext;
 
+import org.openj9.test.util.VersionCheck;
+
 public class Constants {
-	
+
 	public static final String HEXADDRESS_HEADER = "0x";
 	public static final int HEXADECIMAL_RADIX = 16;
 	public static final int DECIMAL_RADIX = 10;
-	
+
 	// properties file
 	public static final String DDREXT_PROPERTIES = "ddrext.properties";
-	
+
 	public static final String DDREXT_EXCLUDES = "ddrext_excludes.xml";
-	
+
 	public static final String TESTDOMAIN_NATIVE = "native";
-	
-	public static final String TESTDOMAIN_REGULAR = "regular"; 
+
+	public static final String TESTDOMAIN_REGULAR = "regular";
 
 	public static final String DDREXT_EXCLUDES_PROPERTY_NAME = "name";
-	
+
 	public static final String DDREXT_EXCLUDES_PROPERTY_DOMAIN = "domain";
-	
+
 	public static final String DDREXT_EXCLUDES_PROPERTY_EXCLUDE = "exclude";
-	
+
 	// Common Error Messages
 	public static final String UNRECOGNIZED_CMD = "Unrecognised command";
 
@@ -78,7 +80,7 @@ public class Constants {
 	public static final String THREAD_FAILURE_KEY = "";
 
 	public static final String THREAD_HELP_SUCCESS_KEY = "list all threads in the VM,list stacks for all threads in the VM";
-	public static final String THREAD_STACK_SUCCESS_KEY = "java/lang/Thread,com/ibm/dtfj/tck/harness/Configure\\$DumpThread\\.generateDump\\(\\),!j9method 0x.*,!stack 0x.*";
+	public static final String THREAD_STACK_SUCCESS_KEY = "java/lang/Thread,j9vm/test/corehelper/SimpleThread\\.createDump\\(\\)V,!j9method 0x.*,!stack 0x.*";
 	public static final String THREAD_FLAGS_SUCCESS_KEY = "main,!j9vmthread 0x.*,publicFlags";
 	public static final String THREAD_DEBUGEVENTDATA_SUCCESS_KEYS = "!j9vmthread 0x.*";
 	public static final String THREAD_MONITORS_SUCCESS_KEY = "itemCount=[1-9][0-9]*,!j9thread 0x.*,!j9threadmonitor 0x.*";
@@ -101,15 +103,15 @@ public class Constants {
 	// make sure j9javavm's address is not 0
 	public static final String J9VMTHREAD_SUCCESS_KEYS = "J9VMThread,J9Method,!j9javavm 0x0*[1-9a-fA-F][0-9a-fA-F]*";
 	public static final String J9VMTHREAD_FAILURE_KEY = "";
-	
+
 	public static final String J9POOL_CMD = "j9pool";
-	public static final String J9POOLPUDDLE_CMD = "j9poolpuddle"; 
+	public static final String J9POOLPUDDLE_CMD = "j9poolpuddle";
 	public static final String J9POOLPUDDLELIST_CMD = "j9poolpuddlelist";
-	
+
 	public static final String WALKJ9POOL_CMD = "walkj9pool";
 	public static final String WALKJ9POOL_SUCCESS_KEYS = "J9Pool at";
 	public static final String WALKJ9POOL_FAILURE_KEY = "Either address is not a valid pool address or pool itself is corrupted";
-	
+
 
 	public static final String J9THREAD_CMD = "j9thread";
 	public static final String J9THREAD_SUCCESS_KEYS = "J9ThreadTracing,J9ThreadMonitor";
@@ -242,8 +244,8 @@ public class Constants {
 	public static final String SHRC_JITPSTATS = "jitpstats";
 	public static final String SHRC_JITPSTATS_SUCCESS_KEY = "JITPROFILE data length [1-9][0-9]* metadata [1-9][0-9]*,!j9x,java/lang/String,!j9romclass";
 	public static final String SHRC_JITPSTATS_FAILURE_KEY = "no shared cache,JITPROFILE data length 0 metadata 0";
-	public static final String SHRC_JITP_SUCCESS_KEY = "JITPROFILE data !j9x";	
-	
+	public static final String SHRC_JITP_SUCCESS_KEY = "JITPROFILE data !j9x";
+
 	public static final String SHRC_FINDJITP = "findjitp";
 	public static final String SHRC_FINDJITP_METHODNAME = "toString";
 	public static final String SHRC_FINDJITP_FAILURE_KEY = "No entry found in the cache";
@@ -255,7 +257,7 @@ public class Constants {
 	public static final String SHRC_JITPFOR = "jitpfor";
 	public static final String SHRC_JITPFOR_METHODNAME = "toString";
 	public static final String SHRC_JITPFOR_FAILURE_KEY = "No entry found in the cache";
-	
+
 	/* JIT hint information */
 	public static final String SHRC_JITHSTATS = "jithstats";
 	public static final String SHRC_JITHSTATS_SUCCESS_KEY = "JITHINT data length [1-9][0-9]* metadata [1-9][0-9]*,!j9x,java/util/HashMap,!j9romclass";
@@ -290,14 +292,15 @@ public class Constants {
 	public static final String ALL_CLASSESS_FAILURE_KEY = "";
 
 	public static final String J9CLASSSHAPE_CMD = "j9classshape";
-	public static final String J9CLASSSHAPE_TEST_CLASS = "j9vm/test/corehelper/SimpleThread";
-	public static final String J9CLASSSHAPE_SUCCESS_KEY = "_object,"+J9CLASSSHAPE_TEST_CLASS;
+	public static final String J9CLASSSHAPE_TEST_CLASS = "j9vm/test/corehelper/SimpleThread$DumperThread";
+	public static final String J9CLASS_TEST_SUCCESS_KEY = "j9vm/test/corehelper/SimpleThread\\$DumperThread";
+	public static final String J9CLASSSHAPE_SUCCESS_KEY = (VersionCheck.major() >= 19 ? "eetop," : "threadRef,") + J9CLASS_TEST_SUCCESS_KEY;
 
 	public static final String J9VTABLES_CMD = "j9vtables";
-	public static final String J9VTABLES_SUCCESS_KEY = "j9class,j9method,"+J9CLASSSHAPE_TEST_CLASS;
+	public static final String J9VTABLES_SUCCESS_KEY = "j9class,j9method,"+J9CLASS_TEST_SUCCESS_KEY;
 
 	public static final String J9STATICS_CMD = "j9statics";
-	public static final String J9STATICS_SUCCESS_KEY = "j9romstaticfieldshape," + J9CLASSSHAPE_TEST_CLASS;
+	public static final String J9STATICS_SUCCESS_KEY = "j9romstaticfieldshape," + J9CLASS_TEST_SUCCESS_KEY;
 
 	public static final String CL_FOR_NAME_CMD = "classforname";
 	public static final String CL_FOR_NAME_CLASS = "java/lang/Object";
@@ -331,23 +334,23 @@ public class Constants {
 	public static final String DUMP_ROM_CLASS_LINEAR_FAILURE_KEY = "";
 
 	public static final String DUMP_ROM_CLASS_CMD = "dumpromclass";
-	public static final String DUMP_ROM_CLASS_SUCCESS_KEY = "ROM Size,Class Name: java/lang/Object,Superclass Name,Source File Name,Methods,Interfaces \\(0\\),Fields \\(0\\),CP Shape Description,Methods \\(13\\)";
+	public static final String DUMP_ROM_CLASS_SUCCESS_KEY = "ROM Size,Class Name: java/lang/Object,Superclass Name,Source File Name,Methods,Interfaces \\(0\\),Fields \\(0\\),CP Shape Description,Methods \\(14\\)";
 	public static final String DUMP_ROM_CLASS_FAILURE_KEY = "";
 
 	public static final String DUMP_ROM_CLASS_NAME_CMD = "name:";
 	public static final String DUMP_ROM_CLASS_NAME = "java/lang/Object";
-	public static final String DUMP_ROM_CLASS_NAME_SUCCESS_KEY = "ROM Size,Class Name: java/lang/Object,Superclass Name,Source File Name: Object.java,Methods,Interfaces \\(0\\),Fields \\(0\\),CP Shape Description,Methods \\(13\\),Found 1 class\\(es\\) with name java/lang/Object";
+	public static final String DUMP_ROM_CLASS_NAME_SUCCESS_KEY = "ROM Size,Class Name: java/lang/Object,Superclass Name,Source File Name: Object.java,Methods,Interfaces \\(0\\),Fields \\(0\\),CP Shape Description,Methods \\(14\\),Found 1 class\\(es\\) with name java/lang/Object";
 	public static final String DUMP_ROM_CLASS_NAME_FAILURE_KEY = "Found 0 class\\(es\\) with name java/lang/Object";
 
 	public static final String DUMP_ROM_CLASS_NAME_WC = "*Object*";
-	public static final String DUMP_ROM_CLASS_NAME_WC_SUCCESS_KEY = "ROM Size,Class Name: java/lang/Object,Superclass Name,Source File Name: Object.java,Methods,Interfaces \\(0\\),Fields \\(0\\),CP Shape Description,Methods \\(13\\),Found [1-9][0-9]* class\\(es\\) with name \\*Object\\*";
+	public static final String DUMP_ROM_CLASS_NAME_WC_SUCCESS_KEY = "ROM Size,Class Name: java/lang/Object,Superclass Name,Source File Name: Object.java,Methods,Interfaces \\(0\\),Fields \\(0\\),CP Shape Description,Methods \\(14\\),Found [1-9][0-9]* class\\(es\\) with name \\*Object\\*";
 	public static final String DUMP_ROM_CLASS_NAME_WC_FAILURE_KEY = "Found 0 class\\(es\\) with name \\*Object\\*";
 
 	public static final String DUMP_ROM_CLASS_MAPS_CMD = "maps";
-	public static final String DUMP_ROM_CLASS_MAPS_SUCCESS_KEY = "ROM Size,Class Name: java/lang/Object,Superclass Name,Source File Name: Object.java,Interfaces \\(0\\),Fields \\(0\\),CP Shape Description,Methods \\(13\\),lmap,dmap,smap";
+	public static final String DUMP_ROM_CLASS_MAPS_SUCCESS_KEY = "ROM Size,Class Name: java/lang/Object,Superclass Name,Source File Name: Object.java,Interfaces \\(0\\),Fields \\(0\\),CP Shape Description,Methods \\(14\\),lmap,dmap,smap";
 	public static final String DUMP_ROM_CLASS_MAPS_FAILURE_KEY = "";
 
-	public static final String DUMP_ROM_CLASS_NAME_MAPS_SUCCESS_KEY = "ROM Size,Class Name: java/lang/Object,Superclass Name,Source File Name: Object.java,Interfaces \\(0\\),Fields \\(0\\),CP Shape Description,Methods \\(13\\),lmap,dmap,smap,Found 1 class\\(es\\) with name java/lang/Object";
+	public static final String DUMP_ROM_CLASS_NAME_MAPS_SUCCESS_KEY = "ROM Size,Class Name: java/lang/Object,Superclass Name,Source File Name: Object.java,Interfaces \\(0\\),Fields \\(0\\),CP Shape Description,Methods \\(14\\),lmap,dmap,smap,Found 1 class\\(es\\) with name java/lang/Object";
 	public static final String DUMP_ROM_CLASS_NAME_MAPS_FAILURE_KEY = "Found 0 class\\(es\\) with name java/lang/Object";
 
 	public static final String DUMP_ROM_CLASS_INVALID_ADDR_SUCCESS_KEY = "Problem running command";//"DDRInteractiveCommandException";
@@ -443,6 +446,7 @@ public class Constants {
 
 	public static final String METHODFORNAME_CMD = "methodforname";
 	public static final String METHODFORNAME_METHOD = "sleep";
+	public static final String METHODFORNAME_METHOD_FULLNAME = "java/lang/Thread.sleep";
 	public static final String METHODFORNAME_SUCCESS_KEY = "java/lang/Thread.sleep,!j9method";
 	public static final String METHODFORNAME_FAILURE_KEY = "Found 0 method\\(s\\)";
 
@@ -530,6 +534,7 @@ public class Constants {
 	public static final String FJ9OBJECTTOJ9OBJECT_CMD = "fj9objecttoj9object";
 	public static final String FJ9OBJECT_SUCCESS_KEY = "fj9object,j9object";
 	public static final String J9OBJECT_CMD = "j9object";
+	public static final String J9OBJECTTOFJ9OBJECT_CMD = "j9objecttofj9object";
 	public static final String J9OBJECT_SUCCESS_KEY = "struct J9Class\\* clazz,Object flags,java/lang/Object";
 
 	public static final String PLUGINS_CMD = "plugins";
@@ -568,20 +573,20 @@ public class Constants {
 			+ ","
 			+ STACKMAP_SUCCESS_KEYS_MSTACK_MAP;
 	public static final String STACKMAP_FAILURE_KEYS_2 = "Not found";
-	
+
 	public static final String SETVM_CMD = "setvm";
 	public static final String SETVM_SUCCESS_KEYS = "VM set to ";
 	public static final String SETVM_FAILURE_KEY_1 = "Error: Specified value \\(=";
 	public static final String SETVM_FAILURE_KEY_2 = "\\) is not a javaVM or vmThread pointer, VM not set";
 	public static final String SETVM_FAILURE_KEY_3 = "Address value is not a number :";
-	public static final String SETVM_FAILURE_KEYS = SETVM_FAILURE_KEY_1 
+	public static final String SETVM_FAILURE_KEYS = SETVM_FAILURE_KEY_1
 			+ ","
-			+ SETVM_FAILURE_KEY_2 
-			+ "," 
-			+ SETVM_FAILURE_KEY_3;	
-	
+			+ SETVM_FAILURE_KEY_2
+			+ ","
+			+ SETVM_FAILURE_KEY_3;
+
 	public static final String J9JAVAVM_CMD = "j9javavm";
-	
+
 	public static final String SHOWDUMPAGENTS_CMD = "showdumpagents";
 	// create dump with option:
 	// -Xdump:system:defaults:file=${system.dump},request=exclusive+compact+prepwalk,
@@ -589,38 +594,41 @@ public class Constants {
 	public static final String SHOWDUMPAGENTS_SUCCESS_KEYS = "-Xdump,request=exclusive\\+compact\\+prepwalk,events=systhrow,"
 			+ "filter=java/lang/OutOfMemoryError";
 	public static final String SHOWDUMPAGENTS_FAILURE_KEYS = "No dump agent";
-	
+
 	public static final String DUMPALLCLASSLOADERS_CMD = "dumpallclassloaders";
 	public static final String DUMPALLCLASSLOADERS_SUCCESS_KEYS = "ClassLoader,Address,SharedLibraries,Pool,ClassHashTable,jniIDs Pool,used,capacity,0x[0-9a-fA-F]";
 	public static final String DUMPALLCLASSLOADERS_FAILURE_KEYS = "";
-	
+
 	public static final String SYM_CMD = "sym";
 	public static final String SYM_TEST_METHOD = "java/lang/System.arraycopy";
 	public static final String SYM_SUCCESS_KEYS = "Closest match,java_lang_System_arraycopy\\+0x.+";
 	public static final String SYM_FAILURE_KEYS = "unknown location";
-	
+
 	public static final String DCLIBS_CMD = "dclibs";
 	public static final String DCLIBS_SUCCESS_KEYS = "Showing library list for,(Lib.+)+";
 	public static final String DCLIBS_FAILURE_KEYS = "Problem running command";
 	public static final String DCLIBS_LIB_COLLENTED = "Library has been collected";
 	public static final String DCLIBS_EXTRACT_SUCCESS_KEYS = "Extracting libraries to,(Extracting.+)+";
-	
+
 	public static final String J9METHOD_CMD = "j9method";
-	
+
 	public static final String COREINFO_CMD = "coreinfo";
 	public static final String COREINFO_SUCCESS_KEYS = "COMMANDLINE,JAVA VERSION INFO,PLATFORM INFO,Platform Name,OS Level,Processors,Architecture,How Many";
 	public static final String COREINFO_FAILURE_KEYS = "Problem running command";
-	
+	public static final String COREINFO_VERSION_IBM_SUCCESS_KEYS = "JAVA VM NAME,IBM J9 VM";
+	public static final String COREINFO_VERSION_OPENJ9_SUCCESS_KEYS = "JAVA VM NAME,Eclipse OpenJ9 VM";
+	public static final String COREINFO_VERSION_FAILURE_KEYS = "Problem running command";
+
 	public static final String NATIVEMEMINFO_CMD = "nativememinfo";
 	public static final String NATIVEMEMINFO_SUCCESS_KEYS = "JRE:,VM:,Classes:,Memory Manager,Java Heap:,Other:,Threads:,Java Stack:, bytes, allocations";
 	public static final String NATIVEMEMINFO_FAILURE_KEYS = "Problem running command";
-	
+
 	public static final String MONITORS_CMD = "monitors";
-	
+
 	public static final String TENANTREGIONS_CMD = "tenantregions";
-	
+
 	public static final String TENANTCHECK_CMD = "tenantcheck";
-	
+
 	/* Constants related to testing of deadlock detection */
 	public static final String DEADLOCK_THREAD = "Thread:";
 	public static final String DEADLOCK_OS_THREAD = "OS Thread:";
@@ -628,9 +636,9 @@ public class Constants {
 	public static final String DEADLOCK_OWNED_BY = "which is owned by:";
 	public static final String DEADLOCK_FIRST_MON = "First Monitor lock";
 	public static final String DEADLOCK_SECOND_MON = "Second Monitor lock";
-	public static final String DEADLOCK_JAVA_OBJ = "java/lang/Object";
+	public static final String DEADLOCK_JAVA_OBJ = "j9vm/test/corehelper/DeadlockCoreGenerator\\$LockObject";
 	public static final String DEADLOCK_CMD = "deadlock";
-	
+
 	/* Constants related to testing of runtime type resolution */
 	public static final String DUMP_HRD_CMD = "MM_HeapRegionDescriptor";
 	public static final String TYPERES_HRD_SUCCESS_KEYS = "Fields for MM_Base,Fields for MM_HeapRegionDescriptor";
@@ -639,7 +647,7 @@ public class Constants {
 	public static final String TYEPERES_LOCK_STRUCT_CMD = "mm_lightweightnonreentrantlock";
 	public static final String TYPERES_LOCK_SUCCESS_KEYS = "Fields for MM_Base,Fields for MM_LightweightNonReentrantLock";
 	public static final String TYPERES_LOCK_FAILURE_KEYS = "null,Problem running command";
-	
+
 	public static final String ROMCLASS_FOR_NAME_CMD = "romclassforname";
-	
+
 }

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -91,6 +91,16 @@ class AOTHasMethodTypeConstant : public virtual TR::RecoverableILGenException
    };
 
 /**
+ * AOT Has patched CP constant exception type.
+ *
+ * Thrown when a method that has a constant object in CP entry patched to a different type is AOT Compiled.
+ */
+class AOTHasPatchedCPConstant: public virtual TR::RecoverableILGenException
+   {
+   virtual const char* what() const throw() { return "AOT Has Patched CP Constant"; }
+   };
+
+/**
  * AOT Relocation Failure exception type.
  *
  * Thrown when an AOT compilation fails in the relocation phase.
@@ -127,7 +137,18 @@ class AOTRelocationRecordGenerationFailure: public virtual TR::CompilationExcept
    {
    virtual const char* what() const throw() { return "AOT Relocation Record Generation Failed"; }
    };
+
+#if defined(J9VM_OPT_JITSERVER)
+/**
+ * AOT Cache Deserialization Failure exception type.
+ *
+ * Thrown when the client JVM fails to deserialize an AOT method received from the JITServer AOT cache.
+ */
+class AOTCacheDeserializationFailure : public virtual RuntimeFailure
+   {
+   virtual const char *what() const throw() { return "AOT cache deserialization failure"; }
+   };
+#endif /* defined(J9VM_OPT_JITSERVER) */
 }
 
 #endif // AOT_FAILURE_HPP
-

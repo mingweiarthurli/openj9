@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2006, 2015 IBM Corp. and others
+ * Copyright (c) 2006, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -48,7 +48,7 @@ import com.ibm.j9ddr.corereaders.tdump.zebedee.util.FileFormatException;
 import com.ibm.j9ddr.corereaders.tdump.zebedee.util.ObjectMap;
 
 /**
- * This class represents an svcdump. It is is the main class in the dumpreader package and
+ * This class represents an svcdump. It is the main class in the dumpreader package and
  * provides low-level access to the contents of an svcdump (eg the ability to read the contents
  * of an address in a given address space).
  * <p>
@@ -168,19 +168,26 @@ public final class Dump extends ImageInputStreamImpl {
             raf = new FileImageInputStream(new RandomAccessFile(filename, "r"));
             fileSize = new File(filename).length();
         } catch (FileNotFoundException e) {
-            if (System.getProperty("os.arch").indexOf("390") == -1) {
+            /*
+             * Note: IBM Java 8 builds do not use the preprocessor so the [IF] condition
+             * is ignored: This must have the proper control flow ignoring those comments.
+             */
+            /*[IF PLATFORM-mz31 | PLATFORM-mz64]*/
+            if (System.getProperty("os.name").toLowerCase().contains("z/os")) {
+                try {
+                    raf = new MVSFileReader(filename);
+                } catch (Exception ex) {
+                    log.info("could not load dump: " + ex.getMessage());
+                    throw e;
+                } catch (LinkageError le) {
+                    log.info("could not load recordio: " + le);
+                    throw le;
+                }
+            } else
+            /*[ENDIF] PLATFORM-mz31 | PLATFORM-mz64 */
+            {
                 throw e;
             }
-            
-            try {
-                raf = new MVSFileReader(filename);
-            } catch (Exception ex) {
-            	log.info("could not load dump: " + ex.getMessage());
-				throw e;
-			}
-        } catch (LinkageError le) {
-            log.info("could not load recordio: " + le);
-            throw le;
         }
         readFirstBlock();
         if (initialize)

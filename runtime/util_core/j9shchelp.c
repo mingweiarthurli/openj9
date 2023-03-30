@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2019 IBM Corp. and others
+ * Copyright (c) 2001, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -204,7 +204,7 @@ getShcModlevelForJCL(uintptr_t j2seVersion)
 		modLevel = J9SH_MODLEVEL_JAVA8;
 		break;
 	default: 
-		modLevel = JAVA_SPEC_VERSION_FROM_J2SE(j2seVersion);
+		modLevel = (uint32_t)JAVA_SPEC_VERSION_FROM_J2SE(j2seVersion);
 		break;
 	}
 	return modLevel;
@@ -245,7 +245,7 @@ getJCLForShcModlevel(uintptr_t modlevel)
 	default:
 		if (modlevel >= 10) {
 			/* J9SH_MODLEVEL_JAVA9 is 5. Does not have modlevel that is 7,8,9 */
-			javaVersion = modlevel;
+			javaVersion = (uint32_t)modlevel;
 		}
 		break;
 	}

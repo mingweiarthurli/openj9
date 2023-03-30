@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2014 IBM Corp. and others
+ * Copyright (c) 2001, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -32,7 +32,6 @@ extern "C" {
 j9object_t JNICALL
 Fast_java_lang_ref_Reference_getImpl(J9VMThread *currentThread, j9object_t receiverObject)
 {
-	/* Only called from java for metronome GC policy */
 	return currentThread->javaVM->memoryManagerFunctions->j9gc_objaccess_referenceGet(currentThread, receiverObject);
 }
 
@@ -42,14 +41,32 @@ Fast_java_lang_ref_Reference_reprocess(J9VMThread *currentThread, j9object_t rec
 {
 	J9JavaVM* javaVM = currentThread->javaVM;
 	J9MemoryManagerFunctions* mmFuncs = javaVM->memoryManagerFunctions;
-	if (J9_GC_POLICY_METRONOME == ((OMR_VM *)javaVM->omrVM)->gcPolicy) {
-		/* Under metronome call getReferent, which will mark the referent if a GC is in progress. */
-		mmFuncs->j9gc_objaccess_referenceGet(currentThread, receiverObject);
-	} else {
-		/* Reprocess this object if a concurrent GC is in progress */
-		mmFuncs->J9WriteBarrierBatchStore(currentThread, receiverObject);
-	}
+	/* Under the SATB barrier call getReferent (for metronome or standard SATB CM), this will mark the referent if a cycle is in progress.
+	 * Or reprocess this object if a concurrent GC (incremental cards) is in progress */
+	mmFuncs->j9gc_objaccess_referenceReprocess(currentThread, receiverObject);
 }
+
+#if JAVA_SPEC_VERSION >= 16
+/* java.lang.ref.Reference: public native boolean refersTo(T target) */
+jboolean JNICALL
+Fast_java_lang_ref_Reference_refersTo(J9VMThread *currentThread, j9object_t reference, j9object_t target)
+{
+	J9JavaVM * const vm = currentThread->javaVM;
+	jboolean result = JNI_FALSE;
+
+	if (NULL == reference) {
+		vm->internalVMFunctions->setCurrentException(currentThread, J9VMCONSTANTPOOL_JAVALANGNULLPOINTEREXCEPTION, NULL);
+	} else {
+		j9object_t referent = J9VMJAVALANGREFREFERENCE_REFERENT_VM(vm, reference);
+
+		if (referent == target) {
+			result = JNI_TRUE;
+		}
+	}
+
+	return result;
+}
+#endif /* JAVA_SPEC_VERSION >= 16 */
 
 J9_FAST_JNI_METHOD_TABLE(java_lang_ref_Reference)
 	J9_FAST_JNI_METHOD("getImpl", "()Ljava/lang/Object;", Fast_java_lang_ref_Reference_getImpl,
@@ -58,5 +75,9 @@ J9_FAST_JNI_METHOD_TABLE(java_lang_ref_Reference)
 	J9_FAST_JNI_METHOD("reprocess", "()V", Fast_java_lang_ref_Reference_reprocess,
 		J9_FAST_JNI_RETAIN_VM_ACCESS | J9_FAST_JNI_NOT_GC_POINT | J9_FAST_JNI_NO_NATIVE_METHOD_FRAME | J9_FAST_JNI_NO_EXCEPTION_THROW |
 		J9_FAST_JNI_NO_SPECIAL_TEAR_DOWN | J9_FAST_JNI_DO_NOT_WRAP_OBJECTS)
+#if JAVA_SPEC_VERSION >= 16
+	J9_FAST_JNI_METHOD("refersTo", "(Ljava/lang/Object;)Z", Fast_java_lang_ref_Reference_refersTo,
+		J9_FAST_JNI_RETAIN_VM_ACCESS | J9_FAST_JNI_DO_NOT_WRAP_OBJECTS)
+#endif /* JAVA_SPEC_VERSION >= 16 */
 J9_FAST_JNI_METHOD_TABLE_END
 }

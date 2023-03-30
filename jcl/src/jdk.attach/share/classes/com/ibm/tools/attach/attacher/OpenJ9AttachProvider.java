@@ -1,8 +1,6 @@
-/*[INCLUDE-IF Sidecar16]*/
-package com.ibm.tools.attach.attacher;
-
+/*[INCLUDE-IF JAVA_SPEC_VERSION >= 8]*/
 /*******************************************************************************
- * Copyright (c) 2009, 2019 IBM Corp. and others
+ * Copyright (c) 2009, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -18,10 +16,11 @@ package com.ibm.tools.attach.attacher;
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
+package com.ibm.tools.attach.attacher;
 
 import java.io.File;
 import java.io.IOException;
@@ -46,6 +45,9 @@ import com.sun.tools.attach.spi.AttachProvider;
  * Concrete subclass of the class that lists the available target VMs
  * 
  */
+/*[IF JAVA_SPEC_VERSION >= 17]*/
+@SuppressWarnings("removal")
+/*[ENDIF] JAVA_SPEC_VERSION >= 17 */
 public class OpenJ9AttachProvider extends AttachProvider {
 
 	/**
@@ -86,7 +88,9 @@ public class OpenJ9AttachProvider extends AttachProvider {
 			throw new AttachNotSupportedException(com.ibm.oti.util.Msg.getString("K0543")); //$NON-NLS-1$
 		}
 
-		OpenJ9VirtualMachine vm = new OpenJ9VirtualMachine(this, descriptor.id());
+		String id = descriptor.id();
+		OpenJ9VirtualMachine vm = new OpenJ9VirtualMachine(this, id);
+		IPC.logMessage("Attach target descriptor.id(): " + id); //$NON-NLS-1$
 		vm.attachTarget();
 		return vm;
 	}
@@ -127,13 +131,14 @@ public class OpenJ9AttachProvider extends AttachProvider {
 		}
 
 		try {
-			CommonDirectory.obtainMasterLock(); /*[PR 164751 avoid scanning the directory when an attach API is launching ]*/
+			/*[PR 164751 avoid scanning the directory when an attach API is launching ]*/
+			CommonDirectory.obtainControllerLock("OpenJ9AttachProvider.listVirtualMachinesImp"); //$NON-NLS-1$
 		} catch (IOException e) { /*[PR 164751 avoid scanning the directory when an attach API is launching ]*/
 			/* 
 			 * IOException is thrown if we already have the lock. The only other cases where we lock this file are during startup and shutdown.
 			 * The attach API startup is complete, thanks to waitForAttachApiInitialization() and threads using this method terminate before shutdown. 
 			 */ 
-			IPC.logMessage("listVirtualMachines() IOError on master lock : ", e.toString()); //$NON-NLS-1$
+			IPC.logMessage("listVirtualMachines() IOError on controller lock : ", e.toString()); //$NON-NLS-1$
 			return descriptors; /* An error has occurred. Since the attach API is not working correctly, be conservative and don't list and targets */
 		}
 		try {
@@ -183,7 +188,8 @@ public class OpenJ9AttachProvider extends AttachProvider {
 				}
 			}
 		} finally {
-			CommonDirectory.releaseMasterLock(); /* guarantee that we unlock the file */
+			/* guarantee that we unlock the file */
+			CommonDirectory.releaseControllerLock("OpenJ9AttachProvider.listVirtualMachinesImp"); //$NON-NLS-1$
 		}
 		return descriptors;
 	}
@@ -217,6 +223,7 @@ public class OpenJ9AttachProvider extends AttachProvider {
 	}
 
 	private static void checkAttachSecurity() {
+		@SuppressWarnings("removal")
 		final SecurityManager securityManager = System.getSecurityManager();
 		if (securityManager != null) {
 			securityManager.checkPermission(Permissions.ATTACH_VM);

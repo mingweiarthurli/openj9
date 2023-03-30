@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -51,12 +51,22 @@ protected:
    CPU(const OMRProcessorDesc& processorDescription) : J9::CPU(processorDescription) {}
 
 public:
+
    /** 
-    * @brief Returns the processor type and features that will be used by portable AOT compilations
+    * @brief A factory method used to construct a CPU object for portable AOT compilations
     * @param[in] omrPortLib : the port library
     * @return TR::CPU
     */
    static TR::CPU detectRelocatable(OMRPortLibrary * const omrPortLib);
+
+   /**
+    * @brief Intialize _supportedFeatureMasks to the list of processor features that will be exploited by the compiler and set _isSupportedFeatureMasksEnabled to true
+    * @return void
+    */
+   static void enableFeatureMasks();
+
+   bool is(OMRProcessorArchitecture p);
+   bool supportsFeature(uint32_t feature);
 
    TR_X86CPUIDBuffer *queryX86TargetCPUID();
    const char * getProcessorVendorId();
@@ -66,7 +76,7 @@ public:
    bool hasPopulationCountInstruction();
 
    bool isCompatible(const OMRProcessorDesc& processorDescription);
-   OMRProcessorDesc getProcessorDescription();
+
    uint32_t getX86ProcessorFeatureFlags();
    uint32_t getX86ProcessorFeatureFlags2();
    uint32_t getX86ProcessorFeatureFlags8();

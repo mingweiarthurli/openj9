@@ -2,7 +2,7 @@
 package java.lang.ref;
 
 /*******************************************************************************
- * Copyright (c) 2002, 2016 IBM Corp. and others
+ * Copyright (c) 2002, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -18,7 +18,7 @@ package java.lang.ref;
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -32,15 +32,8 @@ static void runFinalization() {
 
 private static native void runFinalizationImpl();
 
-// called by java.lang.Shutdown.runAllFinalizers native
-// invoked when Runtime.runFinalizersOnExit() was called with true
-static void runAllFinalizers() {
-	runAllFinalizersImpl();
-}
-
 static ReferenceQueue<Object> getQueue() {
 	return new ReferenceQueue<Object>();
 }
 
-private static native void runAllFinalizersImpl();
 }

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2019, 2020 IBM Corp. and others
+ * Copyright (c) 2019, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -29,6 +29,8 @@
 
 #include "infra/Assert.hpp"
 
+class TR_ResolvedMethod;
+
 namespace TR { class CodeGenerator; }
 namespace TR { class Instruction; }
 namespace TR { class Register; }
@@ -36,6 +38,18 @@ namespace TR { class ResolvedMethodSymbol; }
 
 namespace J9
 {
+
+struct ARM64PICItem
+   {
+   TR_ALLOC(TR_Memory::Linkage);
+
+   ARM64PICItem(TR_OpaqueClassBlock *clazz, TR_ResolvedMethod *method, float freq) :
+      _clazz(clazz), _method(method), _frequency(freq) {}
+
+   TR_OpaqueClassBlock *_clazz;
+   TR_ResolvedMethod *_method;
+   float _frequency;
+   };
 
 namespace ARM64
 {
@@ -91,6 +105,11 @@ class PrivateLinkage : public J9::PrivateLinkage
    virtual uint32_t getRightToLeft();
 
    /**
+    * @brief Adjust stack index so that local references are aligned properly
+    * @param[in/out] stackIndex : index on stack
+    */
+   virtual void alignLocalReferences(uint32_t &stackIndex);
+   /**
     * @brief Maps symbols to locations on stack
     * @param[in] method : method for which symbols are mapped on stack
     */
@@ -101,6 +120,13 @@ class PrivateLinkage : public J9::PrivateLinkage
     * @param[in/out] stackIndex : index on stack
     */
    virtual void mapSingleAutomatic(TR::AutomaticSymbol *p, uint32_t &stackIndex);
+   /**
+    * @brief Maps an automatic symbol to an index on stack
+    * @param[in] p : automatic symbol
+    * @param[in] size : size
+    * @param[in/out] stackIndex : index on stack
+    */
+   virtual void mapSingleAutomatic(TR::AutomaticSymbol *p, uint32_t size, uint32_t &stackIndex);
 
    /**
     * @brief Initializes ARM64 RealRegister linkage

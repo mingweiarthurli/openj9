@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -287,7 +287,24 @@ getVMThreadStateHelper(J9VMThread *targetThread,
 						 */
 					}
 				}
-	
+
+#if JAVA_SPEC_VERSION >= 19
+				/* For a J9VMThread with a mounted virtual thread that is waiting on a
+				 * lock, the virtual thread object should be returned as the lock object
+				 * and the corresponding J9VMThread should be returned as the lock
+				 * owner.
+				 *
+				 * ThreadMXBean documentation states that it does not support VirtualThread
+				 * and behaviour on locks, related to VirtualThread, has not been defined.
+				 * This code matches the RI's ThreadMXBean API behaviour.
+				 */
+				if (((J9VMTHREAD_STATE_WAITING == vmstate) || (J9VMTHREAD_STATE_WAITING_TIMED == vmstate))
+				&& (NULL != targetThread->currentContinuation)
+				) {
+					lockObject = targetThread->threadObject;
+					lockOwner = targetThread;
+				}
+#endif /* JAVA_SPEC_VERSION >= 19 */
 			} else {
 				/* 
 				 * Can't wait on an uninflated object monitor, so the thread

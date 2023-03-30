@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -75,9 +75,39 @@ public:
    /// given a direct call to Object.clone node, return the class of the receiver.
    ///
    TR_OpaqueClassBlock* getCloneClassInNode();
-   TR::Node *           processJNICall(TR::TreeTop *, TR::ResolvedMethodSymbol *);
 
-   void                    devirtualizeCall(TR::TreeTop*);
+   /**
+    * @brief Stub method for OMR callers using the old API.  This function is
+    *    deprecated and will be removed once upstream OMR code is changed.
+    */
+   TR::Node *processJNICall(TR::TreeTop *callNodeTreeTop, TR::ResolvedMethodSymbol *owningSymbol);
+
+   /**
+    * @brief Transform a call node to prepare it for JNI dispatch.
+    *
+    * @param[in] callNodeTreeTop : \c TR::TreeTop for the call node
+    * @param[in] owningSymbol : \c TR::ResolvedMethodSymbol of the method to call
+    * @param[in] comp : \c TR::Compilation object
+    *
+    * @return Transformed call  \c TR::Node
+    */
+   TR::Node *processJNICall(TR::TreeTop *callNodeTreeTop, TR::ResolvedMethodSymbol *owningSymbol, TR::Compilation *comp);
+
+   /**
+    * @brief Stub method for OMR callers using the old API.  This function is
+    *    deprecated and will be removed once upstream OMR code is changed.
+    */
+   void devirtualizeCall(TR::TreeTop *treeTop);
+
+   /**
+    * @brief Devirtualize the call under the given treetop.
+    *
+    * @param[in] treeTop : \c TR::TreeTop of the call to devirtualize
+    * @param[in] comp : \c TR::Compilation object
+    *
+    * @return None
+    */
+   void devirtualizeCall(TR::TreeTop *treeTop, TR::Compilation *comp);
 
    /**
     * @return the signature of the node's type if applicable.
@@ -109,8 +139,8 @@ public:
    bool alwaysGeneratesAKnownCleanSign();
    bool alwaysGeneratesAKnownPositiveCleanSign();
 #ifdef TR_TARGET_S390
-   int32_t getStorageReferenceSize();
-   int32_t getStorageReferenceSourceSize();
+   int32_t getStorageReferenceSize(TR::Compilation *comp);
+   int32_t getStorageReferenceSourceSize(TR::Compilation *comp);
 #endif
 
    bool         isEvenPrecision();
@@ -132,13 +162,13 @@ public:
 
    bool canRemoveArithmeticOperand();
    bool canGCandReturn();
+   bool canGCandReturn(TR::Compilation *comp);
 
    static uint32_t hashOnBCDOrAggrLiteral(char *lit, size_t litSize);
 
    bool referencesSymbolInSubTree(TR::SymbolReference * symRef, vcount_t visitCount);
-   bool referencesMayKillAliasInSubTree(TR::Node * rootNode, vcount_t visitCount);
+   bool referencesMayKillAliasInSubTree(TR::Node * rootNode, vcount_t visitCount, TR::Compilation *comp);
    void getSubTreeReferences(TR::SparseBitVector &references, vcount_t visitCount);
-   TR_ParentOfChildNode * referencesSymbolExactlyOnceInSubTree(TR::Node *, int32_t, TR::SymbolReference *, vcount_t);
 
    /**
     * Node field functions
@@ -147,11 +177,6 @@ public:
 #ifdef TR_TARGET_S390
    TR_StorageReference *getStorageReferenceHint();
    TR_StorageReference *setStorageReferenceHint(TR_StorageReference *s);
-#endif
-
-#ifdef SUPPORT_DFP
-   long double             setLongDouble(long double d);
-   long double             getLongDouble();
 #endif
 
    /**
@@ -174,10 +199,6 @@ public:
    // generators
    void    setPDMulPrecision();
    void    setPDAddSubPrecision();
-
-   bool    isDFPModifyPrecision();
-   void    setDFPPrecision(int32_t p);
-   uint8_t getDFPPrecision();
 
    void    setDecimalAdjust(int32_t a);
    int32_t getDecimalAdjust();
@@ -273,19 +294,25 @@ public:
 
    // Flag used by TR::BNDCHK nodes
    bool isSpineCheckWithArrayElementChild();
-   void setSpineCheckWithArrayElementChild(bool v);
+   void setSpineCheckWithArrayElementChild(bool v, TR::Compilation *comp);
    bool chkSpineCheckWithArrayElementChild();
    const char *printSpineCheckWithArrayElementChild();
 
    // Flags used by call nodes
    bool isUnsafePutOrderedCall();
    bool isDontInlinePutOrderedCall();
-   void setDontInlinePutOrderedCall();
+   void setDontInlinePutOrderedCall(TR::Compilation *comp);
    bool chkDontInlineUnsafePutOrderedCall();
    const char * printIsDontInlineUnsafePutOrderedCall();
 
+   /**
+    * Checks  and return true if the callNode is JNI Call to Unsafe.copyMemory
+    */
+   bool isUnsafeCopyMemoryIntrinsic();
+
    bool isUnsafeGetPutCASCallOnNonArray();
    void setUnsafeGetPutCASCallOnNonArray();
+   void setUnsafeGetPutCASCallOnNonArray(TR::Compilation *comp);
 
    bool isProcessedByCallCloneConstrain();
    void setProcessedByCallCloneConstrain();
@@ -431,8 +458,6 @@ private:
 
    // Holds DecimalInfo and BCDFlags
    UnionPropertyB _unionPropertyB;
-
-   friend class ::TR_DebugExt;
 
 protected:
    // Flag bits

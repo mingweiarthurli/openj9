@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2020 IBM Corp. and others
+ * Copyright (c) 2001, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -27,7 +27,6 @@ import java.util.NoSuchElementException;
 import com.ibm.j9ddr.CorruptDataException;
 import com.ibm.j9ddr.vm29.j9.AlgorithmVersion;
 import com.ibm.j9ddr.vm29.j9.DataType;
-import com.ibm.j9ddr.vm29.j9.J9ConstantHelper;
 import com.ibm.j9ddr.vm29.j9.J9ObjectFieldOffset;
 import com.ibm.j9ddr.vm29.j9.ObjectModel;
 import com.ibm.j9ddr.vm29.pointer.I32Pointer;
@@ -65,7 +64,12 @@ public class J9ObjectHelper
 			mixedReferenceMode = AlgorithmVersion.getVersionOf(AlgorithmVersion.MIXED_REFERENCE_MODE).getAlgorithmVersion() > 0;
 			if (mixedReferenceMode) {
 				J9JavaVMPointer vm = J9RASHelper.getVM(DataType.getJ9RASPointer());
-				compressObjectReferences = vm.extendedRuntimeFlags2().anyBitsIn(J9_EXTENDED_RUNTIME2_COMPRESS_OBJECT_REFERENCES);
+				try {
+					compressObjectReferences = vm.extendedRuntimeFlags2().anyBitsIn(J9_EXTENDED_RUNTIME2_COMPRESS_OBJECT_REFERENCES);
+				} catch (NoSuchFieldException e) {
+					// the 'extendedRuntimeFlags2' field should be present in a VM that supports mixed reference mode
+					throw new RuntimeException(e);
+				}
 			} else {
 				compressObjectReferences = J9BuildFlags.gc_compressedPointers;
 			}
@@ -107,10 +111,15 @@ public class J9ObjectHelper
 	public static UDATA rawClazz(J9ObjectPointer objPointer) throws CorruptDataException
 	{
 		if (mixedReferenceMode) {
-			if (compressObjectReferences) {
-				return J9ObjectCompressedPointer.cast(objPointer).clazz();
+			try {
+				if (compressObjectReferences) {
+					return J9ObjectCompressedPointer.cast(objPointer).clazz();
+				}
+				return J9ObjectFullPointer.cast(objPointer).clazz();
+			} catch (NoSuchFieldException e) {
+				// the 'clazz' field should be present in a VM that supports mixed reference mode
+				throw new CorruptDataException(e);
 			}
-			return J9ObjectFullPointer.cast(objPointer).clazz();
 		}
 		return UDATA.cast(objPointer.clazz());
 	}
@@ -159,11 +168,11 @@ public class J9ObjectHelper
 			try {
 				getObjectField(objPointer, getFieldOffset(objPointer, "value", "[B"));
 
-				isStringBackedByByteArray = new Boolean(true);
+				isStringBackedByByteArray = Boolean.valueOf(true);
 			} catch (NoSuchElementException e) {
 				getObjectField(objPointer, getFieldOffset(objPointer, "value", "[C"));
 
-				isStringBackedByByteArray = new Boolean(false);
+				isStringBackedByByteArray = Boolean.valueOf(false);
 			}
 		}
 		
@@ -193,7 +202,13 @@ public class J9ObjectHelper
 		} else {
 			stringLength = getIntField(objPointer, getFieldOffset(objPointer, "count", "I"));
 
-			boolean enableCompression = getBooleanField(objPointer, getFieldOffset(objPointer, "enableCompression", "Z"));
+			String enableCompressionFieldName;
+			if (AlgorithmVersion.getVersionOf(AlgorithmVersion.JAVA_LANG_STRING_VERSION).getAlgorithmVersion() >= 1) {
+				enableCompressionFieldName = "COMPACT_STRINGS";
+			} else {
+				enableCompressionFieldName = "enableCompression";
+			}
+			boolean enableCompression = getBooleanField(objPointer, getFieldOffset(objPointer, enableCompressionFieldName, "Z"));
 
 			if (enableCompression) {
 				if (stringLength >= 0) {

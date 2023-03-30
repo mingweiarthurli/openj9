@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,13 +15,21 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
 
 #if !defined(MHINTERPRETER_HPP_)
 #define MHINTERPRETER_HPP_
+
+#if defined(OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES)
+#if OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES
+#define VM_MHInterpreter VM_MHInterpreterCompressed
+#else /* OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES */
+#define VM_MHInterpreter VM_MHInterpreterFull
+#endif /* OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES */
+#endif /* defined(OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES) */
 
 #include "ffi.h"
 #include "j9.h"
@@ -151,17 +159,6 @@ private:
 	}
 
 	/**
-	 * Fetch the filterPosition field from the j.l.i.MethodHandle.
-	 * @param methodHandle[in] A MethodHandle object
-	 * @return The filterPosition field from the j.l.i.MethodHandle.
-	 */
-	VMINLINE U_32
-	getMethodHandleFilterPosition(j9object_t methodHandle) const
-	{
-		return (U_32)J9VMJAVALANGINVOKEFILTERARGUMENTSWITHCOMBINERHANDLE_FILTERPOSITION(_currentThread, methodHandle);
-	}
-
-	/**
 	 * Fetch the foldPosition field from the j.l.i.MethodHandle.
 	 * @param methodHandle[in] A MethodHandle object
 	 * @return The foldPosition field from the j.l.i.MethodHandle.
@@ -183,12 +180,6 @@ private:
 		return J9VMJAVALANGINVOKEFOLDHANDLE_COMBINER(_currentThread, methodHandle);
 	}
 
-	VMINLINE j9object_t
-	getCombinerHandleForFilter(j9object_t methodHandle) const
-	{
-		return J9VMJAVALANGINVOKEFILTERARGUMENTSWITHCOMBINERHANDLE_COMBINER(_currentThread, methodHandle);
-	}
-
 	/**
 	 * Fetch the returnType field from the j.l.i.MethodType.
 	 * @param methodType[in] A MethodType object
@@ -199,7 +190,7 @@ private:
 	{
 		return J9VM_J9CLASS_FROM_HEAPCLASS(
 				_currentThread,
-				J9VMJAVALANGINVOKEMETHODTYPE_RETURNTYPE(_currentThread, methodType));
+				J9VMJAVALANGINVOKEMETHODTYPE_RTYPE(_currentThread, methodType));
 	}
 
 	/**
@@ -210,7 +201,7 @@ private:
 	VMINLINE j9object_t
 	getMethodTypeArguments(j9object_t methodType) const
 	{
-		return J9VMJAVALANGINVOKEMETHODTYPE_ARGUMENTS(_currentThread, methodType);
+		return J9VMJAVALANGINVOKEMETHODTYPE_PTYPES(_currentThread, methodType);
 	}
 
 	/**
@@ -367,7 +358,7 @@ foundITable:
 	/**
 	 * @brief Call class initializer <clinit> if the class is not already initialized.
 	 * @param methodHandle[in] The MethodHandle describing the stack
-	 * @return 
+	 * @return
 	 */
 	VMINLINE j9object_t
 	initializeClassIfNeeded(j9object_t methodHandle)
@@ -405,15 +396,7 @@ foundITable:
 	{
 		switch (returnType) {
 		case J9NtcBoolean:
-		{
-			U_32 returnValue = (U_32)*returnStorage;
-			U_8 * returnAddress = (U_8 *)&returnValue;
-#ifdef J9VM_ENV_LITTLE_ENDIAN
-			*returnStorage = (UDATA)(0 != returnAddress[0]);
-#else
-			*returnStorage = (UDATA)(0 != returnAddress[3]);
-#endif /*J9VM_ENV_LITTLE_ENDIAN */
-		}
+			*returnStorage = (UDATA)(U_8)*returnStorage;
 			break;
 		case J9NtcByte:
 			*returnStorage = (UDATA)(IDATA)(I_8)*returnStorage;
@@ -440,7 +423,7 @@ foundITable:
 			break;
 		}
 	}
-	
+
 	/**
 	 * @brief Convert argument or return type from J9Class to J9NativeTypeCode
 	 * @param type[in] The pointer to the J9Class of the type
@@ -535,28 +518,11 @@ foundITable:
 
 	/**
 	* @brief
-	* Perform argument filtering for filterArgumentsWithCombiner.
-	* @param methodHandle
-	* @return j9object_t The target MethodHandle with argument filtered by combinerHandle
-	*/
-	j9object_t
-	filterArgumentsWithCombiner(j9object_t methodHandle);
-
-	/**
-	* @brief
 	* Insert the return value of combinerHandle to the argument list of foldHandle.
 	* @return j9object_t The target MethodHandle  (the one to execute foldHandle)
 	*/
 	j9object_t
 	insertReturnValueForFoldArguments();
-
-	/**
-	* @brief
-	* Insert the return value of combinerHandle to the argument list of the methodHandle.
-	* @return j9object_t The target MethodHandle
-	*/
-	j9object_t
-	replaceReturnValueForFilterArgumentsWithCombiner();
 
 	/**
 	* @brief
@@ -627,7 +593,7 @@ foundITable:
 #ifdef J9VM_OPT_PANAMA
 	VMINLINE VM_BytecodeAction
 	runNativeMethodHandle(j9object_t methodHandle);
-	
+
 	VMINLINE FFI_Return
 	callFunctionFromNativeMethodHandle(void * nativeMethodStartAddress, UDATA *javaArgs, U_8 *returnType, j9object_t methodHandle);
 
@@ -664,11 +630,11 @@ public:
 	 * ConstructorHandle:
 	 * 		[ ... newUninitializedObject bytecodeframe] --> [ ... newInitializedObject]
 	 * FoldHandle:
-	 * 		Refer to the implementation in MHInterpreter.cpp
+	 * 		Refer to the implementation in MHInterpreter.inc
 	 * GuardWithTestHandle:
-	 * 		Refer to the implementation in MHInterpreter.cpp
+	 * 		Refer to the implementation in MHInterpreter.inc
 	 * FilterArgumentsHandle:
-	 * 		Refer to the implementation in MHInterpreter.cpp
+	 * 		Refer to the implementation in MHInterpreter.inc
 	 */
 	VM_BytecodeAction
 	impdep1();
@@ -678,7 +644,8 @@ public:
 			, _vm(_currentThread->javaVM)
 			, _objectAllocate(objectAllocate)
 			, _objectAccessBarrier(objectAccessBarrier)
-	{ };
+	{
+	}
 };
 
 #endif /* MHINTERPRETER_HPP_ */

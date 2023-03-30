@@ -1,8 +1,6 @@
-/*[INCLUDE-IF Sidecar16]*/
-package com.ibm.jvm;
-
+/*[INCLUDE-IF JAVA_SPEC_VERSION >= 8]*/
 /*******************************************************************************
- * Copyright (c) 2006, 2018 IBM Corp. and others
+ * Copyright (c) 2006, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -18,10 +16,11 @@ package com.ibm.jvm;
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
+package com.ibm.jvm;
 
 import java.util.Objects;
 
@@ -48,7 +47,7 @@ public class Log {
 
 	/**
 	 * Set the log options.
-	 * Use the same syntax as the -Xlog command-line option, with the initial -Xlog: omitted.
+	 * Use the same syntax as the -Xsyslog command-line option, with the initial -Xsyslog: omitted.
 	 * 
 	 * @param options The command line log flags.
 	 * @return status 0 on success otherwise a RuntimeException is thrown
@@ -77,6 +76,7 @@ public class Log {
 	
     private static void checkLogSecurityPermssion() throws SecurityException {
 		/* Check the caller has LogPermission. */
+		@SuppressWarnings("removal")
 		SecurityManager manager = System.getSecurityManager();
 		if( manager != null ) {
 			manager.checkPermission(LOG_PERMISSION);

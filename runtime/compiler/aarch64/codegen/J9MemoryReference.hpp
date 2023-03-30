@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2019, 2020 IBM Corp. and others
+ * Copyright (c) 2019, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -36,6 +36,7 @@ namespace J9 { typedef J9::ARM64::MemoryReference MemoryReferenceConnector; }
 #endif
 
 #include "codegen/OMRMemoryReference.hpp"
+#include "infra/Flags.hpp"
 
 namespace J9
 {
@@ -45,15 +46,19 @@ namespace ARM64
 
 class OMR_EXTENSIBLE MemoryReference : public OMR::MemoryReferenceConnector
    {
-public:
-   TR_ALLOC(TR_Memory::MemoryReference)
+   flags8_t _j9Flags;
+
+protected:
 
    /**
     * @brief Constructor
     * @param[in] cg : CodeGenerator object
     */
    MemoryReference(TR::CodeGenerator *cg)
-      : OMR::MemoryReferenceConnector(cg) {}
+      : OMR::MemoryReferenceConnector(cg), _j9Flags(0)
+      {
+      setupCausesImplicitNullPointerException(cg);
+      }
 
    /**
     * @brief Constructor
@@ -65,7 +70,10 @@ public:
          TR::Register *br,
          TR::Register *ir,
          TR::CodeGenerator *cg)
-      : OMR::MemoryReferenceConnector(br, ir, cg) {}
+      : OMR::MemoryReferenceConnector(br, ir, cg), _j9Flags(0)
+      {
+      setupCausesImplicitNullPointerException(cg);
+      }
 
    /**
     * @brief Constructor
@@ -79,7 +87,10 @@ public:
          TR::Register *ir,
          uint8_t scale,
          TR::CodeGenerator *cg)
-      : OMR::MemoryReferenceConnector(br, ir, scale, cg) {}
+      : OMR::MemoryReferenceConnector(br, ir, scale, cg), _j9Flags(0)
+      {
+      setupCausesImplicitNullPointerException(cg);
+      }
 
    /**
     * @brief Constructor
@@ -91,7 +102,10 @@ public:
          TR::Register *br,
          int32_t disp,
          TR::CodeGenerator *cg)
-      : OMR::MemoryReferenceConnector(br, disp, cg) {}
+      : OMR::MemoryReferenceConnector(br, disp, cg), _j9Flags(0)
+      {
+      setupCausesImplicitNullPointerException(cg);
+      }
 
    /**
     * @brief Constructor
@@ -107,6 +121,39 @@ public:
     * @param[in] cg : CodeGenerator object
     */
    MemoryReference(TR::Node *node, TR::SymbolReference *symRef, TR::CodeGenerator *cg);
+
+public:
+   TR_ALLOC(TR_Memory::MemoryReference)
+
+   typedef enum
+      {
+      TR_ARM64MemoryReferenceControl_ThrowsImplicitNullPointerException  = 0x01,
+      /* To be added more if necessary */
+      } TR_ARM64MemoryReferenceExtraControl;
+
+
+   /**
+    * @brief Implicit NullPointerException can be thrown or not
+    * @return true if implicit NullPointerException can be thrown
+    */
+   bool getCausesImplicitNullPointerException()
+      {
+      return _j9Flags.testAll(TR_ARM64MemoryReferenceControl_ThrowsImplicitNullPointerException);
+      }
+
+   /**
+    * @brief Sets Implicit NullPointerException flag
+    */
+   void setCausesImplicitNullPointerException()
+      {
+      _j9Flags.set(TR_ARM64MemoryReferenceControl_ThrowsImplicitNullPointerException);
+      }
+
+   /**
+    * @brief Analyzes current node and sets Implicit NullPointerException flag if necessary
+    * @param[in] cg : CodeGenerator
+    */
+   void setupCausesImplicitNullPointerException(TR::CodeGenerator *cg);
 
    /**
     * @brief Adjustment for resolution

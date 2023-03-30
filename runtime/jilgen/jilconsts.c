@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -67,7 +67,7 @@ writeConstant(OMRPortLibrary *OMRPORTLIB, IDATA fd, char const *name, UDATA valu
 static IDATA
 createConstant(OMRPortLibrary *OMRPORTLIB, char const *name, UDATA value)
 {
-	if (values) {
+	if (0 != values) {
 		return omrstr_printf(line, sizeof(line), "J9CONST({%s},%zu)dnl\n", name, value);
 	}
 #if defined(J9VM_ARCH_POWER) || defined(J9VM_ARCH_ARM) || defined(J9VM_ARCH_AARCH64)
@@ -89,15 +89,15 @@ createConstant(OMRPortLibrary *OMRPORTLIB, char const *name, UDATA value)
 #if defined(J9VM_ENV_DATA64)
 static char const *macroString = "\n\
 %macro MoveHelper 2 ; register, helperName\n\
-		lea %1, [rel %2]\n\
+	lea %1, [rel %2]\n\
 %endmacro\n\
 \n\
 %macro CallHelper 1 ; helperName\n\
-	   	call %1\n\
+	call %1\n\
 %endmacro\n\
 \n\
 %macro CallHelperUseReg 2 ; helperName, register\n\
-	   	call %1\n\
+	call %1\n\
 %endmacro\n\
 \n\
 %macro DECLARE_EXTERN 1 ; helperName\n\
@@ -154,15 +154,15 @@ static char const *macroString = "\n\
 #elif defined(OSX) /* LINUX */
 static char const *macroString = "\n\
 %macro MoveHelper 2 ; register, helperName\n\
-		lea %1, [rel %2]\n\
+	lea %1, [rel %2]\n\
 %endmacro\n\
 \n\
 %macro CallHelper 1 ; helperName\n\
-	   	call %1\n\
+	call %1\n\
 %endmacro\n\
 \n\
 %macro CallHelperUseReg 2 ; helperName, register\n\
-	   	call %1\n\
+	call %1\n\
 %endmacro\n\
 \n\
 %macro DECLARE_EXTERN 1 ; helperName\n\
@@ -189,15 +189,15 @@ static char const *macroString = "\n\
 #if defined(J9VM_ENV_DATA64)
 static char const *macroString = "\n\
 %macro MoveHelper 2 ; register, helperName\n\
-		lea %1, [rel %2]\n\
+	lea %1, [rel %2]\n\
 %endmacro\n\
 \n\
 %macro CallHelper 1 ; helperName\n\
-	   	call %1\n\
+	call %1\n\
 %endmacro\n\
 \n\
 %macro CallHelperUseReg 2 ; helperName, register\n\
-	   	call %1\n\
+	call %1\n\
 %endmacro\n\
 \n\
 %macro DECLARE_EXTERN 1 ; helperName\n\
@@ -274,6 +274,9 @@ writeConstants(OMRPortLibrary *OMRPORTLIB, IDATA fd)
 	jint rc = JNI_OK;
 	UDATA err =
 			/* Build flags */
+#if defined(JAVA_SPEC_VERSION)
+			writeConstant(OMRPORTLIB, fd, "ASM_JAVA_SPEC_VERSION", JAVA_SPEC_VERSION) |
+#endif /* JAVA_SPEC_VERSION */
 #if defined(J9VM_INTERP_ATOMIC_FREE_JNI)
 			writeConstant(OMRPORTLIB, fd, "ASM_J9VM_INTERP_ATOMIC_FREE_JNI", 1) |
 #endif /* J9VM_INTERP_ATOMIC_FREE_JNI */
@@ -322,8 +325,13 @@ writeConstants(OMRPortLibrary *OMRPORTLIB, IDATA fd)
 #endif /* J9VM_PORT_ZOS_CEEHDLRSUPPORT */
 
 #if defined(OMR_GC_CONCURRENT_SCAVENGER)
+#if defined(J9VM_ARCH_AARCH64) || defined(J9VM_ARCH_ARM) || defined(J9VM_ARCH_POWER)
+			/* These platforms include j9cfg.h so don't redefine OMR_GC_CONCURRENT_SCAVENGER in jilconsts. */
+			((0 != values) ? writeConstant(OMRPORTLIB, fd, "OMR_GC_CONCURRENT_SCAVENGER", 1) : 0) |
+#else /* defined(J9VM_ARCH_AARCH64) || defined(J9VM_ARCH_ARM) || defined(J9VM_ARCH_POWER) */
 			writeConstant(OMRPORTLIB, fd, "OMR_GC_CONCURRENT_SCAVENGER", 1) |
-#endif /* OMR_GC_CONCURRENT_SCAVENGER */
+#endif /* defined(J9VM_ARCH_AARCH64) || defined(J9VM_ARCH_ARM) || defined(J9VM_ARCH_POWER) */
+#endif /* defined(OMR_GC_CONCURRENT_SCAVENGER) */
 
 			/* C stack frame */
 			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_sizeof", sizeof(J9CInterpreterStackFrame)) |
@@ -355,8 +363,12 @@ writeConstants(OMRPortLibrary *OMRPORTLIB, IDATA fd)
 			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_preservedFPRs", offsetof(J9CInterpreterStackFrame, preservedFPRs)) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_jitGPRs", offsetof(J9CInterpreterStackFrame, jitGPRs)) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_jitFPRs", offsetof(J9CInterpreterStackFrame, jitFPRs)) |
-			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_jitCR", offsetof(J9CInterpreterStackFrame, jitCR)) |
-			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_jitLR", offsetof(J9CInterpreterStackFrame, jitLR)) |
+#if defined(J9VM_ENV_DATA64)
+			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_jitVRs", offsetof(J9CInterpreterStackFrame, jitVRs)) |
+			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_preservedVRs", offsetof(J9CInterpreterStackFrame, preservedVRs)) |
+#endif /* J9VM_ENV_DATA64 */
+			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_jitCR", offsetof(J9CInterpreterStackFrame, jitGPRs.jitCR)) |
+			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_jitLR", offsetof(J9CInterpreterStackFrame, jitGPRs.jitLR)) |
 #if !defined(LINUX) || defined(J9VM_ENV_DATA64)
 			/* Everyone but Linux PPC 32 */
 			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_currentTOC", offsetof(J9CInterpreterStackFrame, currentTOC)) |
@@ -372,29 +384,35 @@ writeConstants(OMRPortLibrary *OMRPORTLIB, IDATA fd)
 			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_preservedFPRs", offsetof(J9CInterpreterStackFrame, preservedFPRs)) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_jitGPRs", offsetof(J9CInterpreterStackFrame, jitGPRs)) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_jitFPRs", offsetof(J9CInterpreterStackFrame, jitFPRs)) |
-#elif defined(J9VM_ARCH_X86) /* J9VM_ARCH_AARCH64 */
+#elif defined(J9VM_ARCH_RISCV) /* J9VM_ARCH_AARCH64 */
+			/* RISC-V */
+			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_preservedGPRs", offsetof(J9CInterpreterStackFrame, preservedGPRs)) |
+			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_preservedFPRs", offsetof(J9CInterpreterStackFrame, preservedFPRs)) |
+			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_jitGPRs", offsetof(J9CInterpreterStackFrame, jitGPRs)) |
+			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_jitFPRs", offsetof(J9CInterpreterStackFrame, jitFPRs)) |
+#elif defined(J9VM_ARCH_X86) /* J9VM_ARCH_RISCV */
 			/* x86 */
 			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_vmStruct", offsetof(J9CInterpreterStackFrame, vmStruct)) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_machineBP", offsetof(J9CInterpreterStackFrame, machineBP)) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_jitGPRs", offsetof(J9CInterpreterStackFrame, jitGPRs)) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_jitFPRs", offsetof(J9CInterpreterStackFrame, jitFPRs)) |
-			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_rax", offsetof(J9CInterpreterStackFrame, jitGPRs.named.rax)) |
-			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_rbx", offsetof(J9CInterpreterStackFrame, jitGPRs.named.rbx)) |
-			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_rcx", offsetof(J9CInterpreterStackFrame, jitGPRs.named.rcx)) |
-			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_rdx", offsetof(J9CInterpreterStackFrame, jitGPRs.named.rdx)) |
-			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_rdi", offsetof(J9CInterpreterStackFrame, jitGPRs.named.rdi)) |
-			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_rsi", offsetof(J9CInterpreterStackFrame, jitGPRs.named.rsi)) |
-			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_rbp", offsetof(J9CInterpreterStackFrame, jitGPRs.named.rbp)) |
-			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_rsp", offsetof(J9CInterpreterStackFrame, jitGPRs.named.rsp)) |
+			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_rax", offsetof(J9CInterpreterStackFrame, jitGPRs.jitGPRs.named.rax)) |
+			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_rbx", offsetof(J9CInterpreterStackFrame, jitGPRs.jitGPRs.named.rbx)) |
+			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_rcx", offsetof(J9CInterpreterStackFrame, jitGPRs.jitGPRs.named.rcx)) |
+			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_rdx", offsetof(J9CInterpreterStackFrame, jitGPRs.jitGPRs.named.rdx)) |
+			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_rdi", offsetof(J9CInterpreterStackFrame, jitGPRs.jitGPRs.named.rdi)) |
+			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_rsi", offsetof(J9CInterpreterStackFrame, jitGPRs.jitGPRs.named.rsi)) |
+			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_rbp", offsetof(J9CInterpreterStackFrame, jitGPRs.jitGPRs.named.rbp)) |
+			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_rsp", offsetof(J9CInterpreterStackFrame, jitGPRs.jitGPRs.named.rsp)) |
 #if defined(J9VM_ENV_DATA64)
-			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_r8", offsetof(J9CInterpreterStackFrame, jitGPRs.named.r8)) |
-			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_r9", offsetof(J9CInterpreterStackFrame, jitGPRs.named.r9)) |
-			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_r10", offsetof(J9CInterpreterStackFrame, jitGPRs.named.r10)) |
-			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_r11", offsetof(J9CInterpreterStackFrame, jitGPRs.named.r11)) |
-			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_r12", offsetof(J9CInterpreterStackFrame, jitGPRs.named.r12)) |
-			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_r13", offsetof(J9CInterpreterStackFrame, jitGPRs.named.r13)) |
-			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_r14", offsetof(J9CInterpreterStackFrame, jitGPRs.named.r14)) |
-			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_r15", offsetof(J9CInterpreterStackFrame, jitGPRs.named.r15)) |
+			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_r8", offsetof(J9CInterpreterStackFrame, jitGPRs.jitGPRs.named.r8)) |
+			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_r9", offsetof(J9CInterpreterStackFrame, jitGPRs.jitGPRs.named.r9)) |
+			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_r10", offsetof(J9CInterpreterStackFrame, jitGPRs.jitGPRs.named.r10)) |
+			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_r11", offsetof(J9CInterpreterStackFrame, jitGPRs.jitGPRs.named.r11)) |
+			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_r12", offsetof(J9CInterpreterStackFrame, jitGPRs.jitGPRs.named.r12)) |
+			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_r13", offsetof(J9CInterpreterStackFrame, jitGPRs.jitGPRs.named.r13)) |
+			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_r14", offsetof(J9CInterpreterStackFrame, jitGPRs.jitGPRs.named.r14)) |
+			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_r15", offsetof(J9CInterpreterStackFrame, jitGPRs.jitGPRs.named.r15)) |
 #if defined(WIN32)
 			/* Windows x86-64 */
 			writeConstant(OMRPORTLIB, fd, "J9TR_cframe_preservedFPRs", offsetof(J9CInterpreterStackFrame, preservedFPRs)) |
@@ -469,6 +487,11 @@ writeConstants(OMRPortLibrary *OMRPORTLIB, IDATA fd)
 			writeConstant(OMRPORTLIB, fd, "J9TR_VMThread_gsParameters_returnAddr", offsetof(J9VMThread, gsParameters.returnAddr)) |
 #endif /* OMR_GC_CONCURRENT_SCAVENGER */
 
+#if JAVA_SPEC_VERSION >= 19
+			writeConstant(OMRPORTLIB, fd, "J9TR_VMThread_ownedMonitorCount", offsetof(J9VMThread, ownedMonitorCount)) |
+			writeConstant(OMRPORTLIB, fd, "J9TR_VMThread_callOutCount", offsetof(J9VMThread, callOutCount)) |
+#endif
+
 			/* J9StackWalkState */
 			writeConstant(OMRPORTLIB, fd, "J9TR_J9StackWalkState_restartPoint", offsetof(J9StackWalkState, restartPoint)) |
 
@@ -523,7 +546,7 @@ writeConstants(OMRPortLibrary *OMRPORTLIB, IDATA fd)
 			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_loadPreservedAndBranch", offsetof(J9JITConfig, loadPreservedAndBranch)) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_pseudoTOC", offsetof(J9JITConfig, pseudoTOC));
 
-	if (values) {
+	if (0 != values) {
 		err |=
 			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_fast_jitNewObject", offsetof(J9JITConfig, old_fast_jitNewObject)) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_slow_jitNewObject", offsetof(J9JITConfig, old_slow_jitNewObject)) |
@@ -556,6 +579,9 @@ writeConstants(OMRPortLibrary *OMRPORTLIB, IDATA fd)
 			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_fast_jitInstanceOf", offsetof(J9JITConfig, old_fast_jitInstanceOf)) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_fast_jitLookupInterfaceMethod", offsetof(J9JITConfig, old_fast_jitLookupInterfaceMethod)) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_slow_jitLookupInterfaceMethod", offsetof(J9JITConfig, old_slow_jitLookupInterfaceMethod)) |
+			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_fast_jitLookupDynamicInterfaceMethod", offsetof(J9JITConfig, old_fast_jitLookupDynamicInterfaceMethod)) |
+			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_fast_jitLookupDynamicPublicInterfaceMethod", offsetof(J9JITConfig, old_fast_jitLookupDynamicPublicInterfaceMethod)) |
+			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_slow_jitLookupDynamicPublicInterfaceMethod", offsetof(J9JITConfig, old_slow_jitLookupDynamicPublicInterfaceMethod)) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_fast_jitMethodIsNative", offsetof(J9JITConfig, old_fast_jitMethodIsNative)) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_fast_jitMethodIsSync", offsetof(J9JITConfig, old_fast_jitMethodIsSync)) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_fast_jitMethodMonitorEntry", offsetof(J9JITConfig, old_fast_jitMethodMonitorEntry)) |
@@ -590,6 +616,7 @@ writeConstants(OMRPortLibrary *OMRPORTLIB, IDATA fd)
 			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_slow_jitResolveInvokeDynamic", offsetof(J9JITConfig, old_slow_jitResolveInvokeDynamic)) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_slow_jitResolveConstantDynamic", offsetof(J9JITConfig, old_slow_jitResolveConstantDynamic)) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_slow_jitResolveHandleMethod", offsetof(J9JITConfig, old_slow_jitResolveHandleMethod)) |
+			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_slow_jitResolveFlattenableField", offsetof(J9JITConfig, old_slow_jitResolveFlattenableField)) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_slow_jitRetranslateCaller", offsetof(J9JITConfig, old_slow_jitRetranslateCaller)) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_slow_jitRetranslateCallerWithPreparation", offsetof(J9JITConfig, old_slow_jitRetranslateCallerWithPreparation)) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_slow_jitRetranslateMethod", offsetof(J9JITConfig, old_slow_jitRetranslateMethod)) |
@@ -637,13 +664,15 @@ writeConstants(OMRPortLibrary *OMRPORTLIB, IDATA fd)
 			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_slow_jitReportStaticFieldWrite", offsetof(J9JITConfig, old_slow_jitReportStaticFieldWrite)) |
 
 			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_fast_jitGetFlattenableField", offsetof(J9JITConfig, old_fast_jitGetFlattenableField)) |
+			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_fast_jitCloneValueType", offsetof(J9JITConfig, old_fast_jitCloneValueType)) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_fast_jitWithFlattenableField", offsetof(J9JITConfig, old_fast_jitWithFlattenableField)) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_fast_jitPutFlattenableField", offsetof(J9JITConfig, old_fast_jitPutFlattenableField)) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_fast_jitGetFlattenableStaticField", offsetof(J9JITConfig, old_fast_jitGetFlattenableStaticField)) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_fast_jitPutFlattenableStaticField", offsetof(J9JITConfig, old_fast_jitPutFlattenableStaticField)) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_fast_jitLoadFlattenableArrayElement", offsetof(J9JITConfig, old_fast_jitLoadFlattenableArrayElement)) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_fast_jitStoreFlattenableArrayElement", offsetof(J9JITConfig, old_fast_jitStoreFlattenableArrayElement)) |
-			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_fast_jitAcmpHelper", offsetof(J9JITConfig, old_fast_jitAcmpHelper)) |
+			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_fast_jitAcmpeqHelper", offsetof(J9JITConfig, old_fast_jitAcmpeqHelper)) |
+			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_old_fast_jitAcmpneHelper", offsetof(J9JITConfig, old_fast_jitAcmpneHelper)) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_fast_jitNewValue", offsetof(J9JITConfig, fast_jitNewValue)) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_fast_jitNewValueNoZeroInit", offsetof(J9JITConfig, fast_jitNewValueNoZeroInit)) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_JitConfig_fast_jitNewObject", offsetof(J9JITConfig, fast_jitNewObject)) |
@@ -712,6 +741,9 @@ writeConstants(OMRPortLibrary *OMRPORTLIB, IDATA fd)
 			writeConstant(OMRPORTLIB, fd, "J9TR_bcloop_j2i_virtual", J9_BCLOOP_J2I_VIRTUAL) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_bcloop_jump_bytecode_prototype", J9_BCLOOP_JUMP_BYTECODE_PROTOTYPE) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_bcloop_load_preserved_and_branch", J9_BCLOOP_LOAD_PRESERVED_AND_BRANCH) |
+#if JAVA_SPEC_VERSION >= 16
+			writeConstant(OMRPORTLIB, fd, "J9TR_bcloop_n2i_transition", J9_BCLOOP_N2I_TRANSITION) |
+#endif /* JAVA_SPEC_VERSION >= 16 */
 			writeConstant(OMRPORTLIB, fd, "J9TR_bcloop_return_from_jit", J9_BCLOOP_RETURN_FROM_JIT) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_bcloop_return_from_jit_ctor", J9_BCLOOP_RETURN_FROM_JIT_CTOR) |
 			writeConstant(OMRPORTLIB, fd, "J9TR_bcloop_run_exception_handler", J9_BCLOOP_RUN_EXCEPTION_HANDLER) |
@@ -817,21 +849,21 @@ done:
 #if defined(WIN32)
 int
 wmain(int argc, wchar_t ** argv, wchar_t ** envp)
-#else
+#else /* defined(WIN32) */
 int
 main(int argc, char ** argv, char ** envp)
-#endif
+#endif /* defined(WIN32) */
 {
 	OMRPortLibrary j9portLibrary;
 	int rc = 257;
-	
+
 	if (0 == omrthread_init_library()) {
 		omrthread_t attachedThread = NULL;
 		if (0 == omrthread_attach_ex(&attachedThread, J9THREAD_ATTR_DEFAULT)) {
 			/* Use portlibrary version which we compiled against, and have allocated space
-			 * for on the stack.  This version may be different from the one in the linked DLL.
+			 * for on the stack. This version may be different from the one in the linked DLL.
 			 */
-			if (0 == omrport_init_library(&j9portLibrary, sizeof(OMRPortLibrary))) {
+			if (0 == omrport_init_library(&j9portLibrary, sizeof(j9portLibrary))) {
 				if (JNI_OK == writeJitConstants(&j9portLibrary)) {
 					rc = 0;
 				}

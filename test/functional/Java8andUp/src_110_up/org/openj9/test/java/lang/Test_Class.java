@@ -1,7 +1,7 @@
 package org.openj9.test.java.lang;
 
 /*******************************************************************************
- * Copyright (c) 1998, 2019 IBM Corp. and others
+ * Copyright (c) 1998, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -17,7 +17,7 @@ package org.openj9.test.java.lang;
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -125,7 +125,7 @@ public static class SubClassTest extends ClassTest{
  */
 @Test
 public void test_forName() {
-	// Test for method java.lang.Class java.lang.Class.forName(java.lang.String)
+	// Test for method java.lang.Class.forName(java.lang.String)
 	try {
 		AssertJUnit.assertTrue(
 			"Class for name failed for java.lang.Object",
@@ -312,49 +312,6 @@ public void test_getMethods_subtest1() {
 		AssertJUnit.assertTrue("Expected method " + expected_CF[i] + " not found.", match);
 	}
 }
-@Test
-public void test_getMethods_subtest2() {
-
-	java.security.PrivilegedAction action = new java.security.PrivilegedAction() {
-		public Object run() {
-			try {
-				File resources = Support_Resources.createTempFolder();
-				String[]	expected_E = new String[] {
-						"org.openj9.resources.classinheritance.E.method_N(java.lang.String)",
-						"org.openj9.resources.classinheritance.E.method_M(java.lang.String)",
-						"org.openj9.resources.classinheritance.A.method_K(java.lang.String)",
-						"org.openj9.resources.classinheritance.E.method_L(java.lang.String)",
-						"org.openj9.resources.classinheritance.E.method_O(java.lang.String)",
-						"org.openj9.resources.classinheritance.B.method_K(java.lang.String)"};
-
-				Support_Resources.copyFile(resources, null, "openj9tr_general.jar");
-				File file = new File(resources.toString() + "/openj9tr_general.jar");
-				java.net.URL url = new java.net.URL("file:" + file.getPath());
-				ClassLoader loader = new java.net.URLClassLoader(new java.net.URL[]{url}, null);
-
-				Class cls_E = Class.forName("org.openj9.resources.classinheritance.E", false, loader);
-				Method[] methodNames_E = cls_E.getMethods();
-				AssertJUnit.assertEquals("Returned incorrect number of methods for cls_E", expected_E.length + Object.class.getMethods().length, methodNames_E.length);
-				for (int i = 0; i < expected_E.length; i++) {
-					boolean match = false;
-					for (int j = 0; j < methodNames_E.length; j++) {
-						if (methodNames_E[j].toString().indexOf(expected_E[i]) != -1) {
-							match = true;
-						}
-					}
-					AssertJUnit.assertTrue("Expected method " + expected_E[i] + " not found.", match);
-				}
-			} catch (MalformedURLException e) {
-				logger.error("Unexpected exception: " + e);
-			} catch (ClassNotFoundException e) {
-				logger.error("Unexpected exception: " + e);
-			}
-
-			return null;
-		}
-	};
-	java.security.AccessController.doPrivileged(action);
-}
 
 static class ParentClass {
 	public static void methodPublicStatic() {}
@@ -418,6 +375,38 @@ public void test_getMethods_subtest5() {
 		final Class<?> declaringClass = method.getDeclaringClass();
 		if (declaringClass.equals(SuperInterface.class) || declaringClass.equals(SubInterface.class)) {
 			Assert.fail("Should not return Method " + method.getName() + " declared in class " + declaringClass.getName());
+		}
+	}
+}
+
+abstract class ClzParent {}
+class ClzChild extends ClzParent {}
+class ClzImpl implements InterFaceLayerOne {
+	@Override
+	public ClzChild getType() {
+		return null;
+	}
+}
+interface InterFaceLayerOne extends InterfaceLayerTwoA<ClzChild>, InterfaceLayerTwoB {}
+interface InterfaceLayerTwoA<S> extends InterfaceLayerThreeA<ClzChild>, InterfaceLayerThreeB {}
+interface InterfaceLayerTwoB {
+	ClzParent getType();
+}
+interface InterfaceLayerThreeA<S> {
+	S getType();
+}
+interface InterfaceLayerThreeB {
+	ClzParent getType();
+}
+@Test
+public void test_getMethods_subtest6() throws Exception {
+	ClzImpl clzImpl = new ClzImpl();
+	for (Method method : clzImpl.getClass().getMethods()) {
+		for (Class<?> anInterface : method.getDeclaringClass().getInterfaces()) {
+			if (anInterface.getName().equals("org.openj9.test.java.lang.Test_Class$InterFaceLayerOne")) {
+				Method intfMethod = anInterface.getMethod(method.getName(), method.getParameterTypes());
+				Assert.assertEquals(intfMethod.toString(), "public abstract org.openj9.test.java.lang.Test_Class$ClzParent org.openj9.test.java.lang.Test_Class$InterfaceLayerThreeB.getType()");	
+			}
 		}
 	}
 }
@@ -610,166 +599,11 @@ public void test_getClasses() {
 }
 
 /**
- * @tests java.lang.Class#getClasses()
- */
-@Test
-public void test_getClasses2() {
-	final java.security.Permission privCheckPermission = new java.security.BasicPermission("Privilege check") {
-	};
-	class MyCombiner implements java.security.DomainCombiner {
-		boolean combine;
-		public java.security.ProtectionDomain[] combine(java.security.ProtectionDomain[] executionDomains, java.security.ProtectionDomain[] parentDomains) {
-			combine = true;
-			return new java.security.ProtectionDomain[0];
-		}
-		public boolean isPriviledged() {
-			combine = false;
-			try {
-				java.security.AccessController.checkPermission(privCheckPermission);
-			} catch (SecurityException e) {
-			}
-			return !combine;
-		}
-	};
-	final MyCombiner combiner = new MyCombiner();
-	class SecurityManagerCheck extends SecurityManager {
-		String reason;
-		Class checkClass;
-		int checkType;
-		int checkPermission = 0;
-		int checkMemberAccess = 0;
-		int checkPackageAccess = 0;
-
-		public void setExpected(String reason, Class cls, int type) {
-			this.reason = reason;
-			checkClass = cls;
-			checkType = type;
-			checkPermission = 0;
-			checkMemberAccess = 0;
-			checkPackageAccess = 0;
-		}
-		public void checkPermission(java.security.Permission perm) {
-			if (combiner.isPriviledged())
-				return;
-			checkPermission++;
-		}
-		public void checkPackageAccess(String packageName) {
-			if (packageName.startsWith("java.") || packageName.startsWith("org.openj9.test.java.lang")) {
-				return;
-			}
-			if (combiner.isPriviledged())
-				return;
-			checkPackageAccess++;
-			String name = checkClass.getName();
-			int index = name.lastIndexOf('.');
-			String checkPackage = name.substring(0, index);
-			AssertJUnit.assertTrue(reason + " unexpected package: " + packageName, packageName.equals(checkPackage));
-		}
-		public void assertProperCalls() {
-			int declared = checkType == Member.DECLARED ? 1 : 0;
-			AssertJUnit.assertTrue(reason + " unexpected checkPermission count: " + checkPermission, checkPermission == declared);
-			AssertJUnit.assertTrue(reason + " unexpected checkPackageAccess count: " + checkPackageAccess, checkPackageAccess == 1);
-		}
-	}
-
-	final SecurityManagerCheck sm = new SecurityManagerCheck();
-	System.setSecurityManager(sm);
-
-	java.security.AccessControlContext acc = new java.security.AccessControlContext(new java.security.ProtectionDomain[0]);
-	java.security.AccessControlContext acc2 = new java.security.AccessControlContext(acc, combiner);
-
-	java.security.PrivilegedAction action = new java.security.PrivilegedAction() {
-		public Object run() {
-			File resources = Support_Resources.createTempFolder();
-			try {
-				Support_Resources.copyFile(resources, null, "openj9tr_general.jar");
-				File file = new File(resources.toString() + "/openj9tr_general.jar");
-				java.net.URL url = new java.net.URL("file:" + file.getPath());
-				ClassLoader loader = new java.net.URLClassLoader(new java.net.URL[]{url}, null);
-				Class cls = Class.forName("org.openj9.resources.security.SecurityTestSub", false, loader);
-				// must preload junit.framework.Assert before installing SecurityManager
-				// otherwise loading it inside checkPackageAccess() is recursive
-				AssertJUnit.assertTrue("preload assertions", true);
-				try {
-					sm.setExpected("getClasses", cls, java.lang.reflect.Member.PUBLIC);
-					cls.getClasses();
-					sm.assertProperCalls();
-
-					sm.setExpected("getDeclaredClasses", cls, java.lang.reflect.Member.DECLARED);
-					cls.getDeclaredClasses();
-					sm.assertProperCalls();
-
-					sm.setExpected("getConstructor", cls, java.lang.reflect.Member.PUBLIC);
-					cls.getConstructor(new Class[0]);
-					sm.assertProperCalls();
-
-					sm.setExpected("getConstructors", cls, java.lang.reflect.Member.PUBLIC);
-					cls.getConstructors();
-					sm.assertProperCalls();
-
-					sm.setExpected("getDeclaredConstructor", cls, java.lang.reflect.Member.DECLARED);
-					cls.getDeclaredConstructor(new Class[0]);
-					sm.assertProperCalls();
-
-					sm.setExpected("getDeclaredConstructors", cls, java.lang.reflect.Member.DECLARED);
-					cls.getDeclaredConstructors();
-					sm.assertProperCalls();
-
-					sm.setExpected("getField", cls, java.lang.reflect.Member.PUBLIC);
-					cls.getField("publicField");
-					sm.assertProperCalls();
-
-					sm.setExpected("getFields", cls, java.lang.reflect.Member.PUBLIC);
-					cls.getFields();
-					sm.assertProperCalls();
-
-					sm.setExpected("getDeclaredField", cls, java.lang.reflect.Member.DECLARED);
-					cls.getDeclaredField("publicField");
-					sm.assertProperCalls();
-
-					sm.setExpected("getDeclaredFields", cls, java.lang.reflect.Member.DECLARED);
-					cls.getDeclaredFields();
-					sm.assertProperCalls();
-
-					sm.setExpected("getDeclaredMethod", cls, java.lang.reflect.Member.DECLARED);
-					cls.getDeclaredMethod("publicMethod", new Class[0]);
-					sm.assertProperCalls();
-
-					sm.setExpected("getDeclaredMethods", cls, java.lang.reflect.Member.DECLARED);
-					cls.getDeclaredMethods();
-					sm.assertProperCalls();
-
-					sm.setExpected("getMethod", cls, java.lang.reflect.Member.PUBLIC);
-					cls.getMethod("publicMethod", new Class[0]);
-					sm.assertProperCalls();
-
-					sm.setExpected("getMethods", cls, java.lang.reflect.Member.PUBLIC);
-					cls.getMethods();
-					sm.assertProperCalls();
-
-					sm.setExpected("newInstance", cls, java.lang.reflect.Member.PUBLIC);
-					cls.newInstance();
-					sm.assertProperCalls();
-				} finally {
-					System.setSecurityManager(null);
-				}
-			} catch (Exception e) {
-				if (e instanceof RuntimeException)
-					throw (RuntimeException)e;
-				Assert.fail("unexpected exception: " + e);
-			}
-			return null;
-		}
-	};
-	java.security.AccessController.doPrivileged(action, acc2);
-}
-
-/**
  * @tests java.lang.Class#getComponentType()
  */
 @Test
 public void test_getComponentType() {
-	// Test for method java.lang.Class java.lang.Class.getComponentType()
+	// Test for method java.lang.Class.getComponentType()
 	AssertJUnit.assertTrue( "int array does not have int component type" ,
 		int[].class.getComponentType() == int.class);
 	AssertJUnit.assertTrue( "Object array does not have Object component type" ,
@@ -818,7 +652,7 @@ public void test_getConstructors() {
  */
 @Test
 public void test_getDeclaredClasses() {
-	int len = 65;
+	int len = 73;
 	// Test for method java.lang.Class [] java.lang.Class.getDeclaredClasses()
 	Class[] declaredClasses = Test_Class.class.getDeclaredClasses();
 	if (declaredClasses.length != len) {
@@ -962,7 +796,7 @@ public void test_getDeclaredMethods() {
  */
 @Test
 public void test_getDeclaringClass() {
-	// Test for method java.lang.Class java.lang.Class.getDeclaringClass()
+	// Test for method java.lang.Class.getDeclaringClass()
 	AssertJUnit.assertTrue(ClassTest.class.getDeclaringClass().equals(Test_Class.class));
 }
 
@@ -1164,24 +998,34 @@ public void test_getModifiers_classTypes() {
 		AnnotationClazz.class,
 		EnumClazz.class,
 	};
+	int IDENTITY = 0;
+	try {
+		Field f = Modifier.class.getDeclaredField("IDENTITY");
+		IDENTITY = f.getInt(null);
+	} catch (NoSuchFieldException e) {
+		/* Let IDENTITY be 0 in non-Valhalla builds. */
+	} catch(Exception e) {
+		Assert.fail("Unexpected exception " + e.getClass().getName() + " thrown when getting the value of modifier");
+	}
+
 	int[] modifiers = new int[] {
-		0x0000, //
-		0x0004, // protected
-		0x0002, // private
-		0x0000, //
-		0x0001, // public
-		0x0010, // final
-		0x0008, // static
-		0x0018, // final static
-		0x0009, // public static
-		0x0011, // public final
-		0x0019, // public final static
-		0x0000, //
-		0x0410, // static
-		0x0400, // abstract
-		0x1001, // public synthetic
-		0x2608, // static abstract interface annotation
-		0x4018, // static final enum
+		0x0000 | IDENTITY, // (Identity)
+		0x0004 | IDENTITY, // protected (Identity)
+		0x0002 | IDENTITY, // private (Identity)
+		0x0000 | IDENTITY, // (Identity)
+		0x0001 | IDENTITY, // public (Identity)
+		0x0010 | IDENTITY, // final (Identity)
+		0x0008 | IDENTITY, // static (Identity)
+		0x0018 | IDENTITY, // final static (Identity)
+		0x0009 | IDENTITY, // public static (Identity)
+		0x0011 | IDENTITY, // public final (Identity)
+		0x0019 | IDENTITY, // public final static (Identity)
+		0x0000 | IDENTITY, // (Identity)
+		0x0410,            // static
+		0x0400 | IDENTITY, // abstract (Identity)
+		0x1001 | IDENTITY, // public synthetic (Identity)
+		0x2608,            // static abstract interface annotation
+		0x4018 | IDENTITY, // static final enum (Identity)
 	};
 
 	StringBuilder errors = new StringBuilder();
@@ -1238,98 +1082,11 @@ public void test_getName() {
 }
 
 /**
- * @tests java.lang.Class#getResource(java.lang.String)
- */
-@Test
-public void test_getResource() {
-	// Test for method java.net.URL java.lang.Class.getResource(java.lang.String)
-	System.setSecurityManager(new SecurityManager());
-	try {
-		java.net.URL res = Object.class.getResource("Object.class");
-		AssertJUnit.assertTrue("Object.class should not be found", res == null);
-	} finally {
-		System.setSecurityManager(null);
-	}
-	
-	String name = "/org/openj9/resources/openj9tr_Foo.c";
-	
-	// find resource from object
-	AssertJUnit.assertTrue("directory of this class can be found",
-			Test_Class.class.getResource(name) != null);
-	
-	// find resource from array of objects
-	AssertJUnit.assertTrue("directory of array of this class can be found",
-			Test_Class[].class.getResource(name) != null);
-}
-
-/**
- * @tests java.lang.Class#getResourceAsStream(java.lang.String)
- */
-@Test
-public void test_getResourceAsStream() {
-	// Test for method java.io.InputStream java.lang.Class.getResourceAsStream(java.lang.String)
-	String name = Support_Resources.RESOURCE_PACKAGE + "openj9tr_compressD.txt";
-	Class clazz = null;
-	try {
-		clazz = Class.forName("org.openj9.test.java.lang.Test_Class");
-	} catch (ClassNotFoundException e) {
-		AssertJUnit.assertTrue("Should be able to find the class org.openj9.test.java.lang.Test_Class", false);
-	}
-	AssertJUnit.assertTrue("the file " + name + " can not be found in this directory",
-		 clazz.getResourceAsStream(name) != null);
-
-	System.setSecurityManager(new SecurityManager());
-	try {
-		InputStream res = Object.class.getResourceAsStream("Object.class");
-		AssertJUnit.assertTrue("Object.class should not be found", res == null);
-	} finally {
-		System.setSecurityManager(null);
-	}
-
-	name = "org/openj9/resources/openj9tr_Foo.c";
-	AssertJUnit.assertTrue("the file " + name + " should not be found in this directory",
-		clazz.getResourceAsStream(name) == null);
-	AssertJUnit.assertTrue("the file " + name + " can be found in the root directory",
-		clazz.getResourceAsStream("/" + name) != null);
-	// find resource from array of objects
-	AssertJUnit.assertTrue("the file " + name + " can be found in the root directory where the class is an array",
-			Test_Class[].class.getResourceAsStream("/" + name) != null);
-
-	try {
-		clazz = Class.forName("java.lang.Object");
-	} catch (ClassNotFoundException e) {
-		AssertJUnit.assertTrue("Should be able to find the class java.lang.Object", false);
-	}
-	InputStream str = clazz.getResourceAsStream("Class.class");
-	AssertJUnit.assertTrue(
-		"java.lang.Object couldn't find its class with getResource...",
-		str != null);
-	try {
-		AssertJUnit.assertTrue("Cannot read single byte", str.read() != -1);
-		AssertJUnit.assertTrue("Cannot read multiple bytes", str.read(new byte[5]) == 5);
-		str.close();
-	} catch (IOException e) {
-		AssertJUnit.assertTrue("Exception while closing resource stream 1.", false);
-	}
-
-	InputStream str2 = getClass().getResourceAsStream(Support_Resources.RESOURCE_PACKAGE + "openj9tr_compressD.txt");
-	AssertJUnit.assertTrue("Can't find resource", str2 != null);
-	try {
-		AssertJUnit.assertTrue("Cannot read single byte", str2.read() != -1);
-		AssertJUnit.assertTrue("Cannot read multiple bytes", str2.read(new byte[5]) == 5);
-		str2.close();
-	} catch (IOException e) {
-		AssertJUnit.assertTrue("Exception while closing resource stream 2.", false);
-	}
-
-}
-
-/**
  * @tests java.lang.Class#getSuperclass()
  */
 @Test
 public void test_getSuperclass() {
-	// Test for method java.lang.Class java.lang.Class.getSuperclass()
+	// Test for method java.lang.Class.getSuperclass()
 
 	AssertJUnit.assertTrue("Object has a superclass???",
 		Object.class.getSuperclass() == null);
@@ -1585,7 +1342,7 @@ public void test_toGenericString() {
 	AssertJUnit.assertEquals("static class org.openj9.test.java.lang.Test_Class$StaticMember$Class", classes[1].toGenericString());
 	AssertJUnit.assertEquals("class org.openj9.test.java.lang.Test_Class$Member$Class", classes[2].toGenericString());
 	AssertJUnit.assertEquals("class org.openj9.test.java.lang.Test_Class$1Local$Class", classes[3].toGenericString());
-	AssertJUnit.assertEquals("class org.openj9.test.java.lang.Test_Class$6", classes[4].toGenericString());
+	AssertJUnit.assertEquals("class org.openj9.test.java.lang.Test_Class$3", classes[4].toGenericString());
 	AssertJUnit.assertEquals("int", classes[5].toGenericString());
 	AssertJUnit.assertEquals("class org.openj9.test.java.lang.Test_Class$1Local$Class$Member6$E", classes[6].toGenericString());
 	AssertJUnit.assertEquals("class org.openj9.test.java.lang.Test_Class$StaticMember$Class$Member2$A", classes[7].toGenericString());
@@ -1626,7 +1383,7 @@ public void test_getTypeName() {
 	AssertJUnit.assertEquals("org.openj9.test.java.lang.Test_Class$StaticMember$Class", classes[1].getTypeName());
 	AssertJUnit.assertEquals("org.openj9.test.java.lang.Test_Class$Member$Class", classes[2].getTypeName());
 	AssertJUnit.assertEquals("org.openj9.test.java.lang.Test_Class$1Local$Class", classes[3].getTypeName());
-	AssertJUnit.assertEquals("org.openj9.test.java.lang.Test_Class$6", classes[4].getTypeName());
+	AssertJUnit.assertEquals("org.openj9.test.java.lang.Test_Class$3", classes[4].getTypeName());
 	AssertJUnit.assertEquals("int", classes[5].getTypeName());
 	AssertJUnit.assertEquals("org.openj9.test.java.lang.Test_Class$1Local$Class$Member6$E", classes[6].getTypeName());
 	AssertJUnit.assertEquals("org.openj9.test.java.lang.Test_Class$StaticMember$Class$Member2$A", classes[7].getTypeName());
@@ -2294,11 +2051,63 @@ private static String[] AnnoExpectedValues14 = {
 
 	};
 
+private static String[] AnnoExpectedValues19 = {
+    /* 00 */ "null",
+    /* 01 */ "@org.openj9.test.java.lang.Test_Class.ContainerContainerAnn({@org.openj9.test.java.lang.Test_Class.ContainerAnn({@org.openj9.test.java.lang.Test_Class.RepeatableAnn(\"Nested-1\"), @org.openj9.test.java.lang.Test_Class.RepeatableAnn(\"Nested-2\")}), @org.openj9.test.java.lang.Test_Class.ContainerAnn({@org.openj9.test.java.lang.Test_Class.RepeatableAnn(\"Nested-3\"), @org.openj9.test.java.lang.Test_Class.RepeatableAnn(\"Nested-4\")})})",
+    /* 02 */ "@org.openj9.test.java.lang.Test_Class.ContainerAnn({@org.openj9.test.java.lang.Test_Class.RepeatableAnn(\"GrandParent-1\"), @org.openj9.test.java.lang.Test_Class.RepeatableAnn(\"GrandParent-3\"), @org.openj9.test.java.lang.Test_Class.RepeatableAnn(\"GrandParent-5\")})",
+    /* 03 */ "@org.openj9.test.java.lang.Test_Class.RetroAnn4(\"GrandParent-2\")",
+    /* 04 */ "@org.openj9.test.java.lang.Test_Class.RetroAnn5(\"GrandParent-4\")",
+    /* 05 */ "@org.openj9.test.java.lang.Test_Class.RetroAnn6(\"GrandParent-6\")",
+    /* 06 */ "@org.openj9.test.java.lang.Test_Class.ContainerAnn({@org.openj9.test.java.lang.Test_Class.RepeatableAnn(\"Parent-1\"), @org.openj9.test.java.lang.Test_Class.RepeatableAnn(\"Parent-2\"), @org.openj9.test.java.lang.Test_Class.RepeatableAnn(\"Parent-3\"), @org.openj9.test.java.lang.Test_Class.RepeatableAnn(\"Parent-4\"), @org.openj9.test.java.lang.Test_Class.RepeatableAnn(\"Parent-5\")})",
+    /* 07 */ "@org.openj9.test.java.lang.Test_Class.RetroAnn2(\"Parent-7\")",
+    /* 08 */ "@org.openj9.test.java.lang.Test_Class.RetroAnn(\"Parent-6\")",
+    /* 09 */ "@org.openj9.test.java.lang.Test_Class.ContainerAnn({@org.openj9.test.java.lang.Test_Class.RepeatableAnn(\"Child-1\"), @org.openj9.test.java.lang.Test_Class.RepeatableAnn(\"Child-2\"), @org.openj9.test.java.lang.Test_Class.RepeatableAnn(\"Child-3\"), @org.openj9.test.java.lang.Test_Class.RepeatableAnn(\"Child-4\")})",
+    /* 10 */ "@org.openj9.test.java.lang.Test_Class.RetroAnn3(\"Child-5\")",
+    /* 11 */ "@org.openj9.test.java.lang.Test_Class.RetroAnn4(\"GrandParentNR-1\")",
+    /* 12 */ "@org.openj9.test.java.lang.Test_Class.RetroAnn5(\"GrandParentNR-2\")",
+    /* 13 */ "@org.openj9.test.java.lang.Test_Class.RepeatableAnn(\"GrandParentNR-3\")",
+    /* 14 */ "@org.openj9.test.java.lang.Test_Class.RetroAnn6(\"GrandParentNR-4\")",
+    /* 15 */ "@org.openj9.test.java.lang.Test_Class.RetroAnn3(\"GrandParentNR-5\")",
+    /* 16 */ "@org.openj9.test.java.lang.Test_Class.RepeatableAnn(\"ParentNR-1\")",
+    /* 17 */ "@org.openj9.test.java.lang.Test_Class.RetroAnn2(\"ParentNR-2\")",
+    /* 18 */ "@org.openj9.test.java.lang.Test_Class.RetroAnn(\"ParentNR-3\")",
+    /* 19 */ "@org.openj9.test.java.lang.Test_Class.RetroAnn3(\"ChildNR-1\")",
+    /* 20 */ "@org.openj9.test.java.lang.Test_Class.RepeatableAnn(\"ChildNR-2\")",
+    /* 21 */ "@org.openj9.test.java.lang.Test_Class.RetroAnn(\"GrandParentR-1\")",
+    /* 22 */ "@org.openj9.test.java.lang.Test_Class.ContainerAnn({@org.openj9.test.java.lang.Test_Class.RepeatableAnn(\"GrandParentR-2\"), @org.openj9.test.java.lang.Test_Class.RepeatableAnn(\"GrandParentR-3\")})",
+    /* 23 */ "@org.openj9.test.java.lang.Test_Class.RetroAnn2(\"GrandParentR-4\")",
+    /* 24 */ "@org.openj9.test.java.lang.Test_Class.RepeatableAnn(\"ParentR-1\")",
+    /* 25 */ "@org.openj9.test.java.lang.Test_Class.RetroAnn3(\"ParentR-2\")",
+    /* 26 */ "@org.openj9.test.java.lang.Test_Class.RetroAnn4(\"ParentR-3\")",
+    /* 27 */ "@org.openj9.test.java.lang.Test_Class.RetroAnn(\"ChildR-1\")",
+    /* 28 */ "@org.openj9.test.java.lang.Test_Class.RetroAnn5(\"ChildR-2\")",
+    /* 29 */ "@org.openj9.test.java.lang.Test_Class.RepeatableAnn(\"ChildR-3\")",
+    /* 30 */ "@org.openj9.test.java.lang.Test_Class.ContainerAnn({@org.openj9.test.java.lang.Test_Class.RepeatableAnn(\"Nested-1\"), @org.openj9.test.java.lang.Test_Class.RepeatableAnn(\"Nested-2\")})",
+    /* 31 */ "@org.openj9.test.java.lang.Test_Class.ContainerAnn({@org.openj9.test.java.lang.Test_Class.RepeatableAnn(\"Nested-3\"), @org.openj9.test.java.lang.Test_Class.RepeatableAnn(\"Nested-4\")})",
+    /* 32 */ "@org.openj9.test.java.lang.Test_Class.RepeatableAnn(\"GrandParent-1\")",
+    /* 33 */ "@org.openj9.test.java.lang.Test_Class.RepeatableAnn(\"GrandParent-3\")",
+    /* 34 */ "@org.openj9.test.java.lang.Test_Class.RepeatableAnn(\"GrandParent-5\")",
+    /* 35 */ "@org.openj9.test.java.lang.Test_Class.RepeatableAnn(\"Parent-1\")",
+    /* 36 */ "@org.openj9.test.java.lang.Test_Class.RepeatableAnn(\"Parent-2\")",
+    /* 37 */ "@org.openj9.test.java.lang.Test_Class.RepeatableAnn(\"Parent-3\")",
+    /* 38 */ "@org.openj9.test.java.lang.Test_Class.RepeatableAnn(\"Parent-4\")",
+    /* 39 */ "@org.openj9.test.java.lang.Test_Class.RepeatableAnn(\"Parent-5\")",
+    /* 40 */ "@org.openj9.test.java.lang.Test_Class.RepeatableAnn(\"Child-1\")",
+    /* 41 */ "@org.openj9.test.java.lang.Test_Class.RepeatableAnn(\"Child-2\")",
+    /* 42 */ "@org.openj9.test.java.lang.Test_Class.RepeatableAnn(\"Child-3\")",
+    /* 43 */ "@org.openj9.test.java.lang.Test_Class.RepeatableAnn(\"Child-4\")",
+    /* 44 */ "@org.openj9.test.java.lang.Test_Class.RepeatableAnn(\"GrandParentR-2\")",
+    /* 45 */ "@org.openj9.test.java.lang.Test_Class.RepeatableAnn(\"GrandParentR-3\")",
+
+};
+
 private void innerTest_getAnnotations(Class clazz, boolean isDeclared, int ... expected) {
 	Annotation[] ann = (isDeclared) ? clazz.getDeclaredAnnotations() : clazz.getAnnotations();
 	AssertJUnit.assertTrue(clazz.getSimpleName() + ", Incorrect length of annotation list. Expected: " + expected.length + " Actual: " + ann.length, ann.length == expected.length);
 	for (int i = 0; i < expected.length; i++) {
-		if (javaVersion >= 14) {
+		if (javaVersion >= 19) {
+			AssertJUnit.assertTrue(clazz.getSimpleName() + ", Incorrect value in annotation list. Position: " + i + ", Expected value: " + AnnoExpectedValues19[expected[i]] + ", Actual Value: " + anno2String(ann[i]), anno2String(ann[i]).equals(AnnoExpectedValues19[expected[i]]));
+		} else if (javaVersion >= 14) {
 			AssertJUnit.assertTrue(clazz.getSimpleName() + ", Incorrect value in annotation list. Position: " + i + ", Expected value: " + AnnoExpectedValues14[expected[i]] + ", Actual Value: " + anno2String(ann[i]), anno2String(ann[i]).equals(AnnoExpectedValues14[expected[i]]));
 		} else {
 			AssertJUnit.assertTrue(clazz.getSimpleName() + ", Incorrect value in annotation list. Position: " + i + ", Expected value: " + AnnoExpectedValues[expected[i]] + ", Actual Value: " + anno2String(ann[i]), anno2String(ann[i]).equals(AnnoExpectedValues[expected[i]]));
@@ -2340,7 +2149,9 @@ public void test_getDeclaredAnnotations() {
 
 private void innerTest_getAnnotation(Class clazz, Class annoClazz, boolean isDeclared, int expected) {
 	Annotation ann = (isDeclared) ? clazz.getDeclaredAnnotation(annoClazz) : clazz.getAnnotation(annoClazz);
-	if (javaVersion >= 14) {
+	if (javaVersion >= 19) {
+		AssertJUnit.assertTrue(clazz.getSimpleName() + ", Incorrect value for: " + annoClazz.getSimpleName() + ". Expected value: " + AnnoExpectedValues19[expected] + ", Actual Value: " + anno2String(ann), anno2String(ann).equals(AnnoExpectedValues19[expected]));
+	} else if (javaVersion >= 14) {
 		AssertJUnit.assertTrue(clazz.getSimpleName() + ", Incorrect value for: " + annoClazz.getSimpleName() + ". Expected value: " + AnnoExpectedValues14[expected] + ", Actual Value: " + anno2String(ann), anno2String(ann).equals(AnnoExpectedValues14[expected]));
 	} else {
 		AssertJUnit.assertTrue(clazz.getSimpleName() + ", Incorrect value for: " + annoClazz.getSimpleName() + ". Expected value: " + AnnoExpectedValues[expected] + ", Actual Value: " + anno2String(ann), anno2String(ann).equals(AnnoExpectedValues[expected]));
@@ -2419,7 +2230,9 @@ private <A extends Annotation> void innerTest_getAnnotationsByType(Class clazz, 
 	Annotation[] ann = (isDeclared) ? clazz.getDeclaredAnnotationsByType(annoClazz) : clazz.getAnnotationsByType(annoClazz);
 	AssertJUnit.assertTrue( clazz.getSimpleName() + ", Incorrect length of annotation list. Expected: " + expected.length + " Actual: " + ann.length, ann.length == expected.length);
 	for (int i = 0; i < expected.length; i++) {
-		if (javaVersion >= 14) {
+		if (javaVersion >= 19) {
+			AssertJUnit.assertTrue( clazz.getSimpleName() + ", Incorrect value in annotation list. Position: " + i + ", Expected value: " + AnnoExpectedValues19[expected[i]] + ", Actual Value: " + anno2String(ann[i]), anno2String(ann[i]).equals(AnnoExpectedValues19[expected[i]]));
+		} else if (javaVersion >= 14) {
 			AssertJUnit.assertTrue( clazz.getSimpleName() + ", Incorrect value in annotation list. Position: " + i + ", Expected value: " + AnnoExpectedValues14[expected[i]] + ", Actual Value: " + anno2String(ann[i]), anno2String(ann[i]).equals(AnnoExpectedValues14[expected[i]]));
 		} else {
 			AssertJUnit.assertTrue( clazz.getSimpleName() + ", Incorrect value in annotation list. Position: " + i + ", Expected value: " + AnnoExpectedValues[expected[i]] + ", Actual Value: " + anno2String(ann[i]), anno2String(ann[i]).equals(AnnoExpectedValues[expected[i]]));

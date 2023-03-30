@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2017, 2020 IBM Corp. and others
+# Copyright (c) 2017, 2021 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,13 +15,21 @@
 # OpenJDK Assembly Exception [2].
 #
 # [1] https://www.gnu.org/software/classpath/license.html
-# [2] http://openjdk.java.net/legal/assembly-exception.html
+# [2] https://openjdk.org/legal/assembly-exception.html
 #
 # SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 ################################################################################
 
 # Get OMR's platform config
 include(OmrPlatform)
+
+# If we are building on windows, we want ASM_MASM not ASM
+# Note: We need enable ASM before applying our platform config options so that our custom options don't get clobbered.
+if(OMR_OS_WINDOWS)
+	enable_language(ASM_MASM)
+else()
+	enable_language(ASM)
+endif()
 
 # Add our own platform specific config if we have any
 include("${CMAKE_CURRENT_LIST_DIR}/platform/os/${OMR_HOST_OS}.cmake" OPTIONAL)
@@ -33,5 +41,5 @@ include("${CMAKE_CURRENT_LIST_DIR}/platform/toolcfg/${OMR_TOOLCONFIG}.cmake" OPT
 omr_platform_global_setup()
 
 if(NOT OMR_OS_OSX)
-    add_definitions(-DIPv6_FUNCTION_SUPPORT)
+	add_definitions(-DIPv6_FUNCTION_SUPPORT)
 endif()

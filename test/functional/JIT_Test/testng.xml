@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
 <!--
-  Copyright (c) 2016, 2020 IBM Corp. and others
+  Copyright (c) 2016, 2022 IBM Corp. and others
 
   This program and the accompanying materials are made available under
   the terms of the Eclipse Public License 2.0 which accompanies this
@@ -17,7 +17,7 @@
   OpenJDK Assembly Exception [2].
 
   [1] https://www.gnu.org/software/classpath/license.html
-  [2] http://openjdk.java.net/legal/assembly-exception.html
+  [2] https://openjdk.org/legal/assembly-exception.html
 
   SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 -->
@@ -46,6 +46,7 @@
       <class name="jit.test.jitt.array.intArrayLoadStore"/>
       <class name="jit.test.jitt.array.intArrayLoadStoreConstIndices"/>
       <class name="jit.test.jitt.array.shortArrayLoadStore"/>
+      <class name="jit.test.jitt.array.multianewarray"/>
     </classes>
   </test>
   <test name="assemblerTest">
@@ -429,14 +430,29 @@
       <class name="jit.test.tr.newinstance.NewInstanceTests"/>
     </classes>
   </test>
+  <test name="SeqLoadSimplificationTest">
+	 <classes>
+	   <class name="jit.test.tr.SeqLoadSimplificationTest" />
+	 </classes>
+  </test>
   <test name="signExtensionATest">
     <classes>
       <class name="jit.test.tr.signExtensionA.SignExtElimTest" />
     </classes>
   </test>
+  <test name="SIMDCommonedAddressTest">
+         <classes>
+           <class name="jit.test.tr.SIMDOpts.SIMDCommonedAddressTest" />
+         </classes>
+  </test>
   <test name="SIMDOptTest">
 	 <classes>
 	   <class name="jit.test.tr.SIMDOpts.SIMDOptTest" />
+	 </classes>
+  </test>
+  <test name="BNDCHKSimplifyTest">
+	 <classes>
+	   <class name="jit.test.tr.BNDCHKSimplify.BNDCHKSimplifyTest" />
 	 </classes>
   </test>
 	<test name="StringPeepholeTest">
@@ -564,6 +580,10 @@
     <classes>
       <class name="jit.test.recognizedMethod.TestJavaLangStrictMath" />
       <class name="jit.test.recognizedMethod.TestJavaLangMath" />
+      <class name="jit.test.recognizedMethod.TestJavaLangStringLatin1" />
+      <class name="jit.test.recognizedMethod.TestRecognizedCallTransformer" />
+      <class name="jit.test.recognizedMethod.TestJavaIntegerAndLongToString" />
+      <class name="jit.test.recognizedMethod.TestJavaLangStringCodingEncodeASCII" />
     </classes>
   </test>
 

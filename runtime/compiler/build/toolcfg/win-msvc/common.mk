@@ -14,7 +14,7 @@
 # OpenJDK Assembly Exception [2].
 #
 # [1] https://www.gnu.org/software/classpath/license.html
-# [2] http://openjdk.java.net/legal/assembly-exception.html
+# [2] https://openjdk.org/legal/assembly-exception.html
 #
 # SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 
@@ -106,6 +106,7 @@ CX_FLAGS+=\
     -wd4244 \
     -wd4018 \
     -we4700 \
+    -wd4200 \
     -MD
 
 CXX_FLAGS+=\
@@ -217,7 +218,7 @@ ifeq ($(origin MSVC_VERSION), undefined)
         SOLINK_SLINK+=ucrt vcruntime
     endif
 else
-    ifneq (,$(filter 2015 2017, $(MSVC_VERSION)))
+    ifneq (,$(filter 2013 2015 2017 2019, $(MSVC_VERSION)))
         SOLINK_SLINK+=ucrt vcruntime
     endif
 endif

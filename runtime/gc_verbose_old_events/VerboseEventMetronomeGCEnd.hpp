@@ -1,6 +1,6 @@
 
 /*******************************************************************************
- * Copyright (c) 1991, 2014 IBM Corp. and others
+ * Copyright (c) 1991, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -81,9 +81,9 @@ private:
 	U_64 _nonDeterministicSweepDelay;			/**< The longest delay caused by non deterministic sweep among all allocs between two GC quantas */
 	U_64 _nonDeterministicSweepDelayMax;		/**< The longest delay caused by non deterministic sweep among all allocs between two heartbeats */
 	
-	U_64 _maxExclusiveAccessTime;		 /**< The maximum time (of all events of the chain) GC master thread spent stopping mutators */
-	U_64 _minExclusiveAccessTime;		 /**< The minimum time (of all events of the chain) GC master thread spent stopping mutators */
-	U_64 _meanExclusiveAccessTime;		 /**< The average time (of all events of the chain) GC master thread spent stopping mutators */
+	U_64 _maxExclusiveAccessTime;		 /**< The maximum time (of all events of the chain) GC main thread spent stopping mutators */
+	U_64 _minExclusiveAccessTime;		 /**< The minimum time (of all events of the chain) GC main thread spent stopping mutators */
+	U_64 _meanExclusiveAccessTime;		 /**< The average time (of all events of the chain) GC main thread spent stopping mutators */
 	
 	UDATA _maxStartPriority; /**< The maximum start priority of all increments in the event chain. Only used for the last event in the chain. */
 	UDATA _minStartPriority; /**< The minimum start priority of all increments in the event chain. Only used for the last event in the chain. */

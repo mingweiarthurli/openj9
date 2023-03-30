@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2018 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -83,8 +83,11 @@ public abstract class LocalVariableTableIterator implements Iterator<LocalVariab
 
 		public LocalVariableTable next() {
 			count = count.add(1);
+			SelfRelativePointer nameSrp;
 			J9UTF8Pointer name;
+			SelfRelativePointer signatureSrp;
 			J9UTF8Pointer signature;
+			SelfRelativePointer genericSignatureSrp;
 			J9UTF8Pointer genericSignature;
 			try {
 				U8 firstByte = localVariableTablePtr.at(0);
@@ -139,16 +142,21 @@ public abstract class LocalVariableTableIterator implements Iterator<LocalVariab
 				} else {
 					return null;
 				}
-				name = J9UTF8Pointer.cast(SelfRelativePointer.cast(localVariableTablePtr).get());
-				localVariableTablePtr = localVariableTablePtr.add(J9UTF8.SIZEOF);
-				
-				signature = J9UTF8Pointer.cast(SelfRelativePointer.cast(localVariableTablePtr).get());
-				localVariableTablePtr = localVariableTablePtr.add(J9UTF8.SIZEOF);
+
+				nameSrp = SelfRelativePointer.cast(localVariableTablePtr);
+				name = J9UTF8Pointer.cast(nameSrp.get());
+				localVariableTablePtr = localVariableTablePtr.add(SelfRelativePointer.SIZEOF);
+
+				signatureSrp = SelfRelativePointer.cast(localVariableTablePtr);
+				signature = J9UTF8Pointer.cast(signatureSrp.get());
+				localVariableTablePtr = localVariableTablePtr.add(SelfRelativePointer.SIZEOF);
 
 				if (visibilityLength.anyBitsIn(J9NonbuilderConstants.J9_ROMCLASS_OPTINFO_VARIABLE_TABLE_HAS_GENERIC)) {
-					genericSignature = J9UTF8Pointer.cast(SelfRelativePointer.cast(localVariableTablePtr).get());
-					localVariableTablePtr = localVariableTablePtr.add(J9UTF8.SIZEOF);
+					genericSignatureSrp = SelfRelativePointer.cast(localVariableTablePtr);
+					genericSignature = J9UTF8Pointer.cast(genericSignatureSrp.get());
+					localVariableTablePtr = localVariableTablePtr.add(SelfRelativePointer.SIZEOF);
 				} else {
+					genericSignatureSrp = SelfRelativePointer.NULL;
 					genericSignature = J9UTF8Pointer.NULL;
 				}
 
@@ -157,7 +165,8 @@ public abstract class LocalVariableTableIterator implements Iterator<LocalVariab
 				EventManager.raiseCorruptDataEvent("CorruptData encountered walking local variable table.", ex, false);
 				return null;
 			}
-			return new LocalVariableTable(slotNumber, startVisibility, visibilityLength, genericSignature, name, signature);
+			return new LocalVariableTable(slotNumber, startVisibility, visibilityLength,
+					genericSignatureSrp, genericSignature, nameSrp, name, signatureSrp, signature);
 		}
 		private static I32 signExtend(I32 i32, int numberBits){
 			int shiftAmount = (I32.SIZEOF * 8) - numberBits;

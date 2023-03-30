@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -48,14 +48,13 @@ class GC_PointerContiguousArrayIterator
 private:
 	J9IndexableObject *_arrayPtr;	/**< pointer to the array object being iterated */
 	GC_SlotObject _slotObject;		/**< Create own SlotObject class to provide output */
-#if defined(OMR_GC_COMPRESSED_POINTERS) && defined(OMR_GC_FULL_POINTERS)
-	bool const _compressObjectReferences;
-#endif /* defined(OMR_GC_COMPRESSED_POINTERS) && defined(OMR_GC_FULL_POINTERS) */
-
 	fj9object_t *_scanPtr;			/**< pointer to the current array slot */
 	fj9object_t *_endPtr;			/**< pointer to the array slot where the iteration will terminate */
 
 protected:
+#if defined(OMR_GC_COMPRESSED_POINTERS) && defined(OMR_GC_FULL_POINTERS)
+	bool const _compressObjectReferences;
+#endif /* defined(OMR_GC_COMPRESSED_POINTERS) && defined(OMR_GC_FULL_POINTERS) */
 	OMR_VM *_omrVM;
 
 public:
@@ -64,15 +63,7 @@ public:
 	 * @return true, if object references are compressed
 	 */
 	MMINLINE bool compressObjectReferences() {
-#if defined(OMR_GC_COMPRESSED_POINTERS)
-#if defined(OMR_GC_FULL_POINTERS)
-		return _compressObjectReferences;
-#else /* defined(OMR_GC_FULL_POINTERS) */
-		return true;
-#endif /* defined(OMR_GC_FULL_POINTERS) */
-#else /* defined(OMR_GC_COMPRESSED_POINTERS) */
-		return false;
-#endif /* defined(OMR_GC_COMPRESSED_POINTERS) */
+		return OMR_COMPRESS_OBJECT_REFERENCES(_compressObjectReferences);
 	}
 
 	MMINLINE void initialize(J9Object *objectPtr)
@@ -105,7 +96,10 @@ public:
 	}
 
 	GC_PointerContiguousArrayIterator(OMR_VM *omrVM)
-		: _slotObject(GC_SlotObject(omrVM, NULL))
+		: _arrayPtr(NULL)
+		, _slotObject(GC_SlotObject(omrVM, NULL))
+		, _scanPtr(NULL)
+		, _endPtr(NULL)
 #if defined(OMR_GC_COMPRESSED_POINTERS) && defined(OMR_GC_FULL_POINTERS)
 		, _compressObjectReferences(OMRVM_COMPRESS_OBJECT_REFERENCES(omrVM))
 #endif /* defined(OMR_GC_COMPRESSED_POINTERS) && defined(OMR_GC_FULL_POINTERS) */
@@ -117,7 +111,10 @@ public:
 	 * @param objectPtr the array object to be processed
 	 */
 	GC_PointerContiguousArrayIterator(OMR_VM *omrVM, J9Object *objectPtr)
-		: _slotObject(GC_SlotObject(omrVM, NULL))
+		: _arrayPtr(NULL)
+		, _slotObject(GC_SlotObject(omrVM, NULL))
+		, _scanPtr(NULL)
+		, _endPtr(NULL)
 #if defined(OMR_GC_COMPRESSED_POINTERS) && defined(OMR_GC_FULL_POINTERS)
 		, _compressObjectReferences(OMRVM_COMPRESS_OBJECT_REFERENCES(omrVM))
 #endif /* defined(OMR_GC_COMPRESSED_POINTERS) && defined(OMR_GC_FULL_POINTERS) */

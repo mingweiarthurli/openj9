@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -49,6 +49,7 @@
 #include "env/PersistentCHTable.hpp"
 #include "env/PersistentInfo.hpp"
 #include "env/jittypes.h"
+#include "env/VerboseLog.hpp"
 #include "il/Block.hpp"
 #include "il/DataTypes.hpp"
 #include "il/Node.hpp"
@@ -62,7 +63,9 @@
 #include "runtime/J9VMAccess.hpp"
 #include "runtime/RelocationRuntime.hpp"
 #include "control/CompilationRuntime.hpp"
+#include "env/ClassLoaderTable.hpp"
 #include "env/J9JitMemory.hpp"
+#include "env/VMAccessCriticalSection.hpp"
 #include "env/VMJ9.h"
 #include "env/j9method.h"
 #include "env/ut_j9jit.h"
@@ -70,6 +73,7 @@
 #include "ilgen/J9ByteCodeIterator.hpp"
 #include "runtime/IProfiler.hpp"
 #include "runtime/J9Profiler.hpp"
+#include "omrformatconsts.h"
 
 #define BC_HASH_TABLE_SIZE  34501 // 131071// 34501
 #undef  IPROFILER_CONTENDED_LOCKING
@@ -389,7 +393,7 @@ TR_IProfiler::persistIprofileInfo(TR::ResolvedMethodSymbol *resolvedMethodSymbol
 
       // Allocate memory for every possible node in this method
       //
-      J9ROMMethod * romMethod = (J9ROMMethod *)J9_ROM_METHOD_FROM_RAM_METHOD((J9Method *)method);
+      J9ROMMethod * romMethod = comp->fej9()->getROMMethodFromRAMMethod((J9Method *)method);
 
       TR::Options * optionsJIT = TR::Options::getJITCmdLineOptions();
       TR::Options * optionsAOT = TR::Options::getAOTCmdLineOptions();
@@ -398,9 +402,9 @@ TR_IProfiler::persistIprofileInfo(TR::ResolvedMethodSymbol *resolvedMethodSymbol
       int32_t currentCount = resolvedMethod->getInvocationCount();
 
       // can only persist profile info if the method is in the shared cache
-      if (comp->fej9()->sharedCache()->isPointerInSharedCache(romMethod))
+      if (comp->fej9()->sharedCache()->isROMMethodInSharedCache(romMethod))
         {
-         TR_ASSERT(comp->fej9()->sharedCache()->isPointerInSharedCache((void *)methodStart), "bytecodes not in shared cache");
+         TR_ASSERT(comp->fej9()->sharedCache()->isPtrToROMClassesSectionInSharedCache((void *)methodStart), "bytecodes not in shared cache");
          // check if there is already an entry
          unsigned char storeBuffer[1000];
          uint32_t bufferLength = 1000;
@@ -421,7 +425,7 @@ TR_IProfiler::persistIprofileInfo(TR::ResolvedMethodSymbol *resolvedMethodSymbol
                {
                char methodSig[3000];
                fej9->printTruncatedSignature(methodSig, 3000, method);
-               fprintf(stdout, "Persist: %s count %d  Compiling %s\n", methodSig, comp->signature() );
+               fprintf(stdout, "Persist: %s count %" OMR_PRId32 " Compiling %s\n", methodSig, count, comp->signature());
                }
 
             vcount_t visitCount = comp->incVisitCount();
@@ -1259,7 +1263,7 @@ TR_IProfiler::persistentProfilingSample(TR_OpaqueMethodBlock *method, uint32_t b
       void *methodStart = (void *)TR::Compiler->mtd.bytecodeStart(method);
 
       // can only persist profile info if the method is in the shared cache
-      if (!comp->fej9()->sharedCache()->isPointerInSharedCache(methodStart))
+      if (!comp->fej9()->sharedCache()->isPtrToROMClassesSectionInSharedCache(methodStart))
          return NULL;
 
       // check the shared cache
@@ -1271,7 +1275,7 @@ TR_IProfiler::persistentProfilingSample(TR_OpaqueMethodBlock *method, uint32_t b
       descriptor.type = J9SHR_ATTACHED_DATA_TYPE_JITPROFILE;
       descriptor.flags = J9SHR_ATTACHED_DATA_NO_FLAGS;
       J9VMThread *vmThread = ((TR_J9VM *)comp->fej9())->getCurrentVMThread();
-      J9ROMMethod * romMethod = (J9ROMMethod*)J9_ROM_METHOD_FROM_RAM_METHOD((J9Method *)method);
+      J9ROMMethod * romMethod = comp->fej9()->getROMMethodFromRAMMethod((J9Method *)method);
       IDATA dataIsCorrupt;
 
       TR_IPBCDataStorageHeader *store = (TR_IPBCDataStorageHeader *)scConfig->findAttachedData(vmThread, romMethod, &descriptor, &dataIsCorrupt);
@@ -1281,7 +1285,7 @@ TR_IProfiler::persistentProfilingSample(TR_OpaqueMethodBlock *method, uint32_t b
       *methodProfileExistsInSCC = true;
       // Compute the pc we are interested in
       uintptr_t pc = getSearchPC(method, byteCodeIndex, comp);
-      store = searchForPersistentSample(store, (uintptr_t)comp->fej9()->sharedCache()->offsetInSharedCacheFromPointer((void *)pc));
+      store = searchForPersistentSample(store, (uintptr_t)comp->fej9()->sharedCache()->offsetInSharedCacheFromPtrToROMClassesSection((void *)pc));
 
       if (TR::Options::getAOTCmdLineOptions()->getOption(TR_EnableIprofilerChanges) || TR::Options::getJITCmdLineOptions()->getOption(TR_EnableIprofilerChanges))
          {
@@ -1332,12 +1336,12 @@ TR_IProfiler::persistentProfilingSample(TR_OpaqueMethodBlock *method, uint32_t b
       void *methodStart = (void *) TR::Compiler->mtd.bytecodeStart(method);
 
       // can only persist profile info if the method is in the shared cache
-      if (!comp->fej9()->sharedCache()->isPointerInSharedCache(methodStart))
+      if (!comp->fej9()->sharedCache()->isPtrToROMClassesSectionInSharedCache(methodStart))
          return NULL;
 
       *methodProfileExistsInSCC = true;
       void *pc = (void *)getSearchPC(method, byteCodeIndex, comp);
-      store = searchForPersistentSample(store, (uintptr_t)comp->fej9()->sharedCache()->offsetInSharedCacheFromPointer(pc));
+      store = searchForPersistentSample(store, (uintptr_t)comp->fej9()->sharedCache()->offsetInSharedCacheFromPtrToROMClassesSection(pc));
       return store;
       }
    return NULL;
@@ -1354,7 +1358,7 @@ TR_IProfiler::getJ9SharedDataDescriptorForMethod(J9SharedDataDescriptor * descri
    descriptor->type = J9SHR_ATTACHED_DATA_TYPE_JITPROFILE;
    descriptor->flags = J9SHR_ATTACHED_DATA_NO_FLAGS;
    J9VMThread *vmThread = ((TR_J9VM *)comp->fej9())->getCurrentVMThread();
-   J9ROMMethod * romMethod = (J9ROMMethod*)J9_ROM_METHOD_FROM_RAM_METHOD((J9Method *)method);
+   J9ROMMethod * romMethod = comp->fej9()->getROMMethodFromRAMMethod((J9Method *)method);
    IDATA dataIsCorrupt;
    TR_IPBCDataStorageHeader * store = (TR_IPBCDataStorageHeader *) scConfig->findAttachedData(vmThread, romMethod, descriptor, &dataIsCorrupt);
    if (store != (TR_IPBCDataStorageHeader *)descriptor->address)  // a stronger check, as found can be error value
@@ -1681,21 +1685,10 @@ static TR_OpaqueMethodBlock *
 getMethodFromBCInfo(TR_ByteCodeInfo &bcInfo, TR::Compilation *comp)
    {
    TR_OpaqueMethodBlock *method = NULL;
-
-   if (comp->fej9()->isAOT_DEPRECATED_DO_NOT_USE())
-      {
-      if (bcInfo.getCallerIndex() >= 0)
-         method = (TR_OpaqueMethodBlock *)(((TR_AOTMethodInfo *)comp->getInlinedCallSite(bcInfo.getCallerIndex())._vmMethodInfo)->resolvedMethod->getNonPersistentIdentifier());
-      else
-         method = (TR_OpaqueMethodBlock *)(comp->getCurrentMethod()->getNonPersistentIdentifier());
-      }
+   if (bcInfo.getCallerIndex() >= 0)
+      method = comp->getInlinedCallSite(bcInfo.getCallerIndex())._methodInfo;
    else
-      {
-      if (bcInfo.getCallerIndex() >= 0)
-         method = (TR_OpaqueMethodBlock *)(comp->getInlinedCallSite(bcInfo.getCallerIndex())._vmMethodInfo);
-      else
-         method = (TR_OpaqueMethodBlock *)(comp->getCurrentMethod()->getPersistentIdentifier());
-      }
+      method = comp->getCurrentMethod()->getPersistentIdentifier();
 
    return method;
    }
@@ -2567,11 +2560,11 @@ TR_IProfiler::outputStats()
    TR::Options *options = TR::Options::getCmdLineOptions();
    if (options && !options->getOption(TR_DisableIProfilerThread))
       {
-      fprintf(stderr, "IProfiler: Number of buffers to be processed           =%llu\n", _numRequests);
-      fprintf(stderr, "IProfiler: Number of buffers discarded                 =%llu\n", _numRequestsSkipped);
-      fprintf(stderr, "IProfiler: Number of buffers handed to iprofiler thread=%llu\n", _numRequestsHandedToIProfilerThread);
+      fprintf(stderr, "IProfiler: Number of buffers to be processed           =%" OMR_PRIu64 "\n", _numRequests);
+      fprintf(stderr, "IProfiler: Number of buffers discarded                 =%" OMR_PRIu64 "\n", _numRequestsSkipped);
+      fprintf(stderr, "IProfiler: Number of buffers handed to iprofiler thread=%" OMR_PRIu64 "\n", _numRequestsHandedToIProfilerThread);
       }
-   fprintf(stderr, "IProfiler: Number of records processed=%llu\n", _iprofilerNumRecords);
+   fprintf(stderr, "IProfiler: Number of records processed=%" OMR_PRIu64 "\n", _iprofilerNumRecords);
    fprintf(stderr, "IProfiler: Number of hashtable entries=%u\n", countEntries());
    checkMethodHashTable();
    }
@@ -2627,7 +2620,7 @@ void
 TR_IPBCDataFourBytes::createPersistentCopy(TR_J9SharedCache *sharedCache, TR_IPBCDataStorageHeader *storage, TR::PersistentInfo *info)
    {
    TR_IPBCDataFourBytesStorage * store = (TR_IPBCDataFourBytesStorage *) storage;
-   uintptr_t offset = (uintptr_t)sharedCache->offsetInSharedCacheFromPointer((void *)_pc);
+   uintptr_t offset = (uintptr_t)sharedCache->offsetInSharedCacheFromPtrToROMClassesSection((void *)_pc);
    TR_ASSERT_FATAL(offset <= UINT_MAX, "Offset too large for TR_IPBCDataFourBytes");
    storage->pc = (uint32_t)offset;
    storage->left = 0;
@@ -2676,7 +2669,7 @@ void
 TR_IPBCDataEightWords::createPersistentCopy(TR_J9SharedCache *sharedCache, TR_IPBCDataStorageHeader *storage, TR::PersistentInfo *info)
    {
    TR_IPBCDataEightWordsStorage * store = (TR_IPBCDataEightWordsStorage *) storage;
-   uintptr_t offset = (uintptr_t)sharedCache->offsetInSharedCacheFromPointer((void *)_pc);
+   uintptr_t offset = (uintptr_t)sharedCache->offsetInSharedCacheFromPtrToROMClassesSection((void *)_pc);
    TR_ASSERT_FATAL(offset <= UINT_MAX, "Offset too large for TR_IPBCDataEightWords");
    storage->pc = (uint32_t)offset;
    storage->ID = TR_IPBCD_EIGHT_WORDS;
@@ -2813,7 +2806,7 @@ TR_IPBCDataCallGraph::getSumCount(TR::Compilation *comp, bool)
          {
          int32_t len;
          const char * s = _csInfo.getClazz(i) ? comp->fej9()->getClassNameChars((TR_OpaqueClassBlock*)_csInfo.getClazz(i), len) : "0";
-         fprintf(stderr,"[%p] slot %d, class %p %s, weight %d : ", this, i, _csInfo.getClazz(i), s, _csInfo._weight[i]);
+         fprintf(stderr,"[%p] slot %" OMR_PRId32 ", class %#" OMR_PRIxPTR " %s, weight %" OMR_PRId32 " : ", this, i, _csInfo.getClazz(i), s, _csInfo._weight[i]);
          fflush(stderr);
          }
       sumWeight += _csInfo._weight[i];
@@ -2895,7 +2888,7 @@ TR_IPBCDataCallGraph::printWeights(TR::Compilation *comp)
       int32_t len;
       const char * s = _csInfo.getClazz(i) ? comp->fej9()->getClassNameChars((TR_OpaqueClassBlock*)_csInfo.getClazz(i), len) : "0";
 
-      fprintf(stderr, "%p %s %d\n", _csInfo.getClazz(i), s, _csInfo._weight[i]);
+      fprintf(stderr, "%#" OMR_PRIxPTR " %s %d\n", _csInfo.getClazz(i), s, _csInfo._weight[i]);
       }
    fprintf(stderr, "%d\n", _csInfo._residueWeight);
    }
@@ -3062,7 +3055,7 @@ TR_IPBCDataCallGraph::canBePersisted(TR_J9SharedCache *sharedCache, TR::Persiste
             return IPBC_ENTRY_PERSIST_UNLOADED;
             }
 
-         if (!sharedCache->isPointerInSharedCache(clazz->romClass))
+         if (!sharedCache->isROMClassInSharedCache(clazz->romClass))
             {
             releaseEntry(); // release the lock on the entry
             return IPBC_ENTRY_PERSIST_NOTINSCC;
@@ -3073,67 +3066,103 @@ TR_IPBCDataCallGraph::canBePersisted(TR_J9SharedCache *sharedCache, TR::Persiste
    return IPBC_ENTRY_CAN_PERSIST;
    }
 
+
 void
 TR_IPBCDataCallGraph::createPersistentCopy(TR_J9SharedCache *sharedCache, TR_IPBCDataStorageHeader *storage, TR::PersistentInfo *info)
    {
    TR_IPBCDataCallGraphStorage * store = (TR_IPBCDataCallGraphStorage *) storage;
-   uintptr_t offset = (uintptr_t)sharedCache->offsetInSharedCacheFromPointer((void *)_pc);
+   uintptr_t offset = (uintptr_t)sharedCache->offsetInSharedCacheFromPtrToROMClassesSection((void *)_pc);
    TR_ASSERT_FATAL(offset <= UINT_MAX, "Offset too large for TR_IPBCDataCallGraph");
    storage->pc = (uint32_t)offset;
    storage->ID = TR_IPBCD_CALL_GRAPH;
    storage->left = 0;
    storage->right = 0;
+   // We can only afford to store one entry, the one with most samples
+   // The samples for the remaining entries will be added to the "other" category
+   uint16_t maxWeight = 0;
+   int32_t indexMaxWeight = -1; // Index for the entry with most samples
+   uint32_t sumWeights = 0;
    for (int32_t i=0; i < NUM_CS_SLOTS;i++)
       {
       J9Class *clazz = (J9Class *) _csInfo.getClazz(i);
       if (clazz)
          {
          bool isUnloadedClass = info->isUnloadedClass(clazz, true);
-         TR_ASSERT(!isUnloadedClass, "cannot store unloaded class");
-
          if (!isUnloadedClass)
             {
-            uintptr_t romClass = (uintptr_t) clazz->romClass;
-
-            /*
-             * The following race is possible:
-             *
-             * 1. Thread 1 calls TR_IPBCDataCallGraph::canBePersisted on Entry A, which succeeds.
-             *    However, at least one class in the list is NULL.
-             * 2. Thread 2 calls TR_IPBCDataCallGraph::setData on Entry A, which also succeeds,
-             *    setting one of the classes that was previous NULL to something non-NULL.
-             * 3. Thread 1 calls TR_IPBCDataCallGraph::createPersistentCopy. Normally if a class
-             *    in the list is NULL, the value stored is also NULL. However, because Thread 2
-             *    updated some previously NULL class, Thread 1 will compute the difference of
-             *    (ramClass->romClass - startOfSCC) and potentially get a value that's bigger than the SCC.
-             *
-             * Because locking the entry in TR_IPBCDataCallGraph::setData would negatively impact
-             * performance, in order to prevent an issue in loadFromPersistentCopy, check again whether
-             * the romClass is within the SCC.
-             */
-            if (sharedCache->isPointerInSharedCache(clazz->romClass))
+            if (_csInfo._weight[i] > maxWeight)
                {
-               store->_csInfo.setClazz(i, (uintptr_t)sharedCache->offsetInSharedCacheFromPointer(clazz->romClass));
-               TR_ASSERT(_csInfo.getClazz(i), "Race condition detected: cached value=%p, pc=%p", clazz, _pc);
+               maxWeight = _csInfo._weight[i];
+               indexMaxWeight = i;
+               }
+            sumWeights += _csInfo._weight[i];
+            }
+         }
+      }
+   sumWeights += _csInfo._residueWeight;
+
+   store->_csInfo.setClazz(0, 0); // Assume invalid entry 0 and overwite later
+   store->_csInfo._weight[0] = 0;
+   store->_csInfo._residueWeight = sumWeights - maxWeight;
+   store->_csInfo._tooBigToBeInlined = _csInfo._tooBigToBeInlined;
+
+   // Having VM access in hand prevents class unloading and redefinition
+   TR::VMAccessCriticalSection criticalSection(sharedCache->fe());
+
+   if (indexMaxWeight >= 0) // If there is a valid dominant class
+      {
+      TR_OpaqueClassBlock *clazz =  (TR_OpaqueClassBlock*)_csInfo.getClazz(indexMaxWeight);
+      if (!info->isUnloadedClass(clazz, true))
+         {
+         J9ROMClass *romClass = ((J9Class*)clazz)->romClass;
+         if (sharedCache->isROMClassInSharedCache(romClass))
+            {
+            uintptr_t *classChain = sharedCache->rememberClass(clazz);
+            if (classChain)
+               {
+               uintptr_t cacheOffset = 0;
+               if (sharedCache->isPointerInSharedCache(classChain, &cacheOffset))
+                  {
+                  store->_csInfo.setClazz(0, cacheOffset);
+                  store->_csInfo._weight[0] = _csInfo._weight[indexMaxWeight];
+                  // I need to find the chain of the first class loaded by the class loader of this RAMClass
+                  // getClassChainOffsetIdentifyingLoader() fails the compilation if not found, hence we use a special implementation
+                  uintptr_t classChainOffsetOfCLInSharedCache = sharedCache->getClassChainOffsetIdentifyingLoaderNoThrow(clazz);
+                  // The chain that identifies the class loader is stored at index 1
+                  store->_csInfo.setClazz(1, classChainOffsetOfCLInSharedCache);
+                  if (classChainOffsetOfCLInSharedCache == 0)
+                     if (TR::Options::getCmdLineOptions()->getVerboseOption(TR_VerboseIProfilerPersistence))
+                        TR_VerboseLog::writeLineLocked(TR_Vlog_PERF, "createPersistentCopy: Cannot store CallGraphEntry because classChain identifying classloader is 0");
+                  }
+               else
+                  {
+                  if (TR::Options::getCmdLineOptions()->getVerboseOption(TR_VerboseIProfilerPersistence))
+                     TR_VerboseLog::writeLineLocked(TR_Vlog_PERF, "createPersistentCopy: Cannot store CallGraphEntry because of race condition while storing chain");
+                  }
                }
             else
                {
-               store->_csInfo.setClazz(i, 0);
+               if (TR::Options::getCmdLineOptions()->getVerboseOption(TR_VerboseIProfilerPersistence))
+                  TR_VerboseLog::writeLineLocked(TR_Vlog_PERF, "createPersistentCopy: Cannot store CallGraphEntry because cannot remember class");
                }
             }
-         else
+         else // Most frequent class is not in SCC, so I cannot store IProfiler info about this in SCC
             {
-            store->_csInfo.setClazz(i, 0);
+            if (TR::Options::getCmdLineOptions()->getVerboseOption(TR_VerboseIProfilerPersistence))
+               TR_VerboseLog::writeLineLocked(TR_Vlog_PERF, "createPersistentCopy: Cannot store CallGraphEntry because ROMClass is not in SCC");
             }
          }
       else
          {
-         store->_csInfo.setClazz(i, 0);
+         if (TR::Options::getCmdLineOptions()->getVerboseOption(TR_VerboseIProfilerPersistence))
+            TR_VerboseLog::writeLineLocked(TR_Vlog_PERF, "createPersistentCopy: Cannot store CallGraphEntry because RAMClass is unloaded");
          }
-      store->_csInfo._weight[i] = _csInfo._weight[i];
       }
-   store->_csInfo._residueWeight = _csInfo._residueWeight;
-   store->_csInfo._tooBigToBeInlined = _csInfo._tooBigToBeInlined;
+   else
+      {
+      if (TR::Options::getCmdLineOptions()->getVerboseOption(TR_VerboseIProfilerPersistence))
+         TR_VerboseLog::writeLineLocked(TR_Vlog_PERF, "createPersistentCopy: Cannot store CallGraphEntry because there is no data");
+      }
    }
 
 void
@@ -3141,33 +3170,102 @@ TR_IPBCDataCallGraph::loadFromPersistentCopy(TR_IPBCDataStorageHeader * storage,
    {
    TR_IPBCDataCallGraphStorage * store = (TR_IPBCDataCallGraphStorage *) storage;
    TR_ASSERT(storage->ID == TR_IPBCD_CALL_GRAPH, "Incompatible types between storage and loading of iprofile persistent data");
-   for (int32_t i = 0; i < NUM_CS_SLOTS; i++)
+   TR_J9SharedCache *sharedCache = comp->fej9()->sharedCache();
+
+   // First index has the dominant class
+   _csInfo.setClazz(0, 0);
+   _csInfo._weight[0] = 0;
+   uintptr_t csInfoChainOffset = store->_csInfo.getClazz(0);
+   auto classChainIdentifyingLoaderOffsetInSCC = store->_csInfo.getClazz(1);
+   if (csInfoChainOffset && classChainIdentifyingLoaderOffsetInSCC)
       {
-      if (store->_csInfo.getClazz(i))
+      uintptr_t *classChain = (uintptr_t*)sharedCache->pointerFromOffsetInSharedCache(csInfoChainOffset);
+      if (classChain)
          {
-         J9Class *ramClass = NULL;
-         uintptr_t romClass = 0;
-
-         uintptr_t csInfoClazzOffset = store->_csInfo.getClazz(i);
-         if (comp->fej9()->sharedCache()->isOffsetInSharedCache(csInfoClazzOffset, &romClass))
-            ramClass = ((TR_J9VM *)comp->fej9())->matchRAMclassFromROMclass((J9ROMClass *)romClass, comp);
-
-         if (ramClass)
+         // I need to convert from ROMClass into RAMClass
+         void *classChainIdentifyingLoader = sharedCache->pointerFromOffsetInSharedCache(classChainIdentifyingLoaderOffsetInSCC);
+         if (classChainIdentifyingLoader)
             {
-            _csInfo.setClazz(i, (uintptr_t)ramClass);
-            _csInfo._weight[i] = store->_csInfo._weight[i];
+            TR::VMAccessCriticalSection criticalSection(comp->fej9());
+            J9ClassLoader *classLoader = (J9ClassLoader *)sharedCache->persistentClassLoaderTable()->lookupClassLoaderAssociatedWithClassChain(classChainIdentifyingLoader);
+            if (classLoader)
+               {
+               TR_OpaqueClassBlock *j9class = sharedCache->lookupClassFromChainAndLoader(classChain, classLoader);
+               if (j9class)
+                  {
+                  // Optimizer and the codegen assume receiver classes of a call from profiling data are initialized,
+                  // otherwise they shouldn't show up in the profile. But classes from iprofiling data from last run
+                  // may be uninitialized in load time, as the program behavior may change in the second run. Thus
+                  // we need to verify that a class is initialized, otherwise optimizer or codegen will make wrong
+                  // transformation based on invalid assumption.
+                  //
+                  if (comp->fej9()->isClassInitialized(j9class))
+                     {
+                     _csInfo.setClazz(0, (uintptr_t)j9class);
+                     _csInfo._weight[0] = store->_csInfo._weight[0];
+                     }
+                  else
+                     {
+                     if (TR::Options::getCmdLineOptions()->getVerboseOption(TR_VerboseIProfilerPersistence))
+                        {
+                        J9UTF8 *classNameUTF8 = J9ROMCLASS_CLASSNAME(sharedCache->startingROMClassOfClassChain(classChain));
+                        TR_VerboseLog::writeLineLocked(TR_Vlog_PERF,"loadFromPersistentCopy: Cannot covert ROMClass to RAMClass because RAMClass is not initialized. Class: %.*s",
+                                                       J9UTF8_LENGTH(classNameUTF8), J9UTF8_DATA(classNameUTF8));
+                        }
+                     }
+                  }
+               else
+                  {
+                  // This is the second most frequent failure. Do we have the wrong classLoader?
+                  if (TR::Options::getCmdLineOptions()->getVerboseOption(TR_VerboseIProfilerPersistence))
+                     {
+                     J9UTF8 *classNameUTF8 = J9ROMCLASS_CLASSNAME(sharedCache->startingROMClassOfClassChain(classChain));
+                     TR_VerboseLog::writeLineLocked(TR_Vlog_PERF, "loadFromPersistentCopy: Cannot convert ROMClass to RAMClass because lookupClassFromChainAndLoader failed. Class: %.*s",
+                                                    J9UTF8_LENGTH(classNameUTF8), J9UTF8_DATA(classNameUTF8));
+                     }
+                  }
+               }
+            else
+               {
+               // This is the most important failure case
+               if (TR::Options::getCmdLineOptions()->getVerboseOption(TR_VerboseIProfilerPersistence))
+                  {
+                  J9UTF8 *classNameUTF8 = J9ROMCLASS_CLASSNAME(sharedCache->startingROMClassOfClassChain(classChain));
+                  TR_VerboseLog::writeLineLocked(TR_Vlog_PERF, "loadFromPersistentCopy: Cannot convert ROMClass to RAMClass. Cannot find classloader. Class: %.*s",
+                                                 J9UTF8_LENGTH(classNameUTF8), J9UTF8_DATA(classNameUTF8));
+                  }
+               }
             }
          else
             {
-            _csInfo.setClazz(i, 0);
-            _csInfo._weight[i] = 0;
+            if (TR::Options::getCmdLineOptions()->getVerboseOption(TR_VerboseIProfilerPersistence))
+               {
+               J9UTF8 *classNameUTF8 = J9ROMCLASS_CLASSNAME(sharedCache->startingROMClassOfClassChain(classChain));
+               TR_VerboseLog::writeLineLocked(TR_Vlog_PERF, "loadFromPersistentCopy: Cannot convert ROMClass to RAMClass. Cannot find chain identifying classloader. Class: %.*s",
+                                              J9UTF8_LENGTH(classNameUTF8), J9UTF8_DATA(classNameUTF8));
+               }
             }
          }
       else
          {
-         _csInfo.setClazz(i, 0);
-         _csInfo._weight[i] = 0;
+         if (TR::Options::getCmdLineOptions()->getVerboseOption(TR_VerboseIProfilerPersistence))
+            {
+            TR_VerboseLog::writeLineLocked(TR_Vlog_PERF, "loadFromPersistentCopy: Cannot convert ROMClass to RAMClass. Cannot get the class chain of ROMClass");
+            }
          }
+      }
+   else
+      {
+      if (TR::Options::getCmdLineOptions()->getVerboseOption(TR_VerboseIProfilerPersistence))
+         {
+         TR_VerboseLog::writeLineLocked(TR_Vlog_PERF, "loadFromPersistentCopy: Cannot convert ROMClass to RAMClass. Don't have required information in the entry");
+         }
+      }
+   // Populate the remaining entries with 0
+   for (int32_t i = 1; i < NUM_CS_SLOTS; i++)
+      {
+      _csInfo.setClazz(i, 0);
+      _csInfo._weight[i] = 0;
       }
    _csInfo._residueWeight = store->_csInfo._residueWeight;
    _csInfo._tooBigToBeInlined = store->_csInfo._tooBigToBeInlined;
@@ -3421,7 +3519,8 @@ void TR_IProfiler::setupEntriesInHashTable(TR_IProfiler *ip)
          if (pc == 0 ||
                pc == 0xffffffff)
             {
-            printf("invalid pc for entry %p %p\n", entry, pc);fflush(stdout);
+            printf("invalid pc for entry %p %#" OMR_PRIxPTR "\n", entry, pc);
+            fflush(stdout);
             prevEntry = entry;
             entry = entry->getNext();
             continue;
@@ -3479,7 +3578,7 @@ void TR_IProfiler::copyDataFromEntry(TR_IPBytecodeHashTableEntry *oldEntry, TR_I
             {
             for (int32_t i = 0; i < NUM_CS_SLOTS; i++)
                {
-               printf("got clazz %p weight %d\n", oldCSInfo->getClazz(i), oldCSInfo->_weight[i]);
+               printf("got clazz %#" OMR_PRIxPTR " weight %d\n", oldCSInfo->getClazz(i), oldCSInfo->_weight[i]);
                newCSInfo->setClazz(i, oldCSInfo->getClazz(i));
                newCSInfo->_weight[i] = oldCSInfo->_weight[i];
                }
@@ -3526,7 +3625,8 @@ void TR_IProfiler::checkMethodHashTable()
                 J9UTF8_LENGTH(signatureUTF8), J9UTF8_DATA(signatureUTF8), method);fflush(fout);
 #endif
          int32_t count = 0;
-         fprintf(fout,"\t has %d callers and %d -bytecode long:\n", 0, J9_BYTECODE_END_FROM_ROM_METHOD(getOriginalROMMethod(method))-J9_BYTECODE_START_FROM_ROM_METHOD(getOriginalROMMethod(method)));fflush(fout);
+         fprintf(fout,"\t has %d callers and %" OMR_PRIdPTR " -bytecode long:\n", 0, J9_BYTECODE_END_FROM_ROM_METHOD(getOriginalROMMethod(method)) - J9_BYTECODE_START_FROM_ROM_METHOD(getOriginalROMMethod(method)));
+         fflush(fout);
          uint32_t i=0;
 
          for (TR_IPMethodData* it = &entry->_caller; it; it = it->next)
@@ -3541,10 +3641,12 @@ void TR_IProfiler::checkMethodHashTable()
                J9UTF8 * caller_methodClazzUTF8;
                getClassNameSignatureFromMethod((J9Method*)meth, caller_methodClazzUTF8, caller_nameUTF8, caller_signatureUTF8);
 
-               fprintf(fout,"%p %.*s%.*s%.*s weight %d pc %p\n", meth,
-                  J9UTF8_LENGTH(caller_methodClazzUTF8), J9UTF8_DATA(caller_methodClazzUTF8), J9UTF8_LENGTH(caller_nameUTF8), J9UTF8_DATA(caller_nameUTF8),
+               fprintf(fout,"%p %.*s%.*s%.*s weight %" OMR_PRIu32 " pc %" OMR_PRIx32 "\n", meth,
+                  J9UTF8_LENGTH(caller_methodClazzUTF8), J9UTF8_DATA(caller_methodClazzUTF8),
+                  J9UTF8_LENGTH(caller_nameUTF8), J9UTF8_DATA(caller_nameUTF8),
                   J9UTF8_LENGTH(caller_signatureUTF8), J9UTF8_DATA(caller_signatureUTF8),
-                  it->getWeight(), it->getPCIndex());fflush(fout);
+                  it->getWeight(), it->getPCIndex());
+               fflush(fout);
                }
             else
                {
@@ -4038,8 +4140,8 @@ UDATA TR_IProfiler::parseBuffer(J9VMThread * vmThread, const U_8* dataStart, UDA
 
    J9JavaVM * javaVM = _compInfo->getJITConfig()->javaVM;
 
-   int32_t skipCountMaster = 20+(rand()%10); // TODO: Use the master TR_RandomGenerator from jitconfig?
-   int32_t skipCount = skipCountMaster;
+   int32_t skipCountMain = 20+(rand()%10); // TODO: Use the main TR_RandomGenerator from jitconfig?
+   int32_t skipCount = skipCountMain;
    bool profileFlag = true;
 
    while (cursor < dataStart + size)
@@ -4051,7 +4153,7 @@ UDATA TR_IProfiler::parseBuffer(J9VMThread * vmThread, const U_8* dataStart, UDA
          // replenish skipCount if it has been exhausted
          if (skipCount <= 0)
             {
-            skipCount = skipCountMaster;
+            skipCount = skipCountMain;
             profileFlag = !profileFlag;  // flip profiling flag
             if (profileFlag)
                {
@@ -4354,11 +4456,11 @@ void printCsInfo(CallSiteProfileInfo& csInfo, TR::Compilation* comp, void* tag =
       if (comp)
          {
          char *clazzSig = TR::Compiler->cls.classSignature(comp, (TR_OpaqueClassBlock*)csInfo.getClazz(i), comp->trMemory());
-         fprintf(fout, "%p CLASS %d %p %s WEIGHT %d\n", tag, i, csInfo.getClazz(i), clazzSig, csInfo._weight[i]);
+         fprintf(fout, "%p CLASS %d %#" OMR_PRIxPTR " %s WEIGHT %d\n", tag, i, csInfo.getClazz(i), clazzSig, csInfo._weight[i]);
          }
       else
          {
-         fprintf(fout, "%p CLASS %d %p WEIGHT %d\n", tag, i, csInfo.getClazz(i), csInfo._weight[i]);
+         fprintf(fout, "%p CLASS %d %#" OMR_PRIxPTR " WEIGHT %d\n", tag, i, csInfo.getClazz(i), csInfo._weight[i]);
          }
       fflush(fout);
       }
@@ -4643,7 +4745,7 @@ void TR_AggregationHT::sortByNameAndPrint(TR_J9VMBase *fe)
          U_8* pc = (U_8*)ipbcCGData->getPC();
 
          size_t bcOffset = pc - (U_8*)J9_BYTECODE_START_FROM_ROM_METHOD(romMethod);
-         fprintf(stderr, "\tOffset %u\t", bcOffset);
+         fprintf(stderr, "\tOffset %" OMR_PRIuSIZE "\t", bcOffset);
          switch (*pc)
             {
             case JBinvokestatic:     fprintf(stderr, "JBinvokestatic\n"); break;
@@ -4662,7 +4764,7 @@ void TR_AggregationHT::sortByNameAndPrint(TR_J9VMBase *fe)
                {
                int32_t len;
                const char * s = fe->getClassNameChars((TR_OpaqueClassBlock*)cgData->getClazz(j), len);
-               fprintf(stderr, "\t\tW:%4u\tM:%p\t%.*s\n", cgData->_weight[j], cgData->getClazz(j), len, s);
+               fprintf(stderr, "\t\tW:%4u\tM:%#" OMR_PRIxPTR "\t%.*s\n", cgData->_weight[j], cgData->getClazz(j), len, s);
                }
             }
          fprintf(stderr, "\t\tW:%4u\n", cgData->_residueWeight);

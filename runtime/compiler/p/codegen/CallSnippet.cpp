@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -282,10 +282,7 @@ TR_RuntimeHelper TR::PPCCallSnippet::getInterpretedDispatchHelper(
       isJitInduceOSRCall = true;
       }
 
-   bool forceUnresolvedDispatch = fej9->forceUnresolvedDispatch();
-   if (comp->getOption(TR_UseSymbolValidationManager))
-      forceUnresolvedDispatch = false;
-
+   bool forceUnresolvedDispatch = !fej9->isResolvedDirectDispatchGuaranteed(comp);
    if (methodSymRef->isUnresolved() || forceUnresolvedDispatch)
       {
       TR_ASSERT(!isJitInduceOSRCall || !forceUnresolvedDispatch, "calling jitInduceOSR is not supported yet under AOT\n");
@@ -350,7 +347,7 @@ uint8_t *TR::PPCCallSnippet::emitSnippetBody()
 
    TR_RuntimeHelper runtimeHelper = getInterpretedDispatchHelper(methodSymRef, callNode->getDataType(),
                                                                  methodSymbol->isSynchronised(), isNativeStatic, cg());
-   glueRef = cg()->symRefTab()->findOrCreateRuntimeHelper(runtimeHelper, false, false, false);
+   glueRef = cg()->symRefTab()->findOrCreateRuntimeHelper(runtimeHelper);
 
    intptr_t helperAddress = (intptr_t)glueRef->getMethodAddress();
    if (cg()->directCallRequiresTrampoline(helperAddress, (intptr_t)cursor))
@@ -398,9 +395,7 @@ uint8_t *TR::PPCCallSnippet::emitSnippetBody()
    //continue execution in interpreted mode. Therefore, it doesn't need the method pointer.
    if (!glueRef->isOSRInductionHelper())
       {
-      bool forceUnresolvedDispatch = fej9->forceUnresolvedDispatch();
-      if (comp->getOption(TR_UseSymbolValidationManager))
-         forceUnresolvedDispatch = false;
+      bool forceUnresolvedDispatch = !fej9->isResolvedDirectDispatchGuaranteed(comp);
 
       // Store the method pointer: it is NULL for unresolved
       if (methodSymRef->isUnresolved() || forceUnresolvedDispatch)
@@ -531,7 +526,7 @@ uint8_t *TR::PPCVirtualUnresolvedSnippet::emitSnippetBody()
    TR::Compilation *comp = cg()->comp();
    TR_J9VMBase *fej9 = (TR_J9VMBase *)(comp->fe());
    TR::Node       *callNode = getNode();
-   TR::SymbolReference *glueRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_PPCvirtualUnresolvedHelper, false, false, false);
+   TR::SymbolReference *glueRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_PPCvirtualUnresolvedHelper);
    void *thunk = fej9->getJ2IThunk(callNode->getSymbolReference()->getSymbol()->castToMethodSymbol()->getMethod(), comp);
    uint8_t *j2iThunkRelocationPoint;
 
@@ -648,7 +643,7 @@ uint8_t *TR::PPCInterfaceCallSnippet::emitSnippetBody()
    TR::Node       *callNode = getNode();
    TR::Compilation *comp = cg()->comp();
    TR_J9VMBase *fej9 = (TR_J9VMBase *)(comp->fe());
-   TR::SymbolReference *glueRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_PPCinterfaceCallHelper, false, false, false);
+   TR::SymbolReference *glueRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_PPCinterfaceCallHelper);
    void *thunk = fej9->getJ2IThunk(callNode->getSymbolReference()->getSymbol()->castToMethodSymbol()->getMethod(), comp);
    uint8_t *j2iThunkRelocationPoint;
 
@@ -711,53 +706,56 @@ uint8_t *TR::PPCInterfaceCallSnippet::emitSnippetBody()
 
    if (comp->target().is64Bit())
       {
-      if (getTOCOffset() != PTOC_FULL_INDEX)
+      if (!comp->target().cpu.isAtLeast(OMR_PROCESSOR_PPC_P10))
          {
-         TR_PPCTableOfConstants::setTOCSlot(getTOCOffset(), (uintptr_t)cursor);
-         }
-      else
-         {
-         int32_t  *patchAddr = (int32_t *)getLowerInstruction()->getBinaryEncoding();
-         intptr_t addrValue = (intptr_t)cursor;
-         if (!comp->compileRelocatableCode()
-            #ifdef J9VM_OPT_JITSERVER
-               && !comp->isOutOfProcessCompilation()
-            #endif
-            )
+         if (getTOCOffset() != PTOC_FULL_INDEX)
             {
-            // If the high nibble is 0 and the next nibble's high bit is clear, change the first instruction to a nop and the third to a li
-            // Next nibble's high bit needs to be clear in order to use li (because li will sign extend the immediate)
-            if ((addrValue >> 48) == 0 && ((addrValue >> 32) & 0x8000) == 0)
-               {
-               *patchAddr |= addrValue & 0x0000ffff;
-               addrValue = cg()->hiValue(addrValue);
-               uint32_t ori = *(patchAddr-2);
-               uint32_t li = TR::InstOpCode::getOpCodeBinaryEncoding(TR::InstOpCode::li) | (ori & 0x03e00000);
-               *(patchAddr-2) = li | ((addrValue>>16) & 0x0000ffff);
-               *(patchAddr-3) |= addrValue & 0x0000ffff;
-               *(patchAddr-4) = TR::InstOpCode::getOpCodeBinaryEncoding(TR::InstOpCode::nop);
-               }
-            else
-               {
-               *patchAddr |= addrValue & 0x0000ffff;
-               addrValue = cg()->hiValue(addrValue);
-               *(patchAddr-2) |= (addrValue>>16) & 0x0000ffff;
-               *(patchAddr-3) |= addrValue & 0x0000ffff;
-               *(patchAddr-4) |= (addrValue>>32) & 0x0000ffff;
-               }
+            TR_PPCTableOfConstants::setTOCSlot(getTOCOffset(), (uintptr_t)cursor);
             }
          else
             {
-            // We must take this path for all compiles that need to generate relocatable code (ex. AOT, outOfProcess).
-            // The immediate fields of relocatable instructions must be clear. This is because when performing the relocation,
-            // we OR the new address into the fields. So if the fields are not already clear, then OR'ing the new address can
-            // result in garbage data.
-            cg()->addExternalRelocation(new (cg()->trHeapMemory()) TR::BeforeBinaryEncodingExternalRelocation(getUpperInstruction(),
-               (uint8_t *)(addrValue),
-               (uint8_t *)fixedSequence4,
-               TR_FixedSequenceAddress2,
-               cg()),
-               __FILE__, __LINE__, callNode);
+            int32_t  *patchAddr = (int32_t *)getLowerInstruction()->getBinaryEncoding();
+            intptr_t addrValue = (intptr_t)cursor;
+            if (!comp->compileRelocatableCode()
+               #ifdef J9VM_OPT_JITSERVER
+                  && !comp->isOutOfProcessCompilation()
+               #endif
+               )
+               {
+               // If the high nibble is 0 and the next nibble's high bit is clear, change the first instruction to a nop and the third to a li
+               // Next nibble's high bit needs to be clear in order to use li (because li will sign extend the immediate)
+               if ((addrValue >> 48) == 0 && ((addrValue >> 32) & 0x8000) == 0)
+                  {
+                  *patchAddr |= addrValue & 0x0000ffff;
+                  addrValue = cg()->hiValue(addrValue);
+                  uint32_t ori = *(patchAddr-2);
+                  uint32_t li = TR::InstOpCode::getOpCodeBinaryEncoding(TR::InstOpCode::li) | (ori & 0x03e00000);
+                  *(patchAddr-2) = li | ((addrValue>>16) & 0x0000ffff);
+                  *(patchAddr-3) |= addrValue & 0x0000ffff;
+                  *(patchAddr-4) = TR::InstOpCode::getOpCodeBinaryEncoding(TR::InstOpCode::nop);
+                  }
+               else
+                  {
+                  *patchAddr |= addrValue & 0x0000ffff;
+                  addrValue = cg()->hiValue(addrValue);
+                  *(patchAddr-2) |= (addrValue>>16) & 0x0000ffff;
+                  *(patchAddr-3) |= addrValue & 0x0000ffff;
+                  *(patchAddr-4) |= (addrValue>>32) & 0x0000ffff;
+                  }
+               }
+            else
+               {
+               // We must take this path for all compiles that need to generate relocatable code (ex. AOT, outOfProcess).
+               // The immediate fields of relocatable instructions must be clear. This is because when performing the relocation,
+               // we OR the new address into the fields. So if the fields are not already clear, then OR'ing the new address can
+               // result in garbage data.
+               cg()->addExternalRelocation(new (cg()->trHeapMemory()) TR::BeforeBinaryEncodingExternalRelocation(getUpperInstruction(),
+                  (uint8_t *)(addrValue),
+                  (uint8_t *)fixedSequence4,
+                  TR_FixedSequenceAddress2,
+                  cg()),
+                  __FILE__, __LINE__, callNode);
+               }
             }
          }
       }
@@ -857,25 +855,25 @@ uint8_t *TR::PPCCallSnippet::generateVIThunk(TR::Node *callNode, int32_t argSize
    switch (callNode->getDataType())
           {
           case TR::NoType:
-                 dispatcher = (intptr_t)cg->symRefTab()->findOrCreateRuntimeHelper(TR_PPCicallVMprJavaSendVirtual0, false, false, false)->getMethodAddress();
+                 dispatcher = (intptr_t)cg->symRefTab()->findOrCreateRuntimeHelper(TR_PPCicallVMprJavaSendVirtual0)->getMethodAddress();
                  break;
           case TR::Int32:
-                 dispatcher = (intptr_t)cg->symRefTab()->findOrCreateRuntimeHelper(TR_PPCicallVMprJavaSendVirtual1, false, false, false)->getMethodAddress();
+                 dispatcher = (intptr_t)cg->symRefTab()->findOrCreateRuntimeHelper(TR_PPCicallVMprJavaSendVirtual1)->getMethodAddress();
                  break;
           case TR::Address:
                  if (comp->target().is64Bit())
-                    dispatcher = (intptr_t)cg->symRefTab()->findOrCreateRuntimeHelper(TR_PPCicallVMprJavaSendVirtualJ, false, false, false)->getMethodAddress();
+                    dispatcher = (intptr_t)cg->symRefTab()->findOrCreateRuntimeHelper(TR_PPCicallVMprJavaSendVirtualJ)->getMethodAddress();
                  else
-                    dispatcher = (intptr_t)cg->symRefTab()->findOrCreateRuntimeHelper(TR_PPCicallVMprJavaSendVirtual1, false, false, false)->getMethodAddress();
+                    dispatcher = (intptr_t)cg->symRefTab()->findOrCreateRuntimeHelper(TR_PPCicallVMprJavaSendVirtual1)->getMethodAddress();
                  break;
           case TR::Int64:
-                 dispatcher = (intptr_t)cg->symRefTab()->findOrCreateRuntimeHelper(TR_PPCicallVMprJavaSendVirtualJ, false, false, false)->getMethodAddress();
+                 dispatcher = (intptr_t)cg->symRefTab()->findOrCreateRuntimeHelper(TR_PPCicallVMprJavaSendVirtualJ)->getMethodAddress();
                  break;
           case TR::Float:
-                 dispatcher = (intptr_t)cg->symRefTab()->findOrCreateRuntimeHelper(TR_PPCicallVMprJavaSendVirtualF, false, false, false)->getMethodAddress();
+                 dispatcher = (intptr_t)cg->symRefTab()->findOrCreateRuntimeHelper(TR_PPCicallVMprJavaSendVirtualF)->getMethodAddress();
                  break;
           case TR::Double:
-                 dispatcher = (intptr_t)cg->symRefTab()->findOrCreateRuntimeHelper(TR_PPCicallVMprJavaSendVirtualD, false, false, false)->getMethodAddress();
+                 dispatcher = (intptr_t)cg->symRefTab()->findOrCreateRuntimeHelper(TR_PPCicallVMprJavaSendVirtualD)->getMethodAddress();
                  break;
           default:
                  TR_ASSERT(0, "Bad return data type for a call node.  DataType was %s\n",
@@ -988,25 +986,25 @@ TR_J2IThunk *TR::PPCCallSnippet::generateInvokeExactJ2IThunk(TR::Node *callNode,
    switch (callNode->getDataType())
           {
           case TR::NoType:
-                 dispatcherSymbol = cg->symRefTab()->findOrCreateRuntimeHelper(TR_icallVMprJavaSendInvokeExact0, false, false, false);
+                 dispatcherSymbol = cg->symRefTab()->findOrCreateRuntimeHelper(TR_icallVMprJavaSendInvokeExact0);
                  break;
           case TR::Int32:
-                 dispatcherSymbol = cg->symRefTab()->findOrCreateRuntimeHelper(TR_icallVMprJavaSendInvokeExact1, false, false, false);
+                 dispatcherSymbol = cg->symRefTab()->findOrCreateRuntimeHelper(TR_icallVMprJavaSendInvokeExact1);
                  break;
           case TR::Address:
                  if (comp->target().is64Bit())
-                    dispatcherSymbol = cg->symRefTab()->findOrCreateRuntimeHelper(TR_icallVMprJavaSendInvokeExactJ, false, false, false);
+                    dispatcherSymbol = cg->symRefTab()->findOrCreateRuntimeHelper(TR_icallVMprJavaSendInvokeExactJ);
                  else
-                    dispatcherSymbol = cg->symRefTab()->findOrCreateRuntimeHelper(TR_icallVMprJavaSendInvokeExact1, false, false, false);
+                    dispatcherSymbol = cg->symRefTab()->findOrCreateRuntimeHelper(TR_icallVMprJavaSendInvokeExact1);
                  break;
           case TR::Int64:
-                 dispatcherSymbol = cg->symRefTab()->findOrCreateRuntimeHelper(TR_icallVMprJavaSendInvokeExactJ, false, false, false);
+                 dispatcherSymbol = cg->symRefTab()->findOrCreateRuntimeHelper(TR_icallVMprJavaSendInvokeExactJ);
                  break;
           case TR::Float:
-                 dispatcherSymbol = cg->symRefTab()->findOrCreateRuntimeHelper(TR_icallVMprJavaSendInvokeExactF, false, false, false);
+                 dispatcherSymbol = cg->symRefTab()->findOrCreateRuntimeHelper(TR_icallVMprJavaSendInvokeExactF);
                  break;
           case TR::Double:
-                 dispatcherSymbol = cg->symRefTab()->findOrCreateRuntimeHelper(TR_icallVMprJavaSendInvokeExactD, false, false, false);
+                 dispatcherSymbol = cg->symRefTab()->findOrCreateRuntimeHelper(TR_icallVMprJavaSendInvokeExactD);
                  break;
           default:
                  TR_ASSERT(0, "Bad return data type '%s' for call node [" POINTER_PRINTF_FORMAT "]\n",
@@ -1240,10 +1238,7 @@ TR_Debug::print(TR::FILE *pOutFile, TR::PPCCallSnippet * snippet)
    const char          *labelString = NULL;
    bool                 isNativeStatic = false;
 
-   bool forceUnresolvedDispatch = fej9->forceUnresolvedDispatch();
-   if (comp->getOption(TR_UseSymbolValidationManager))
-      forceUnresolvedDispatch = false;
-
+   bool forceUnresolvedDispatch = !fej9->isResolvedDirectDispatchGuaranteed(comp);
    if (methodSymbol->isHelper() &&
        methodSymRef->isOSRInductionHelper())
       {

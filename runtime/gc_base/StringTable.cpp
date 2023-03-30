@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2020 IBM Corp. and others
+ * Copyright (c) 2001, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -32,7 +32,7 @@
 #include "StringTable.hpp"
 #include "VMHelpers.hpp"
 
-/* the following is all ones except the least significant bit */
+/* the following is all zeros except the least significant bit */
 #define TYPE_UTF8 ((UDATA)1)
 
 extern "C" {
@@ -44,7 +44,7 @@ typedef struct stringTableUTF8Query {
 } stringTableUTF8Query;
 
 static UDATA stringHashFn (void *key, void *userData);
-static UDATA stringHashEqualFn (void *leftKey, void *rightKey, void *userData);
+static BOOLEAN stringHashEqualFn (void *leftKey, void *rightKey, void *userData);
 static IDATA stringComparatorFn(struct J9AVLTree *tree, struct J9AVLTreeNode *leftNode, struct J9AVLTreeNode *rightNode);
 static j9object_t setupCharArray(J9VMThread *vmThread, j9object_t sourceString, j9object_t newString);
 
@@ -209,8 +209,6 @@ static IDATA
 stringComparatorFn(struct J9AVLTree *tree, struct J9AVLTreeNode *leftNode, struct J9AVLTreeNode *rightNode)
 {
 	J9JavaVM *javaVM = (J9JavaVM*) tree->userData;
-	MM_GCExtensionsBase *extensions = MM_GCExtensionsBase::getExtensions(javaVM->omrVM);
-	bool isMetronome = extensions->isMetronomeGC();
 	j9object_t right_s = NULL;
 	U_32 rightLength = 0;
 	j9object_t right_p = NULL;
@@ -241,7 +239,7 @@ stringComparatorFn(struct J9AVLTree *tree, struct J9AVLTreeNode *leftNode, struc
 			U_16 rightChar = 0;
 			U_32 consumed = 0;
 
-			consumed = decodeUTF8CharN(u8Ptr+left_i, &leftChar, leftLength-left_i);
+			consumed = (U_32)VM_VMHelpers::decodeUTF8CharN(u8Ptr+left_i, &leftChar, leftLength-left_i);
 			if (0 == consumed) { 
 				/* reached the end of the left string early */
 				rc = -1;
@@ -266,17 +264,15 @@ stringComparatorFn(struct J9AVLTree *tree, struct J9AVLTreeNode *leftNode, struc
 			rc = 1;
 			goto done;
 		}
-		if (isMetronome) {
-#if defined(J9VM_GC_REALTIME) 
-			if (!j9gc_objaccess_checkStringConstantLive(javaVM, right_s)) {
-				/* Consider dead strings as 'lower than' live strings for the comparator.  
-				 * Also consider UTF8s as alive.
-				 */
-				rc = -1;
-				goto done;
-			}
-#endif
+
+		if (!checkStringConstantLive(javaVM, right_s)) {
+			/* Consider dead strings as 'lower than' live strings for the comparator.
+			 * Also consider UTF8s as alive.
+			 */
+			rc = -1;
+			goto done;
 		}
+
 		/* The strings had the same characters with the same length and both were alive */
 		rc = 0;
 	} else {
@@ -321,22 +317,18 @@ stringComparatorFn(struct J9AVLTree *tree, struct J9AVLTreeNode *leftNode, struc
 			goto done;
 		}
 
-		if (isMetronome) {
-#if defined(J9VM_GC_REALTIME) 
-			/* Consider 'live' strings as 'higher' than their dead counterparts. */
-			BOOLEAN leftStringAlive = j9gc_objaccess_checkStringConstantLive(javaVM, left_s);
-			BOOLEAN rightStringAlive = j9gc_objaccess_checkStringConstantLive(javaVM, right_s);
-			
-			if (leftStringAlive && (!rightStringAlive)) {
-				rc = 1;
-			} else if (rightStringAlive && (!leftStringAlive)) {
-				rc = -1;
-			} else if (rightStringAlive == leftStringAlive) {
-				rc = 0;
-			} else {
-				Assert_MM_unreachable();
-			}
-#endif
+		/* Consider 'live' strings as 'higher' than their dead counterparts. */
+		BOOLEAN leftStringAlive = checkStringConstantLive(javaVM, left_s);
+		BOOLEAN rightStringAlive = checkStringConstantLive(javaVM, right_s);
+
+		if (leftStringAlive && (!rightStringAlive)) {
+			rc = 1;
+		} else if (rightStringAlive && (!leftStringAlive)) {
+			rc = -1;
+		} else if (rightStringAlive == leftStringAlive) {
+			rc = 0;
+		} else {
+			Assert_MM_unreachable();
 		}
 	}
 
@@ -352,11 +344,10 @@ done:
  * @param userData pointer to Java VM Thread
  */
 
-static UDATA
+static BOOLEAN
 stringHashEqualFn(void *leftKey, void *rightKey, void *userData)
 {
 	J9JavaVM *javaVM = (J9JavaVM*) userData;
-	bool isMetronome = MM_GCExtensionsBase::getExtensions(javaVM->omrVM)->isMetronomeGC();
 	j9object_t left_s = NULL;
 	U_32 leftLength = 0;
 	j9object_t left_p = NULL;
@@ -384,7 +375,7 @@ stringHashEqualFn(void *leftKey, void *rightKey, void *userData)
 			U_16 leftChar, rightChar;
 			U_32 consumed;
 
-			consumed = decodeUTF8CharN(u8Ptr+right_i, &rightChar, rightLength-right_i);
+			consumed = (U_32)VM_VMHelpers::decodeUTF8CharN(u8Ptr+right_i, &rightChar, rightLength-right_i);
 			if (0 == consumed) { /* reached the end of the string early */
 				return FALSE;
 			}
@@ -404,15 +395,12 @@ stringHashEqualFn(void *leftKey, void *rightKey, void *userData)
 		if (right_i != rightLength) {
 			return FALSE;
 		}
-		if (isMetronome) {
-#if defined(J9VM_GC_REALTIME) 
-			/*
-			 * Only consider it to be a match if both string constants are live (i.e. they aren't about to be cleared).
-			 * Since the right string is UTF8, re-use the left string as a placeholder
-			 */
-			rc = j9gc_objaccess_checkStringConstantsLive(javaVM, left_s, left_s);
-#endif
-		}
+
+		/*
+		 * Only consider it to be a match if both string constants are live (i.e. they aren't about to be cleared).
+		 * Since the right string is UTF8, re-use the left string as a placeholder
+		 */
+		rc = checkStringConstantsLive(javaVM, left_s, left_s);
 	} else {
 		j9object_t right_s = *(j9object_t *)rightKey;
 		U_32 right_i = 0;
@@ -422,7 +410,7 @@ stringHashEqualFn(void *leftKey, void *rightKey, void *userData)
 		bool rightCompressed = IS_STRING_COMPRESSED_VM(javaVM, right_s);
 
 		/* Lengths have different significance for String and UTF8 */
-		if ((J9VMJAVALANGSTRING_HASHCODE_VM(javaVM, left_s) != J9VMJAVALANGSTRING_HASHCODE_VM(javaVM, right_s))
+		if ((J9VMJAVALANGSTRING_HASH_VM(javaVM, left_s) != J9VMJAVALANGSTRING_HASH_VM(javaVM, right_s))
 			|| (leftLength != rightLength))	{
 			return FALSE;
 		}
@@ -446,20 +434,17 @@ stringHashEqualFn(void *leftKey, void *rightKey, void *userData)
 				return FALSE;
 			}
 		}
-		if (isMetronome) {
-#if defined(J9VM_GC_REALTIME) 
-			/*
-			 * Only consider it to be a match if both string constants are live (i.e. they aren't about to be cleared).
-			 */
-			rc = j9gc_objaccess_checkStringConstantsLive(javaVM, left_s, right_s);
-#endif
-		}
+
+		/*
+		 * Only consider it to be a match if both string constants are live (i.e. they aren't about to be cleared).
+		 */
+		rc = checkStringConstantsLive(javaVM, left_s, right_s);
 	}
 
 	return rc;
 }
 
-UDATA
+BOOLEAN
 j9gc_stringHashEqualFn(void *leftKey, void *rightKey, void *userData)
 {
 	return stringHashEqualFn(leftKey, rightKey, userData);
@@ -508,10 +493,10 @@ stringHashFn(void *key, void *userData)
 		hashCode = u8Ptr->hash;
 	} else {
 		j9object_t s = *(j9object_t*)key;
-		hashCode = J9VMJAVALANGSTRING_HASHCODE_VM(javaVM, s);
+		hashCode = J9VMJAVALANGSTRING_HASH_VM(javaVM, s);
 		if (hashCode == 0) {
 			hashCode = computeJavaHashForExpandedString(javaVM, s);
-			J9VMJAVALANGSTRING_SET_HASHCODE_VM(javaVM, s, hashCode);
+			J9VMJAVALANGSTRING_SET_HASH_VM(javaVM, s, hashCode);
 		}
 	}
 
@@ -524,6 +509,39 @@ j9gc_stringHashFn(void *key, void *userData)
 	return stringHashFn(key, userData);
 }
 
+/**
+ * Assuming incoming UTF8 byte stream contains only ISO-8859-1/Latin-1 characters.
+ * Decode data & store to byteArray.
+ * 
+ * @param vmThread[in] the VM thread
+ * @param data[in] the UTF8 byte stream
+ * @param length[in] the length of incoming UTF8 byte stream
+ * @param byteArray[out] the target byte array to store the data
+ * @param translateSlashes[in] the flag to translate slashes
+ * 
+ * @return last slash position to be restored to `/` for anonymous classes
+ */
+MMINLINE static UDATA
+storeLatin1ByteArrayhelper(J9VMThread *vmThread, U_8 *data, UDATA length, j9object_t byteArray, bool translateSlashes)
+{
+	UDATA lastSlash = 0;
+	UDATA index = 0;
+	while (0 != length) {
+		U_16 unicode = 0;
+		UDATA consumed = VM_VMHelpers::decodeUTF8CharN(data, &unicode, length);
+		Assert_GC_true_with_message2(MM_EnvironmentBase::getEnvironment(vmThread->omrVMThread), 0 != consumed, "Invalid UTF8 character at %p, %zu", data, length);
+		data += consumed;
+		length -= consumed;
+		if (translateSlashes && ('/' == unicode)) {
+			lastSlash = index;
+			unicode = '.';
+		}
+		J9JAVAARRAYOFBYTE_STORE(vmThread, byteArray, index, unicode);
+		index += 1;
+	}
+	return lastSlash;
+}
+
 j9object_t
 j9gc_createJavaLangString(J9VMThread *vmThread, U_8 *data, UDATA length, UDATA stringFlags)
 {
@@ -532,13 +550,64 @@ j9gc_createJavaLangString(J9VMThread *vmThread, U_8 *data, UDATA length, UDATA s
 	MM_StringTable *stringTable = MM_GCExtensions::getExtensions(vm->omrVM)->getStringTable();
 	j9object_t result = NULL;
 	j9object_t charArray = NULL;
-	UDATA allocateFlags = J9_GC_ALLOCATE_OBJECT_NON_INSTRUMENTABLE;
-
-	if (VM_VMHelpers::isUTF8ASCII(data, length)) {
-		stringFlags |= J9_STR_ASCII;
-	}
+	bool compressStrings = IS_STRING_COMPRESSION_ENABLED_VM(vm);
+	bool isUnicode = J9_ARE_ANY_BITS_SET(stringFlags, J9_STR_UNICODE);
+	bool translateSlashes = J9_ARE_ANY_BITS_SET(stringFlags, J9_STR_XLAT);
+	bool anonClassName = J9_ARE_ANY_BITS_SET(stringFlags, J9_STR_ANON_CLASS_NAME);
+	bool internString = J9_ARE_ANY_BITS_SET(stringFlags, J9_STR_INTERN);
+	UDATA unicodeLength = 0;
 
 	Trc_MM_createJavaLangString_Entry(vmThread, length, data, stringFlags);
+
+	/* Determine if the string contains only ASCII (<= 0x7F) characters */
+	bool isASCII = true;
+	/* Determine if the string contains only Latin-1 (<= 0xFF) characters */
+	bool isASCIIorLatin1 = true;
+	if (isUnicode) {
+		/* Translation and anon class name are not currently supported for unicode input */
+		Assert_MM_false(translateSlashes || anonClassName);
+		/* Currently, the only users of isASCII when isUnicode is true are also gated by compressStrings, so
+		 * don't bother computing isASCII if compression is off.
+		 */
+		unicodeLength = length / 2;
+		if (compressStrings) {
+			U_16 *unicodeData = (U_16*)data;
+			for (UDATA i = 0; i < unicodeLength; ++i) {
+				if (unicodeData[i] > 0x7F) {
+					isASCII = false;
+					if (J2SE_VERSION(vm) >= J2SE_V17) {
+						for (UDATA j = i; j < unicodeLength; ++j) {
+							if (unicodeData[j] > 0xFF) {
+								isASCIIorLatin1 = false;
+								break;
+							}
+						}
+					} else {
+						isASCIIorLatin1 = false;
+					}
+					break;
+				}
+			}
+		} else {
+			/* For future safety, ensure isASCII is false if not computed correctly */
+			isASCII = false;
+			isASCIIorLatin1 = false;
+		}
+	} else {
+		for (UDATA i = 0; i < length; ++i) {
+			if (data[i] > 0x7F) {
+				isASCII = false;
+				if (compressStrings && (J2SE_VERSION(vm) >= J2SE_V17)) {
+					U_8 *dataTmp = data + i;
+					UDATA lengthTmp = length - i;
+					isASCIIorLatin1 = VM_VMHelpers::isLatin1String(dataTmp, lengthTmp);
+				} else {
+					isASCIIorLatin1 = false;
+				}
+				break;
+			}
+		}
+	}
 
 	/* For strings that should be interned, and don't need to be converted or translated,
 	 * check if they are already in the string hashtable.  Otherwise, don't bother with
@@ -549,11 +618,13 @@ j9gc_createJavaLangString(J9VMThread *vmThread, U_8 *data, UDATA length, UDATA s
 	 * add the string before this one is not fatal and is ignored.
 	 */
 
-	if ((stringFlags & (J9_STR_XLAT | J9_STR_UNICODE | J9_STR_INTERN)) == J9_STR_INTERN) {
+	if (internString && !translateSlashes && !isUnicode) {
 		UDATA hash = 0;
 
-		if (J9_ARE_ANY_BITS_SET(stringFlags, J9_STR_ASCII)) {
-			hash = VM_VMHelpers::computeHashForASCII(data, length);
+		if (isASCII) {
+			for (UDATA i = 0; i < length; ++i) {
+				hash = (hash << 5) - hash + data[i];
+			}
 		} else {
 			hash = VM_VMHelpers::computeHashForUTF8(data, length);
 		}
@@ -566,12 +637,11 @@ j9gc_createJavaLangString(J9VMThread *vmThread, U_8 *data, UDATA length, UDATA s
 	}
 
 	if (NULL == result) {
-		UDATA unicodeLength = 0;
+		UDATA allocateFlags = J9_ARE_ANY_BITS_SET(stringFlags, J9_STR_INSTRUMENTABLE)
+				? J9_GC_ALLOCATE_OBJECT_INSTRUMENTABLE
+				: J9_GC_ALLOCATE_OBJECT_NON_INSTRUMENTABLE;
 
-		if (stringFlags & J9_STR_INSTRUMENTABLE) {
-			allocateFlags = J9_GC_ALLOCATE_OBJECT_INSTRUMENTABLE;
-		}
-		if ((stringFlags & (J9_STR_TENURE | J9_STR_INTERN)) != 0) {
+		if (J9_ARE_ANY_BITS_SET(stringFlags, J9_STR_TENURE | J9_STR_INTERN)) {
 			allocateFlags |= J9_GC_ALLOCATE_OBJECT_TENURED;
 		}
 
@@ -581,26 +651,33 @@ j9gc_createJavaLangString(J9VMThread *vmThread, U_8 *data, UDATA length, UDATA s
 			goto nomem;
 		}
 
-		if (J9_STR_UNICODE == (stringFlags & J9_STR_UNICODE)) {
-			unicodeLength = length / 2;
-		} else {
-			if (J9_ARE_ANY_BITS_SET(stringFlags, J9_STR_ASCII)) {
+		if (!isUnicode) {
+			if (isASCII) {
 				unicodeLength = length;
 			} else {
-				unicodeLength = VM_VMHelpers::getUTF8UnicodeLength(data, length);
+				UDATA tempLength = length;
+				U_8 *tempData = data;
+				while (tempLength != 0) {
+					U_16 unicode = 0;
+					UDATA consumed = VM_VMHelpers::decodeUTF8CharN(tempData, &unicode, tempLength);
+					Assert_GC_true_with_message2(MM_EnvironmentBase::getEnvironment(vmThread->omrVMThread), 0 != consumed, "Invalid UTF8 character at %p, %zu", tempData, tempLength);
+					tempData += consumed;
+					tempLength -= consumed;
+					unicodeLength += 1;
+				}
 			}
 		}
 
 		PUSH_OBJECT_IN_SPECIAL_FRAME(vmThread, result);
 
 		if (J9_ARE_ANY_BITS_SET(vm->runtimeFlags, J9_RUNTIME_STRING_BYTE_ARRAY)) {
-			if (IS_STRING_COMPRESSION_ENABLED_VM(vm) && J9_ARE_ANY_BITS_SET(stringFlags, J9_STR_ASCII)) {
+			if (compressStrings && isASCIIorLatin1) {
 				charArray = J9AllocateIndexableObject(vmThread, vm->byteArrayClass, (U_32) unicodeLength, allocateFlags);
 			} else {
 				charArray = J9AllocateIndexableObject(vmThread, vm->byteArrayClass, (U_32) unicodeLength * 2, allocateFlags);
 			}
 		} else {
-			if (IS_STRING_COMPRESSION_ENABLED_VM(vm) && J9_ARE_ANY_BITS_SET(stringFlags, J9_STR_ASCII)) {
+			if (compressStrings && isASCII) {
 				charArray = J9AllocateIndexableObject(vmThread, vm->charArrayClass, (U_32) (unicodeLength + 1) / 2, allocateFlags);
 			} else {
 				charArray = J9AllocateIndexableObject(vmThread, vm->charArrayClass, (U_32) unicodeLength, allocateFlags);
@@ -613,42 +690,111 @@ j9gc_createJavaLangString(J9VMThread *vmThread, U_8 *data, UDATA length, UDATA s
 			goto nomem;
 		}
 
-		if (J9_STR_UNICODE == (stringFlags & J9_STR_UNICODE)) {
-			UDATA i;
+		if (isUnicode) {
 			U_16 * unicodeData = (U_16 *) data;
 
-			if (IS_STRING_COMPRESSION_ENABLED_VM(vm) && J9_ARE_ANY_BITS_SET(stringFlags, J9_STR_ASCII)) {
-				for (i = 0; i < unicodeLength; ++i) {
+			if (compressStrings && isASCIIorLatin1) {
+				for (UDATA i = 0; i < unicodeLength; ++i) {
 					J9JAVAARRAYOFBYTE_STORE(vmThread, charArray, i, (I_8)unicodeData[i]);
 				}
 			} else {
-				for (i = 0; i < unicodeLength; ++i) {
+				for (UDATA i = 0; i < unicodeLength; ++i) {
 					J9JAVAARRAYOFCHAR_STORE(vmThread, charArray, i, unicodeData[i]);
 				}
 			}
 		} else {
-			if (IS_STRING_COMPRESSION_ENABLED_VM(vm) && J9_ARE_ANY_BITS_SET(stringFlags, J9_STR_ASCII)) {
-				VM_VMHelpers::copyUTF8ToBackingArrayAsASCII(vmThread, data, length, stringFlags, charArray, 0);
+			if (compressStrings && isASCIIorLatin1) {
+				UDATA lastSlash = 0;
+				if (translateSlashes) {
+					if (isASCII) {
+						for (UDATA i = 0; i < length; ++i) {
+							U_8 c = data[i];
+							if ('/' == c) {
+								lastSlash = i;
+								c = '.';
+							}
+							J9JAVAARRAYOFBYTE_STORE(vmThread, charArray, i, c);
+						}
+					} else {
+						lastSlash = storeLatin1ByteArrayhelper(vmThread, data, length, charArray, true);
+					}
+				} else {
+					if (isASCII) {
+						for (UDATA i = 0; i < length; ++i) {
+							J9JAVAARRAYOFBYTE_STORE(vmThread, charArray, i, data[i]);
+						}
+					} else {
+						lastSlash = storeLatin1ByteArrayhelper(vmThread, data, length, charArray, false);
+					}
+				}
+
+				/* Anonymous classes have the following name format [className]/[ROMADDRESS], so we have to fix up the name
+				 * because the previous loops have converted '/' to '.' already.
+				 */
+				if (anonClassName && (0 != lastSlash)) {
+					J9JAVAARRAYOFBYTE_STORE(vmThread, charArray, lastSlash, (U_8)'/');
+				}
 			} else {
-				VM_VMHelpers::copyUTF8ToBackingArrayAsUTF16(vmThread, data, length, stringFlags, charArray, 0);
+				UDATA lastSlash = 0;
+				if (isASCII) {
+					if (translateSlashes) {
+						for (UDATA i = 0; i < length; ++i) {
+							U_8 c = data[i];
+							if ('/' == c) {
+								lastSlash = i;
+								c = '.';
+							}
+							J9JAVAARRAYOFCHAR_STORE(vmThread, charArray, i, c);
+						}
+					} else {
+						for (UDATA i = 0; i < length; ++i) {
+							J9JAVAARRAYOFCHAR_STORE(vmThread, charArray, i, data[i]);
+						}
+					}
+				} else {
+					UDATA writeIndex = 0;
+					UDATA tempLength = length;
+					U_8* tempData = data;
+					while (tempLength > 0) {
+						U_16 unicode = 0;
+						UDATA consumed = VM_VMHelpers::decodeUTF8Char(tempData, &unicode);
+						if (translateSlashes) {
+							if ((U_16)'/' == unicode) {
+								lastSlash = writeIndex;
+								unicode = (U_16)'.';
+							}
+						}
+						J9JAVAARRAYOFCHAR_STORE(vmThread, charArray, writeIndex, unicode);
+						writeIndex += 1;
+						tempData += consumed;
+						tempLength -= consumed;
+					}
+				}
+
+				/* Anonymous classes have the following name format [className]/[ROMADDRESS], so we have to fix up the name
+				 * because the previous loops have converted '/' to '.' already.
+				 */
+				if (anonClassName && (0 != lastSlash)) {
+					J9JAVAARRAYOFCHAR_STORE(vmThread, charArray, lastSlash, (U_16)'/');
+				}
 			}
 		}
 
 		J9VMJAVALANGSTRING_SET_VALUE(vmThread, result, charArray);
 
-		if (IS_STRING_COMPRESSION_ENABLED_VM(vm)) {
-			if (J9_ARE_ANY_BITS_SET(stringFlags, J9_STR_ASCII)) {
-				if (J2SE_VERSION(vm) >= J2SE_V11) {
-					J9VMJAVALANGSTRING_SET_CODER(vmThread, result, 0);
-				} else {
-					J9VMJAVALANGSTRING_SET_COUNT(vmThread, result, (I_32)unicodeLength);
-				}
+		if (compressStrings) {
+			if (isASCIIorLatin1) {
+#if JAVA_SPEC_VERSION >= 11
+				J9VMJAVALANGSTRING_SET_CODER(vmThread, result, 0);
+#else /* JAVA_SPEC_VERSION >= 11 */
+				J9VMJAVALANGSTRING_SET_COUNT(vmThread, result, (I_32)unicodeLength);
+#endif /* JAVA_SPEC_VERSION >= 11 */
 			} else {
-				if (J2SE_VERSION(vm) >= J2SE_V11) {
-					J9VMJAVALANGSTRING_SET_CODER(vmThread, result, 1);
-				} else {
-					J9VMJAVALANGSTRING_SET_COUNT(vmThread, result, (I_32)unicodeLength | (I_32)0x80000000);
-				}
+#if JAVA_SPEC_VERSION >= 11
+				J9VMJAVALANGSTRING_SET_CODER(vmThread, result, 1);
+#else /* JAVA_SPEC_VERSION >= 11 */
+				J9VMJAVALANGSTRING_SET_COUNT(vmThread, result, (I_32)unicodeLength | (I_32)0x80000000);
+#endif /* JAVA_SPEC_VERSION >= 11 */
 
 				if (J9VMJAVALANGSTRING_COMPRESSIONFLAG(vmThread, stringClass) == 0) {
 					/*
@@ -671,18 +817,18 @@ j9gc_createJavaLangString(J9VMThread *vmThread, U_8 *data, UDATA length, UDATA s
 				}
 			}
 		} else {
-			if (J2SE_VERSION(vm) >= J2SE_V11) {
-				J9VMJAVALANGSTRING_SET_CODER(vmThread, result, 1);
-			} else {
-				J9VMJAVALANGSTRING_SET_COUNT(vmThread, result, (I_32)unicodeLength);
-			}
+#if JAVA_SPEC_VERSION >= 11
+			J9VMJAVALANGSTRING_SET_CODER(vmThread, result, 1);
+#else /* JAVA_SPEC_VERSION >= 11 */
+			J9VMJAVALANGSTRING_SET_COUNT(vmThread, result, (I_32)unicodeLength);
+#endif /* JAVA_SPEC_VERSION >= 11 */
 		}
 
 		MM_AtomicOperations::writeBarrier();
 
 		/* Intern the String if requested */
 
-		if (stringFlags & J9_STR_INTERN) {
+		if (internString) {
 			result = stringTable->addStringToInternTable(vmThread, result);
 			if (NULL == result) {
 				goto nomem;
@@ -759,11 +905,11 @@ setupCharArray(J9VMThread *vmThread, j9object_t sourceString, j9object_t newStri
 
 		J9VMJAVALANGSTRING_SET_VALUE(vmThread, newString, newChars);
 
-		if (J2SE_VERSION(vm) >= J2SE_V11) {
-			J9VMJAVALANGSTRING_SET_CODER(vmThread, newString, J9VMJAVALANGSTRING_CODER(vmThread, sourceString));
-		} else {
-			J9VMJAVALANGSTRING_SET_COUNT(vmThread, newString, J9VMJAVALANGSTRING_COUNT(vmThread, sourceString));
-		}
+#if JAVA_SPEC_VERSION >= 11
+		J9VMJAVALANGSTRING_SET_CODER(vmThread, newString, J9VMJAVALANGSTRING_CODER(vmThread, sourceString));
+#else /* JAVA_SPEC_VERSION >= 11 */
+		J9VMJAVALANGSTRING_SET_COUNT(vmThread, newString, J9VMJAVALANGSTRING_COUNT(vmThread, sourceString));
+#endif /* JAVA_SPEC_VERSION >= 11 */
 
 		result = newString;
 	}
@@ -771,15 +917,13 @@ setupCharArray(J9VMThread *vmThread, j9object_t sourceString, j9object_t newStri
 	return result;
 }
 
-
-j9object_t	
+j9object_t
 j9gc_internString(J9VMThread *vmThread, j9object_t sourceString)
 {
 	J9JavaVM *vm = vmThread->javaVM;
 	J9InternalVMFunctions * const vmFuncs = vm->internalVMFunctions;
 	MM_GCExtensions *extensions = MM_GCExtensions::getExtensions(vm->omrVM);
 	MM_StringTable *stringTable = extensions->getStringTable();
-	bool isMetronome = extensions->isMetronomeGC();
 	j9object_t internedString = NULL;
 	j9object_t *candidatePtr = NULL;
 	j9object_t candidate = NULL;
@@ -790,21 +934,11 @@ j9gc_internString(J9VMThread *vmThread, j9object_t sourceString)
 	candidate = *candidatePtr;
 
 	if ((NULL != candidate) && stringHashEqualFn(&candidate, &sourceString, vm)) {
-		if (isMetronome) {
-#if defined(J9VM_GC_REALTIME) 
-			/*
-			 * This can only be used if the current candidate pointer is live.
-			 * Pass in candidate twice since we only have one string.
-			 */
-			if (FALSE != j9gc_objaccess_checkStringConstantsLive(vm, candidate, candidate)) {
-				Trc_MM_stringTableCacheHit(vmThread, candidate);
-				return candidate;
-			}
-#else
-			Trc_MM_stringTableCacheHit(vmThread, candidate);
-			return candidate;
-#endif
-		} else {
+		/*
+		 * This can only be used if the current candidate pointer is live.
+		 * Pass in candidate twice since we only have one string.
+		 */
+		if (checkStringConstantsLive(vm, candidate, candidate)) {
 			Trc_MM_stringTableCacheHit(vmThread, candidate);
 			return candidate;
 		}
@@ -838,6 +972,62 @@ j9gc_internString(J9VMThread *vmThread, j9object_t sourceString)
 	*candidatePtr = internedString;
 	Trc_MM_stringTableCacheMiss(vmThread, internedString);
 	return internedString;
+}
+
+typedef struct {
+	J9UTF8* utf;
+	j9object_t stringObject;
+} J9UTFCacheEntry;
+
+static UDATA
+utfCacheHashFn(void *key, void *userData)
+{
+	/* UTF8 pointers are 2-aligned, so shift the pointer for maximum entropy */
+	return ((UDATA)((J9UTFCacheEntry*)key)->utf) >> 1;
+}
+
+static UDATA
+utfCacheHashEqualFn(void *leftKey, void *rightKey, void *userData)
+{
+	return ((J9UTFCacheEntry*)leftKey)->utf == ((J9UTFCacheEntry*)rightKey)->utf;
+}
+
+j9object_t
+j9gc_createJavaLangStringWithUTFCache(J9VMThread *vmThread, J9UTF8 *utf)
+{
+	j9object_t result = NULL;
+	/* Allocation may cause a GC which frees the cache - ensure no local copy of the cache
+	 * is held across the allocation.
+	 */
+	{
+		J9HashTable *utfCache = vmThread->utfCache;
+		if (NULL != utfCache) {
+			J9UTFCacheEntry exemplar = { utf, NULL };
+			J9UTFCacheEntry *entry = (J9UTFCacheEntry*)hashTableFind(utfCache, &exemplar);
+			if (NULL != entry) {
+				result = J9WEAKROOT_OBJECT_LOAD(vmThread, &entry->stringObject);
+				goto done;
+			}
+		}
+	}
+	result = j9gc_createJavaLangString(vmThread, J9UTF8_DATA(utf), J9UTF8_LENGTH(utf), J9_STR_INTERN);
+	if (NULL != result) {
+		if (J9_ARE_ANY_BITS_SET(vmThread->javaVM->extendedRuntimeFlags2, J9_EXTENDED_RUNTIME2_ENABLE_UTF_CACHE)) {
+			J9HashTable *utfCache = vmThread->utfCache;
+			if (NULL == utfCache) {
+				/* Failure to allocate the cache is non-fatal and is ignored */
+				utfCache = hashTableNew(OMRPORT_FROM_J9PORT(vmThread->javaVM->portLibrary), J9_GET_CALLSITE(), 0, sizeof(J9UTFCacheEntry), sizeof(void*), 0, J9MEM_CATEGORY_VM, utfCacheHashFn, utfCacheHashEqualFn, NULL, NULL);
+				vmThread->utfCache = utfCache;
+			}
+			if (NULL != utfCache) {
+				J9UTFCacheEntry entry = { utf, result };
+				/* Failure to add to the cache is non-fatal and is ignored */
+				hashTableAdd(utfCache, (void*)&entry);
+			}
+		}
+	}
+done:
+	return result;
 }
 
 } /* end of extern "C" */

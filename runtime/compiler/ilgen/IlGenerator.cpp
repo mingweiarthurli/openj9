@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -210,15 +210,6 @@ bool TR_J9ByteCodeIlGenerator::internalGenIL()
    TR::RecognizedMethod recognizedMethod = _methodSymbol->getRecognizedMethod();
    if (recognizedMethod != TR::unknownMethod)
       {
-      if (recognizedMethod == TR::java_math_BigDecimal_DFPGetHWAvailable)
-         {
-         if (performTransformation(comp(), "O^O IlGenerator: Generate java/math/BigDecimal.DFPGetHWAvailable\n"))
-            {
-            genDFPGetHWAvailable();
-            return true;
-            }
-         }
-
       if (recognizedMethod == TR::com_ibm_jit_JITHelpers_supportsIntrinsicCaseConversion && !TR::Compiler->om.canGenerateArraylets())
          {
          if (performTransformation(comp(), "O^O IlGenerator: Generate com/ibm/jit/JITHelpers.supportsIntrinsicCaseConversion\n"))
@@ -565,9 +556,10 @@ TR_J9ByteCodeIlGenerator::genILFromByteCodes()
       if (currNode->getOpCodeValue() == TR::checkcast
           && currNode->getSecondChild()->getOpCodeValue() == TR::loadaddr
           && currNode->getSecondChild()->getSymbolReference()->isUnresolved()
-          && // check whether the checkcast class is valuetype. Expansion is only needed for checkcast to reference type.
+          && // check whether the checkcast class is primitive valuetype. Expansion is only needed for checkcast to reference type.
             (!TR::Compiler->om.areValueTypesEnabled()
-            || !TR::Compiler->cls.isClassRefValueType(comp(), method()->classOfMethod(), currNode->getSecondChild()->getSymbolReference()->getCPIndex())))
+            || !TR::Compiler->cls.isClassRefPrimitiveValueType(comp(), method()->classOfMethod(),
+                                        currNode->getSecondChild()->getSymbolReference()->getCPIndex())))
           {
           unresolvedCheckcastTopsNeedingNullGuard.add(currTree);
           }
@@ -1071,17 +1063,10 @@ TR_J9ByteCodeIlGenerator::prependEntryCode(TR::Block * firstBlock)
       TR::Node * firstChild = pop();
       TR::SymbolReference * monEnterSymRef = symRefTab()->findOrCreateMethodMonitorEntrySymbolRef(_methodSymbol);
 
-      if (TR::Compiler->cls.classesOnHeap())
+      if (firstChild->getOpCodeValue() == TR::loadaddr && firstChild->getSymbol()->isClassObject())
          {
-         if (firstChild->getOpCodeValue() == TR::loadaddr && firstChild->getSymbol()->isClassObject())
-            {
-            monitorEnter = TR::Node::createWithSymRef(TR::aloadi, 1, 1, firstChild, symRefTab()->findOrCreateJavaLangClassFromClassSymbolRef());
-            monitorEnter = TR::Node::createWithSymRef(TR::monent, 1, 1, monitorEnter, monEnterSymRef);
-            }
-         else
-            {
-            monitorEnter = TR::Node::createWithSymRef(TR::monent, 1, 1, firstChild, monEnterSymRef);
-            }
+         monitorEnter = TR::Node::createWithSymRef(TR::aloadi, 1, 1, firstChild, symRefTab()->findOrCreateJavaLangClassFromClassSymbolRef());
+         monitorEnter = TR::Node::createWithSymRef(TR::monent, 1, 1, monitorEnter, monEnterSymRef);
          }
       else
          {
@@ -1132,9 +1117,10 @@ TR_J9ByteCodeIlGenerator::prependEntryCode(TR::Block * firstBlock)
    TR::Node * methodEnterHook = 0;
 
    static const char* disableMethodHookForCallees = feGetEnv("TR_DisableMethodHookForCallees");
-   if ((fej9()->isMethodTracingEnabled(_methodSymbol->getResolvedMethod()->getPersistentIdentifier()) ||
-        TR::Compiler->vm.canMethodEnterEventBeHooked(comp()))
-         && (isOutermostMethod() || !disableMethodHookForCallees))
+   if ((fej9()->isMethodTracingEnabled(_methodSymbol->getResolvedMethod()->getPersistentIdentifier())
+        || (!comp()->getOption(TR_FullSpeedDebug)
+            && TR::Compiler->vm.canMethodEnterEventBeHooked(comp())))
+       && (isOutermostMethod() || !disableMethodHookForCallees))
       {
       methodEnterHook = genMethodEnterHook();
       }
@@ -1210,11 +1196,10 @@ TR_J9ByteCodeIlGenerator::prependGuardedCountForRecompilation(TR::Block * origin
    else
       {
       TR::Node *loadFlagNode = TR::Node::createWithSymRef(node, TR::iload, 0, comp()->getSymRefTab()->findOrCreateCountForRecompileSymbolRef());
-#ifndef PUBLIC_BUILD
+
       if (comp()->getOption(TR_EnableGCRPatching))
          cmpFlagNode = TR::Node::createif(TR::ificmpne, loadFlagNode, TR::Node::create(node, TR::iconst, 0, 1), originalFirstBlock->getEntry());
       else
-#endif
          cmpFlagNode = TR::Node::createif(TR::ificmpeq, loadFlagNode, TR::Node::create(node, TR::iconst, 0, 0), originalFirstBlock->getEntry());
       }
    TR::TreeTop *cmpFlag = TR::TreeTop::create(comp(), cmpFlagNode);
@@ -1240,7 +1225,7 @@ TR_J9ByteCodeIlGenerator::prependGuardedCountForRecompilation(TR::Block * origin
    TR::Block *callRecompileBlock = TR::Block::createEmptyBlock(comp());
    callRecompileBlock->append(TR::TreeTop::createResetTree(comp(), node, comp()->getRecompilationInfo()->getCounterSymRef(),
                                                           comp()->getOptions()->getGCRResetCount(), NULL, true));
-#ifndef PUBLIC_BUILD
+
    // Create the instruction that will patch my cmp
    if (comp()->getOption(TR_EnableGCRPatching))
       {
@@ -1250,7 +1235,6 @@ TR_J9ByteCodeIlGenerator::prependGuardedCountForRecompilation(TR::Block * origin
                              comp()->getSymRefTab()->findOrCreateGCRPatchPointSymbolRef())));
       }
 
-#endif
    TR::TreeTop *callTree = TR::TransformUtil::generateRetranslateCallerWithPrepTrees(node, TR_PersistentMethodInfo::RecompDueToGCR, comp());
    callRecompileBlock->append(callTree);
    callRecompileBlock->setIsCold(true);
@@ -1351,52 +1335,6 @@ TR_J9ByteCodeIlGenerator::genJNIIL()
    prependEntryCode(_block);
 
    return true;
-   }
-
-void
-TR_J9ByteCodeIlGenerator::genDFPGetHWAvailable()
-   {
-   static int32_t constToLoad = -1;
-   initialize();
-   int32_t firstIndex = _bcIndex;
-   setIsGenerated(_bcIndex);
-   if (constToLoad == -1)
-      {
-      bool dfpbd = comp()->getOption(TR_DisableHysteresis);
-      bool nodfpbd =  comp()->getOption(TR_DisableDFP);
-      bool isPOWERDFP = comp()->target().cpu.isPower() && comp()->target().cpu.supportsDecimalFloatingPoint();
-
-      bool is390DFP =
-#ifdef TR_TARGET_S390
-         comp()->target().cpu.isZ() && comp()->target().cpu.supportsFeature(OMR_FEATURE_S390_DFP);
-#else
-         false;
-#endif
-
-      if ((isPOWERDFP || is390DFP) && ((!dfpbd && !nodfpbd) || dfpbd))
-         {
-         constToLoad = 1;
-         }
-      else
-         {
-         constToLoad = 0;
-         }
-      }
-
-   loadConstant(TR::iconst, constToLoad);
-
-   setIsGenerated(++_bcIndex);
-   _bcIndex = genReturn(method()->returnOpCode(), method()->isSynchronized());
-   TR::Block * block = blocks(firstIndex);
-   cfg()->addEdge(cfg()->getStart(), block);
-   block->setVisitCount(_blockAddedVisitCount);
-   block->getExit()->getNode()->copyByteCodeInfo(block->getLastRealTreeTop()->getNode());
-   cfg()->insertBefore(block, 0);
-   _bcIndex = 0;
-   _methodSymbol->setFirstTreeTop(blocks(0)->getEntry());
-   prependEntryCode(blocks(0));
-
-   dumpOptDetails(comp(), "\tOverriding default return value with %d.\n", constToLoad);
    }
 
 void
@@ -1602,12 +1540,9 @@ TR_J9ByteCodeIlGenerator::genNewInstanceImplThunk()
       //the call to findOrCreateClassSymbol is safe even though we pass CPI of -1 since it is guarded by !isAOT check in createResolvedMethodWithSignature
       loadSymbol(TR::loadaddr, symRefTab()->findOrCreateClassSymbol(_methodSymbol, -1, classId)); // This Class
 
-      if (TR::Compiler->cls.classesOnHeap())
-         {
-         TR::Node* node = pop();
-         node = TR::Node::createWithSymRef(TR::aloadi, 1, 1, node, symRefTab()->findOrCreateJavaLangClassFromClassSymbolRef());
-         push(node);
-         }
+      TR::Node* node = pop();
+      node = TR::Node::createWithSymRef(TR::aloadi, 1, 1, node, symRefTab()->findOrCreateJavaLangClassFromClassSymbolRef());
+      push(node);
 
       genTreeTop(genNodeAndPopChildren(TR::call, 3, accessCheckSymRef));
       }
@@ -1639,30 +1574,16 @@ TR_J9ByteCodeIlGenerator::genNewInstanceImplCall(TR::Node *classNode)
    TR_ResolvedMethod *caller = method()->owningMethod(); // the caller of Class.newInstance()
    TR_ASSERT(caller, "should only be transforming newInstanceImpl call if newInstance is being inlined");
 
-   TR::Node *callNode;
-   if (TR::Compiler->cls.classesOnHeap())
-      {
-      TR::Node *classNodeAsClass = TR::Node::createWithSymRef(TR::aloadi, 1, 1, classNode, symRefTab()->findOrCreateClassFromJavaLangClassSymbolRef());
-      //the call to findOrCreateClassSymbol is safe even though we pass CPI of -1 since we check for !compileRelocatableCode() in the caller
-      TR::Node *node         = TR::Node::createWithSymRef(TR::loadaddr, 0, symRefTab()->findOrCreateClassSymbol(_methodSymbol, -1, caller->classOfMethod()));
-      TR::Node *nodeAsObject = TR::Node::createWithSymRef(TR::aloadi, 1, 1, node, symRefTab()->findOrCreateJavaLangClassFromClassSymbolRef());
+   TR::Node *classNodeAsClass = TR::Node::createWithSymRef(TR::aloadi, 1, 1, classNode, symRefTab()->findOrCreateClassFromJavaLangClassSymbolRef());
+   //the call to findOrCreateClassSymbol is safe even though we pass CPI of -1 since we check for !compileRelocatableCode() in the caller
+   TR::Node *node         = TR::Node::createWithSymRef(TR::loadaddr, 0, symRefTab()->findOrCreateClassSymbol(_methodSymbol, -1, caller->classOfMethod()));
+   TR::Node *nodeAsObject = TR::Node::createWithSymRef(TR::aloadi, 1, 1, node, symRefTab()->findOrCreateJavaLangClassFromClassSymbolRef());
 
-      callNode = TR::Node::createWithSymRef(TR::acalli, 3, 3,
-                      classNodeAsClass,
-                      classNode,
-                      nodeAsObject,
-                      symRefTab()->findOrCreateObjectNewInstanceImplSymbol(_methodSymbol));
-      }
-   else
-      {
-      //the call to findOrCreateClassSymbol is safe even though we pass CPI of -1 since we check for !compileRelocatableCode() in the caller
-      callNode = TR::Node::createWithSymRef(TR::acalli, 3, 3,
-                      classNode,
-                      classNode,
-                      TR::Node::createWithSymRef(TR::loadaddr, 0,
-                                      symRefTab()->findOrCreateClassSymbol(_methodSymbol, -1, caller->classOfMethod())),
-                      symRefTab()->findOrCreateObjectNewInstanceImplSymbol(_methodSymbol));
-      }
+   TR::Node *callNode = TR::Node::createWithSymRef(TR::acalli, 3, 3,
+                     classNodeAsClass,
+                     classNode,
+                     nodeAsObject,
+                     symRefTab()->findOrCreateObjectNewInstanceImplSymbol(_methodSymbol));
 
    return callNode;
    }
@@ -2211,6 +2132,7 @@ bool TR_J9ByteCodeIlGenerator::replaceMethods(TR::TreeTop *tt, TR::Node *node)
    for (int i = 0; i < _numDecFormatRenames; i++)
       {
       if (!strcmp(nodeName, _decFormatRenames[i].srcMethodSignature))
+         {
          if (performTransformation(comp(), "%sreplaced %s by %s in [%p]\n",
                                      OPT_DETAILS, _decFormatRenames[i].srcMethodSignature, _decFormatRenames[i].dstMethodSignature, node))
             {
@@ -2220,7 +2142,10 @@ bool TR_J9ByteCodeIlGenerator::replaceMethods(TR::TreeTop *tt, TR::Node *node)
             return true;
             }
          else
+            {
             return false;
+            }
+         }
       }
    return true;
    }

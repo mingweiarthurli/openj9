@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -160,24 +160,17 @@ J9::Node::copyValidProperties(TR::Node *fromNode, TR::Node *toNode)
    UnionPropertyB_Type fromUnionPropertyB_Type = fromNode->getUnionPropertyB_Type();
    UnionPropertyB_Type toUnionPropertyB_Type = toNode->getUnionPropertyB_Type();
 
-   if ((fromUnionPropertyB_Type == toUnionPropertyB_Type))
+   if (fromUnionPropertyB_Type == toUnionPropertyB_Type)
       {
       switch (fromUnionPropertyB_Type)
          {
          case HasDecimalInfo:
 #if !defined(ENABLE_RECREATE_WITH_COPY_VALID_PROPERTIES_COMPLETE)
-            // TODO there is still confusion for DFP types what properties they have
-            // eg a TR::deModifyPrecision has a DFPPrecision, but a TR::pd2df does not
-            // where is this declared in the opcode?
-
             // for now have to copy forward all decimalInfo properties
             toNode->_unionPropertyB._decimalInfo = fromNode->_unionPropertyB._decimalInfo;
 #else
             // _decimalPrecision
-            if (toNode->getType().isDFP() && fromNode->getType().isDFP())
-               // the above test is not enough to determine whether the node hasDFPPrecision
-               toNode->setDFPPrecision(fromNode->getDFPPrecision());
-            else if (toNode->hasDecimalPrecision() && fromNode->hasDecimalPrecision())
+            if (toNode->hasDecimalPrecision() && fromNode->hasDecimalPrecision())
                toNode->setDecimalPrecision(fromNode->getDecimalPrecision());
 
             // _decimalSourcePrecisionOrDividend
@@ -267,11 +260,15 @@ J9::Node::getCloneClassInNode()
    return (TR_OpaqueClassBlock *)_unionBase._children[1];
    }
 
+TR::Node *
+J9::Node::processJNICall(TR::TreeTop *callNodeTreeTop, TR::ResolvedMethodSymbol *owningSymbol)
+   {
+   return self()->processJNICall(callNodeTreeTop, owningSymbol, TR::comp());
+   }
 
 TR::Node *
-J9::Node::processJNICall(TR::TreeTop * callNodeTreeTop, TR::ResolvedMethodSymbol * owningSymbol)
+J9::Node::processJNICall(TR::TreeTop *callNodeTreeTop, TR::ResolvedMethodSymbol *owningSymbol, TR::Compilation *comp)
    {
-   TR::Compilation * comp = TR::comp();
    if (!comp->cg()->getSupportsDirectJNICalls() || comp->getOption(TR_DisableDirectToJNI) || (comp->compileRelocatableCode() && !comp->cg()->supportsDirectJNICallsForAOT()))
       return self();
 
@@ -298,8 +295,8 @@ J9::Node::processJNICall(TR::TreeTop * callNodeTreeTop, TR::ResolvedMethodSymbol
       }
 #endif
 
-   if (comp->canTransformUnsafeCopyToArrayCopy() &&
-       (methodSymbol->getRecognizedMethod() == TR::sun_misc_Unsafe_copyMemory))
+   if (comp->canTransformUnsafeCopyToArrayCopy()
+         && self()->isUnsafeCopyMemoryIntrinsic())
       {
       return self();
       }
@@ -314,6 +311,10 @@ J9::Node::processJNICall(TR::TreeTop * callNodeTreeTop, TR::ResolvedMethodSymbol
       return self();
       }
 
+   if (methodSymbol->getRecognizedMethod() == TR::jdk_internal_loader_NativeLibraries_load)
+      {
+      return self();
+      }
 
    if (methodSymbol->canReplaceWithHWInstr())
       return self();
@@ -335,15 +336,21 @@ J9::Node::processJNICall(TR::TreeTop * callNodeTreeTop, TR::ResolvedMethodSymbol
       }
 
 #if defined(TR_TARGET_POWER)
-   // Recognizing these methods on Power allows us to take a shortcut 
-   // in the JNI dispatch where we mangle the register dependencies and call 
+   // Recognizing these methods on Power allows us to take a shortcut
+   // in the JNI dispatch where we mangle the register dependencies and call
    // optimized helpers in the JIT library using what amounts to system/C dispatch.
    // The addresses of the optimized helpers in the server process will not necessarily
    // match the client-side addresses, so we can't take this shortcut in JITServer mode.
    if (((methodSymbol->getRecognizedMethod() == TR::java_util_zip_CRC32_update) ||
+#if JAVA_SPEC_VERSION <= 8
         (methodSymbol->getRecognizedMethod() == TR::java_util_zip_CRC32_updateBytes) ||
         (methodSymbol->getRecognizedMethod() == TR::java_util_zip_CRC32_updateByteBuffer)) &&
-       !comp->requiresSpineChecks() 
+#else
+        (methodSymbol->getRecognizedMethod() == TR::java_util_zip_CRC32_updateBytes0) ||
+        (methodSymbol->getRecognizedMethod() == TR::java_util_zip_CRC32_updateByteBuffer0)) &&
+#endif
+       !comp->requiresSpineChecks()  &&
+       !comp->compileRelocatableCode()
       #ifdef J9VM_OPT_JITSERVER
          && !comp->isOutOfProcessCompilation()
       #endif
@@ -473,11 +480,19 @@ J9::Node::processJNICall(TR::TreeTop * callNodeTreeTop, TR::ResolvedMethodSymbol
 void
 J9::Node::devirtualizeCall(TR::TreeTop *treeTop)
    {
+   return self()->devirtualizeCall(treeTop, TR::comp());
+   }
+
+void
+J9::Node::devirtualizeCall(TR::TreeTop *treeTop, TR::Compilation *comp)
+   {
    OMR::NodeConnector::devirtualizeCall(treeTop);
    TR::ResolvedMethodSymbol *methodSymbol = self()->getSymbol()->castToResolvedMethodSymbol();
 
    if (methodSymbol->isJNI())
-      self()->processJNICall(treeTop, TR::comp()->getMethodSymbol());
+      {
+      self()->processJNICall(treeTop, comp->getMethodSymbol(), comp);
+      }
    }
 
 bool
@@ -613,7 +628,6 @@ J9::Node::isTruncating()
       else
          return false;
       }
-   // eg. dd2pd <prec=9, sourcePrecision=12> -> ddadd: truncation since the ddadd may have up to 12 non-zero digits
    else if (self()->getType().isBCD() && self()->getOpCode().isConversion() && self()->getNumChildren() >= 1 && !self()->getValueChild()->getType().isBCD())
       {
       if (self()->hasSourcePrecision() && self()->getDecimalPrecision() < self()->getSourcePrecision())
@@ -851,27 +865,15 @@ J9::Node::alwaysGeneratesAKnownPositiveCleanSign()
 
 #ifdef TR_TARGET_S390
 int32_t
-J9::Node::getStorageReferenceSize()
+J9::Node::getStorageReferenceSize(TR::Compilation *comp)
    {
-   TR::Compilation *comp = TR::comp();
    if (self()->getType().isAggregate())
       {
       return self()->getSize();
       }
-   else if (self()->getType().isAnyZoned() && self()->getOpCode().isConversion() && self()->getFirstChild()->getType().isDFP())
-      {
-      if (self()->hasSourcePrecision() && self()->getSourcePrecision() <= TR::DataType::getMaxExtendedDFPPrecision())
-         {
-         return std::max<int32_t>(self()->getDecimalPrecision(), self()->getSourcePrecision());
-         }
-      else if (self()->getDataType() == TR::DecimalFloat || self()->getDataType() == TR::DecimalDouble)
-         return TR::DataType::getMaxLongDFPPrecision();
-      else
-         return TR::DataType::getMaxExtendedDFPPrecision();
-      }
    else if (self()->getOpCode().isBCDToNonBCDConversion())
       {
-      return self()->getStorageReferenceSourceSize();
+      return self()->getStorageReferenceSourceSize(comp);
       }
    else
       {
@@ -914,9 +916,8 @@ J9::Node::getStorageReferenceSize()
    }
 
 int32_t
-J9::Node::getStorageReferenceSourceSize()
+J9::Node::getStorageReferenceSourceSize(TR::Compilation *comp)
    {
-   TR::Compilation *comp = TR::comp();
    int32_t size = 0;
    switch (self()->getOpCodeValue())
       {
@@ -931,18 +932,7 @@ J9::Node::getStorageReferenceSourceSize()
          size = comp->cg()->getPackedToIntegerFixedSize();
          break;
       default:
-         if (self()->getOpCode().isConversion() &&
-                  self()->getType().isDFP() &&
-                  (
-                   self()->getFirstChild()->getType().isAnyZoned() ||
-                   self()->getFirstChild()->getType().isAnyPacked()))
-            {
-            size = self()->getFirstChild()->getSize();
-            }
-         else
-            {
             TR_ASSERT(false, "node %p and type %s not supported in getStorageReferenceSourceSize\n", self(), self()->getDataType().toString());
-            }
          break;
       }
    return size;
@@ -980,7 +970,7 @@ J9::Node::pdshrRoundIsConstantZero()
       }
    else
       {
-      TR_ASSERT(false, "only packed and DFP shift right operations have a round node (op %d)\n", self()->getOpCodeValue());
+      TR_ASSERT(false, "Only packed shift right operations have a round node (op %d)\n", self()->getOpCodeValue());
       }
    return false;
    }
@@ -1140,9 +1130,8 @@ J9::Node::referencesSymbolInSubTree(TR::SymbolReference* symRef, vcount_t visitC
    }
 
 bool
-J9::Node::referencesMayKillAliasInSubTree(TR::Node * rootNode, vcount_t visitCount)
+J9::Node::referencesMayKillAliasInSubTree(TR::Node * rootNode, vcount_t visitCount, TR::Compilation *comp)
    {
-   TR::Compilation * comp = TR::comp();
    TR::SparseBitVector  references (comp->allocator());
    self()->getSubTreeReferences(references, visitCount);
 
@@ -1170,42 +1159,6 @@ J9::Node::getSubTreeReferences(TR::SparseBitVector &references, vcount_t visitCo
     self()->getChild(i)->getSubTreeReferences(references, visitCount);
 }
 
-TR_ParentOfChildNode*
-J9::Node::referencesSymbolExactlyOnceInSubTree(
-   TR::Node* parent, int32_t childNum, TR::SymbolReference* symRef, vcount_t visitCount)
-   {
-   // The visit count in the node must be maintained by this method.
-   //
-   TR::Compilation * comp = TR::comp();
-   vcount_t oldVisitCount = self()->getVisitCount();
-   if (oldVisitCount == visitCount)
-      return NULL;
-   self()->setVisitCount(visitCount);
-
-   if (self()->getOpCode().hasSymbolReference() && (self()->getSymbolReference()->getReferenceNumber() == symRef->getReferenceNumber()))
-      {
-      TR_ParentOfChildNode* pNode = new (comp->trStackMemory()) TR_ParentOfChildNode(parent, childNum);
-      return pNode;
-      }
-
-   // For all other subtrees, see if any has a ref. If exactly one does, return it
-   TR_ParentOfChildNode* matchNode=NULL;
-   for (int32_t i = self()->getNumChildren()-1; i >= 0; i--)
-      {
-      TR::Node * child = self()->getChild(i);
-      TR_ParentOfChildNode* curr = child->referencesSymbolExactlyOnceInSubTree(self(), i, symRef, visitCount);
-      if (curr)
-         {
-         if (matchNode)
-            {
-            return NULL;
-            }
-         matchNode = curr;
-         }
-      }
-
-   return matchNode;
-   }
 
 /**
  * Node field functions
@@ -1228,23 +1181,6 @@ J9::Node::setStorageReferenceHint(TR_StorageReference *s)
    {
    TR_ASSERT(self()->getOpCode().canHaveStorageReferenceHint(), "attempting to access _storageReferenceHint field for node %s %p that does not have it", self()->getOpCode().getName(), this);
    return (_storageReferenceHint = s);
-   }
-
-#endif
-
-#ifdef SUPPORT_DFP
-
-long double
-J9::Node::setLongDouble(long double d)
-   {
-   self()->freeExtensionIfExists();
-   return (*(long double *)_unionBase._unionedWithChildren._constData= d);
-   }
-
-long double
-J9::Node::getLongDouble()
-   {
-   return *(long double *)_unionBase._unionedWithChildren._constData;
    }
 
 #endif
@@ -1272,10 +1208,8 @@ J9::Node::hasDecimalInfo()
    return
       // Any node with a BCD type (pdloadi, pdadd, zd2pd, pdstorei etc)
       self()->getType().isBCD() ||
-      // Any node with DFP type (dfadd, dfloadi, deconst etc) for the result precision digits
-      self()->getType().isDFP()
-      // Conversions from a BCD type to a float to encode # of fractional digits (pd2f, pd2d, pd2de etc)
-      || self()->getOpCode().isConversionWithFraction()
+      // Conversions from a BCD type to a float to encode # of fractional digits (pd2f, pd2d, etc.)
+      self()->getOpCode().isConversionWithFraction()
       // BCD types and also any BCD ifs and compares (e.g. ifpdcmpxx, pdcmpxx)
       || self()->chkOpsCastedToBCD();
    }
@@ -1381,38 +1315,6 @@ J9::Node::setPDAddSubPrecision()
    TR_ASSERT(self()->getNumChildren() >= 2, "expecting >= 2 children and not %d children on a packed add/sub node\n", self()->getNumChildren());
    self()->setDecimalPrecision(std::max(self()->getFirstChild()->getDecimalPrecision(), self()->getSecondChild()->getDecimalPrecision())+1);
    }
-
-
-
-bool
-J9::Node::isDFPModifyPrecision()
-   {
-   TR_ASSERT(self()->getType().isDFP(), "opcode not supported for isDFPModifyPrecision on node %p\n", self());
-   if (self()->getOpCodeValue() == TR::ILOpCode::modifyPrecisionOpCode(self()->getDataType()))
-      return true;
-   return false;
-   }
-
-void
-J9::Node::setDFPPrecision(int32_t p)
-   {
-   TR_ASSERT(self()->getType().isDFP(), "opcode not supported for setDFPPrecision on node %p\n", self());
-   TR_ASSERT(p > 0 && p <= TR_MAX_DECIMAL_PRECISION, "unexpected DFP precision %d on node %p\n", p, self());
-   TR_ASSERT(self()->hasDecimalInfo(), "attempting to access _decimalPrecision field for node %s %p that does not have it", self()->getOpCode().getName(), self());
-   _unionPropertyB._decimalInfo._decimalPrecision = (uint32_t)p;
-   }
-
-uint8_t
-J9::Node::getDFPPrecision()
-   {
-   TR_ASSERT(self()->getType().isDFP(), "opcode not supported for getDFPPrecision on node %s %p\n", self()->getOpCode().getName(), self());
-   TR_ASSERT(self()->hasDecimalInfo(), "attempting to access _decimalPrecision field for node %s %p that does not have it", self()->getOpCode().getName(), self());
-   TR_ASSERT(_unionPropertyB._decimalInfo._decimalPrecision > 0 && _unionPropertyB._decimalInfo._decimalPrecision <= TR_MAX_DECIMAL_PRECISION,
-             "unexpected DFP precision %d on node %s %p\n", _unionPropertyB._decimalInfo._decimalPrecision, self()->getOpCode().getName(), self());
-   return _unionPropertyB._decimalInfo._decimalPrecision;
-   }
-
-
 
 void
 J9::Node::setDecimalAdjust(int32_t a)
@@ -2132,11 +2034,10 @@ J9::Node::isSpineCheckWithArrayElementChild()
    }
 
 void
-J9::Node::setSpineCheckWithArrayElementChild(bool v)
+J9::Node::setSpineCheckWithArrayElementChild(bool v, TR::Compilation *comp)
    {
-   TR::Compilation * c = TR::comp();
    TR_ASSERT(self()->getOpCode().isSpineCheck(), "assertion failure");
-   if (performNodeTransformation2(c, "O^O NODE FLAGS: Setting spineCHKWithArrayElementChild flag on node %p to %d\n", self(), v))
+   if (performNodeTransformation2(comp, "O^O NODE FLAGS: Setting spineCHKWithArrayElementChild flag on node %p to %d\n", self(), v))
       _flags.set(spineCHKWithArrayElementChild, v);
    }
 
@@ -2196,19 +2097,39 @@ J9::Node::isDontInlinePutOrderedCall()
    }
 
 void
-J9::Node::setDontInlinePutOrderedCall()
+J9::Node::setDontInlinePutOrderedCall(TR::Compilation *comp)
    {
-   TR::Compilation * c = TR::comp();
    TR_ASSERT(self()->getOpCode().isCall(), " Can only call this routine for a call node \n");
    bool isPutOrdered = self()->isUnsafePutOrderedCall();
 
    TR_ASSERT(isPutOrdered, "attempt to set dontInlinePutOrderedCall flag and not a putOrdered call");
    if (isPutOrdered)
       {
-      if (performNodeTransformation1(c, "O^O NODE FLAGS: Setting dontInlineUnsafePutOrderedCall flag on node %p\n", self()))
+      if (performNodeTransformation1(comp, "O^O NODE FLAGS: Setting dontInlineUnsafePutOrderedCall flag on node %p\n", self()))
          _flags.set(dontInlineUnsafePutOrderedCall);
       }
 
+   }
+
+bool
+J9::Node::isUnsafeCopyMemoryIntrinsic()
+   {
+   if (self()->getOpCode().isCall() && self()->getSymbol()->isMethod())
+      {
+      TR::MethodSymbol *symbol = self()->getSymbol()->getMethodSymbol();
+      if (symbol && symbol->isNative())
+         {
+         switch (symbol->getRecognizedMethod())
+            {
+            case TR::sun_misc_Unsafe_copyMemory:
+            case TR::jdk_internal_misc_Unsafe_copyMemory0:
+               return true;
+            default:
+               break;
+            }
+         }
+      }
+   return false;
    }
 
 bool
@@ -2243,12 +2164,17 @@ J9::Node::isUnsafeGetPutCASCallOnNonArray()
 void
 J9::Node::setUnsafeGetPutCASCallOnNonArray()
    {
-   TR::Compilation * c = TR::comp();
+   self()->setUnsafeGetPutCASCallOnNonArray(TR::comp());
+   }
+
+void
+J9::Node::setUnsafeGetPutCASCallOnNonArray(TR::Compilation *comp)
+   {
    TR_ASSERT(self()->getSymbol()->isMethod() && self()->getSymbol()->getMethodSymbol(), "setUnsafeGetPutCASCallOnNonArray called on node which is not a call");
 
-   //TR_ASSERT(getSymbol()->getMethodSymbol()->castToResolvedMethodSymbol()->getResolvedMethod()->isUnsafeWithObjectArg(),"Attempt to change flag on a method that is not JNI Unsafe that needs special care for arraylets\n");
    TR_ASSERT(self()->getSymbol()->getMethodSymbol()->getMethod()->isUnsafeWithObjectArg() || self()->getSymbol()->getMethodSymbol()->getMethod()->isUnsafeCAS(),"Attempt to check flag on a method that is not JNI Unsafe that needs special care for arraylets\n");
-   if (performNodeTransformation1(c, "O^O NODE FLAGS: Setting unsafeGetPutOnNonArray flag on node %p\n", self()))
+
+   if (performNodeTransformation1(comp, "O^O NODE FLAGS: Setting unsafeGetPutOnNonArray flag on node %p\n", self()))
       _flags.set(unsafeGetPutOnNonArray);
    }
 
@@ -2647,13 +2573,18 @@ J9::Node::isArrayCopyCall()
 bool
 J9::Node::requiresRegisterPair(TR::Compilation *comp)
    {
-   return self()->getType().isLongDouble() || OMR::NodeConnector::requiresRegisterPair(comp);
+   return OMR::NodeConnector::requiresRegisterPair(comp);
    }
 
 bool
 J9::Node::canGCandReturn()
    {
-   TR::Compilation * comp = TR::comp();
+   return self()->canGCandReturn(TR::comp());
+   }
+
+bool
+J9::Node::canGCandReturn(TR::Compilation *comp)
+   {
    if (comp->getOption(TR_EnableFieldWatch))
       {
       if (self()->getOpCodeValue() == TR::treetop || self()->getOpCode().isNullCheck() || self()->getOpCode().isAnchor())

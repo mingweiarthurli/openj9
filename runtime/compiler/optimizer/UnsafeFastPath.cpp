@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -219,7 +219,7 @@ bool TR_UnsafeFastPath::tryTransformUnsafeAtomicCallInVarHandleAccessMethod(TR::
          node->setIsSafeForCGToFastPathUnsafeCall(true);
          if (!isVarHandleOperationMethodOnArray(callerMethod))
             {
-            node->setUnsafeGetPutCASCallOnNonArray();
+            node->setUnsafeGetPutCASCallOnNonArray(comp());
             }
 
          if (trace())
@@ -311,7 +311,11 @@ static bool needUnsignedConversion(TR::RecognizedMethod methodToReduce)
       case TR::com_ibm_jit_JITHelpers_getCharFromArrayByIndex:
       case TR::com_ibm_jit_JITHelpers_getCharFromArrayVolatile:
       case TR::java_lang_StringUTF16_getChar:
+      case TR::java_lang_StringUTF16_putChar:
          return true;
+
+      default:
+         break;
       }
 
    return false;
@@ -485,8 +489,12 @@ int32_t TR_UnsafeFastPath::perform()
          switch (symbol->getRecognizedMethod())
             {
             case TR::java_lang_StringUTF16_getChar:
+            case TR::java_lang_StringUTF16_putChar:
                objectChild = 0;
                offsetChild = 1;
+               break;
+
+            default:
                break;
             }
 
@@ -531,6 +539,7 @@ int32_t TR_UnsafeFastPath::perform()
             case TR::com_ibm_jit_JITHelpers_putObjectInArrayVolatile:
             case TR::com_ibm_jit_JITHelpers_putObjectInArray:
             case TR::java_lang_StringUTF16_getChar:
+            case TR::java_lang_StringUTF16_putChar:
                isArrayOperation = true;
                break;
             default:
@@ -642,6 +651,11 @@ int32_t TR_UnsafeFastPath::perform()
                value = node->getChild(3);
                type = TR::Int16;
                break;
+            case TR::java_lang_StringUTF16_putChar:
+               isByIndex = true;
+               value = node->getChild(2);
+               type = TR::Int16;
+               break;
             case TR::com_ibm_jit_JITHelpers_putCharInArrayVolatile:
                isVolatile = true;
             case TR::com_ibm_jit_JITHelpers_putCharInArray:
@@ -732,7 +746,11 @@ int32_t TR_UnsafeFastPath::perform()
             switch (calleeMethod)
                {
                case TR::java_lang_StringUTF16_getChar:
+               case TR::java_lang_StringUTF16_putChar:
                   unsafeSymRef = comp()->getSymRefTab()->findOrCreateArrayShadowSymbolRef(TR::Int8);
+                  break;
+
+               default:
                   break;
                }
 
@@ -830,7 +848,7 @@ int32_t TR_UnsafeFastPath::perform()
                      node = TR::Node::recreateWithoutProperties(node, comp()->il.opCodeForIndirectArrayStore(type), 2, addrCalc, value, unsafeSymRef);
 
                      spineCHK->setAndIncChild(0, node);
-                     spineCHK->setSpineCheckWithArrayElementChild(true);
+                     spineCHK->setSpineCheckWithArrayElementChild(true, comp());
                      }
 
                   if (trace())
@@ -861,7 +879,7 @@ int32_t TR_UnsafeFastPath::perform()
                      spineCHK->setAndIncChild(0, node);
                      }
 
-                  spineCHK->setSpineCheckWithArrayElementChild(true);
+                  spineCHK->setSpineCheckWithArrayElementChild(true, comp());
 
                   if (trace())
                      traceMsg(comp(), "Created node [" POINTER_PRINTF_FORMAT "] to load from location [" POINTER_PRINTF_FORMAT "] with spineCHK [" POINTER_PRINTF_FORMAT "]\n", node, addrCalc, spineCHK);

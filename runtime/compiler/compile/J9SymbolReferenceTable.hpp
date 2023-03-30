@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -76,6 +76,36 @@ class SymbolReferenceTable : public OMR::SymbolReferenceTableConnector
    TR::SymbolReference * findOrCreateOSRScratchBufferSymbolRef();
    TR::SymbolReference * findOrCreateOSRFrameIndexSymbolRef();
 
+   /** \brief
+    *    Find or create VMThread tempSlot symbol reference. J9VMThread.tempSlot provides a mechanism for the
+    *    compiler to provide information that the VM can use for various reasons - such as locating items on
+    *    the stack during a call to internal native methods that are signature-polymorphic.
+    *
+    * \return
+    *    TR::SymbolReference* the VMThreadTempSlotField symbol reference
+    */
+   TR::SymbolReference * findOrCreateVMThreadTempSlotFieldSymbolRef();
+
+   /** \brief
+    *    Find or create VMThread.floatTemp1 symbol reference. J9VMThread.floatTemp1 provides an additional
+    *    mechanism for the compiler to provide information that the VM can use for various reasons
+    *
+    * \return
+    *    TR::SymbolReference* the VMThread.floatTemp1 symbol reference
+    */
+   TR::SymbolReference * findOrCreateVMThreadFloatTemp1SymbolRef();
+
+   /** \brief
+    *    Find or create symref for vTableIndex field of struct J9JNIMethodID
+    *
+    * \param offset
+    *    The offsetof value for vTableIndex field
+    *
+    * \return
+    *    TR::SymbolReference* the symref representing vTableIndex field
+    */
+   TR::SymbolReference * findOrCreateJ9JNIMethodIDvTableIndexFieldSymbol(intptr_t offset);
+
    // CG linkage
    TR::SymbolReference * findOrCreateAcquireVMAccessSymbolRef(TR::ResolvedMethodSymbol * owningMethodSymbol); // minor rework
    TR::SymbolReference * findOrCreateReleaseVMAccessSymbolRef(TR::ResolvedMethodSymbol * owningMethodSymbol); // minor rework
@@ -95,12 +125,14 @@ class SymbolReferenceTable : public OMR::SymbolReferenceTableConnector
    TR::SymbolReference * findOrCreateSpecialMethodSymbol(TR::ResolvedMethodSymbol * owningMethodSymbol, int32_t cpIndex);
    TR::SymbolReference * findOrCreateVirtualMethodSymbol(TR::ResolvedMethodSymbol * owningMethodSymbol, int32_t cpIndex);
    TR::SymbolReference * findOrCreateInterfaceMethodSymbol(TR::ResolvedMethodSymbol * owningMethodSymbol, int32_t cpIndex);
-   TR::SymbolReference * findOrCreateDynamicMethodSymbol(TR::ResolvedMethodSymbol * owningMethodSymbol, int32_t callSiteIndex);
-   TR::SymbolReference * findOrCreateHandleMethodSymbol(TR::ResolvedMethodSymbol * owningMethodSymbol, int32_t cpIndex);
+   TR::SymbolReference * findOrCreateDynamicMethodSymbol(TR::ResolvedMethodSymbol * owningMethodSymbol, int32_t callSiteIndex, bool * unresolvedInCP = 0, bool * isInvokeCacheAppendixNull = 0);
+   TR::SymbolReference * findOrCreateHandleMethodSymbol(TR::ResolvedMethodSymbol * owningMethodSymbol, int32_t cpIndex, bool * unresolvedInCP = 0, bool * isInvokeCacheAppendixNull = 0);
    TR::SymbolReference * findOrCreateHandleMethodSymbol(TR::ResolvedMethodSymbol * owningMethodSymbol, int32_t cpIndex, char *signature);
    TR::SymbolReference * findOrCreateCallSiteTableEntrySymbol(TR::ResolvedMethodSymbol * owningMethodSymbol, int32_t callSiteIndex);
    TR::SymbolReference * findOrCreateMethodTypeTableEntrySymbol(TR::ResolvedMethodSymbol * owningMethodSymbol, int32_t cpIndex);
+#if defined(J9VM_OPT_METHOD_HANDLE)
    TR::SymbolReference * findOrCreateVarHandleMethodTypeTableEntrySymbol(TR::ResolvedMethodSymbol * owningMethodSymbol, int32_t cpIndex);
+#endif /* defined(J9VM_OPT_METHOD_HANDLE) */
    TR::SymbolReference * methodSymRefWithSignature(TR::SymbolReference *original, char *effectiveSignature, int32_t effectiveSignatureLength);
    TR::SymbolReference * findOrCreateTypeCheckArrayStoreSymbolRef(TR::ResolvedMethodSymbol * owningMethodSymbol);
    TR::SymbolReference * findOrCreateArrayClassRomPtrSymbolRef();
@@ -110,7 +142,34 @@ class SymbolReferenceTable : public OMR::SymbolReferenceTableConnector
    TR::SymbolReference * findOrCreateWriteBarrierClassStoreRealTimeGCSymbolRef(TR::ResolvedMethodSymbol * owningMethodSymbol = 0);
    TR::SymbolReference * findOrCreateWriteBarrierBatchStoreSymbolRef(TR::ResolvedMethodSymbol * owningMethodSymbol = 0);
 
-   TR::SymbolReference * findOrCreateAcmpHelperSymbolRef(TR::ResolvedMethodSymbol * owningMEthodSymbol = NULL);
+   TR::SymbolReference * findOrCreateAcmpeqHelperSymbolRef(TR::ResolvedMethodSymbol * owningMethodSymbol = NULL);
+   TR::SymbolReference * findOrCreateAcmpneHelperSymbolRef(TR::ResolvedMethodSymbol * owningMethodSymbol = NULL);
+
+   // these helpers are guaranteed to never throw if the receiving object is not null,
+   // so we explicit generate NULLCHKs and assume the helpers will never throw
+   TR::SymbolReference * findOrCreateGetFlattenableFieldSymbolRef(TR::ResolvedMethodSymbol * owningMethodSymbol = NULL);
+   TR::SymbolReference * findOrCreateWithFlattenableFieldSymbolRef(TR::ResolvedMethodSymbol * owningMethodSymbol = NULL);
+   TR::SymbolReference * findOrCreatePutFlattenableFieldSymbolRef(TR::ResolvedMethodSymbol * owningMethodSymbol = NULL);
+   TR::SymbolReference * findOrCreateGetFlattenableStaticFieldSymbolRef(TR::ResolvedMethodSymbol * owningMethodSymbol = NULL);
+   TR::SymbolReference * findOrCreatePutFlattenableStaticFieldSymbolRef(TR::ResolvedMethodSymbol * owningMethodSymbol = NULL);
+
+   // these helpers may throw exception such as ArrayIndexOutOfBoundsException or ArrayStoreException etc.
+   TR::SymbolReference * findOrCreateLoadFlattenableArrayElementSymbolRef(TR::ResolvedMethodSymbol * owningMethodSymbol = NULL);
+   TR::SymbolReference * findOrCreateStoreFlattenableArrayElementSymbolRef(TR::ResolvedMethodSymbol * owningMethodSymbol = NULL);
+
+   // This helper walks the iTables to find the VFT offset for an interface
+   // method that is not known until runtime (and therefore does not have an
+   // IPIC data snippet). The parameters are the receiver class, interface
+   // class, and iTable index (though in the trees they must appear as
+   // children in the opposite order), and the return value is the VFT offset.
+   //
+   // The given receiver class must implement the given interface class.
+   //
+   TR::SymbolReference * findOrCreateLookupDynamicInterfaceMethodSymbolRef();
+
+   // This helper is a variant of jitLookupDynamicInterfaceMethod that requires
+   // the dispatched callee to be public, otherwise throwing IllegalAccessError.
+   TR::SymbolReference * findOrCreateLookupDynamicPublicInterfaceMethodSymbolRef();
 
    TR::SymbolReference * findOrCreateShadowSymbol(TR::ResolvedMethodSymbol * owningMethodSymbol, int32_t cpIndex, bool isStore);
    TR::SymbolReference * findOrFabricateShadowSymbol(TR::ResolvedMethodSymbol * owningMethodSymbol, TR::Symbol::RecognizedField recognizedField, TR::DataType type, uint32_t offset, bool isVolatile, bool isPrivate, bool isFinal, char* name = NULL);
@@ -141,6 +200,31 @@ class SymbolReferenceTable : public OMR::SymbolReferenceTableConnector
     *     Returns a symbol reference fabricated for the field.
     */
    TR::SymbolReference * findOrFabricateShadowSymbol(TR_OpaqueClassBlock *containingClass, TR::DataType type, uint32_t offset, bool isVolatile, bool isPrivate, bool isFinal,  const char *name, const char *signature);
+
+   /** \brief
+    *     Returns an array shadow symbol reference fabricated for the field of a flattened array element.
+    *
+    *  \param arrayComponentClass
+    *     The array component class that contains the field.
+    *  \param type
+    *     The data type of the field.
+    *  \param fieldOffset
+    *     The offset of the field from the beginning of the first field.
+    *  \param isPrivate
+    *     Specifies whether the field is private.
+    *  \param fieldName
+    *     The name of the field.
+    *  \param fieldSignature
+    *     The signature of the field.
+    *  \return
+    *     Returns an array shadow symbol reference fabricated for the field of a flattened array element.
+    */
+   TR::SymbolReference * findOrFabricateFlattenedArrayElementFieldShadowSymbol(TR_OpaqueClassBlock *arrayComponentClass, TR::DataType type, int32_t fieldOffset, bool isPrivate, const char *fieldName, const char *fieldSignature);
+
+   /** \brief
+    *     Returns a symbol reference for default value instance of value class.
+    */
+   TR::SymbolReference * findOrCreateDefaultValueSymbolRef(void *defaultValueSlotAddress, int32_t cpIndex);
 
    TR::SymbolReference * findOrCreateObjectNewInstanceImplSymbol(TR::ResolvedMethodSymbol * owningMethodSymbol);
    TR::SymbolReference * findOrCreateDLTBlockSymbolRef();
@@ -199,6 +283,9 @@ class SymbolReferenceTable : public OMR::SymbolReferenceTableConnector
    TR::SymbolReference * findOrCreateStaticSymbol(TR::ResolvedMethodSymbol * owningMethodSymbol, int32_t cpIndex, bool isStore);
 
    TR::SymbolReference * findOrCreateClassIsArraySymbolRef();
+
+   TR::SymbolReference * findArrayClassRomPtrSymbolRef();
+   TR::SymbolReference * findClassRomPtrSymbolRef();
 
    TR::SymbolReference * findClassFromJavaLangClassAsPrimitiveSymbolRef();
    TR::SymbolReference * findOrCreateClassFromJavaLangClassAsPrimitiveSymbolRef();
@@ -278,6 +365,27 @@ class SymbolReferenceTable : public OMR::SymbolReferenceTableConnector
     *     The <objectEqualityComparison> symbol reference.
     */
    TR::SymbolReference *findOrCreateObjectEqualityComparisonSymbolRef();
+   TR::SymbolReference *findOrCreateObjectInequalityComparisonSymbolRef();
+
+   /**
+    * \brief
+    *    Finds the <encodeASCII> symbol
+    *    reference, creating it if necessary.
+    *
+    *  \return
+    *     The <encodeASCII> symbol reference.
+    */
+   TR::SymbolReference *findOrCreateEncodeASCIISymbolRef();
+
+   /**
+    * \brief
+    *    Finds the <nonNullableArrayNullStoreCheck> "nonhelper" symbol
+    *    reference, creating it if necessary.
+    *
+    *  \return
+    *     The <nonNullableArrayNullStoreCheck> symbol reference.
+    */
+   TR::SymbolReference *findOrCreateNonNullableArrayNullStoreCheckSymbolRef();
 
    /**
     * \brief
@@ -339,11 +447,21 @@ class SymbolReferenceTable : public OMR::SymbolReferenceTableConnector
 
    TR::SymbolReference * findShadowSymbol(TR_ResolvedMethod * owningMethod, int32_t cpIndex, TR::DataType, TR::Symbol::RecognizedField *recognizedField = NULL);
 
+   /**
+    * @brief Retrieve the textual name of the given NonHelperSymbol
+    *
+    * @param[in] nonHelper : the nonHelper symbol
+    *
+    * @return Textual name of the NonHelperSymbol
+    */
+   static const char *getNonHelperSymbolName(CommonNonhelperSymbol nonHelper);
+
    protected:
 
    TR::Symbol                           *_currentThreadDebugEventDataSymbol;
    List<TR::SymbolReference>            _currentThreadDebugEventDataSymbolRefs;
    List<TR::SymbolReference>            _constantPoolAddressSymbolRefs;
+   List<TR::SymbolReference>            _defaultValueAddressSlotSymbolRefs;
 
    private:
 
@@ -380,6 +498,10 @@ class SymbolReferenceTable : public OMR::SymbolReferenceTableConnector
    typedef TR::typed_allocator<ResolvedFieldShadowsEntry, TR::Allocator> ResolvedFieldShadowsAlloc;
    typedef std::map<ResolvedFieldShadowKey, TR::SymbolReference*, std::less<ResolvedFieldShadowKey>, ResolvedFieldShadowsAlloc> ResolvedFieldShadows;
 
+   typedef std::pair<const ResolvedFieldShadowKey, TR::SymbolReference*> FlattenedArrayElementFieldShadowsEntry;
+   typedef TR::typed_allocator<FlattenedArrayElementFieldShadowsEntry, TR::Allocator> FlattenedArrayElementFieldShadowsAlloc;
+   typedef std::map<ResolvedFieldShadowKey, TR::SymbolReference*, std::less<ResolvedFieldShadowKey>, FlattenedArrayElementFieldShadowsAlloc> FlattenedArrayElementFieldShadows;
+
    /**
     * \brief Find if an existing resolved shadow exists matching the given key.
     *
@@ -406,6 +528,14 @@ class SymbolReferenceTable : public OMR::SymbolReferenceTableConnector
     * \return TR::SymbolReference* the shadow symref if found, NULL otherwise
     */
    TR::SymbolReference * findResolvedFieldShadow(ResolvedFieldShadowKey key, bool isVolatile, bool isPrivate, bool isFinal);
+   /**
+    * \brief Find if an existing flattened array shadow exists matching the given key.
+    *
+    * \param key is the key used to search for the symref
+    * \param isPrivate specifies whether the symbol found must be private.
+    * \return TR::SymbolReference* the flattened array shadow symref if found, NULL otherwise
+    */
+   TR::SymbolReference * findFlattenedArrayElementFieldShadow(ResolvedFieldShadowKey key, bool isPrivate);
 
    /**
     * \brief Create a shadow symbol
@@ -439,6 +569,11 @@ class SymbolReferenceTable : public OMR::SymbolReferenceTableConnector
    TR_Array<TR::SymbolReference *> * _unsafeJavaStaticVolatileSymRefs;
 
    ResolvedFieldShadows _resolvedFieldShadows;
+
+   FlattenedArrayElementFieldShadows _flattenedArrayElementFieldShadows;
+
+   static const char *_commonNonHelperSymbolNames[];
+
    };
 
 }

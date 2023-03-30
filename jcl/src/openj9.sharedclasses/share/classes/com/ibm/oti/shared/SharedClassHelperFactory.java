@@ -1,8 +1,6 @@
 /*[INCLUDE-IF SharedClasses]*/
-package com.ibm.oti.shared;
-
 /*******************************************************************************
- * Copyright (c) 1998, 2017 IBM Corp. and others
+ * Copyright (c) 1998, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -18,10 +16,11 @@ package com.ibm.oti.shared;
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
+package com.ibm.oti.shared;
 
 import java.net.URL;
 /*[IF Sidecar19-SE]*/
@@ -122,7 +121,7 @@ public interface SharedClassHelperFactory {
 	;
 
 	/**
-	 * <p>Returns a SharedClassURLHelper for a given ClassLoader.<p>
+	 * <p>Returns a SharedClassURLHelper for a given ClassLoader.</p>
 	 * <p>Creates a new SharedClassURLHelper if one cannot be found, otherwise returns existing SharedClassURLHelper.</p>
 	 * <p>Throws a HelperAlreadyDefinedException if the ClassLoader already has a different type of helper.</p>
 	 * <p>Returns null if a SecurityManager is installed and there is no 
@@ -278,9 +277,10 @@ public interface SharedClassHelperFactory {
 	 * @param 		loader ClassLoader.
 	 * 					ClassLoader which may or may not have a SharedClassHelper
 	 *  
-	 * @return		Set<SharedClassHelper>.
+	 * @return		Set&lt;SharedClassHelper&gt;.
 	 * 					A set of helpers exist for this ClassLoader.
 	 */
 	public Set<SharedClassHelper> findHelpersForClassLoader(ClassLoader loader);
 	/*[ENDIF]*/
+
 }

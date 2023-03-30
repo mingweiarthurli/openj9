@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2019, 2020 IBM Corp. and others
+ * Copyright (c) 2019, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,20 +15,19 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
 
-#ifndef TR_J9_ARM64_CODEGENERATORBASE_INCL
-#define TR_J9_ARM64_CODEGENERATORBASE_INCL
+#ifndef J9_ARM64_CODEGENERATOR_INCL
+#define J9_ARM64_CODEGENERATOR_INCL
 
 /*
  * The following #define and typedef must appear before any #includes in this file
  */
-#ifndef TRJ9_CODEGENERATORBASE_CONNECTOR
-#define TRJ9_CODEGENERATORBASE_CONNECTOR
-
+#ifndef J9_CODEGENERATOR_CONNECTOR
+#define J9_CODEGENERATOR_CONNECTOR
 namespace J9 { namespace ARM64 { class CodeGenerator; } }
 namespace J9 { typedef J9::ARM64::CodeGenerator CodeGeneratorConnector; }
 #else
@@ -48,12 +47,14 @@ namespace ARM64
 
 class OMR_EXTENSIBLE CodeGenerator : public J9::CodeGenerator
    {
-   public:
 
-   /**
-    * @brief Constructor
-    */
-   CodeGenerator();
+protected:
+
+   CodeGenerator(TR::Compilation *comp);
+
+public:
+
+   void initialize();
 
    /**
     * @brief Allocates recompilation information
@@ -76,9 +77,9 @@ class OMR_EXTENSIBLE CodeGenerator : public J9::CodeGenerator
     * @return Endoded BL (or B) instruction
     */
    uint32_t encodeHelperBranchAndLink(TR::SymbolReference *symRef, uint8_t *cursor, TR::Node *node, bool omitLink = false);
-   
+
    bool inlineDirectCall(TR::Node *node, TR::Register *&resultReg);
-   
+
    /**
     * @brief Generates pre-prologue
     * @param[in] data : binary encoding data
@@ -93,6 +94,23 @@ class OMR_EXTENSIBLE CodeGenerator : public J9::CodeGenerator
    TR::Instruction *generateSwitchToInterpreterPrePrologue(TR::Instruction *cursor, TR::Node *node);
 
    bool supportsDirectJNICallsForAOT() { return true; }
+
+   /**
+    * \brief Determines whether the code generator supports stack allocations
+    */
+   bool supportsStackAllocations() { return true; }
+
+   /**
+    * @brief Answers whether isInstance inline fast helper is supported
+    * @return true if isInstance inline fast helper is supported
+    */
+   bool supportsInliningOfIsInstance();
+
+   /**
+    * @brief Answers whether inlining of the specified recognized method should be suppressed
+    * @return true if inlining of the method should be suppressed
+    */
+   bool suppressInliningOfRecognizedMethod(TR::RecognizedMethod method);
    };
 
 }

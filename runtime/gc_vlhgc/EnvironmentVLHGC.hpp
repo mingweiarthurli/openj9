@@ -1,6 +1,6 @@
 
 /*******************************************************************************
- * Copyright (c) 1991, 2018 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -67,11 +67,11 @@ public:
 
 	MM_CopyForwardCompactGroup *_copyForwardCompactGroups;  /**< List of copy-forward data for each compact group for the given GC thread (only for GC threads during copy forward operations) */
 	
-	UDATA _previousConcurrentYieldCheckBytesScanned;	/**< The number of bytes scanned in the mark stats at the end of the previous shouldYieldFromTask check in concurrent mark */
+	uintptr_t _previousConcurrentYieldCheckBytesScanned;	/**< The number of bytes scanned in the mark stats at the end of the previous shouldYieldFromTask check in concurrent mark */
 
 	MM_CardBufferControlBlock *_rsclBufferControlBlockHead; /**< head of BufferControlBlock thread local pool list */
 	MM_CardBufferControlBlock *_rsclBufferControlBlockTail; /**< tail of BufferControlBlock thread local pool list */
-	IDATA _rsclBufferControlBlockCount;	/**< count of buffers in BufferControlBlock thread local pool list */
+	intptr_t _rsclBufferControlBlockCount;	/**< count of buffers in BufferControlBlock thread local pool list */
 	MM_RememberedSetCardBucket *_rememberedSetCardBucketPool; /**< GC thread local pool of RS Card Buckets for each Region (its Card List) */
 	MM_RememberedSetCardList *_lastOverflowedRsclWithReleasedBuffers; /**< in global list of overflowed RSCL, this is the last RSCL this thread visited */
 
@@ -79,6 +79,7 @@ public:
 
 	MM_MarkVLHGCStats _markVLHGCStats;
 	MM_SweepVLHGCStats _sweepVLHGCStats;
+
 #if defined(J9VM_GC_MODRON_COMPACTION)
 	MM_CompactVLHGCStats _compactVLHGCStats;
 #endif /* J9VM_GC_MODRON_COMPACTION */

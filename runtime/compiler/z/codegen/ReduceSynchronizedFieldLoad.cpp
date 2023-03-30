@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -64,13 +64,13 @@ ReduceSynchronizedFieldLoad::inlineSynchronizedFieldLoad(TR::Node* node, TR::Cod
    TR::LabelSymbol* fastPathLabel = generateLabelSymbol(cg);
    TR::LabelSymbol* slowPathLabel = generateLabelSymbol(cg);
 
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, fastPathLabel);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, fastPathLabel);
 
    TR_S390OutOfLineCodeSection* outOfLineCodeSection = new (cg->trHeapMemory()) TR_S390OutOfLineCodeSection(slowPathLabel, mergeLabel, cg);
    cg->getS390OutOfLineCodeSectionList().push_front(outOfLineCodeSection);
    outOfLineCodeSection->swapInstructionListsWithCompilation();
 
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, slowPathLabel);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, slowPathLabel);
 
    // Generate a dynamic debug counter for the fallback path whose execution should be extremely rare
    cg->generateDebugCounter(TR::DebugCounter::debugCounterName(comp, "codegen/z/ReduceSynchronizedFieldLoad/success/OOL/%s", comp->signature()));
@@ -239,7 +239,7 @@ ReduceSynchronizedFieldLoad::inlineSynchronizedFieldLoad(TR::Node* node, TR::Cod
 
    generateS390BranchInstruction(cg, TR::InstOpCode::BRC, TR::InstOpCode::COND_BRC, node, slowPathLabel);
 
-   generateS390LabelInstruction(cg, TR::InstOpCode::LABEL, node, mergeLabel, conditions);
+   generateS390LabelInstruction(cg, TR::InstOpCode::label, node, mergeLabel, conditions);
 
    cg->decReferenceCount(synchronizedObjectNode);
    cg->decReferenceCount(loadNode);
@@ -286,8 +286,10 @@ ReduceSynchronizedFieldLoad::performOnTreeTops(TR::TreeTop* startTreeTop, TR::Tr
          TR::Node* monentNode = iter.currentNode()->getOpCodeValue() == TR::monent ?
             iter.currentNode() :
             iter.currentNode()->getFirstChild();
-         // Locking on value types is prohibited by the spec., so this optimization can only be performed if we are certain (at compile time) the locking object is not a value type
-         if (TR::Compiler->om.areValueTypesEnabled() && cg->isMonitorValueType(monentNode) != TR_no)
+         // Locking on value types or value based classes is prohibited by the spec.,
+         // so this optimization can only be performed if we are certain (at compile time)
+         // the locking object is not a value type or value based
+         if (cg->isMonitorValueBasedOrValueType(monentNode) != TR_no)
             continue;
          if (comp->getOption(TR_TraceCG))
             {

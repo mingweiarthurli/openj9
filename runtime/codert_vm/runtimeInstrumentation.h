@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2014 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -53,7 +53,7 @@ shutdownJITRuntimeInstrumentation(J9JavaVM *vm);
  * of the flag bits are enabled.
  * 
  * This function will return an error if J9_PRIVATE_FLAGS_RI_INITIALIZED
- * is not set in the privateFlags of the target thread.  This will be be set if the call to the port library
+ * is not set in the privateFlags of the target thread.  This will be set if the call to the port library
  * function j9ri_authorize_current_thread() succeeded when the thread was created.
  * 
  * The following constants represent valid bits in newFlags:

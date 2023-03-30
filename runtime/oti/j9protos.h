@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -153,7 +153,7 @@ I_32 numCodeSets (void);
 
 /* X86 for MS compilers, __i386__ for GNU compilers */
 
-#if !defined(J9_SOFT_FLOAT) && (defined(_X86_) || defined (__i386__) || defined(J9HAMMER) || defined(OSX))
+#if !defined(J9_SOFT_FLOAT) && (defined(_X86_) || defined (__i386__) || defined(J9HAMMER) || (defined(OSX) && !defined(J9AARCH64)))
 
 #define 	J9_SETUP_FPU_STATE() helperInitializeFPU()
 
@@ -1132,6 +1132,57 @@ extern J9_CFUNC struct J9Method* jitGetJ9MethodUsingIndex(J9VMThread *currentThr
 extern J9_CFUNC struct J9Method* jitResolveStaticMethodRef(J9VMThread *vmStruct, J9ConstantPool *constantPool, UDATA cpOrSplitIndex, UDATA resolveFlags);
 extern J9_CFUNC struct J9Method* jitResolveSpecialMethodRef(J9VMThread *vmStruct, J9ConstantPool *constantPool, UDATA cpOrSplitIndex, UDATA resolveFlags);
 extern J9_CFUNC struct J9Class * jitGetDeclaringClassOfROMField(J9VMThread *vmStruct, J9Class *clazz, J9ROMFieldShape *romField);
+extern J9_CFUNC BOOLEAN jitIsFieldStable(J9VMThread *currentThread, J9Class *clazz, UDATA cpIndex);
+extern J9_CFUNC BOOLEAN jitIsMethodTaggedWithForceInline(J9VMThread *currentThread, J9Method *method);
+extern J9_CFUNC BOOLEAN jitIsMethodTaggedWithDontInline(J9VMThread *currentThread, J9Method *method);
+extern J9_CFUNC BOOLEAN jitIsMethodTaggedWithIntrinsicCandidate(J9VMThread *currentThread, J9Method *method);
+
+typedef struct J9MethodFromSignatureWalkState {
+	const char *className;
+	U_32 classNameLength;
+	struct J9JNINameAndSignature nameAndSig;
+	struct J9VMThread *vmThread;
+	struct J9ClassLoaderWalkState classLoaderWalkState;
+} J9MethodFromSignatureWalkState;
+
+/**
+ * Cleans up the iterator after matching all methods found.
+ *
+ * @param state The inlialized iterator state
+ */
+extern J9_CFUNC void
+allMethodsFromSignatureEndDo(J9MethodFromSignatureWalkState *state);
+
+/**
+ * Advances the iterator looking for the next method matching the exact signature provided during initialization.
+ *
+ * @param state The inlialized iterator state
+ *
+ * @return      J9Method matching the exact signature provided during initialization of the iterator in the class loader
+ *              if it exists; NULL if no such method is found.
+ */
+extern J9_CFUNC struct J9Method *
+allMethodsFromSignatureNextDo(J9MethodFromSignatureWalkState *state);
+
+/**
+ * Initializes the iterator state and returns the first method matching the supplied exact (no wildcards allowed)
+ * signature from any class loader.
+ *
+ * @param state            The iterator state which will be initialized.
+ * @param vm               The VM instance to look for methods in.
+ * @param flags            The flags forwarded to class loader iterator functions
+ * @param className        The class name including the package.
+ * @param classNameLength  The length (in number of bytes) of the class name
+ * @param methodName       The method name
+ * @param methodNameLength The length (in number of bytes) of the method name
+ * @param methodSig        The method signature
+ * @param methodSigLength  The length (in number of bytes) of the method signature
+ *
+ * @return                 J9Method matching the exact signature provided in the first class loader it is found; NULL if
+ *                         no such method is found.
+ */
+extern J9_CFUNC struct J9Method *
+allMethodsFromSignatureStartDo(J9MethodFromSignatureWalkState *state, J9JavaVM* vm, UDATA flags, const char *className, U_32 classNameLength, const char *methodName, U_32 methodNameLength, const char *methodSig, U_32 methodSigLength);
 
 #endif /* J9VM_INTERP_NATIVE_SUPPORT*/
 #endif /* _J9VMJITNATIVECOMPILESUPPORT_ */
@@ -1211,8 +1262,12 @@ extern J9_CFUNC j9object_t resolveMethodTypeRef (J9VMThread *vmThread, J9Constan
 extern J9_CFUNC j9object_t resolveMethodTypeRefInto(J9VMThread *vmThread, J9ConstantPool *ramCP, UDATA cpIndex, UDATA resolveFlags, J9RAMMethodTypeRef *ramCPEntry);
 extern J9_CFUNC j9object_t resolveMethodHandleRef (J9VMThread *vmThread, J9ConstantPool *ramCP, UDATA cpIndex, UDATA resolveFlags);
 extern J9_CFUNC j9object_t resolveMethodHandleRefInto(J9VMThread *vmThread, J9ConstantPool *ramCP, UDATA cpIndex, UDATA resolveFlags, J9RAMMethodHandleRef *ramCPEntry);
+extern J9_CFUNC j9object_t resolveOpenJDKInvokeHandle (J9VMThread *vmThread, J9ConstantPool *ramCP, UDATA cpIndex, UDATA resolveFlags);
 extern J9_CFUNC j9object_t resolveInvokeDynamic (J9VMThread *vmThread, J9ConstantPool *ramCP, UDATA cpIndex, UDATA resolveFlags);
 extern J9_CFUNC j9object_t resolveConstantDynamic (J9VMThread *vmThread, J9ConstantPool *ramCP, UDATA cpIndex, UDATA resolveFlags);
+#if JAVA_SPEC_VERSION >= 16
+extern J9_CFUNC void resolveUpcallInvokeHandle(J9VMThread *vmThread, J9UpcallMetaData *data);
+#endif /* JAVA_SPEC_VERSION >= 16 */
 #endif /* _J9VMRESOLVESUPPORT_ */
 
 /* J9VMRomImageSupport*/
@@ -1303,10 +1358,16 @@ extern J9_CFUNC void  JNICALL sidecarInvokeReflectConstructorImpl (J9VMThread *v
 extern J9_CFUNC void  JNICALL sendFromMethodDescriptorString (J9VMThread *vmThread, J9UTF8 *descriptor, J9ClassLoader *classLoader, J9Class *appendArgType);
 extern J9_CFUNC void  JNICALL sendResolveMethodHandle (J9VMThread *vmThread, UDATA cpIndex, J9ConstantPool *ramCP, J9Class *definingClass, J9ROMNameAndSignature* nameAndSig);
 extern J9_CFUNC void  JNICALL sendForGenericInvoke (J9VMThread *vmThread, j9object_t methodHandle, j9object_t methodType, UDATA dropFirstArg);
+extern J9_CFUNC void  JNICALL sendResolveOpenJDKInvokeHandle (J9VMThread *vmThread, J9ConstantPool *ramCP, UDATA cpIndex, I_32 refKind, J9Class *resolvedClass, J9ROMNameAndSignature* nameAndSig);
+#if JAVA_SPEC_VERSION >= 11
 extern J9_CFUNC void  JNICALL sendResolveConstantDynamic (J9VMThread *vmThread, J9ConstantPool *ramCP, UDATA cpIndex, J9ROMNameAndSignature* nameAndSig, U_16* bsmData);
+#endif /* JAVA_SPEC_VERSION >= 11 */
 extern J9_CFUNC void  JNICALL sendResolveInvokeDynamic (J9VMThread *vmThread, J9ConstantPool *ramCP, UDATA callSiteIndex, J9ROMNameAndSignature* nameAndSig, U_16* bsmData);
 extern J9_CFUNC void  JNICALL jitFillOSRBuffer (struct J9VMThread *vmContext, void *osrBlock);
 extern J9_CFUNC void  JNICALL sendRunThread(J9VMThread *vmContext, j9object_t tenantContext);
+#if JAVA_SPEC_VERSION >= 16
+extern J9_CFUNC void JNICALL sendResolveUpcallInvokeHandle (J9VMThread *currentThread, J9UpcallMetaData *data);
+#endif /* JAVA_SPEC_VERSION >= 16 */
 #endif /* _J9VMJAVAINTERPRETERSTARTUP_ */
 
 /* J9VMNativeHelpersLarge*/
@@ -1322,21 +1383,16 @@ extern J9_CFUNC UDATA  hasMoreInlinedMethods (void * inlinedCallSite);
 extern J9_CFUNC UDATA  getByteCodeIndex (void * inlinedCallSite);
 extern J9_CFUNC void  jitReportDynamicCodeLoadEvents (J9VMThread * currentThread);
 extern J9_CFUNC UDATA  getJitInlineDepthFromCallSite (J9JITExceptionTable *metaData, void *inlinedCallSite);
-extern J9_CFUNC void*  jitGetInlinerMapFromPC (J9JavaVM * javaVM, J9JITExceptionTable * exceptionTable, UDATA jitPC);
-extern J9_CFUNC void*  getStackMapFromJitPC (J9JavaVM * javaVM, struct J9JITExceptionTable * exceptionTable, UDATA jitPC);
+extern J9_CFUNC void*  jitGetInlinerMapFromPC (J9VMThread * currentThread, J9JavaVM * vm, J9JITExceptionTable * exceptionTable, UDATA jitPC);
+extern J9_CFUNC void*  getStackMapFromJitPC (J9VMThread * currentThread, J9JavaVM * vm, struct J9JITExceptionTable * exceptionTable, UDATA jitPC);
 extern J9_CFUNC UDATA  getCurrentByteCodeIndexAndIsSameReceiver (J9JITExceptionTable *metaData, void *stackMap, void *currentInlinedCallSite, UDATA * isSameReceiver);
 extern J9_CFUNC void  clearFPStack (void);
 extern J9_CFUNC void  jitExclusiveVMShutdownPending (J9VMThread *vmThread);
 extern J9_CFUNC void*  getNextInlinedCallSite (J9JITExceptionTable * metaData, void * inlinedCallSite);
-extern J9_CFUNC void*  jitGetStackMapFromPC (J9JavaVM * javaVM, struct J9JITExceptionTable * exceptionTable, UDATA jitPC);
+extern J9_CFUNC void*  jitGetStackMapFromPC (J9VMThread * currentThread, struct J9JITExceptionTable * exceptionTable, UDATA jitPC);
 extern J9_CFUNC void  jitAddPicToPatchOnClassUnload (void *classPointer, void *addressToBePatched);
-extern J9_CFUNC UDATA  jitSignalHandler (J9VMThread *vmStruct, U_32 gpType, void* gpInfo);
 #endif /* J9VM_INTERP_NATIVE_SUPPORT */
 #endif /* _J9VMNATIVEHELPERSLARGE_ */
-
-/* Runtime annotation handling */
-extern J9_CFUNC I_32 getAnnotationByType(J9ROMConstantPoolItem const *constantPool, J9UTF8 const *searchString,
-	U_32 const numAnnotations, U_8 const *data, U_8 const **pIndex,  U_8 const *dataEnd);
 
 #ifdef __cplusplus
 }

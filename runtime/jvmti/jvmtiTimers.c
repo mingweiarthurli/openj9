@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2018 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -57,20 +57,41 @@ jvmtiError JNICALL
 jvmtiGetCurrentThreadCpuTime(jvmtiEnv* env,
 	jlong* nanos_ptr)
 {
-	jvmtiError rc;
+#if JAVA_SPEC_VERSION >= 19
+	J9JavaVM *vm = JAVAVM_FROM_ENV(env);
+	J9VMThread *currentThread = NULL;
+#endif /* JAVA_SPEC_VERSION >= 19 */
+	jvmtiError rc = JVMTI_ERROR_NONE;
 	jlong rv_nanos = 0;
 
 	Trc_JVMTI_jvmtiGetCurrentThreadCpuTime_Entry(env);
 
-	ENSURE_PHASE_START_OR_LIVE(env);
-	ENSURE_CAPABILITY(env, can_get_current_thread_cpu_time);
+#if JAVA_SPEC_VERSION >= 19
+	rc = getCurrentVMThread(vm, &currentThread);
+	if (JVMTI_ERROR_NONE == rc) {
+		vm->internalVMFunctions->internalEnterVMFromJNI(currentThread);
+#endif /* JAVA_SPEC_VERSION >= 19 */
 
-	ENSURE_NON_NULL(nanos_ptr);
+		ENSURE_PHASE_START_OR_LIVE(env);
+		ENSURE_CAPABILITY(env, can_get_current_thread_cpu_time);
 
-	rv_nanos = (jlong)omrthread_get_self_cpu_time(omrthread_self());
-	rc = JVMTI_ERROR_NONE;
+		ENSURE_NON_NULL(nanos_ptr);
+
+#if JAVA_SPEC_VERSION >= 19
+		ENSURE_JTHREADOBJECT_NOT_VIRTUAL(
+			currentThread,
+			currentThread->threadObject,
+			JVMTI_ERROR_UNSUPPORTED_OPERATION);
+#endif /* JAVA_SPEC_VERSION >= 19 */
+
+		rv_nanos = (jlong)omrthread_get_self_cpu_time(omrthread_self());
 
 done:
+#if JAVA_SPEC_VERSION >= 19
+		vm->internalVMFunctions->internalExitVMToJNI(currentThread);
+	}
+#endif /* JAVA_SPEC_VERSION >= 19 */
+
 	if (NULL != nanos_ptr) {
 		*nanos_ptr = rv_nanos;
 	}
@@ -131,14 +152,21 @@ jvmtiGetThreadCpuTime(jvmtiEnv* env,
 			ENSURE_NON_NULL(nanos_ptr);
 			rv_nanos = (jlong)omrthread_get_cpu_time(omrthread_self());
 		} else {
-			rc = getVMThread(currentThread, thread, &targetThread, TRUE, TRUE);
+			rc = getVMThread(
+					currentThread, thread, &targetThread,
+#if JAVA_SPEC_VERSION >= 19
+					JVMTI_ERROR_UNSUPPORTED_OPERATION,
+#else /* JAVA_SPEC_VERSION >= 19 */
+					JVMTI_ERROR_NONE,
+#endif /* JAVA_SPEC_VERSION >= 19 */
+					J9JVMTI_GETVMTHREAD_ERROR_ON_DEAD_THREAD | J9JVMTI_GETVMTHREAD_ERROR_ON_VIRTUALTHREAD);
 			if (rc == JVMTI_ERROR_NONE) {
 				if (nanos_ptr == NULL) {
 					rc = JVMTI_ERROR_NULL_POINTER;
 				} else {
 					rv_nanos = (jlong)omrthread_get_cpu_time(targetThread->osThread);
 				}
-				releaseVMThread(currentThread, targetThread);
+				releaseVMThread(currentThread, targetThread, thread);
 			}
 		}
 done:

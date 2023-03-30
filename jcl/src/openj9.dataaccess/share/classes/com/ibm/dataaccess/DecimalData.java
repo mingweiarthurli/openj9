@@ -1,6 +1,6 @@
 /*[INCLUDE-IF DAA]*/
 /*******************************************************************************
- * Copyright (c) 2013, 2019 IBM Corp. and others
+ * Copyright (c) 2013, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,11 +16,10 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
-
 package com.ibm.dataaccess;
 
 import java.math.BigDecimal;
@@ -315,18 +314,15 @@ public final class DecimalData
 
         // fill in high/low nibble pairs from next-to-last up to first
         for (i = last - 1; i > offset && value != 0; i--) {
-            packedDecimal[i] = CommonData
-                    .getBinaryToPackedValues((int) (value % 100));
+            packedDecimal[i] = CommonData.getBinaryToPackedValues(value % 100);
             value = value / 100;
         }
 
         if (i == offset && value != 0) {
             if (evenPrecision)
-                packedDecimal[i] = (byte) (CommonData
-                        .getBinaryToPackedValues((int) (value % 100)) & CommonData.LOWER_NIBBLE_MASK);
+                packedDecimal[i] = (byte) (CommonData.getBinaryToPackedValues(value % 100) & CommonData.LOWER_NIBBLE_MASK);
             else
-                packedDecimal[i] = CommonData
-                        .getBinaryToPackedValues((int) (value % 100));
+                packedDecimal[i] = CommonData.getBinaryToPackedValues(value % 100);
             value = value / 100;
             i--;
         }
@@ -427,8 +423,10 @@ public final class DecimalData
     
         switch (decimalType) {
         case EBCDIC_SIGN_EMBEDDED_TRAILING:
-            externalSignOffset += precision - 1;
         case EBCDIC_SIGN_EMBEDDED_LEADING:
+            if (decimalType == EBCDIC_SIGN_EMBEDDED_TRAILING) {
+            	externalSignOffset += precision - 1;
+            }
             byte sign;
             if (integerValue >= 0) {
                 sign = (byte) (CommonData.PACKED_PLUS << 4);
@@ -438,8 +436,10 @@ public final class DecimalData
             externalDecimal[externalSignOffset] = (byte) ((externalDecimal[externalSignOffset] & CommonData.LOWER_NIBBLE_MASK) | sign);
             break;
         case EBCDIC_SIGN_SEPARATE_TRAILING:
-            externalSignOffset += precision;
         case EBCDIC_SIGN_SEPARATE_LEADING:
+            if (decimalType == EBCDIC_SIGN_SEPARATE_TRAILING) {
+                externalSignOffset += precision;
+            }
             if (integerValue >= 0)
                 externalDecimal[externalSignOffset] = EBCDIC_SIGN_POSITIVE;
             else
@@ -722,8 +722,10 @@ public final class DecimalData
     
         switch (decimalType) {
         case EBCDIC_SIGN_EMBEDDED_TRAILING:
-            externalSignOffset += precision - 1;
         case EBCDIC_SIGN_EMBEDDED_LEADING:
+            if (decimalType == EBCDIC_SIGN_EMBEDDED_TRAILING) {
+                externalSignOffset += precision - 1;
+            }
             byte sign;
             if (longValue >= 0) {
                 sign = (byte) (CommonData.PACKED_PLUS << 4);
@@ -733,8 +735,10 @@ public final class DecimalData
             externalDecimal[externalSignOffset] = (byte) ((externalDecimal[externalSignOffset] & CommonData.LOWER_NIBBLE_MASK) | sign);
             break;
         case EBCDIC_SIGN_SEPARATE_TRAILING:
-            externalSignOffset += precision;
         case EBCDIC_SIGN_SEPARATE_LEADING:
+            if (decimalType == EBCDIC_SIGN_SEPARATE_TRAILING) {
+                externalSignOffset += precision;
+            }
             if (longValue >= 0)
                 externalDecimal[externalSignOffset] = EBCDIC_SIGN_POSITIVE;
             else
@@ -842,7 +846,7 @@ public final class DecimalData
     /**
      * Converts a Packed Decimal value in a byte array into a binary integer. If the digital part of the input Packed
      * Decimal is not valid then the digital part of the output will not be valid. The sign of the input Packed Decimal
-     * is assumed to to be positive unless the sign nibble contains one of the negative sign codes, in which case the
+     * is assumed to be positive unless the sign nibble contains one of the negative sign codes, in which case the
      * sign of the input Packed Decimal is interpreted as negative.
      * 
      * Overflow can happen if the Packed Decimal value does not fit into a binary integer. When
@@ -937,7 +941,7 @@ public final class DecimalData
     /**
      * Converts a Packed Decimal value in a byte array into a binary long. If the digital part of the input Packed
      * Decimal is not valid then the digital part of the output will not be valid. The sign of the input Packed Decimal
-     * is assumed to to be positive unless the sign nibble contains one of the negative sign codes, in which case the
+     * is assumed to be positive unless the sign nibble contains one of the negative sign codes, in which case the
      * sign of the input Packed Decimal is interpreted as negative.
      * 
      * Overflow can happen if the Packed Decimal value does not fit into a binary long. In this case, when
@@ -1040,7 +1044,7 @@ public final class DecimalData
     /**
      * Converts a Packed Decimal in a byte array into an External Decimal in another byte array. If the digital part of
      * the input Packed Decimal is not valid then the digital part of the output will not be valid. The sign of the
-     * input Packed Decimal is assumed to to be positive unless the sign nibble contains one of the negative sign codes,
+     * input Packed Decimal is assumed to be positive unless the sign nibble contains one of the negative sign codes,
      * in which case the sign of the input Packed Decimal is interpreted as negative.
      * 
      * @param packedDecimal
@@ -1146,7 +1150,7 @@ public final class DecimalData
     /**
      * Convert a Packed Decimal in a byte array to a Unicode Decimal in a char array. If the digital part of the input
      * Packed Decimal is not valid then the digital part of the output will not be valid. The sign of the input Packed
-     * Decimal is assumed to to be positive unless the sign nibble contains one of the negative sign codes, in which
+     * Decimal is assumed to be positive unless the sign nibble contains one of the negative sign codes, in which
      * case the sign of the input Packed Decimal is interpreted as negative.
      * 
      * @param packedDecimal
@@ -1326,7 +1330,7 @@ public final class DecimalData
     /**
      * Converts an External Decimal value in a byte array into a binary integer. If the digital part of the input
      * External Decimal is not valid then the digital part of the output will not be valid. The sign of the input
-     * External Decimal is assumed to to be positive unless the sign nibble or byte (depending on
+     * External Decimal is assumed to be positive unless the sign nibble or byte (depending on
      * <code>decimalType</code>) contains one of the negative sign codes, in which case the sign of the input External
      * Decimal is interpreted as negative.
      * 
@@ -1465,7 +1469,7 @@ public final class DecimalData
     /**
      * Converts an External Decimal value in a byte array into a long. If the digital part of the input External Decimal
      * is not valid then the digital part of the output will not be valid. The sign of the input External Decimal is
-     * assumed to to be positive unless the sign nibble or byte (depending on <code>decimalType</code>) contains one of
+     * assumed to be positive unless the sign nibble or byte (depending on <code>decimalType</code>) contains one of
      * the negative sign codes, in which case the sign of the input External Decimal is interpreted as negative.
      * 
      * Overflow can happen if the External Decimal value does not fit into a binary long. When
@@ -1598,7 +1602,7 @@ public final class DecimalData
     /**
      * Converts an External Decimal in a byte array to a Packed Decimal in another byte array. If the digital part of
      * the input External Decimal is not valid then the digital part of the output will not be valid. The sign of the
-     * input External Decimal is assumed to to be positive unless the sign nibble or byte (depending on
+     * input External Decimal is assumed to be positive unless the sign nibble or byte (depending on
      * <code>decimalType</code>) contains one of the negative sign codes, in which case the sign of the input External
      * Decimal is interpreted as negative.
      * 
@@ -1730,7 +1734,7 @@ public final class DecimalData
 
     /**
      * Converts an External Decimal in a byte array to a BigDecimal. The sign of the input External Decimal is assumed
-     * to to be positive unless the sign nibble or byte (depending on <code>decimalType</code>) contains one of the
+     * to be positive unless the sign nibble or byte (depending on <code>decimalType</code>) contains one of the
      * negative sign codes, in which case the sign of the input External Decimal is interpreted as negative.
      * 
      * Overflow can happen if the External Decimal value does not fit into the BigDecimal. In this case, when
@@ -1829,7 +1833,7 @@ public final class DecimalData
     
     /**
      * Converts a Unicode Decimal value in a char array into a binary integer. The sign of the input Unicode Decimal is
-     * assumed to to be positive unless the sign char contains the negative sign code, in which case the sign of the
+     * assumed to be positive unless the sign char contains the negative sign code, in which case the sign of the
      * input Unicode Decimal is interpreted as negative.
      * 
      * Overflow can happen if the Unicode Decimal value does not fit into a binary int. In this case, when
@@ -1941,7 +1945,7 @@ public final class DecimalData
 
     /**
      * Converts a Unicode Decimal value in a char array into a binary long. The sign of the input Unicode Decimal is
-     * assumed to to be positive unless the sign char contains the negative sign code, in which case the sign of the
+     * assumed to be positive unless the sign char contains the negative sign code, in which case the sign of the
      * input Unicode Decimal is interpreted as negative.
      * 
      * Overflow can happen if the Unicode Decimal value does not fit into a binary long. In this case, when
@@ -2057,7 +2061,7 @@ public final class DecimalData
     /**
      * Converts an Unicode Decimal in a char array to a Packed Decimal in a byte array. If the digital part of the input
      * Unicode Decimal is not valid then the digital part of the output will not be valid. The sign of the input Unicode
-     * Decimal is assumed to to be positive unless the sign byte contains the negative sign code, in which case the sign
+     * Decimal is assumed to be positive unless the sign byte contains the negative sign code, in which case the sign
      * of the input Unicode Decimal is interpreted as negative.
      * 
      * @param unicodeDecimal
@@ -2148,7 +2152,7 @@ public final class DecimalData
     }
 
     /**
-     * Convert a Unicode Decimal in a char array to a BigInteger. The sign of the input Unicode Decimal is assumed to to
+     * Convert a Unicode Decimal in a char array to a BigInteger. The sign of the input Unicode Decimal is assumed to
      * be positive unless the sign byte contains the negative sign code, in which case the sign of the input Unicode
      * Decimal is interpreted as negative.
      * 
@@ -2570,7 +2574,7 @@ public final class DecimalData
 
         // take care of the sign nibble and the right most digit
         byteArray[offset + length - 1] = (byte) ((buffer[numDigitsLeft] - '0') << 4);
-        byteArray[offset + length - 1] |= ((value.signum() == -1) ? 0x0D : 0x0C);
+        byteArray[offset + length - 1] |= (byte) ((value.signum() == -1) ? 0x0D : 0x0C);
 
         // compact 2 digits into each byte
         for (int i = numDigitsLeft - 1; i >= endPosition

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -88,6 +88,7 @@ static jobject JNICALL gpCheckToReflectedMethod (JNIEnv * env, jclass clazz, jme
 #endif /* !INTERP_MINIMAL_JNI */
 
 static UDATA gpProtectedSetNativeOutOfMemoryError(void * entryArg);
+static UDATA gpProtectedSetNegativeArraySizeException(void * entryArg);
 static UDATA gpProtectedSetHeapOutOfMemoryError(void * entryArg);
 static UDATA gpProtectedSetCurrentExceptionNLS (void * entryArg);
 static UDATA gpProtectedRunCallInMethod (void *entryArg);
@@ -140,6 +141,10 @@ static void JNICALL releaseStringCritical(JNIEnv *env, jstring str, const jchar 
 static jobject JNICALL getModule(JNIEnv *env, jclass clazz);
 #endif /* JAVA_SPEC_VERSION >= 9 */
 
+#if JAVA_SPEC_VERSION >= 19
+static jboolean JNICALL isVirtualThread(JNIEnv *env, jobject obj);
+#endif /* JAVA_SPEC_VERSION >= 19 */
+
 #define FIND_CLASS gpCheckFindClass
 #define TO_REFLECTED_METHOD gpCheckToReflectedMethod
 #define TO_REFLECTED_FIELD gpCheckToReflectedField
@@ -164,6 +169,31 @@ static jobject JNICALL getModule(JNIEnv *env, jclass clazz);
 #define RELEASE_LONG_ARRAY_ELEMENTS ((void (JNICALL *)(JNIEnv *env, jlongArray array, jlong * elems, jint mode))releaseArrayElements)
 #define RELEASE_FLOAT_ARRAY_ELEMENTS ((void (JNICALL *)(JNIEnv *env, jfloatArray array, jfloat * elems, jint mode))releaseArrayElements)
 #define RELEASE_DOUBLE_ARRAY_ELEMENTS ((void (JNICALL *)(JNIEnv *env, jdoubleArray array, jdouble * elems, jint mode))releaseArrayElements)
+
+#if defined(J9VM_ZOS_3164_INTEROPERABILITY)
+#define GET_BOOLEAN_ARRAY_ELEMENTS31 ((jboolean * (JNICALL *)(JNIEnv *env, jbooleanArray array, jboolean * isCopy))getArrayElements31)
+#define GET_BYTE_ARRAY_ELEMENTS31 ((jbyte * (JNICALL *)(JNIEnv *env, jbyteArray array, jboolean * isCopy))getArrayElements31)
+#define GET_CHAR_ARRAY_ELEMENTS31 ((jchar * (JNICALL *)(JNIEnv *env, jcharArray array, jboolean * isCopy))getArrayElements31)
+#define GET_SHORT_ARRAY_ELEMENTS31 ((jshort * (JNICALL *)(JNIEnv *env, jshortArray array, jboolean * isCopy))getArrayElements31)
+#define GET_INT_ARRAY_ELEMENTS31 ((jint * (JNICALL *)(JNIEnv *env, jintArray array, jboolean * isCopy))getArrayElements31)
+#define GET_LONG_ARRAY_ELEMENTS31 ((jlong * (JNICALL *)(JNIEnv *env, jlongArray array, jboolean * isCopy))getArrayElements31)
+#define GET_FLOAT_ARRAY_ELEMENTS31 ((jfloat * (JNICALL *)(JNIEnv *env, jfloatArray array, jboolean * isCopy))getArrayElements31)
+#define GET_DOUBLE_ARRAY_ELEMENTS31 ((jdouble * (JNICALL *)(JNIEnv *env, jdoubleArray array, jboolean * isCopy))getArrayElements31)
+#define GET_PRIMITIVE_ARRAY_CRITICAL31 ((void * (JNICALL *)(JNIEnv *env, jarray array, jboolean * isCopy))getArrayElements31)
+
+#define RELEASE_BOOLEAN_ARRAY_ELEMENTS31 ((void (JNICALL *)(JNIEnv *env, jbooleanArray array, jboolean * elems, jint mode))releaseArrayElements31)
+#define RELEASE_BYTE_ARRAY_ELEMENTS31 ((void (JNICALL *)(JNIEnv *env, jbyteArray array, jbyte * elems, jint mode))releaseArrayElements31)
+#define RELEASE_CHAR_ARRAY_ELEMENTS31 ((void (JNICALL *)(JNIEnv *env, jcharArray array, jchar * elems, jint mode))releaseArrayElements31)
+#define RELEASE_SHORT_ARRAY_ELEMENTS31 ((void (JNICALL *)(JNIEnv *env, jshortArray array, jshort * elems, jint mode))releaseArrayElements31)
+#define RELEASE_INT_ARRAY_ELEMENTS31 ((void (JNICALL *)(JNIEnv *env, jintArray array, jint * elems, jint mode))releaseArrayElements31)
+#define RELEASE_LONG_ARRAY_ELEMENTS31 ((void (JNICALL *)(JNIEnv *env, jlongArray array, jlong * elems, jint mode))releaseArrayElements31)
+#define RELEASE_FLOAT_ARRAY_ELEMENTS31 ((void (JNICALL *)(JNIEnv *env, jfloatArray array, jfloat * elems, jint mode))releaseArrayElements31)
+#define RELEASE_DOUBLE_ARRAY_ELEMENTS31 ((void (JNICALL *)(JNIEnv *env, jdoubleArray array, jdouble * elems, jint mode))releaseArrayElements31)
+#define RELEASE_PRIMITIVE_ARRAY_CRITICAL31 ((void (JNICALL *)(JNIEnv *env, jarray carray, void * elems, jint mode))releaseArrayElements31)
+
+#define GET_STRING_CRITICAL31 ((const jchar * (JNICALL *)(JNIEnv *env, jstring string, jboolean *isCopy))getStringChars31)
+#define RELEASE_STRING_CRITICAL31 ((void (JNICALL *)(JNIEnv *env, jstring string, const jchar *carray))releaseStringChars31)
+#endif /* defined(J9VM_ZOS_3164_INTEROPERABILITY) */
 
 #define GET_BOOLEAN_ARRAY_REGION ((void (JNICALL *)(JNIEnv *env, jbooleanArray array, jsize start, jsize len, jboolean *buf))getArrayRegion)
 #define GET_BYTE_ARRAY_REGION ((void (JNICALL *)(JNIEnv *env, jbyteArray array, jsize start, jsize len, jbyte *buf))getArrayRegion)
@@ -236,6 +266,22 @@ static jobject JNICALL newObjectV(JNIEnv *env, jclass clazz, jmethodID methodID,
 	return obj;
 }
 
+#if defined(J9VM_ZOS_3164_INTEROPERABILITY)
+jobject JNICALL newObjectV31(JNIEnv *env, jclass clazz, jmethodID methodID, va_list args)
+{
+	jobject obj;
+
+	obj = allocObject(env, clazz);
+	if (obj) {
+		CALL_NONVIRTUAL_VOID_METHOD_V31(env, obj, METHODID_CLASS_REF(methodID), methodID, args);
+		if (exceptionCheck(env)) {
+			deleteLocalRef(env, obj);
+			obj = (jobject) NULL;
+		}
+	}
+	return obj;
+}
+#endif /* defined(J9VM_ZOS_3164_INTEROPERABILITY) */
 
 void JNICALL OMRNORETURN fatalError(JNIEnv *env, const char *msg)
 {
@@ -461,7 +507,27 @@ UDATA JNICALL pushArguments(J9VMThread *vmThread, J9Method* method, void *args) 
 	} else {
 		jvalues = NULL;
 	}
+
+#if defined(J9VM_ZOS_3164_INTEROPERABILITY)
+/* 31-bit vargs support being processed from 64-bit JVM.
+ * The alignment is set to be 4-bytes aligned.  Also __wsizeof() expands to 8 bytes on 64-bit, has been replaced with sizeof().
+ * The alignment check setting vl[0] will naturally take care of expansion.
+ */
+#define va_arg_31(vl, type) (*(type *)( (vl)[0] = (char *) (((unsigned long)((vl)[1])+3)&~(3)), (vl)[1] = (vl)[0] + (sizeof ( (* (type (*)(void)) 0 )() ) ), (sizeof(type) < sizeof(U_32)) ? ((vl)[0] + ((sizeof ( (* (type (*)(void)) 0 )() ) ) - sizeof(type))): (vl)[0] ))
+
+// Update ARG macro to also check if 31bit vargs, then call the va_arg_31 macro defined above if so.
+#define ARG(type, sig) (jvalues ? (jvalues++->sig) : ((isCrossAmodeVarArgs)?va_arg_31(*(va_list*)args, type):va_arg(*(va_list*)args, type)))
+
+	BOOLEAN isCrossAmodeVarArgs = FALSE;
+
+	if ( J9_ARE_ANY_BITS_SET((UDATA)args, 0x2) ) {
+		/* pointer being tagged with 0x2 implies it's a 31-bit cross-amode var_args */
+		isCrossAmodeVarArgs = TRUE;
+		args = (void *) ((U_8*)args - 2);
+	}
+#else /* defined(J9VM_ZOS_3164_INTEROPERABILITY) */
 #define ARG(type, sig) (jvalues ? (jvalues++->sig) : va_arg(*(va_list*)args, type))
+#endif /* defined(J9VM_ZOS_3164_INTEROPERABILITY) */
 
 	/* process the arguments */
 	sigChar = &J9UTF8_DATA(J9ROMMETHOD_SIGNATURE(J9_ROM_METHOD_FROM_RAM_METHOD(method)))[1];	/* skip the opening '(' */
@@ -1162,6 +1228,26 @@ void JNICALL gpCheckSetNativeOutOfMemoryError(J9VMThread* env, U_32 moduleName, 
 	}
 }
 
+static UDATA
+gpProtectedSetNegativeArraySizeException(void * entryArg)
+{
+	J9RedirectedNegativeArraySizeExceptionArgs * args = (J9RedirectedNegativeArraySizeExceptionArgs *) entryArg;
+	setNegativeArraySizeException(args->env, args->size);
+	return 0;
+}
+
+void JNICALL gpCheckSetNegativeArraySizeException(J9VMThread* env, I_32 size)
+{
+	/* Check if already protected or -Xrs is set and short-circuit the path through gpProtectAndRun */
+	if ((((J9VMThread *) env)->gpProtected) || (J9_ARE_ALL_BITS_SET(((J9VMThread *) env)->javaVM->sigFlags, J9_SIG_XRS_SYNC))) {
+		setNegativeArraySizeException(env, size);
+	} else {
+		J9RedirectedNegativeArraySizeExceptionArgs args;
+		args.env = env;
+		args.size = size;
+		gpProtectAndRun(gpProtectedSetNegativeArraySizeException, (JNIEnv*)env, &args);
+	}
+}
 
 static UDATA
 gpProtectedSetHeapOutOfMemoryError(void * entryArg)
@@ -1478,6 +1564,9 @@ struct JNINativeInterface_ EsJNIFunctions = {
 #if JAVA_SPEC_VERSION >= 9
 	getModule,
 #endif /* JAVA_SPEC_VERSION >= 9 */
+#if JAVA_SPEC_VERSION >= 19
+	isVirtualThread,
+#endif /* JAVA_SPEC_VERSION >= 19 */
 };
 
 void  initializeJNITable(J9JavaVM *vm)
@@ -1485,6 +1574,99 @@ void  initializeJNITable(J9JavaVM *vm)
 	vm->jniFunctionTable = GLOBAL_TABLE(EsJNIFunctions);
 }
 
+#if defined(J9VM_ZOS_3164_INTEROPERABILITY)
+/**
+* A utility routine invoked once by libjvm31 shim library to return
+* a JNINativeInterface_ function table in below-the-bar storage.
+* Certain entries that require customized handling for 31-bit callers
+* are updated in the table, otherwise, will reuse 64-bit functions.
+*
+*@param[in] env The JNIEnv* of the current thread.
+*@return Below-the-bar JNINativeInterface_ function table.
+*/
+JNINativeInterface_* JNICALL
+J9VM_initializeJNI31Table(JNIEnv *env)
+{
+	PORT_ACCESS_FROM_VMC((J9VMThread *) env);
+	/* This 64-bit XPLINK function pointer table of JNI native functions needs to be accessible by 31-bit shim library. */
+	JNINativeInterface_ *EsJNI31Functions = (JNINativeInterface_*) j9mem_allocate_memory32(sizeof(JNINativeInterface_), OMRMEM_CATEGORY_VM);
+
+	/* Majority of 64-bit JNI functions are common for 31-bit shim library.
+	 * Update the specific entries for 31-bit customized functions below.
+	 */
+	memcpy(EsJNI31Functions, &EsJNIFunctions, sizeof(JNINativeInterface_));
+
+	/* Macros defined in jnicimap.h for Call<type>Method<args> */
+	EsJNI31Functions->CallObjectMethodV = CALL_VIRTUAL_OBJECT_METHOD_V31;
+	EsJNI31Functions->CallBooleanMethodV = CALL_VIRTUAL_BOOLEAN_METHOD_V31;
+	EsJNI31Functions->CallByteMethodV = CALL_VIRTUAL_BYTE_METHOD_V31;
+	EsJNI31Functions->CallCharMethodV = CALL_VIRTUAL_CHAR_METHOD_V31;
+	EsJNI31Functions->CallShortMethodV = CALL_VIRTUAL_SHORT_METHOD_V31;
+	EsJNI31Functions->CallIntMethodV = CALL_VIRTUAL_INT_METHOD_V31;
+	EsJNI31Functions->CallLongMethodV = CALL_VIRTUAL_LONG_METHOD_V31;
+	EsJNI31Functions->CallFloatMethodV = CALL_VIRTUAL_FLOAT_METHOD_V31;
+	EsJNI31Functions->CallDoubleMethodV = CALL_VIRTUAL_DOUBLE_METHOD_V31;
+	EsJNI31Functions->CallVoidMethodV = CALL_VIRTUAL_VOID_METHOD_V31;
+
+	/* Macros defined in jnicimap.h for CallNonvirtual<type>Method<args> */
+	EsJNI31Functions->CallNonvirtualObjectMethodV = CALL_NONVIRTUAL_OBJECT_METHOD_V31;
+	EsJNI31Functions->CallNonvirtualBooleanMethodV = CALL_NONVIRTUAL_BOOLEAN_METHOD_V31;
+	EsJNI31Functions->CallNonvirtualByteMethodV = CALL_NONVIRTUAL_BYTE_METHOD_V31;
+	EsJNI31Functions->CallNonvirtualCharMethodV = CALL_NONVIRTUAL_CHAR_METHOD_V31;
+	EsJNI31Functions->CallNonvirtualShortMethodV = CALL_NONVIRTUAL_SHORT_METHOD_V31;
+	EsJNI31Functions->CallNonvirtualIntMethodV = CALL_NONVIRTUAL_INT_METHOD_V31;
+	EsJNI31Functions->CallNonvirtualLongMethodV = CALL_NONVIRTUAL_LONG_METHOD_V31;
+	EsJNI31Functions->CallNonvirtualFloatMethodV = CALL_NONVIRTUAL_FLOAT_METHOD_V31;
+	EsJNI31Functions->CallNonvirtualDoubleMethodV = CALL_NONVIRTUAL_DOUBLE_METHOD_V31;
+	EsJNI31Functions->CallNonvirtualVoidMethodV = CALL_NONVIRTUAL_VOID_METHOD_V31;
+
+	/* Macros defined in jnicimap.h for CallStatic<type>Method<args> */
+	EsJNI31Functions->CallStaticObjectMethodV = CALL_STATIC_OBJECT_METHOD_V31;
+	EsJNI31Functions->CallStaticBooleanMethodV = CALL_STATIC_BOOLEAN_METHOD_V31;
+	EsJNI31Functions->CallStaticByteMethodV = CALL_STATIC_BYTE_METHOD_V31;
+	EsJNI31Functions->CallStaticCharMethodV = CALL_STATIC_CHAR_METHOD_V31;
+	EsJNI31Functions->CallStaticShortMethodV = CALL_STATIC_SHORT_METHOD_V31;
+	EsJNI31Functions->CallStaticIntMethodV = CALL_STATIC_INT_METHOD_V31;
+	EsJNI31Functions->CallStaticLongMethodV = CALL_STATIC_LONG_METHOD_V31;
+	EsJNI31Functions->CallStaticFloatMethodV = CALL_STATIC_FLOAT_METHOD_V31;
+	EsJNI31Functions->CallStaticDoubleMethodV = CALL_STATIC_DOUBLE_METHOD_V31;
+	EsJNI31Functions->CallStaticVoidMethodV = CALL_STATIC_VOID_METHOD_V31;
+
+	EsJNI31Functions->GetBooleanArrayElements = GET_BOOLEAN_ARRAY_ELEMENTS31;
+	EsJNI31Functions->GetByteArrayElements = GET_BYTE_ARRAY_ELEMENTS31;
+	EsJNI31Functions->GetCharArrayElements = GET_CHAR_ARRAY_ELEMENTS31;
+	EsJNI31Functions->GetShortArrayElements = GET_SHORT_ARRAY_ELEMENTS31;
+	EsJNI31Functions->GetIntArrayElements = GET_INT_ARRAY_ELEMENTS31;
+	EsJNI31Functions->GetLongArrayElements = GET_LONG_ARRAY_ELEMENTS31;
+	EsJNI31Functions->GetFloatArrayElements = GET_FLOAT_ARRAY_ELEMENTS31;
+	EsJNI31Functions->GetDoubleArrayElements = GET_DOUBLE_ARRAY_ELEMENTS31;
+	EsJNI31Functions->ReleaseBooleanArrayElements = RELEASE_BOOLEAN_ARRAY_ELEMENTS31;
+	EsJNI31Functions->ReleaseByteArrayElements = RELEASE_BYTE_ARRAY_ELEMENTS31;
+	EsJNI31Functions->ReleaseCharArrayElements = RELEASE_CHAR_ARRAY_ELEMENTS31;
+	EsJNI31Functions->ReleaseShortArrayElements = RELEASE_SHORT_ARRAY_ELEMENTS31;
+	EsJNI31Functions->ReleaseIntArrayElements = RELEASE_INT_ARRAY_ELEMENTS31;
+	EsJNI31Functions->ReleaseLongArrayElements = RELEASE_LONG_ARRAY_ELEMENTS31;
+	EsJNI31Functions->ReleaseFloatArrayElements = RELEASE_FLOAT_ARRAY_ELEMENTS31;
+	EsJNI31Functions->ReleaseDoubleArrayElements = RELEASE_DOUBLE_ARRAY_ELEMENTS31;
+
+	EsJNI31Functions->GetStringChars = getStringChars31;
+	EsJNI31Functions->ReleaseStringChars = releaseStringChars31;
+	EsJNI31Functions->GetStringUTFChars = getStringUTFChars31;
+	EsJNI31Functions->ReleaseStringUTFChars = releaseStringCharsUTF31;
+
+	EsJNI31Functions->NewObjectV = newObjectV31;
+
+	/* Critical routines are mapped to the non-critical versions, as the Java objects
+	 * are not directly accessible to AMODE31 callers.
+	 */
+	EsJNI31Functions->GetPrimitiveArrayCritical = GET_PRIMITIVE_ARRAY_CRITICAL31;
+	EsJNI31Functions->ReleasePrimitiveArrayCritical = RELEASE_PRIMITIVE_ARRAY_CRITICAL31;
+	EsJNI31Functions->GetStringCritical = GET_STRING_CRITICAL31;
+	EsJNI31Functions->ReleaseStringCritical = RELEASE_STRING_CRITICAL31;
+
+	return EsJNI31Functions;
+}
+#endif /* defined(J9VM_ZOS_3164_INTEROPERABILITY) */
 
 /*
  * 1) Private routine.  Used to delete a jni global reference from an actual object pointer.
@@ -1506,9 +1688,7 @@ j9jni_deleteGlobalRef(JNIEnv *env, jobject globalRef, jboolean isWeak)
 #endif
 
 #if defined(J9VM_GC_REALTIME)
-		if (J9_EXTENDED_RUNTIME_USER_REALTIME_ACCESS_BARRIER == (vm->extendedRuntimeFlags & J9_EXTENDED_RUNTIME_USER_REALTIME_ACCESS_BARRIER)) {
-			vm->memoryManagerFunctions->j9gc_objaccess_jniDeleteGlobalReference(vmThread, *((j9object_t*)globalRef));
-		}
+		vm->memoryManagerFunctions->j9gc_objaccess_jniDeleteGlobalReference(vmThread, *((j9object_t*)globalRef));
 #endif /* defined(J9VM_GC_REALTIME) */
 		if (pool_includesElement(isWeak ? vm->jniWeakGlobalReferences : vm->jniGlobalReferences, globalRef) == TRUE) {
 			pool_removeElement(isWeak ? vm->jniWeakGlobalReferences : vm->jniGlobalReferences, globalRef);
@@ -1832,7 +2012,7 @@ newString(JNIEnv *env, const jchar* uchars, jsize len)
 	VM_VMAccess::inlineEnterVMFromJNI(vmThread);
 
 	if (len < 0) {
-		setCurrentExceptionUTF(vmThread, J9VMCONSTANTPOOL_JAVALANGNEGATIVEARRAYSIZEEXCEPTION, NULL);
+		setNegativeArraySizeException(vmThread, len);
 	} else {
 		j9object_t stringObject = vmThread->javaVM->memoryManagerFunctions->j9gc_createJavaLangString(vmThread, (U_8 *) uchars, ((UDATA)len) * 2, J9_STR_UNICODE);
 
@@ -1862,14 +2042,33 @@ monitorEnter(JNIEnv* env, jobject obj)
 
 	if (J9_OBJECT_MONITOR_ENTER_FAILED(monstatus)) {
 fail:
+		switch (monstatus) {
+#if JAVA_SPEC_VERSION >= 16
+		case J9_OBJECT_MONITOR_VALUE_TYPE_IMSE: {
+			J9Class* badClass = J9OBJECT_CLAZZ(vmThread, obj);
+			J9UTF8 *badClassName = J9ROMCLASS_CLASSNAME(badClass->romClass);
 #if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
-		if (J9_OBJECT_MONITOR_VALUE_TYPE_IMSE == monstatus) {
-			J9UTF8 *badClassName = J9ROMCLASS_CLASSNAME(J9OBJECT_CLAZZ(vmThread, obj)->romClass);
-			setCurrentExceptionNLSWithArgs(vmThread, J9NLS_VM_ERROR_BYTECODE_OBJECTREF_CANNOT_BE_VALUE_TYPE, J9VMCONSTANTPOOL_JAVALANGILLEGALMONITORSTATEEXCEPTION, J9UTF8_LENGTH(badClassName), J9UTF8_DATA(badClassName));
-		} else
-#endif /* defined(J9VM_OPT_VALHALLA_VALUE_TYPES) */
-		if (J9_OBJECT_MONITOR_OOM == monstatus) {
+			if (J9_IS_J9CLASS_VALUETYPE(badClass)) {
+				setCurrentExceptionNLSWithArgs(vmThread, J9NLS_VM_ERROR_BYTECODE_OBJECTREF_CANNOT_BE_VALUE_TYPE, J9VMCONSTANTPOOL_JAVALANGILLEGALMONITORSTATEEXCEPTION, J9UTF8_LENGTH(badClassName), J9UTF8_DATA(badClassName));
+			} else 
+#endif /* defined(J9VM_OPT_VALHALLA_VALUE_TYPES) */		
+			{
+				Assert_VM_true(J9_ARE_ALL_BITS_SET(vmThread->javaVM->extendedRuntimeFlags2, J9_EXTENDED_RUNTIME2_VALUE_BASED_EXCEPTION));
+				setCurrentExceptionNLSWithArgs(vmThread, J9NLS_VM_ERROR_BYTECODE_OBJECTREF_CANNOT_BE_VALUE_BASED, J9VMCONSTANTPOOL_JAVALANGVIRTUALMACHINEERROR, J9UTF8_LENGTH(badClassName), J9UTF8_DATA(badClassName));
+			}
+			break;
+		}
+#endif /* JAVA_SPEC_VERSION >= 16 */
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+		case J9_OBJECT_MONITOR_CRIU_SINGLE_THREAD_MODE_THROW:
+			setCRIUSingleThreadModeJVMCRIUException(vmThread, 0, 0);
+			break;
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
+		case J9_OBJECT_MONITOR_OOM:
 			SET_NATIVE_OUT_OF_MEMORY_ERROR(vmThread, J9NLS_VM_FAILED_TO_ALLOCATE_MONITOR);
+			break;
+		default:
+			Assert_VM_unreachable();
 		}
 		rc = -1;
 	} else if (J9_UNEXPECTED(!VM_ObjectMonitor::recordJNIMonitorEnter(vmThread, (j9object_t)monstatus))) {
@@ -1879,7 +2078,7 @@ fail:
 
 	VM_VMAccess::inlineExitVMToJNI(vmThread);
 
-	Trc_VM_JNI_monitorEnter_Entry(vmThread, rc);
+	Trc_VM_JNI_monitorEnter_Exit(vmThread, rc);
 
 	return rc;
 }
@@ -1905,7 +2104,7 @@ monitorExit(JNIEnv* env, jobject obj)
 
 	VM_VMAccess::inlineExitVMToJNI(vmThread);
 
-	Trc_VM_JNI_monitorExit_Entry(vmThread, rc);
+	Trc_VM_JNI_monitorExit_Exit(vmThread, rc);
 
 	return rc;
 }
@@ -2158,6 +2357,27 @@ findJNIMethod(J9VMThread* currentThread, J9Class* clazz, char* name, char* signa
 	return result;
 }
 
+UDATA
+jniIsInternalClassRef(J9JavaVM *vm, jobject ref)
+{
+	UDATA rc = FALSE;
+	J9ClassWalkState classWalkState;
+	J9Class *clazz = allLiveClassesStartDo(&classWalkState, vm, NULL);
+	while (clazz != NULL) {
+		do {
+			if (ref == (jobject)&clazz->classObject) {
+				rc = TRUE;
+				goto done;
+			}
+			clazz = clazz->replacedClass;
+		} while (NULL != clazz);
+		clazz = allLiveClassesNextDo(&classWalkState);
+	}
+done:
+	allLiveClassesEndDo(&classWalkState);
+	return rc;
+}
+
 static jobjectRefType JNICALL
 getObjectRefType(JNIEnv *env, jobject obj)
 {
@@ -2166,8 +2386,6 @@ getObjectRefType(JNIEnv *env, jobject obj)
 	jobjectRefType rc = JNIInvalidRefType;
 	J9JNIReferenceFrame* frame;
 	J9JavaStack* stack = vmThread->stackObject;
-	J9ClassWalkState classWalkState;
-	J9Class * clazz;
 
 	VM_VMAccess::inlineEnterVMFromJNI(vmThread);
 
@@ -2229,15 +2447,10 @@ getObjectRefType(JNIEnv *env, jobject obj)
 
 	/* Check for class refs */
 
-	clazz = allLiveClassesStartDo(&classWalkState, vm, NULL);
-	while (clazz != NULL) {
-		if (obj == (jobject) &(clazz->classObject)) {
-			rc = JNILocalRefType;
-			break;
-		}
-		clazz = allLiveClassesNextDo(&classWalkState);
+	if (jniIsInternalClassRef(vm, obj)) {
+		rc = JNILocalRefType;
+		goto done;
 	}
-	allLiveClassesEndDo(&classWalkState);
 
 done:
 	VM_VMAccess::inlineExitVMToJNI(vmThread);
@@ -2267,6 +2480,29 @@ getModule(JNIEnv *env, jclass clazz)
 }
 #endif /* JAVA_SPEC_VERSION >= 9 */
 
+#if JAVA_SPEC_VERSION >= 19
+static jboolean JNICALL
+isVirtualThread(JNIEnv *env, jobject obj)
+{
+	jboolean result = JNI_FALSE;
+	J9VMThread *vmThread = (J9VMThread *)env;
+
+	Trc_VM_JNI_isVirtualThread_Entry(vmThread, obj);
+
+	if (NULL != obj) {
+		VM_VMAccess::inlineEnterVMFromJNI(vmThread);
+		j9object_t object = J9_JNI_UNWRAP_REFERENCE(obj);
+		if ((NULL != object) && IS_JAVA_LANG_VIRTUALTHREAD(vmThread, object)) {
+			result = JNI_TRUE;
+		}
+		VM_VMAccess::inlineExitVMToJNI(vmThread);
+	}
+
+	Trc_VM_JNI_isVirtualThread_Exit(vmThread, result);
+
+	return result;
+}
+#endif /* JAVA_SPEC_VERSION >= 19 */
 
 IDATA
 jniParseArguments(J9JavaVM *vm, char *optArg)
@@ -2345,13 +2581,13 @@ defineClass(JNIEnv *env, const char *name, jobject loader, const jbyte *buf, jsi
 	} else {
 #define JAVA_PACKAGE_NAME_LENGTH 5 /* Number of characters in "java/" */
 		J9JavaVM * vm = currentThread->javaVM;
-		J9ClassLoader * classLoader;
-		J9TranslationBufferSet *dynamicLoadBuffers;
-		UDATA classNameLength;
-		U_8 * className;
-		U_8 check;
-		U_8 c;
-		U_8 * checkPtr;
+		J9ClassLoader * classLoader = NULL;
+		J9TranslationBufferSet *dynamicLoadBuffers = NULL;
+		UDATA classNameLength = 0;
+		U_8 * className = NULL;
+		U_8 check = 0;
+		U_8 c = 0;
+		U_8 * checkPtr = NULL;
 		J9Class * clazz = NULL;
 		BOOLEAN errorOccurred = FALSE;
 
@@ -2379,7 +2615,7 @@ defineClass(JNIEnv *env, const char *name, jobject loader, const jbyte *buf, jsi
 			classNameLength += 1;
 		}
 		className = (U_8 *) name;
-		if (c & 0x80) {
+		if (0 != (check & 0x80)) {
 			className = compressUTF8(currentThread, className, classNameLength, &classNameLength);
 			if (className == NULL) {
 				/* Exception already set */

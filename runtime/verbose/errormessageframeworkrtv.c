@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2015, 2020 IBM Corp. and others
+ * Copyright (c) 2015, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -435,6 +435,12 @@ getBCVDataType(J9BytecodeVerificationData* verifyData, MethodContextInfo* method
 		UDATA convertedType = (UDATA)decodeTable[bytecodeTypeInfo];
 		typeNameIndex = CFR_STACKMAP_TYPE_OBJECT;
 
+#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+		if (J9_ARE_ALL_BITS_SET(bcvType, BCV_PRIMITIVE_VALUETYPE)) {
+		   typeNameIndex = CFR_STACKMAP_TYPE_PRIMITIVE_OBJECT;
+		}
+#endif /* #if defined(J9VM_OPT_VALHALLA_VALUE_TYPES) */
+
 		/* Set the expected type to 'reference' if the type data extracted from bytecode is 'reference' type.
 		 * Note: according to the JVM Specification, the expected type for aastore is 'java/lang/Object' rather than 'reference'.
 		 */
@@ -498,6 +504,7 @@ adjustStackTopForWrongDataType(J9BytecodeVerificationData *verifyData)
 	case BCV_ERR_STACKMAP_FRAME_LOCALS_UNDERFLOW:	/* FALLTHROUGH */
 	case BCV_ERR_STACKMAP_FRAME_LOCALS_OVERFLOW:	/* FALLTHROUGH */
 	case BCV_ERR_STACKMAP_FRAME_STACK_OVERFLOW:		/* FALLTHROUGH */
+	case BCV_ERR_INIT_FLAGS_MISMATCH:				/* FALLTHROUGH */
 	case BCV_ERR_INIT_NOT_CALL_INIT:				/* FALLTHROUGH */
 	case BCV_ERR_WRONG_TOP_TYPE:					/* FALLTHROUGH */
 	case BCV_ERR_INVALID_ARRAY_REFERENCE:			/* FALLTHROUGH */
@@ -766,14 +773,13 @@ printReasonForFlagMismatch(MessageBuffer *msgBuf, J9BytecodeVerificationData *ve
 				goto exit;
 			}
 
-			/* Compare the flag value if the bci value matches */
-			if (currentFrame->bci == targetFrame->bci) {
-				BOOLEAN matchFlag = compareStackMapFrameFlag(currentFrame, targetFrame);
-				if (!matchFlag) {
-					printMessage(msgBuf, "Current frame's flags are not assignable to stack map frame's.");
-					result = TRUE;
-					goto exit;
-				}
+			/* Compare the flag value regardless of the bci value as the comparison
+			 * might happen to the branch bytecode specified in the stackmap frame.
+			 */
+			if (FALSE == compareStackMapFrameFlag(currentFrame, targetFrame)) {
+				printMessage(msgBuf, "Current frame's flags are not assignable to stack map frame's.");
+				result = TRUE;
+				goto exit;
 			}
 		}
 	}
@@ -865,6 +871,7 @@ generateJ9RtvExceptionDetails(J9BytecodeVerificationData* verifyData, U_8* initM
 		printMessage(&msgBuf, "Current frame's stack size doesn't match stackmap.");
 		printStackFrame = setStackMapFrameWithIndex(verifyData, &methodInfo, &stackMapFrameTarget);
 		break;
+	case BCV_ERR_INIT_FLAGS_MISMATCH: /* FALLTHROUGH */
 	case BCV_ERR_INIT_NOT_CALL_INIT:
 		printStackFrame = printReasonForFlagMismatch(&msgBuf, verifyData, &methodInfo, &stackMapFrameCurrent, &stackMapFrameTarget);
 		printCurrentStack = printStackFrame;
@@ -942,6 +949,9 @@ generateJ9RtvExceptionDetails(J9BytecodeVerificationData* verifyData, U_8* initM
 		break;
 	case BCV_ERR_BYTECODE_ERROR:
 		printMessage(&msgBuf, "Error exists in the bytecode.");
+		break;
+	case BCV_ERR_NEW_OJBECT_MISMATCH:
+		printMessage(&msgBuf, "The arity (0x%x) of the new object is greater than zero", verifyData->errorTempData);
 		break;
 	default:
 		Assert_VRB_ShouldNeverHappen();

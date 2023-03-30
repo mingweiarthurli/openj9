@@ -1,6 +1,6 @@
-<?xml version="1.0" encoding="UTF-8"?>
+<?xml version='1.0' encoding='UTF-8'?>
 <!--
-Copyright (c) 2016, 2020 IBM Corp. and others
+Copyright (c) 2016, 2022 IBM Corp. and others
 
 This program and the accompanying materials are made available under
 the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,11 +16,12 @@ Exception [1] and GNU General Public License, version 2 with the
 OpenJDK Assembly Exception [2].
 
 [1] https://www.gnu.org/software/classpath/license.html
-[2] http://openjdk.java.net/legal/assembly-exception.html
+[2] https://openjdk.org/legal/assembly-exception.html
 
 SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 -->
 <playlist xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../TKG/playlist.xsd">
+	<include>nativeTestSettings.mk</include>
 	<test>
 		<testCaseName>algotest2</testCaseName>
 		<variations>
@@ -142,6 +143,12 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 	</test>
 	<test>
 		<testCaseName>jsigjnitest</testCaseName>
+		<disables>
+			<disable>
+				<comment>https://github.com/eclipse-openj9/openj9/issues/3212</comment>
+				<platform>.*windows.*</platform>
+			</disable>
+		</disables>
 		<variations>
 			<variation>Mode110</variation>
 			<variation>Mode610</variation>
@@ -150,8 +157,6 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 	$(SQ)$(JAVA_SHARED_LIBRARIES_DIR)$(D)jsigjnitest$(SQ) \
 	$(SQ)$(J9VM_PATH)$(SQ) $(JVM_OPTIONS) ; \
 	$(TEST_STATUS)</command>
-		<!-- temporarily disable this test on windows; https://github.com/eclipse/openj9/issues/3212 -->
-		<platformRequirements>^os.win</platformRequirements>
 		<levels>
 			<level>sanity</level>
 		</levels>
@@ -238,11 +243,13 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 			<impl>openj9</impl>
 			<impl>ibm</impl>
 		</impls>
-		<subsets>
-			<subset>9</subset>
-			<subset>11+</subset>
-		</subsets>
-		<aot>explicit</aot>
+		<versions>
+			<version>9</version>
+			<version>11+</version>
+		</versions>
+		<features>
+			<feature>AOT:explicit</feature>
+		</features>
 	</test>
 	<test>
 		<testCaseName>shrtest_zos</testCaseName>
@@ -269,11 +276,13 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 			<impl>openj9</impl>
 			<impl>ibm</impl>
 		</impls>
-		<subsets>
-			<subset>9</subset>
-			<subset>11+</subset>
-		</subsets>
-		<aot>explicit</aot>
+		<versions>
+			<version>9</version>
+			<version>11+</version>
+		</versions>
+		<features>
+			<feature>AOT:explicit</feature>
+		</features>
 	</test>
 	<test>
 		<testCaseName>shrtest_aix</testCaseName>
@@ -300,11 +309,13 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 			<impl>openj9</impl>
 			<impl>ibm</impl>
 		</impls>
-		<subsets>
-			<subset>9</subset>
-			<subset>11+</subset>
-		</subsets>
-		<aot>explicit</aot>
+		<versions>
+			<version>9</version>
+			<version>11+</version>
+		</versions>
+		<features>
+			<feature>AOT:explicit</feature>
+		</features>
 	</test>
 	<test>
 		<testCaseName>shrtest_win</testCaseName>
@@ -330,11 +341,13 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 			<impl>openj9</impl>
 			<impl>ibm</impl>
 		</impls>
-		<subsets>
-			<subset>9</subset>
-			<subset>11+</subset>
-		</subsets>
-		<aot>explicit</aot>
+		<versions>
+			<version>9</version>
+			<version>11+</version>
+		</versions>
+		<features>
+			<feature>AOT:explicit</feature>
+		</features>
 	</test>
 	<test>
 		<testCaseName>shrtest_linux_SE80</testCaseName>
@@ -361,10 +374,12 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 			<impl>openj9</impl>
 			<impl>ibm</impl>
 		</impls>
-		<subsets>
-			<subset>8</subset>
-		</subsets>
-		<aot>explicit</aot>
+		<versions>
+			<version>8</version>
+		</versions>
+		<features>
+			<feature>AOT:explicit</feature>
+		</features>
 	</test>
 	<test>
 		<testCaseName>shrtest_zos_SE80</testCaseName>
@@ -391,13 +406,21 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 			<impl>openj9</impl>
 			<impl>ibm</impl>
 		</impls>
-		<subsets>
-			<subset>8</subset>
-		</subsets>
-		<aot>explicit</aot>
+		<versions>
+			<version>8</version>
+		</versions>
+		<features>
+			<feature>AOT:explicit</feature>
+		</features>
 	</test>
 	<test>
 		<testCaseName>shrtest_aix_SE80</testCaseName>
+		<disables>
+			<disable>
+				<comment>runtimes/infrastructure/issues/5965</comment>
+				<impl>ibm</impl>
+			</disable>
+		</disables>
 		<variations>
 			<variation>Mode110</variation>
 			<variation>Mode610</variation>
@@ -421,10 +444,12 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 			<impl>openj9</impl>
 			<impl>ibm</impl>
 		</impls>
-		<subsets>
-			<subset>8</subset>
-		</subsets>
-		<aot>explicit</aot>
+		<versions>
+			<version>8</version>
+		</versions>
+		<features>
+			<feature>AOT:explicit</feature>
+		</features>
 	</test>
 	<test>
 		<testCaseName>shrtest_win_SE80</testCaseName>
@@ -450,10 +475,12 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 			<impl>openj9</impl>
 			<impl>ibm</impl>
 		</impls>
-		<subsets>
-			<subset>8</subset>
-		</subsets>
-		<aot>explicit</aot>
+		<versions>
+			<version>8</version>
+		</versions>
+		<features>
+			<feature>AOT:explicit</feature>
+		</features>
 	</test>
 	<test>
 		<testCaseName>thrstatetest</testCaseName>
@@ -474,9 +501,9 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 		<types>
 			<type>native</type>
 		</types>
-		<subsets>
-			<subset>8</subset>
-		</subsets>
+		<versions>
+			<version>8</version>
+		</versions>
 		<impls>
 			<impl>openj9</impl>
 			<impl>ibm</impl>
@@ -501,10 +528,10 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 		<types>
 			<type>native</type>
 		</types>
-		<subsets>
-			<subset>9</subset>
-			<subset>11+</subset>
-		</subsets>
+		<versions>
+			<version>9</version>
+			<version>11+</version>
+		</versions>
 		<impls>
 			<impl>openj9</impl>
 			<impl>ibm</impl>
@@ -512,6 +539,11 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 	</test>
 	<test>
 		<testCaseName>vmLifecyleTests</testCaseName>
+		<disables>
+			<disable>
+				<comment>https://github.com/eclipse-openj9/openj9/issues/3561</comment>
+			</disable>
+		</disables>
 		<variations>
 			<variation>Mode110</variation>
 			<variation>Mode610</variation>
@@ -536,13 +568,17 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 			<impl>openj9</impl>
 			<impl>ibm</impl>
 		</impls>
-		<subsets>
-			<subset>8</subset>
-		</subsets>
-		<disabled>https://github.com/eclipse/openj9/issues/3561</disabled>
+		<versions>
+			<version>8</version>
+		</versions>
 	</test>
 	<test>
 		<testCaseName>vmLifecyleTests</testCaseName>
+		<disables>
+			<disable>
+				<comment>https://github.com/eclipse-openj9/openj9/issues/3561</comment>
+			</disable>
+		</disables>
 		<variations>
 			<variation>Mode110</variation>
 			<variation>Mode610</variation>
@@ -563,10 +599,33 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 		<types>
 			<type>native</type>
 		</types>
-		<subsets>
-			<subset>9</subset>
-			<subset>11+</subset>
-		</subsets>
-		<disabled>https://github.com/eclipse/openj9/issues/3561</disabled>
+		<versions>
+			<version>9</version>
+			<version>11+</version>
+		</versions>
+	</test>
+	<test>
+		<testCaseName>TestInvtest</testCaseName>
+		<command>cp -R $(TEST_JDK_HOME)/ $(REPORTDIR_NQ)/testJava; \
+		$(TEST_JAVA)/bin/java -version; \
+		extattr +a $(REPORTDIR_NQ)/testJava$(LIBJ9IFA29); \
+		export LIBPATH=$(Q)$(PATH_TO_LIB):$(LIBPATH)$(Q); \
+		$(JAVA_SHARED_LIBRARIES_DIR)/invtest -Djava.home=$(TEST_JAVA)/ -Dibm.java9.forceCommonCleanerShutdown=true; \
+		$(TEST_STATUS); \
+		rm -rf $(REPORTDIR_NQ)/testJava</command>
+		<platformRequirements>os.zos</platformRequirements>
+		<levels>
+			<level>sanity</level>
+		</levels>
+		<groups>
+			<group>functional</group>
+		</groups>
+		<types>
+			<type>native</type>
+		</types>
+		<impls>
+			<impl>openj9</impl>
+			<impl>ibm</impl>
+		</impls>
 	</test>
 </playlist>

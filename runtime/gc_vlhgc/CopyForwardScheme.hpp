@@ -1,6 +1,5 @@
-
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -47,12 +46,13 @@ class MM_CopyForwardCompactGroup;
 class MM_CopyForwardGMPCardCleaner;
 class MM_CopyForwardNoGMPCardCleaner;
 class MM_CopyForwardVerifyScanner;
-class MM_Dispatcher;
+class MM_ForwardedHeader;
+class MM_ParallelDispatcher;
 class MM_HeapRegionManager;
 class MM_HeapRegionDescriptorVLHGC;
 class MM_InterRegionRememberedSet;
 class MM_MarkMap;
-class MM_MemoryPoolBumpPointer;
+class MM_MemoryPoolAddressOrderedList;
 class MM_ReferenceStats;
 
 /* Forward declaration of classes defined within the cpp */
@@ -60,7 +60,6 @@ class MM_CopyForwardSchemeAbortScanner;
 class MM_CopyForwardSchemeRootScanner;
 class MM_CopyForwardSchemeRootClearer;
 class MM_CopyForwardSchemeTask;
-class MM_ScavengerForwardedHeader;
 
 /**
  * Copy Forward scheme used for highly mobile partial collection operations.
@@ -96,10 +95,9 @@ private:
 		UDATA _evacuateRegionCount; /**< The number of evacuate regions in this group */
 		UDATA _maxSublistCount; /**< The highest value _sublistCount is permitted to reach in this group */
 		volatile UDATA _sublistCount; /**< The number of active sublists in this list */
-		MM_HeapRegionDescriptorVLHGC *_tailCandidates; /**< A linked list of regions in this compact group which have empty tails */
-		MM_LightweightNonReentrantLock _tailCandidatesLock; /**< Lock to protect _tailCandidates */
-		UDATA _tailCandidateCount; /**< The number of regions in the _tailCandidates list */
-	protected:
+		MM_HeapRegionDescriptorVLHGC *_freeMemoryCandidates; /**< A linked list of regions in this compact group which have free memory */
+		MM_LightweightNonReentrantLock _freeMemoryCandidatesLock; /**< Lock to protect _freeMemoryCandidates */
+		UDATA _freeMemoryCandidateCount; /**< The number of regions in the _freeMemoryCandidates list */	protected:
 	private:
 		/* Methods */
 	public:
@@ -114,7 +112,7 @@ private:
 	UDATA _minCacheSize;  /**< Minimum size in bytes that will be returned as a general purpose cache area */
 	UDATA _maxCacheSize;  /**< Maximum size in bytes that will be requested for a general purpose cache area */
 
-	MM_Dispatcher *_dispatcher;
+	MM_ParallelDispatcher *_dispatcher;
 	
 	MM_CopyScanCacheListVLHGC _cacheFreeList;  /**< Caches which are not bound to heap memory and available to be populated */
 	MM_CopyScanCacheListVLHGC *_cacheScanLists;  /**< An array of per-node caches which contains objects still to be scanned (1+node_count elements in array)*/
@@ -148,7 +146,6 @@ private:
 	bool _collectStringConstantsEnabled;  /**< Local cached value which determines whether string constants are roots */
 
 	bool _tracingEnabled;  /**< Temporary variable to enable tracing of activity */
-	bool _cacheTracingEnabled;  /**< Temporary variable to enable tracing of activity */
 	MM_AllocationContextTarok *_commonContext;	/**< The common context is used as an opaque token to represent cases where we don't want to relocate objects during NUMA-aware copy-forward since relocating to the common context is currently disabled */
 	MM_CopyForwardCompactGroup *_compactGroupBlock; /**< A block of MM_CopyForwardCompactGroup structs which is subdivided among the GC threads */ 
 	UDATA _arraySplitSize; /**< The number of elements to be scanned in each array chunk (this determines the degree of parallelization) */
@@ -158,6 +155,8 @@ private:
 	volatile bool _failedToExpand; /**< Record if we've failed to expand in this collection already, in order to avoid repeated expansion attempts */
 	bool _shouldScanFinalizableObjects; /**< Set to true at the beginning of a collection if there are any pending finalizable objects */
 	const UDATA _objectAlignmentInBytes;	/**< Run-time objects alignment in bytes */
+
+	UDATA *_compressedSurvivorTable;	/**< start address of compressed survivor table (1 bit presents CARD_SIZE of Heap) */
 
 protected:
 public:
@@ -289,7 +288,7 @@ private:
 	void addCacheEntryToScanCacheListAndNotify(MM_EnvironmentVLHGC *env, MM_CopyScanCacheVLHGC *newCacheEntry);
 	
 	void flushCache(MM_EnvironmentVLHGC *env, MM_CopyScanCacheVLHGC *cache);
-	void clearCache(MM_EnvironmentVLHGC *env, MM_CopyScanCacheVLHGC *cache);
+	bool clearCache(MM_EnvironmentVLHGC *env, MM_CopyScanCacheVLHGC *cache);
 
 	/**
 	 * add OwnableSynchronizerObject in the buffer if reason == SCAN_REASON_COPYSCANCACHE || SCAN_REASON_PACKET
@@ -302,6 +301,9 @@ private:
 	 */
 	MMINLINE void scanOwnableSynchronizerObjectSlots(MM_EnvironmentVLHGC *env, MM_AllocationContextTarok *reservingContext, J9Object *objectPtr, ScanReason reason);
 
+
+	MMINLINE void scanContinuationNativeSlots(MM_EnvironmentVLHGC *env, MM_AllocationContextTarok *reservingContext, J9Object *objectPtr, ScanReason reason);
+	MMINLINE void scanContinuationObject(MM_EnvironmentVLHGC *env, MM_AllocationContextTarok *reservingContext, J9Object *objectPtr, ScanReason reason);
 	/**
 	 * Called whenever a ownable synchronizer object is scaned during CopyForwardScheme. Places the object on the thread-specific buffer of gc work thread.
 	 * @param env -- current thread environment
@@ -350,12 +352,12 @@ private:
 	void scanPhantomReferenceObjects(MM_EnvironmentVLHGC *env);
 	
 	/**
-	 * Set region as survivor (and its survivor base address). Also set the special state if region was created by phantom reference processing.
+	 * Set region as survivor. Also set the special state if region was created by phantom reference processing.
 	 * @param env[in] the current thread
 	 * @param region[in] region to set as survivor
-	 * @param survivorBase[in] survivor base address (all object below this address, if different than low region address are not part of survivor)
+	 * @param freshSurvivor[in] if true, it is survivor region from free region
 	 */
-	void setRegionAsSurvivor(MM_EnvironmentVLHGC* env, MM_HeapRegionDescriptorVLHGC *region, void* survivorBase);
+	void setRegionAsSurvivor(MM_EnvironmentVLHGC* env, MM_HeapRegionDescriptorVLHGC *region, bool freshSurvivor);
 
 	/**
 	 * Process the list of reference objects recorded in the specified list.
@@ -468,25 +470,19 @@ private:
 	MMINLINE bool isObjectInNurseryMemory(J9Object *objectPtr);
 
 	/**
-	 * @param doesObjectNeedHash[out]		True, if object need to store hashcode in hashslot
-	 * @param isObjectGrowingHashSlot[out]	True, if object need to grow size for hashslot
-	 */
-	MMINLINE void calculateObjectDetailsForCopy(MM_ScavengerForwardedHeader* forwardedHeader, UDATA *objectCopySizeInBytes, UDATA *objectReserveSizeInBytes, bool *doesObjectNeedHash, bool *isObjectGrowingHashSlot);
-
-	/**
 	 * Remove any remaining regions from the reserved allocation list.
 	 * @param env GC thread.
 	 */
 	void clearReservedRegionLists(MM_EnvironmentVLHGC *env);
 
 	/**
-	 * Acquire a region for use as a survivor area during copy and forward.
+	 * Acquire an empty region for use as a survivor area during copy and forward.
 	 * @param env GC thread.
 	 * @param regionList Internally managed region list to which the region should be assigned to.
 	 * @param compactGroup Compact group for acquired region
 	 * @return the newly acquired region or NULL if no region was available
 	 */
-	MM_HeapRegionDescriptorVLHGC *acquireRegion(MM_EnvironmentVLHGC *env, MM_ReservedRegionListHeader::Sublist *regionList, UDATA compactGroup);
+	MM_HeapRegionDescriptorVLHGC *acquireEmptyRegion(MM_EnvironmentVLHGC *env, MM_ReservedRegionListHeader::Sublist *regionList, UDATA compactGroup);
 
 	/**
 	 * Inserts newRegion into the given regionList.  The implementation assumes that the calling thread can modify regionList without locking
@@ -506,22 +502,22 @@ private:
 	void releaseRegion(MM_EnvironmentVLHGC *env, MM_ReservedRegionListHeader::Sublist *regionList, MM_HeapRegionDescriptorVLHGC *region);
 
 	/**
-	 * Insert the specified tail candidate into the tail candidate list.  The implementation assumes that the calling thread can modify 
+	 * Insert the specified free memory candidate into the candidate list.  The implementation assumes that the calling thread can modify
 	 * regionList without locking it so the callsite either needs to have locked the list or be single-threaded.
 	 * @param env[in] The GC thread
-	 * @param regionList[in] The region list to which tailRegion should be added as a a tail candidate
-	 * @param tailRegion[in] The region to add
+	 * @param regionList[in] The region list to which Region should be added as a candidate
+	 * @param region[in] The region to add
 	 */
-	void insertTailCandidate(MM_EnvironmentVLHGC* env, MM_ReservedRegionListHeader* regionList, MM_HeapRegionDescriptorVLHGC *tailRegion);
+	void insertFreeMemoryCandidate(MM_EnvironmentVLHGC* env, MM_ReservedRegionListHeader* regionList, MM_HeapRegionDescriptorVLHGC *region);
 
 	/**
-	 * Remove the specified tail candidate from the tail candidate list.  The implementation assumes that the calling thread can modify 
+	 * Remove the specified free memory candidate from the candidate list.  The implementation assumes that the calling thread can modify
 	 * regionList without locking it so the callsite either needs to have locked the list or be single-threaded.
 	 * @param env[in] The GC thread
-	 * @param regionList[in] The region list which tailRegion belongs to
-	 * @param tailRegion[in] The region to remove
+	 * @param regionList[in] The region list which Region belongs to
+	 * @param region[in] The region to remove
 	 */
-	void removeTailCandidate(MM_EnvironmentVLHGC* env, MM_ReservedRegionListHeader* regionList, MM_HeapRegionDescriptorVLHGC *tailRegion);
+	void removeFreeMemoryCandidate(MM_EnvironmentVLHGC* env, MM_ReservedRegionListHeader* regionList, MM_HeapRegionDescriptorVLHGC *region);
 	
 	/**
 	 * Reserve memory for an object to be copied to survivor space.
@@ -531,7 +527,7 @@ private:
 	 * @param listLock[out] Returns the lock associated with the returned memory
 	 * @return a pointer to the storage reserved for allocation, or NULL on failure.
 	 */
-	void *reserveMemoryForObject(MM_EnvironmentVLHGC *env, UDATA compactGroup, UDATA objectSize, MM_LightweightNonReentrantLock** listLock);
+	void *reserveMemoryForObject(MM_EnvironmentVLHGC *env, uintptr_t compactGroup, uintptr_t objectSize, MM_LightweightNonReentrantLock** listLock);
 
 	/**
 	 * Reserve memory for a general cache to be used as the copy destination of a survivor space.
@@ -543,7 +539,7 @@ private:
 	 * @param listLock[out] Returns the lock associated with the returned memory
 	 * @return true if the cache was allocated, false otherwise.
 	 */
-	bool reserveMemoryForCache(MM_EnvironmentVLHGC *env, UDATA compactGroup, UDATA maxCacheSize, void **addrBase, void **addrTop, MM_LightweightNonReentrantLock** listLock);
+	bool reserveMemoryForCache(MM_EnvironmentVLHGC *env, uintptr_t compactGroup, uintptr_t maxCacheSize, void **addrBase, void **addrTop, MM_LightweightNonReentrantLock** listLock);
 
 	/**
 	 * Creates a new chunk of scan caches by using heap memory and attaches them to the free cache list.
@@ -560,7 +556,7 @@ private:
 	 * @param objectReserveSizeInBytes Amount of bytes to be reserved (can be greater than the original object size) for copying.
 	 * @return a CopyScanCache which contains the reserved memory or NULL if the reserve was not successful.
 	 */
-	MMINLINE MM_CopyScanCacheVLHGC *reserveMemoryForCopy(MM_EnvironmentVLHGC *env, J9Object *objectToEvacuate, MM_AllocationContextTarok *reservingContext, UDATA objectReserveSizeInBytes);
+	MMINLINE MM_CopyScanCacheVLHGC *reserveMemoryForCopy(MM_EnvironmentVLHGC *env, J9Object *objectToEvacuate, MM_AllocationContextTarok *reservingContext, uintptr_t objectReserveSizeInBytes);
 
 	void flushCaches(MM_CopyScanCacheVLHGC *cache);
 	
@@ -634,12 +630,12 @@ private:
 	/**
 	 * Rescan all objects in the specified overflowed region.
 	 */
-	void cleanRegion(MM_EnvironmentVLHGC *env, MM_HeapRegionDescriptorVLHGC *region, U_8 flagToClean);
+	void cleanOverflowedRegion(MM_EnvironmentVLHGC *env, MM_HeapRegionDescriptorVLHGC *region, U_8 flagToClean);
 	/**
 	 * Handling of Work Packets overflow case
 	 * Active STW Card Based Overflow Handler only.
 	 * For other types of STW Overflow Handlers always return false
-	 * @param env[in] The master GC thread
+	 * @param env[in] The main GC thread
 	 * @return true if overflow flag is set
 	 */
 	bool handleOverflow(MM_EnvironmentVLHGC *env);
@@ -778,6 +774,7 @@ private:
 	void scanFinalizableList(MM_EnvironmentVLHGC *env, j9object_t headObject);
 #endif /* J9VM_GC_FINALIZATION */
 
+	void scanContinuationObjects(MM_EnvironmentVLHGC *env);
 	/**
 	 * Clear the cycle's mark map for all regions that are part of the evacuate set.
 	 * @param env GC thread.
@@ -863,9 +860,21 @@ private:
 	 * @note This will respect any alignment requirements due to hot fields etc.
 	 * @return an object pointer representing the new location of the object, or the original object pointer on failure.
 	 */
-	J9Object *copy(MM_EnvironmentVLHGC *env, MM_AllocationContextTarok *reservingContext, MM_ScavengerForwardedHeader* forwardedHeader, bool leafType = false);
-	void updateInternalLeafPointersAfterCopy(J9IndexableObject *destinationPtr, J9IndexableObject *sourcePtr);
+	J9Object *copy(MM_EnvironmentVLHGC *env, MM_AllocationContextTarok *reservingContext, MM_ForwardedHeader* forwardedHeader, bool leafType = false);
 	
+
+	/* Depth copy the hot fields of an object.
+	 * @param forwardedHeader - forwarded header of an object
+	 * @param destinationObjectPtr - destinationObjectPtr of the object described by the forwardedHeader
+	 */ 
+	MMINLINE void depthCopyHotFields(MM_EnvironmentVLHGC *env, J9Class *clazz, J9Object *destinationObjectPtr, MM_AllocationContextTarok *reservingContext);
+	
+	/* Copy the hot field of an object.
+	 * Valid if scavenger dynamicBreadthScanOrdering is enabled.
+	 * @param destinationObjectPtr - the object who's hot field will be copied
+	 * @param offset  - the object field offset of the hot field to be copied 
+	 */ 
+	MMINLINE void copyHotField(MM_EnvironmentVLHGC *env, J9Object *destinationObjectPtr, U_8 offset, MM_AllocationContextTarok *reservingContext);
 	/**
 	 * Push any remaining cached mark map data out before the copy scan cache is released.
 	 * @param env GC thread.
@@ -919,26 +928,14 @@ private:
 	UDATA getDesiredCopyCacheSize(MM_EnvironmentVLHGC *env, UDATA compactGroup);
 
 	/**
-	 * Align the specified memory pool so that it can be used for survivor objects.
-	 * Specifically, make sure that we can't be copying objects into the area covered by a card which is 
-	 * meant to describe objects which were already in the region.
-	 * @param env[in] the current thread
-	 * @param memoryPool[in] the memoryPool to align
-	 * @return the number of bytes lost by aligning the pool
-	 */
-	UDATA alignMemoryPool(MM_EnvironmentVLHGC *env, MM_MemoryPoolBumpPointer *memoryPool);
-	
-	/**
-	 * Set the specified tail candidate region to be a survivor region.
-	 * 1. Set its _survivorBase to survivorBase (essentially set survivorSet to true).
-	 * 2. Update its free memory in preparation for copying objects into it
-	 * 3. Prepare its reference lists for processing
+	 * Set the specified free memory candidate region to be a survivor region.
+	 * 1. Update its free memory in preparation for copying objects into it
+	 * 2. Prepare its reference lists for processing
 	 * The caller is responsible for calling rememberAndResetReferenceLists() on the list once it's released all locks.
 	 * @param env[in] the current thread
-	 * @param region[in] the tail region to convert
-	 * @param survivorBase the lowest address in the region where survivor objects can be found
+	 * @param region[in] the free memory region to convert
 	 */
-	void convertTailCandidateToSurvivorRegion(MM_EnvironmentVLHGC* env, MM_HeapRegionDescriptorVLHGC *region, void* survivorBase);
+	void convertFreeMemoryCandidateToSurvivorRegion(MM_EnvironmentVLHGC* env, MM_HeapRegionDescriptorVLHGC *region);
 
 	/**
 	 * Scan the root set, copying-and-forwarding any objects found.
@@ -976,6 +973,15 @@ private:
 	 */
 	MMINLINE bool iterateAndCopyforwardSlotReference(MM_EnvironmentVLHGC *env, MM_AllocationContextTarok *reservingContext, J9Object *objectPtr);
 
+	void verifyObjectsInRange(MM_EnvironmentVLHGC *env, UDATA *lowAddress, UDATA *highAddress);
+	void verifyChunkSlotsAndMapSlotsInRange(MM_EnvironmentVLHGC *env, UDATA *lowAddress, UDATA *highAddress);
+	void checkConsistencyGMPMapAndPGCMap(MM_EnvironmentVLHGC *env, MM_HeapRegionDescriptorVLHGC *region, UDATA *lowAddress, UDATA *highAddress);
+	void  cleanOverflowInRange(MM_EnvironmentVLHGC *env, UDATA *lowAddress, UDATA *highAddress);
+
+	MMINLINE bool isCompressedSurvivor(void *heapAddr);
+	MMINLINE void setCompressedSurvivorCards(MM_EnvironmentVLHGC *env, void *startHeapAddress, void *endHeapAddress);
+	MMINLINE void cleanCompressedSurvivorCardTable(MM_EnvironmentVLHGC *env);
+
 protected:
 
 	MM_CopyForwardScheme(MM_EnvironmentVLHGC *env, MM_HeapRegionManager *manager);
@@ -992,8 +998,8 @@ protected:
 	 */
 	void tearDown(MM_EnvironmentVLHGC *env);
 
-	void masterSetupForCopyForward(MM_EnvironmentVLHGC *env);
-	void masterCleanupForCopyForward(MM_EnvironmentVLHGC *env);
+	void mainSetupForCopyForward(MM_EnvironmentVLHGC *env);
+	void mainCleanupForCopyForward(MM_EnvironmentVLHGC *env);
 	void workerSetupForCopyForward(MM_EnvironmentVLHGC *env);
 
 	void clearGCStats(MM_EnvironmentVLHGC *env);
@@ -1069,11 +1075,20 @@ public:
 	void kill(MM_EnvironmentVLHGC *env);
 
 	/**
+	 * Pre Copy Forward process. Clear GC stats, pre process regions and perform any main-specific setup
+	 */
+	void copyForwardPreProcess(MM_EnvironmentVLHGC *env);
+
+	/**
+	 * Post Copy Forward process. Sets persistent flag indicating if copy forward collection was successful or not.
+	 */
+	void copyForwardPostProcess(MM_EnvironmentVLHGC *env);
+
+	/**
 	 * Run a copy forward collection operation on the already determined collection set.
 	 * @param env[in] Main thread.
-	 * @return Flag indicating if the copy forward collection was successful or not.
 	 */
-	bool copyForwardCollectionSet(MM_EnvironmentVLHGC *env);
+	void copyForwardCollectionSet(MM_EnvironmentVLHGC *env);
 
 	/**
 	 * Return true if CopyForward is running under Hybrid mode
@@ -1088,6 +1103,33 @@ public:
 		_regionCountReservedNonEvacuated = regionCount;
 	}
 
+#if defined(OMR_GC_VLHGC_CONCURRENT_COPY_FORWARD)
+	/**
+	 * Run concurrent copy forward collection increment. Contrary to regular copyForwardCollectionSet(),
+	 * this method will be called twice for each PGC cycle (whenever concurrent copy forward is
+	 * enabled), once for initial STW increment and once for the final STW increment. For each of
+	 * those increments isConcurrentCycleInProgress state/value will get updated. For initial increment,
+	 * it will change from false to true causing only preProcess step to be performed, and for the
+	 * final increment it will change from true to false causing only postProcess step to be performed.
+	 *
+	 * @param env[in] Main thread.
+	 */
+	void concurrentCopyForwardCollectionSet(MM_EnvironmentVLHGC *env);
+#endif /* defined(OMR_GC_VLHGC_CONCURRENT_COPY_FORWARD) */
+
+	/**
+	 * True if concurrent CopyForward cycle is active at any point (STW or concurrent
+	 * task active, or even short gaps between STW and concurrent tasks). Equivalent to
+	 * isConcurrentCycleInProgress() from Scavenger
+	 */
+	MMINLINE bool isConcurrentCycleInProgress() {
+		/* Unimplemented */
+		return false;
+	}
+
+	void abandonTLHRemainders(MM_EnvironmentVLHGC *env);
+	void doStackSlot(MM_EnvironmentVLHGC *env, J9Object *fromObject, J9Object** slotPtr, J9StackWalkState *walkState, const void *stackLocation);
+
 	friend class MM_CopyForwardGMPCardCleaner;
 	friend class MM_CopyForwardNoGMPCardCleaner;
 	friend class MM_CopyForwardSchemeTask;
@@ -1095,5 +1137,11 @@ public:
 	friend class MM_CopyForwardSchemeRootClearer;
 	friend class MM_CopyForwardSchemeAbortScanner;
 };
+
+typedef struct StackIteratorData4CopyForward {
+	MM_CopyForwardScheme *copyForwardScheme;
+	MM_EnvironmentVLHGC *env;
+	J9Object *fromObject;
+} StackIteratorData4CopyForward;
 
 #endif /* COPYFORWARDSCHEME_HPP_ */

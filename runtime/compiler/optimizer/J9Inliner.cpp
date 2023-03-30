@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -48,8 +48,11 @@
 #include "runtime/J9Profiler.hpp"
 #include "runtime/J9ValueProfiler.hpp"
 #include "codegen/CodeGenerator.hpp"
+#include "ilgen/J9ByteCode.hpp"
+#include "ilgen/J9ByteCodeIterator.hpp"
 
 #define OPT_DETAILS "O^O INLINER: "
+const float MIN_PROFILED_CALL_FREQUENCY = (.65f); // lowered this from .80f since opportunities were being missed in WAS; in those cases getting rid of the call even in 65% of the cases was beneficial probably due to the improved icache impact
 
 extern int32_t          *NumInlinedMethods;  // Defined in Inliner.cpp
 extern int32_t          *InlinedSizes;       // Defined in Inliner.cpp
@@ -451,10 +454,24 @@ bool TR_InlinerBase::inlineCallTarget(TR_CallStack *callStack, TR_CallTarget *ca
 
    // Last chance to improve our prex info
    //
-   calltarget->_prexArgInfo = TR_PrexArgInfo::enhance(calltarget->_prexArgInfo, argInfo, comp());
-   argInfo = getUtil()->computePrexInfo(calltarget);
+   if (!calltarget->_prexArgInfo)
+      calltarget->_prexArgInfo = getUtil()->computePrexInfo(calltarget);
 
-   if (!comp()->incInlineDepth(calltarget->_calleeSymbol, calltarget->_myCallSite->_callNode->getByteCodeInfo(), calltarget->_myCallSite->_callNode->getSymbolReference()->getCPIndex(), calltarget->_myCallSite->_callNode->getSymbolReference(), !calltarget->_myCallSite->_isIndirectCall, argInfo))
+   argInfo = TR_PrexArgInfo::enhance(calltarget->_prexArgInfo, argInfo, comp());
+   calltarget->_prexArgInfo = argInfo;
+   bool tracePrex = comp()->trace(OMR::inlining) || comp()->trace(OMR::invariantArgumentPreexistence);
+   if (tracePrex && argInfo)
+      {
+      traceMsg(comp(), "Final prex argInfo:\n");
+      argInfo->dumpTrace();
+      }
+
+   if (!comp()->incInlineDepth(calltarget->_calleeSymbol,
+                               calltarget->_myCallSite->_callNode,
+                               !calltarget->_myCallSite->_isIndirectCall,
+                               calltarget->_guard,
+                               calltarget->_receiverClass,
+                               argInfo))
 		{
 		return false;
 		}
@@ -528,6 +545,33 @@ TR_OpaqueClassBlock* TR_J9VirtualCallSite::getClassFromMethod ()
    return _initialCalleeMethod->classOfMethod();
    }
 
+// Ensure the call site is a basic invokevirtual; the bytecode is an 'invokevirtaul' and the
+// cpIndex is the same as the call site _cpIndex. This will insure that the call site is not
+// some type of transformed call site that may not be a valid case for allowing an isInstanceOf()
+// call during AOT compiles
+bool TR_J9VirtualCallSite::isBasicInvokeVirtual()
+   {
+   TR_OpaqueMethodBlock *method = ((TR_ResolvedJ9Method*)_initialCalleeMethod->owningMethod())->getPersistentIdentifier();
+   int32_t methodSize = TR::Compiler->mtd.bytecodeSize(method);
+   uintptr_t methodStart = TR::Compiler->mtd.bytecodeStart(method);
+
+   TR_ASSERT_FATAL(_bcInfo.getByteCodeIndex() >= 0 && _bcInfo.getByteCodeIndex()+2 < methodSize, "Bytecode index can't be less than zero or higher than the methodSize");
+
+   uint8_t *pc = (uint8_t *)(methodStart + _bcInfo.getByteCodeIndex());
+   TR_J9ByteCode bytecode = TR_J9ByteCodeIterator::convertOpCodeToByteCodeEnum(*pc);
+   //fprintf( stderr, "method %p, size %d, start %p, PC %p, BC: %d==%d? (%d)\n", method, methodSize, methodStart, pc, bytecode, J9BCinvokevirtual, (bytecode==J9BCinvokevirtual));
+   if (bytecode==J9BCinvokevirtual)
+      {
+      uint16_t cpIndex = *(uint16_t*)(pc + 1);
+      //fprintf( stderr, "BC cpIndex %d, callSite cpIndex %d\n", cpIndex, _cpIndex );
+      if (_cpIndex==cpIndex)
+         {
+         return true;
+         }
+      }
+   return false;
+   }
+
 bool TR_J9VirtualCallSite::findCallSiteTarget(TR_CallStack *callStack, TR_InlinerBase* inliner)
    {
    if (hasFixedTypeArgInfo())
@@ -551,6 +595,62 @@ bool TR_J9VirtualCallSite::findCallSiteTarget(TR_CallStack *callStack, TR_Inline
       }
 
    tryToRefineReceiverClassBasedOnResolvedTypeArgInfo(inliner);
+
+   // Refine receiver class based on CP class
+   // When we have an invokevirtual on an abstract method defined in an interface class,
+   // the call site's class will be more concrete than class of method.
+   // This happens when an abstract class implements an interface class without providing
+   // implementation for the given method, and the call site is refering to the method of
+   // the abstract class, the cp entry of the method ref will be resolved to j9method of
+   // the interface class. However, the class ref from cp will be resolved to the abstract
+   // class, which is more concrete
+   //
+   if (_cpIndex != -1 && _receiverClass && TR::Compiler->cls.isInterfaceClass(comp(), _receiverClass) && isBasicInvokeVirtual())
+      {
+      TR_ResolvedMethod* owningMethod = _initialCalleeMethod->owningMethod();
+      TR_ResolvedJ9Method* j9OwningMethod = (TR_ResolvedJ9Method*)owningMethod;
+      int32_t nameLen=0, sigLen=0;
+      char *cpMethodName = j9OwningMethod->getMethodNameFromConstantPool(_cpIndex, nameLen);
+      char *cpMethodSig  = j9OwningMethod->getMethodSignatureFromConstantPool(_cpIndex, sigLen);
+      char *methodName   = _initialCalleeMethod->nameChars();
+      char *methodSig    = _initialCalleeMethod->signatureChars();
+      if (nameLen && nameLen == _initialCalleeMethod->nameLength() && sigLen && sigLen == _initialCalleeMethod->signatureLength() &&
+         strncmp(cpMethodName, methodName, nameLen)==0 && strncmp(cpMethodSig, methodSig, sigLen)==0)
+         {
+         int32_t classRefCPIndex = owningMethod->classCPIndexOfMethod(_cpIndex);
+         TR_OpaqueClassBlock* callSiteClass = owningMethod->getClassFromConstantPool(comp(), classRefCPIndex, true);
+         if (callSiteClass && callSiteClass != _receiverClass)
+            {
+            if (comp()->fej9()->isJavaLangObject(callSiteClass))
+               _isCallingObjectMethod = TR_yes;
+            else
+               {
+               // Verify subtyping against the defining interface rather than
+               // _receiverClass, since the latter could have been refined to a
+               // more specific interface.
+               TR_OpaqueClassBlock *defInterface = getClassFromMethod();
+               TR_YesNoMaybe callSiteClassOk = fe()->isInstanceOf(
+                  callSiteClass, defInterface, true, true, true);
+
+               TR_ASSERT_FATAL(
+                  callSiteClassOk == TR_yes,
+                  "class %p inherits a method from interface %p without implementing it",
+                  callSiteClass,
+                  defInterface);
+
+               _isCallingObjectMethod = TR_no;
+               if (comp()->trace(OMR::inlining))
+                  {
+                  char* oldClassSig = TR::Compiler->cls.classSignature(comp(), _receiverClass, comp()->trMemory());
+                  char* callSiteClassSig = TR::Compiler->cls.classSignature(comp(), callSiteClass, comp()->trMemory());
+                  traceMsg(comp(), "Receiver type %p sig %s is class of an interface method for invokevirtual, improve it to call site receiver type %p sig %s\n", _receiverClass, oldClassSig, callSiteClass, callSiteClassSig);
+                  }
+               // Update receiver class
+               _receiverClass = callSiteClass;
+               }
+            }
+         }
+      }
 
    if (addTargetIfMethodIsNotOverriden(inliner) ||
       addTargetIfMethodIsNotOverridenInReceiversHierarchy(inliner) ||
@@ -586,6 +686,108 @@ static TR_ResolvedMethod * findSingleImplementer(
 
 bool TR_J9InterfaceCallSite::findCallSiteTarget (TR_CallStack *callStack, TR_InlinerBase* inliner)
    {
+   bool result = findCallSiteTargetImpl(callStack, inliner);
+
+   // A passing vgnop-based interface guard can guarantee the receiver type is
+   // as expected by the inlined body, but only if we already know before the
+   // guard that the receiver implements the expected interface. Here, an
+   // interface type bound is insufficient to know that, because bytecode
+   // verification does not guarantee any particular receiver type at
+   // invokeinterface.
+   //
+   // As such, in the absence of a class (i.e. non-interface) type bound on the
+   // receiver, all targets must use profiled guard. Additionally, the profiled
+   // guard must ensure on the hot side that the receiver is an instance of the
+   // interface expected at this call site.
+   //
+   // These requirements could be relaxed in the future by generating a type
+   // check against the interface type at the beginning of the inlined body
+   // (taking care to ensure that the exception successors are the same as
+   // those of the call, rather than those of the first block of the callee).
+   //
+   //    ZEROCHK jitThrowIncompatibleClassChangeError
+   //      instanceof
+   //        <receiver>
+   //        loadaddr <interface>
+   //
+   // In particular, such a type check would allow the following cases:
+   //
+   // - A default method inlined using a nonoverridden guard. Currently,
+   //   default methods are never inlined (at interface call sites) because
+   //   TR_ResolvedJ9Method::getResolvedInterfaceMethod() does not return them.
+   //
+   // - A profiled guard with method test for a method defined by a class that
+   //   does not implement the expected interface. Subtypes may still implement
+   //   the interface.
+   //
+   // If/when we want to start inlining in one or both of these cases, the
+   // assertions below can be relaxed accordingly. However, testing instanceof
+   // against the interface will be expensive, so there would have to be a
+   // considerable benefit to the inlining to motivate such a change.
+   //
+   TR_OpaqueClassBlock *iface = getClassFromMethod();
+   if (_receiverClass != NULL
+       && !TR::Compiler->cls.isInterfaceClass(comp(), _receiverClass))
+      {
+      TR_ASSERT_FATAL(
+         fe()->isInstanceOf(_receiverClass, iface, true, true, true) == TR_yes,
+         "interface call site %p receiver type %p "
+         "does not implement the expected interface %p",
+         this,
+         _receiverClass,
+         iface);
+
+      heuristicTrace(
+         inliner->tracer(),
+         "Interface call site %p has receiver class bound %p; nop guards ok",
+         this,
+         _receiverClass);
+      }
+   else
+      {
+      TR_Debug *debug = comp()->getDebug();
+      for (int32_t i = 0; i < numTargets(); i++)
+         {
+         TR_CallTarget *tgt = getTarget(i);
+         TR_VirtualGuardKind kind = tgt->_guard->_kind;
+         TR_ASSERT_FATAL(
+            kind == TR_ProfiledGuard,
+            "interface call site %p requires profiled guard (kind %d), "
+            "but target %d [%p] uses %s (kind %d)",
+            this,
+            (int)TR_ProfiledGuard,
+            i,
+            tgt,
+            debug == NULL ? "<unknown name>" : debug->getVirtualGuardKindName(kind),
+            (int)kind);
+
+         // Bound on the receiver types that pass the profiled guard
+         TR_OpaqueClassBlock *passClass = NULL;
+         TR_ResolvedMethod *callee = tgt->_calleeMethod;
+         if (tgt->_guard->_type == TR_VftTest)
+            passClass = tgt->_receiverClass;
+         else
+            passClass = callee->containingClass();
+
+         TR_ASSERT_FATAL(
+            fe()->isInstanceOf(passClass, iface, true, true, true) == TR_yes,
+            "interface call site %p target %d [%p] (J9Method %p) "
+            "accepts receivers of type %p, "
+            "which does not implement the expected interface %p",
+            this,
+            i,
+            tgt,
+            callee->getPersistentIdentifier(),
+            passClass,
+            iface);
+         }
+      }
+
+   return result;
+   }
+
+bool TR_J9InterfaceCallSite::findCallSiteTargetImpl(TR_CallStack *callStack, TR_InlinerBase* inliner)
+   {
    static char *minimizedInlineJIT = feGetEnv("TR_JITInlineMinimized");
 
    if (minimizedInlineJIT)
@@ -614,7 +816,7 @@ bool TR_J9InterfaceCallSite::findCallSiteTarget (TR_CallStack *callStack, TR_Inl
    if (!_receiverClass)
       {
       int32_t len = _interfaceMethod->classNameLength();
-      char * s = classNameToSignature(_interfaceMethod->classNameChars(), len, comp());
+      char * s = TR::Compiler->cls.classNameToSignature(_interfaceMethod->classNameChars(), len, comp());
       _receiverClass = comp()->fej9()->getClassFromSignature(s, len, _callerResolvedMethod, true);
       }
 
@@ -633,10 +835,152 @@ bool TR_J9InterfaceCallSite::findCallSiteTarget (TR_CallStack *callStack, TR_Inl
 
    if (calleeResolvedMethod && !calleeResolvedMethod->virtualMethodIsOverridden())
       {
-      TR_VirtualGuardSelection * guard = new (comp()->trHeapMemory()) TR_VirtualGuardSelection(TR_InterfaceGuard, TR_MethodTest);
-      addTarget(comp()->trMemory(),inliner,guard,calleeResolvedMethod,_receiverClass,heapAlloc);
-      heuristicTrace(inliner->tracer(),"Call is an Interface with a Single Implementer guard %p\n", guard);
-      return true;
+      TR_VirtualGuardKind kind = TR_ProfiledGuard;
+      TR_VirtualGuardTestType testType = TR_DummyTest;
+      TR_OpaqueClassBlock *thisClass = _receiverClass;
+      if (_receiverClass != NULL
+          && !TR::Compiler->cls.isInterfaceClass(comp(), _receiverClass))
+         {
+         kind = TR_InterfaceGuard;
+         testType = TR_MethodTest;
+         }
+      else
+         {
+         // Whether to try to choose VFT test based on a non-extended defClass
+         // or based on profiling. This does not affect the final defClass
+         // heuristic because in that case we can be certain that the class
+         // won't be extended later.
+         bool useVftTestHeuristics = true;
+         TR::PersistentInfo *persistInfo = comp()->getPersistentInfo();
+         if (TR::Compiler->vm.isVMInStartupPhase(comp()->fej9()->getJ9JITConfig()))
+            {
+            const static bool useVftTestHeuristicsDuringStartup =
+               feGetEnv("TR_useInterfaceVftTestHeuristicsDuringStartup") != NULL;
+
+            useVftTestHeuristics = useVftTestHeuristicsDuringStartup;
+            }
+
+         // Profiled guards must guarantee that passing receivers are instances
+         // of some class that implements the expected interface. See the
+         // comment in TR_J9InterfaceCallSite::findCallSiteTarget().
+         //
+         // The choice of VFT test vs. method test is irrelevant here, as
+         // either one would accept instances of defClass. However, a VFT test
+         // obtained by consulting the profiled receiver types would work.
+         //
+         TR_OpaqueClassBlock *defClass = calleeResolvedMethod->containingClass();
+         thisClass = defClass;
+         TR_OpaqueClassBlock *iface = getClassFromMethod();
+         if (fe()->isInstanceOf(defClass, iface, true, true, true) != TR_yes)
+            {
+            calleeResolvedMethod = NULL; // hope to get a VFT test from profiling
+            }
+         // Heuristically choose between VFT test and method test. VFT test
+         // is cheaper, but method test can potentially allow the inlined
+         // body to be run for more receivers.
+         else if (TR::Compiler->cls.isClassFinal(comp(), defClass))
+            {
+            testType = TR_VftTest; // method test will never help
+            }
+         else if (useVftTestHeuristics && !fe()->classHasBeenExtended(defClass))
+            {
+            // Hope that defClass won't be extended in the future, or if it is,
+            // that its subtypes will override the inlined method anyway.
+            testType = TR_VftTest;
+            }
+         else
+            {
+            // There's already at least one subclass inheriting the single
+            // implementation. Choose method test because it covers the
+            // defining class and (so far) all of its subclasses. (If there
+            // were a subclass with its own override, then calleeResolvedMethod
+            // would be overridden.)
+            testType = TR_MethodTest;
+
+            // Still consult the profiling though, since it might reveal that
+            // one type is overwhelmingly frequent at this call site. In that
+            // case, change back to VFT test.
+            TR_ValueProfileInfoManager *profMgr =
+               TR_ValueProfileInfoManager::get(comp());
+
+            TR_AddressInfo *valueInfo = NULL;
+            if (profMgr != NULL)
+               {
+               valueInfo = static_cast<TR_AddressInfo*>(
+                  profMgr->getValueInfo(_bcInfo, comp(), AddressInfo));
+               }
+
+            if (useVftTestHeuristics
+                && valueInfo != NULL
+                && !comp()->getOption(TR_DisableProfiledInlining))
+               {
+               TR_ScratchList<TR_ExtraAddressInfo> byFreqDesc(comp()->trMemory());
+               valueInfo->getSortedList(comp(), &byFreqDesc);
+               ListIterator<TR_ExtraAddressInfo> it(&byFreqDesc);
+               uint32_t remainingTotalFreq = valueInfo->getTotalFrequency();
+               TR_OpaqueClassBlock *topProfiledClass = NULL;
+               uint32_t topProfiledFreq = 0;
+               TR_ExtraAddressInfo *cur = it.getFirst();
+               for (; cur != NULL; cur = it.getNext())
+                  {
+                  auto *curClass =
+                     reinterpret_cast<TR_OpaqueClassBlock*>(cur->_value);
+
+                  if (persistInfo->isObsoleteClass(curClass, comp()->fe())
+                      || fe()->isInstanceOf(curClass, iface, true, true, true) != TR_yes)
+                     {
+                     remainingTotalFreq -= cur->_frequency;
+                     }
+                  else if (topProfiledClass == NULL)
+                     {
+                     topProfiledClass = curClass;
+                     topProfiledFreq = cur->_frequency;
+                     }
+                  }
+
+               if (topProfiledClass != NULL
+                   && remainingTotalFreq >= 32
+                   && topProfiledFreq == remainingTotalFreq)
+                  {
+                  testType = TR_VftTest;
+                  thisClass = topProfiledClass;
+                  }
+               }
+            }
+         }
+
+      if (calleeResolvedMethod != NULL)
+         {
+         TR_ASSERT_FATAL(testType != TR_DummyTest, "failed to select a guard test type");
+         TR_VirtualGuardSelection *guard =
+            new (comp()->trHeapMemory()) TR_VirtualGuardSelection(
+               kind, testType, thisClass);
+
+         if (kind == TR_ProfiledGuard)
+            {
+            // Almost all bytecode would pass type checking even including
+            // interface types. So even though this can't be a nop guard
+            // (because verification doesn't check interface types), treat it
+            // as much like a nop guard as possible. In particular, this will
+            // ensure that the block containing the cold call is actually
+            // marked cold, and ensure that priv. arg remat is allowed.
+            guard->_forceTakenSideCold = true;
+
+            // It is still a high-probability profiled guard...
+            guard->setIsHighProbablityProfiledGuard();
+            }
+
+         addTarget(
+            comp()->trMemory(),
+            inliner,
+            guard,
+            calleeResolvedMethod,
+            thisClass,
+            heapAlloc);
+
+         heuristicTrace(inliner->tracer(),"Call is an Interface with a Single Implementer guard %p\n", guard);
+         return true;
+         }
       }
 
    return findProfiledCallTargets(callStack, inliner);
@@ -645,7 +989,7 @@ bool TR_J9InterfaceCallSite::findCallSiteTarget (TR_CallStack *callStack, TR_Inl
 TR_OpaqueClassBlock* TR_J9InterfaceCallSite::getClassFromMethod ()
    {
    int32_t len = _interfaceMethod->classNameLength();
-   char * s = classNameToSignature(_interfaceMethod->classNameChars(), len, comp());
+   char * s = TR::Compiler->cls.classNameToSignature(_interfaceMethod->classNameChars(), len, comp());
    return comp()->fej9()->getClassFromSignature(s, len, _callerResolvedMethod, true);
    }
 
@@ -719,9 +1063,7 @@ bool TR_J9MutableCallSite::findCallSiteTarget (TR_CallStack *callStack, TR_Inlin
          if (mcsObject && knot)
             {
             TR_J9VMBase *fej9 = (TR_J9VMBase *)(comp()->fej9());
-            uintptr_t currentEpoch = fej9->getVolatileReferenceField(mcsObject, "epoch", "Ljava/lang/invoke/MethodHandle;");
-            if (currentEpoch)
-               vgs->_mutableCallSiteEpoch = knot->getOrCreateIndex(currentEpoch);
+            vgs->_mutableCallSiteEpoch = fej9->mutableCallSiteEpoch(comp(), mcsObject);
             }
          else
             {
@@ -731,19 +1073,40 @@ bool TR_J9MutableCallSite::findCallSiteTarget (TR_CallStack *callStack, TR_Inlin
 
       if (vgs->_mutableCallSiteEpoch != TR::KnownObjectTable::UNKNOWN)
          {
-         TR_ResolvedMethod       *specimenMethod = comp()->fej9()->createMethodHandleArchetypeSpecimen(comp()->trMemory(),
-            knot->getPointerLocation(vgs->_mutableCallSiteEpoch), _callerResolvedMethod);
-         TR_CallTarget *target = addTarget(comp()->trMemory(), inliner, vgs,
-            specimenMethod, _receiverClass, heapAlloc);
-         TR_ASSERT(target , "There should be only one target for TR_MutableCallSite");
-         target->_calleeMethodKind = TR::MethodSymbol::ComputedVirtual;
+#if defined(J9VM_OPT_OPENJDK_METHODHANDLE)
+         TR::MethodSymbol::Kinds methodKind = TR::MethodSymbol::Static;
+         TR_OpaqueMethodBlock *targetJ9Method =
+            comp()->fej9()->targetMethodFromMethodHandle(comp(), vgs->_mutableCallSiteEpoch);
 
-         // The following dereferences pointers to heap references, which is technically not valid,
-         // but it's only a debug trace, and it won't crash (only return garbage).
-         //
-         heuristicTrace(inliner->tracer(),"  addTarget: MutableCallSite.epoch is %p.obj%d (%p.%p)",
-             vgs->_mutableCallSiteObject, vgs->_mutableCallSiteEpoch,
-            *vgs->_mutableCallSiteObject, knot->getPointer(vgs->_mutableCallSiteEpoch));
+         TR_ASSERT_FATAL(
+            targetJ9Method != NULL,
+            "failed to find MCS target (obj%d) LambdaForm method",
+            (int)vgs->_mutableCallSiteEpoch);
+
+         TR_ResolvedMethod *targetMethod = comp()->fej9()->createResolvedMethod(
+            comp()->trMemory(), targetJ9Method, callStack->_method);
+
+         heuristicTrace(
+            inliner->tracer(),
+            "Refine callee of MCS target invokeBasic to %s\n",
+            targetMethod->signature(comp()->trMemory(), stackAlloc));
+#else
+         TR::MethodSymbol::Kinds methodKind = TR::MethodSymbol::ComputedVirtual;
+         TR_ResolvedMethod *targetMethod = comp()->fej9()->createMethodHandleArchetypeSpecimen(
+            comp()->trMemory(),
+            knot->getPointerLocation(vgs->_mutableCallSiteEpoch),
+            _callerResolvedMethod);
+#endif
+         TR_CallTarget *target = addTarget(comp()->trMemory(), inliner, vgs,
+            targetMethod, _receiverClass, heapAlloc);
+         TR_ASSERT(target , "There should be only one target for TR_MutableCallSite");
+         target->_calleeMethodKind = methodKind;
+
+         heuristicTrace(
+            inliner->tracer(),
+            "  addTarget: MutableCallSite %p epoch is obj%d",
+            vgs->_mutableCallSiteObject,
+            vgs->_mutableCallSiteEpoch);
 
          return true;
          }
@@ -897,6 +1260,14 @@ void TR_ProfileableCallSite::findSingleProfiledReceiver(ListIterator<TR_ExtraAdd
          {
          TR_OpaqueClassBlock* callSiteClass = _receiverClass ? _receiverClass : getClassFromMethod();
 
+         if (callSiteClass && !isInterface() && TR::Compiler->cls.isInterfaceClass(comp(), callSiteClass) && isCallingObjectMethod() != TR_yes)
+            {
+            // TR_J9VirtualCallSite::findCallSiteTarget() should have refined the _receiverClass, but it must have failed, we need to abort this inlining
+            if (comp()->trace(OMR::inlining))
+               traceMsg(comp(), "inliner: callSiteClass [%p] is an interface making it impossible to confirm correct context of the profiled class [%p]\n", callSiteClass, tempreceiverClass);
+            callSiteClass = 0;
+            }
+
          bool profiledClassIsNotInstanceOfCallSiteClass = true;
          if (callSiteClass)
             {
@@ -925,7 +1296,16 @@ void TR_ProfileableCallSite::findSingleProfiledReceiver(ListIterator<TR_ExtraAdd
             continue;
             }
 
-         //origMethod
+         if (preferMethodTest && isInterface())
+            {
+            // For interface call sites, the profiled guard must allow only
+            // receivers that are instances of the expected interface. See the
+            // comment in TR_J9InterfaceCallSite::findCallSiteTarget().
+            TR_OpaqueClassBlock *defClass = targetMethod->containingClass();
+            TR_OpaqueClassBlock *iface = getClassFromMethod();
+            if (fe()->isInstanceOf(defClass, iface, true, true, true) != TR_yes)
+               preferMethodTest = false;
+            }
 
          TR_J9VMBase *fej9 = (TR_J9VMBase *)(comp()->fe());
          // need to be able to store class chains for these methods
@@ -1001,8 +1381,14 @@ void TR_ProfileableCallSite::findSingleProfiledMethod(ListIterator<TR_ExtraAddre
       return;
       }
    TR_OpaqueClassBlock* callSiteClass = _receiverClass ? _receiverClass : getClassFromMethod();
-   if (!callSiteClass)
+   TR_ASSERT_FATAL(!isInterface(), "Interface call site called TR_ProfileableCallSite::findSingleProfiledMethod()");
+   if (!callSiteClass || (TR::Compiler->cls.isInterfaceClass(comp(), callSiteClass) && isCallingObjectMethod() != TR_yes))
+      {
+      // TR_J9VirtualCallSite::findCallSiteTarget() should refine the _receiverClass, but if it failed, we need to abort this inlining
+      if (callSiteClass && comp()->trace(OMR::inlining))
+         traceMsg(comp(), "callSiteClass [%p] is an interface making it impossible to confirm correct context for any profiled class\n", callSiteClass);
       return;
+      }
 
    // first let's do sanity test on all profiled targets
    if (comp()->trace(OMR::inlining))

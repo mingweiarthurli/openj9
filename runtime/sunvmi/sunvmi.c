@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2002, 2019 IBM Corp. and others
+ * Copyright (c) 2002, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -172,12 +172,18 @@ getCallerClassIterator(J9VMThread * currentThread, J9StackWalkState * walkState)
 	J9JavaVM * vm = currentThread->javaVM;
 	
 
-	if ((J9_ROM_METHOD_FROM_RAM_METHOD(walkState->method)->modifiers & J9AccMethodFrameIteratorSkip) == J9AccMethodFrameIteratorSkip) {
-		/* Skip methods with java.lang.invoke.FrameIteratorSkip annotation */
+	if (J9_ARE_ALL_BITS_SET(J9_ROM_METHOD_FROM_RAM_METHOD(walkState->method)->modifiers, J9AccMethodFrameIteratorSkip)) {
+		/* Skip methods with java.lang.invoke.FrameIteratorSkip / jdk.internal.vm.annotation.Hidden / java.lang.invoke.LambdaForm$Hidden annotation */
 		return J9_STACKWALK_KEEP_ITERATING;
 	}
 
-	if ((walkState->method != vm->jlrMethodInvoke) && (walkState->method != vm->jliMethodHandleInvokeWithArgs) && (walkState->method != vm->jliMethodHandleInvokeWithArgsList)) {
+	if ((walkState->method != vm->jlrMethodInvoke)
+#if JAVA_SPEC_VERSION >= 18
+		&& (walkState->method != vm->jlrMethodInvokeMH)
+#endif /* JAVA_SPEC_VERSION >= 18 */
+		&& (walkState->method != vm->jliMethodHandleInvokeWithArgs)
+		&& (walkState->method != vm->jliMethodHandleInvokeWithArgsList)
+	) {
 		J9InternalVMFunctions *vmFuncs = vm->internalVMFunctions;
 		J9Class * currentClass = J9_CLASS_FROM_CP(walkState->constantPool);
 
@@ -212,8 +218,8 @@ getCallerClassJEP176Iterator(J9VMThread * currentThread, J9StackWalkState * walk
 	
 	Assert_SunVMI_mustHaveVMAccess(currentThread);
 
-	if ((J9_ROM_METHOD_FROM_RAM_METHOD(walkState->method)->modifiers & J9AccMethodFrameIteratorSkip) == J9AccMethodFrameIteratorSkip) {
-		/* Skip methods with java.lang.invoke.FrameIteratorSkip annotation */
+	if (J9_ARE_ALL_BITS_SET(J9_ROM_METHOD_FROM_RAM_METHOD(walkState->method)->modifiers, J9AccMethodFrameIteratorSkip)) {
+		/* Skip methods with java.lang.invoke.FrameIteratorSkip / jdk.internal.vm.annotation.Hidden / java.lang.invoke.LambdaForm$Hidden annotation */
 		return J9_STACKWALK_KEEP_ITERATING;
 	}
 
@@ -231,6 +237,9 @@ getCallerClassJEP176Iterator(J9VMThread * currentThread, J9StackWalkState * walk
 		if ((walkState->method == vm->jliMethodHandleInvokeWithArgs)
 				|| (walkState->method == vm->jliMethodHandleInvokeWithArgsList)
 				|| (walkState->method == vm->jlrMethodInvoke)
+#if JAVA_SPEC_VERSION >= 18
+				|| (walkState->method == vm->jlrMethodInvokeMH)
+#endif /* JAVA_SPEC_VERSION >= 18 */
 				|| (vm->srMethodAccessor && vmFuncs->instanceOfOrCheckCast(currentClass, J9VM_J9CLASS_FROM_HEAPCLASS(currentThread, *((j9object_t*) vm->srMethodAccessor))))
 				|| (vm->srConstructorAccessor && vmFuncs->instanceOfOrCheckCast(currentClass, J9VM_J9CLASS_FROM_HEAPCLASS(currentThread, *((j9object_t*) vm->srConstructorAccessor))))
 		) {
@@ -560,12 +569,18 @@ getClassContextIterator(J9VMThread * currentThread, J9StackWalkState * walkState
 {
 	J9JavaVM * vm = currentThread->javaVM;
 
-	if ((J9_ROM_METHOD_FROM_RAM_METHOD(walkState->method)->modifiers & J9AccMethodFrameIteratorSkip) == J9AccMethodFrameIteratorSkip) {
-		/* Skip methods with java.lang.invoke.FrameIteratorSkip annotation */
+	if (J9_ARE_ALL_BITS_SET(J9_ROM_METHOD_FROM_RAM_METHOD(walkState->method)->modifiers, J9AccMethodFrameIteratorSkip)) {
+		/* Skip methods with java.lang.invoke.FrameIteratorSkip / jdk.internal.vm.annotation.Hidden / java.lang.invoke.LambdaForm$Hidden annotation */
 		return J9_STACKWALK_KEEP_ITERATING;
 	}
 
-	if ((walkState->method != vm->jlrMethodInvoke) && (walkState->method != vm->jliMethodHandleInvokeWithArgs) && (walkState->method != vm->jliMethodHandleInvokeWithArgsList)) {
+	if ((walkState->method != vm->jlrMethodInvoke)
+#if JAVA_SPEC_VERSION >= 18
+		&& (walkState->method != vm->jlrMethodInvokeMH)
+#endif /* JAVA_SPEC_VERSION >= 18 */
+		&& (walkState->method != vm->jliMethodHandleInvokeWithArgs)
+		&& (walkState->method != vm->jliMethodHandleInvokeWithArgsList)
+	) {
 		J9Class * currentClass = J9_CLASS_FROM_CP(walkState->constantPool);
 		J9InternalVMFunctions *vmFuncs = vm->internalVMFunctions;
 
@@ -725,15 +740,14 @@ JVM_GetSystemPackages_Impl(JNIEnv* env)
 						}
 						funcs->internalExitVMToJNI(vmThread);
 
-						if (packageStringRef) {
-							(*env)->SetObjectArrayElement(env, result, (jsize) i, packageStringRef);
-							(*env)->DeleteLocalRef(env, packageStringRef);
-						}
-
-						if ( (*env)->ExceptionCheck(env) ) {
+						if (NULL == packageStringRef) {
+							/* An exception is necessarily pending */
 							result = NULL;
 							break;
 						}
+
+						(*env)->SetObjectArrayElement(env, result, (jsize) i, packageStringRef);
+						(*env)->DeleteLocalRef(env, packageStringRef);
 					}
 				}
 			}
@@ -786,18 +800,18 @@ JVM_GetSystemPackage_Impl(JNIEnv* env, jstring pkgName)
 	Trc_SunVMI_GetSystemPackage_Entry(env, pkgName);
 
 	if (NULL == pkgName) {
-		return NULL;
+		goto done;
 	}
 
 	utfPkgName = (const char *) (*env)->GetStringUTFChars(env, pkgName, NULL);
 	if (NULL == utfPkgName) {
-		return NULL;
+		goto done;
 	}
 
 	utfPkgNameLen = strlen(utfPkgName);
 
 	if (0 == utfPkgNameLen) {
-		return NULL;
+		goto release;
 	}
 
 	funcs->internalEnterVMFromJNI(vmThread);
@@ -812,7 +826,7 @@ JVM_GetSystemPackage_Impl(JNIEnv* env, jstring pkgName)
 		queryROMClass = j9mem_allocate_memory(allocationSize, J9MEM_CATEGORY_VM);
 		if (NULL == queryROMClass) {
 			Trc_SunVMI_AllocateRomClassFailed(vmThread);
-			goto done;
+			goto exit;
 		} else {
 			/* the end of a J9ROMClass is guaranteed to be aligned */
 			pkgNameUTF8 =  (J9UTF8 *)(queryROMClass + 1);
@@ -854,12 +868,11 @@ JVM_GetSystemPackage_Impl(JNIEnv* env, jstring pkgName)
 	if (NULL != jlstringObject) {
 		result = funcs->j9jni_createLocalRef(env, jlstringObject);
 	}
-
-done:
+exit:
 	funcs->internalExitVMToJNI(vmThread);
-
+release:
 	(*env)->ReleaseStringUTFChars(env, pkgName, utfPkgName);
-
+done:
 	Trc_SunVMI_GetSystemPackage_Exit(env, result);
 
 	return result;

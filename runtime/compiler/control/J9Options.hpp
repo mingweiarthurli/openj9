@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -94,7 +94,13 @@ class OMR_EXTENSIBLE Options : public OMR::OptionsConnector
 
    static int32_t _samplingFrequencyInDeepIdleMode;
    static int32_t getSamplingFrequencyInDeepIdleMode() {return _samplingFrequencyInDeepIdleMode;}
-   
+
+   static int32_t _highActiveThreadThreshold;
+   static int32_t getHighActiveThreadThreshold() {return _highActiveThreadThreshold;}
+
+   static int32_t _veryHighActiveThreadThreshold;
+   static int32_t getVeryHighActiveThreadThreshold() {return _veryHighActiveThreadThreshold;}
+
    static int32_t _maxCheckcastProfiledClassTests;
    static int32_t getCheckcastMaxProfiledClassTests() {return _maxCheckcastProfiledClassTests;}
 
@@ -134,6 +140,7 @@ class OMR_EXTENSIBLE Options : public OMR::OptionsConnector
    static int32_t _profilerStackSize;
    static int32_t _smallMethodBytecodeSizeThreshold; // used on setting invocation counts
    static int32_t _smallMethodBytecodeSizeThresholdForCold; // used in GCR filtering
+   static int32_t _smallMethodBytecodeSizeThresholdForJITServerAOTCache; // for determining which methods to convert to AOT done remotely
 
    static int32_t _countForMethodsCompiledDuringStartup;
    static int32_t getCountForMethodsCompiledDuringStartup() { return _countForMethodsCompiledDuringStartup; }
@@ -214,9 +221,13 @@ class OMR_EXTENSIBLE Options : public OMR::OptionsConnector
    static int32_t _scratchSpaceFactorWhenJSR292Workload;
    static int32_t getScratchSpaceFactorWhenJSR292Workload() { return _scratchSpaceFactorWhenJSR292Workload; }
 
+   static size_t _scratchSpaceLimitForHotCompilations; // Only used under -Xtune:throughput
+   static size_t getScratchSpaceLimitForHotCompilations() { return _scratchSpaceLimitForHotCompilations; }
+
 #if defined(J9VM_OPT_JITSERVER)
-   static int32_t getScratchSpaceFactorWhenJITServerWorkload() { return 2; }
-#endif
+   static int32_t _scratchSpaceFactorWhenJITServerWorkload;
+   static int32_t getScratchSpaceFactorWhenJITServerWorkload() { return _scratchSpaceFactorWhenJITServerWorkload; }
+#endif /* defined(J9VM_OPT_JITSERVER) */
 
    static int32_t _lowVirtualMemoryMBThreshold;
    static int32_t getLowVirtualMemoryMBThreshold() { return _lowVirtualMemoryMBThreshold; }
@@ -232,8 +243,6 @@ class OMR_EXTENSIBLE Options : public OMR::OptionsConnector
    static int32_t _numDLTBufferMatchesToEagerlyIssueCompReq;
    static int32_t _dltPostponeThreshold;
 
-
-
    static int32_t _minSamplingPeriod;
    int32_t getMinSamplingPeriod() {return _minSamplingPeriod;}
    static int32_t _compilationBudget;
@@ -246,6 +255,7 @@ class OMR_EXTENSIBLE Options : public OMR::OptionsConnector
    static int32_t _qsziThresholdToDowngradeDuringCLP;
    static int32_t _qszThresholdToDowngradeOptLevelDuringStartup;
    static int32_t _cpuUtilThresholdForStarvation;
+   static int32_t _qszLimit; // maximum size of the compilation queue
    static int32_t _compPriorityQSZThreshold;
    static int32_t _GCRQueuedThresholdForCounting; // if too many GCR are queued we stop counting
    static int32_t _minimumSuperclassArraySize; //size of the minimum superclass array
@@ -257,6 +267,23 @@ class OMR_EXTENSIBLE Options : public OMR::OptionsConnector
    static int32_t _TLHPrefetchBoundaryLineCount;
    static int32_t _TLHPrefetchTLHEndLineCount;
    static int32_t _numFirstTimeCompilationsToExitIdleMode; // use large number to disable the feature
+
+#if defined(J9VM_OPT_JITSERVER)
+   static int64_t _oldAge;
+   static int64_t _oldAgeUnderLowMemory;
+   static int64_t _timeBetweenPurges;
+   static bool _shareROMClasses;
+   static int32_t _sharedROMClassCacheNumPartitions;
+   static int32_t _reconnectWaitTimeMs;
+   static const uint32_t DEFAULT_JITCLIENT_TIMEOUT = 30000; // ms
+   static const uint32_t DEFAULT_JITSERVER_TIMEOUT = 30000; // ms
+   static int32_t _aotCachePersistenceMinDeltaMethods;
+   static int32_t _aotCachePersistenceMinPeriodMs;
+#endif /* defined(J9VM_OPT_JITSERVER) */
+
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+   static int32_t _sleepMsBeforeCheckpoint;
+#endif
 
    static int32_t _waitTimeToEnterIdleMode;
    static int32_t _waitTimeToEnterDeepIdleMode;
@@ -280,6 +307,7 @@ class OMR_EXTENSIBLE Options : public OMR::OptionsConnector
    static int32_t _hwprofilerNumOutstandingBuffers;
 
    static TR_YesNoMaybe _hwProfilerEnabled;
+   static TR_YesNoMaybe _perfToolEnabled;
    static uint32_t _hwprofilerHotOptLevelThreshold;
    static uint32_t _hwprofilerScorchingOptLevelThreshold;
    static uint32_t _hwprofilerWarmOptLevelThreshold;
@@ -340,6 +368,138 @@ class OMR_EXTENSIBLE Options : public OMR::OptionsConnector
    static char *inlinefileOption(char *option, void *, TR::OptionTable *entry);
    static char *limitfileOption(char *option, void *, TR::OptionTable *entry);
    static char *versionOption(char *option, void *, TR::OptionTable *entry);
+
+   /** \brief
+    *    Set memory manager functions related configuration.
+    *
+    *  \param vm
+    *     J9JavaVM pointer.
+    *
+    *  \param jitConfig
+    *     J9JITConfig pointer.
+    */
+   void preProcessMmf(J9JavaVM *vm, J9JITConfig *jitConfig);
+
+   /** \brief
+    *     Set compiler mode.
+    *
+    *  \param vm
+    *     J9JavaVM pointer.
+    *
+    *  \param jitConfig
+    *     J9JITConfig pointer.
+    */
+   void preProcessMode(J9JavaVM *vm, J9JITConfig *jitConfig);
+
+   /** \brief
+    *     Set JNI related configuration.
+    *
+    *  \param vm
+    *     J9JavaVM pointer.
+    */
+   void preProcessJniAccelerator(J9JavaVM *vm);
+
+   /** \brief
+    *     Increase code cache total size based on codecachetotal options.
+    *
+    *  \param vm
+    *     J9JavaVM pointer.
+    *
+    *  \param jitConfig
+    *     J9JITConfig pointer.
+    */
+   void preProcessCodeCacheIncreaseTotalSize(J9JavaVM *vm, J9JITConfig *jitConfig);
+
+   /** \brief
+    *     Set print code cache usage option.
+    *
+    *  \param vm
+    *     J9JavaVM pointer.
+    */
+   void preProcessCodeCachePrintCodeCache(J9JavaVM *vm);
+
+   /** \brief
+    *     Set large code page size and flags.
+    *
+    *  \param vm
+    *     J9JavaVM pointer.
+    *
+    *  \param jitConfig
+    *     J9JITConfig pointer.
+    *
+    *  \return true if successfully processed large code page size and flags.
+    */
+   bool preProcessCodeCacheXlpCodeCache(J9JavaVM *vm, J9JITConfig *jitConfig);
+
+   /** \brief
+    *     Set code cache related configuration.
+    *
+    *  \param vm
+    *     J9JavaVM pointer.
+    *
+    *  \param jitConfig
+    *     J9JITConfig pointer.
+    *
+    *  \return true if successfully processed code cache related
+    */
+   bool preProcessCodeCache(J9JavaVM *vm, J9JITConfig *jitConfig);
+
+   /** \brief
+    *     Set sampling thread expiration time.
+    *
+    *  \param vm
+    *     J9JavaVM pointer.
+    */
+   void preProcessSamplingExpirationTime(J9JavaVM *vm);
+
+   /** \brief
+    *     Set number of usable compilation threads.
+    *
+    *  \param vm
+    *     J9JavaVM pointer.
+    *
+    *  \param jitConfig
+    *     J9JITConfig pointer.
+    */
+   void preProcessCompilationThreads(J9JavaVM *vm, J9JITConfig *jitConfig);
+
+   /** \brief
+    *     Set thread local heap related configuration.
+    *
+    *  \param vm
+    *     J9JavaVM pointer.
+    */
+   void preProcessTLHPrefetch(J9JavaVM *vm);
+
+   /** \brief
+    *     Set hardware profiler related configuration.
+    *
+    *  \param vm
+    *     J9JavaVM pointer.
+    */
+   void preProcessHwProfiler(J9JavaVM *vm);
+
+   /** \brief
+    *     Set deterministic mode related configuration.
+    *
+    *  \param vm
+    *     J9JavaVM pointer.
+    */
+   void preProcessDeterministicMode(J9JavaVM *vm);
+
+   /** \brief
+    *     Set jit server related configuration.
+    *
+    *  \param vm
+    *     J9JavaVM pointer.
+    *
+    *  \param jitConfig
+    *     J9JITConfig pointer.
+    *
+    *  \return true if successfully set jit server related configuration.
+    */
+   bool preProcessJitServer(J9JavaVM *vm, J9JITConfig *jitConfig);
+
    bool  fePreProcess(void *base);
    bool  fePostProcessAOT(void *base);
    bool  fePostProcessJIT(void *base);

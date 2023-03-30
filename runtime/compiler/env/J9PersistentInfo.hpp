@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -40,9 +40,8 @@ namespace J9 { typedef J9::PersistentInfo PersistentInfoConnector; }
 
 class TR_FrontEnd;
 class TR_PersistentMemory;
-class TR_PersistentCHTable; 
+class TR_PersistentCHTable;
 class TR_PersistentClassLoaderTable;
-class TR_DebugExt;
 class TR_J2IThunkTable;
 namespace J9 { class Options; }
 
@@ -70,6 +69,37 @@ enum RemoteCompilationModes
    CLIENT,
    SERVER,
    };
+
+enum ServerMemoryState
+   {
+   VERY_LOW = 0,
+   LOW,
+   NORMAL,
+   };
+
+enum ServerActiveThreadsState
+   {
+   VERY_HIGH_THREAD = 0,
+   HIGH_THREAD,
+   NORMAL_THREAD,
+   };
+
+enum CompThreadActivationPolicy
+   {
+   // Order is important, we use comparison operators
+   // on policy states and for indexing into the name array
+   SUSPEND = 0,
+   MAINTAIN,
+   SUBDUE,
+   AGGRESSIVE,
+   };
+
+static const char *compThreadActivationPolicyNames[] = {
+   "SUSPEND",
+   "MAINTAIN",
+   "SUBDUE",
+   "AGGRESSIVE",
+   };
 }
 #endif /* defined(J9VM_OPT_JITSERVER) */
 
@@ -79,7 +109,6 @@ namespace J9
 
 class PersistentInfo : public OMR::PersistentInfoConnector
    {
-   friend class ::TR_DebugExt;
    friend class J9::Options;
 
    public:
@@ -117,6 +146,7 @@ class PersistentInfo : public OMR::PersistentInfoConnector
          _jitSampleCountWhenStartupStateExited(0),
          _vmTotalCpuTimeWhenStartupStateEntered(0),
          _vmTotalCpuTimeWhenStartupStateExited(0),
+         _lateSCCDisclaimTime(300000000000), // 300s
          _inliningAggressiveness(100),
          _lastTimeSamplerThreadEnteredIdle(0),
          _lastTimeSamplerThreadEnteredDeepIdle(0),
@@ -130,11 +160,17 @@ class PersistentInfo : public OMR::PersistentInfoConnector
          _runtimeInstrumentationEnabled(false),
          _runtimeInstrumentationRecompilationEnabled(false),
 #if defined(J9VM_OPT_JITSERVER)
-         _remoteCompilationMode(JITServer::NONE),
          _JITServerAddress("localhost"),
          _JITServerPort(38400),
-         _socketTimeoutMs(2000),
+         _socketTimeoutMs(0),
          _clientUID(0),
+         _JITServerMetricsPort(38500),
+         _requireJITServer(false),
+         _localSyncCompiles(true),
+         _JITServerUseAOTCache(false),
+         _JITServerAOTCacheName("default"),
+         _JITServerUseAOTCachePersistence(false),
+         _JITServerAOTCacheDir(),
 #endif /* defined(J9VM_OPT_JITSERVER) */
       OMR::PersistentInfoConnector(pm)
       {}
@@ -218,6 +254,9 @@ class PersistentInfo : public OMR::PersistentInfoConnector
    void setVmTotalCpuTimeWhenStartupStateExited(int64_t n) { _vmTotalCpuTimeWhenStartupStateExited = n; }
    int64_t getVmTotalCpuTimeWhenStartupStateExited() const { return _vmTotalCpuTimeWhenStartupStateExited; }
 
+   void setLateSCCDisclaimTime(int64_t t) { _lateSCCDisclaimTime = t; }
+   int64_t getLateSCCDisclaimTime() const { return _lateSCCDisclaimTime; }
+
    void setInliningAggressiveness(int32_t n) { _inliningAggressiveness = n; }
    int32_t getInliningAggressiveness() const { return _inliningAggressiveness; }
 
@@ -246,8 +285,8 @@ class PersistentInfo : public OMR::PersistentInfoConnector
    void setInvokeExactJ2IThunkTable(TR_J2IThunkTable *table){ _invokeExactJ2IThunkTable = table; }
 
 
-   TR_PersistentCHTable * getPersistentCHTable() { return _persistentCHTable; }
-   void setPersistentCHTable(TR_PersistentCHTable *table) { _persistentCHTable = table; }
+   TR_PersistentCHTable * getPersistentCHTable();
+   void setPersistentCHTable(TR_PersistentCHTable *table);
 
    TR_RuntimeAssumptionTable *getRuntimeAssumptionTable() { return &_runtimeAssumptionTable; }
 
@@ -297,16 +336,33 @@ class PersistentInfo : public OMR::PersistentInfoConnector
    int32_t _countForRecompile;
 
 #if defined(J9VM_OPT_JITSERVER)
-   JITServer::RemoteCompilationModes getRemoteCompilationMode() const { return _remoteCompilationMode; }
-   void setRemoteCompilationMode(JITServer::RemoteCompilationModes m) { _remoteCompilationMode = m; }
+   static JITServer::RemoteCompilationModes _remoteCompilationMode; // JITServer::NONE, JITServer::CLIENT, JITServer::SERVER
+
+   static JITServer::RemoteCompilationModes getRemoteCompilationMode() { return _remoteCompilationMode; }
    const std::string &getJITServerAddress() const { return _JITServerAddress; }
-   void setJITServerAddress(char *addr) { _JITServerAddress = addr; }
+   void setJITServerAddress(const char *addr) { _JITServerAddress = addr; }
    uint32_t getSocketTimeout() const { return _socketTimeoutMs; }
    void setSocketTimeout(uint32_t t) { _socketTimeoutMs = t; }
    uint32_t getJITServerPort() const { return _JITServerPort; }
    void setJITServerPort(uint32_t port) { _JITServerPort = port; }
    uint64_t getClientUID() const { return _clientUID; }
    void setClientUID(uint64_t val) { _clientUID = val; }
+   uint64_t getServerUID() const { return _serverUID; }
+   void setServerUID(uint64_t val) { _serverUID = val; }
+   uint32_t getJITServerMetricsPort() const { return _JITServerMetricsPort; }
+   void setJITServerMetricsPort(uint32_t port) { _JITServerMetricsPort = port; }
+   bool getRequireJITServer() const { return _requireJITServer; }
+   void setRequireJITServer(bool requireJITServer) { _requireJITServer = requireJITServer; }
+   bool isLocalSyncCompiles() const { return _localSyncCompiles; }
+   void setLocalSyncCompiles(bool localSyncCompiles) { _localSyncCompiles = localSyncCompiles; }
+   bool getJITServerUseAOTCache() const { return _JITServerUseAOTCache; }
+   void setJITServerUseAOTCache(bool use) { _JITServerUseAOTCache = use; }
+   const std::string &getJITServerAOTCacheName() const { return _JITServerAOTCacheName; }
+   void setJITServerAOTCacheName(const char *name) { _JITServerAOTCacheName = name; }
+   bool getJITServerUseAOTCachePersistence() const { return _JITServerUseAOTCachePersistence; }
+   void setJITServerUseAOTCachePersistence(bool use) { _JITServerUseAOTCachePersistence = use; }
+   const std::string &getJITServerAOTCacheDir() const { return _JITServerAOTCacheDir; }
+   void setJITServerAOTCacheDir(const char *dir) { _JITServerAOTCacheDir = dir; }
 #endif /* defined(J9VM_OPT_JITSERVER) */
 
    private:
@@ -337,7 +393,7 @@ class PersistentInfo : public OMR::PersistentInfoConnector
 
    bool _externalStartupEndedSignal; // the app will tell us when startup ends
 
-   bool _disableFurtherCompilation;
+   volatile bool _disableFurtherCompilation;
 
    uint32_t _loadFactor; // set in samplerThread; increases with active threads, decreases with CPUs
 
@@ -358,6 +414,8 @@ class PersistentInfo : public OMR::PersistentInfoConnector
 
    int64_t _vmTotalCpuTimeWhenStartupStateExited;  // set when we exit STARTUP state
 
+   int64_t _lateSCCDisclaimTime; // CPU time in ns
+
    int32_t _inliningAggressiveness;
 
    // The following four fields are stored here for RAS purposes (easy access from a debugging session)
@@ -376,7 +434,6 @@ class PersistentInfo : public OMR::PersistentInfoConnector
 
    TR_J2IThunkTable *_invokeExactJ2IThunkTable;
 
-
    TR::Monitor *_gpuInitMonitor;
 
    bool _runtimeInstrumentationEnabled;
@@ -385,18 +442,24 @@ class PersistentInfo : public OMR::PersistentInfoConnector
    bool _classLoadingPhase;            ///< true, if we detect a large number of classes loaded per second
    bool _inlinerTemporarilyRestricted; ///< do not inline when true; used to restrict cold inliner during startup
 
-
    volatile uint64_t _elapsedTime; ///< elapsed time as computed by the sampling thread (ms)
                                    ///< May need adjustment if sampling thread goes to sleep
 
-
    int32_t _numLoadedClasses; ///< always increasing
+
 #if defined(J9VM_OPT_JITSERVER)
-   JITServer::RemoteCompilationModes _remoteCompilationMode; // JITServer::NONE, JITServer::CLIENT, JITServer::SERVER
    std::string _JITServerAddress;
    uint32_t    _JITServerPort;
    uint32_t    _socketTimeoutMs; // timeout for communication sockets used in out-of-process JIT compilation
    uint64_t    _clientUID;
+   uint64_t    _serverUID; // At the client, this represents the UID of the server the client is connected to
+   uint32_t    _JITServerMetricsPort; // Port for receiving http metrics requests from Prometheus; only used at server
+   bool        _requireJITServer;
+   bool        _localSyncCompiles;
+   bool        _JITServerUseAOTCache;
+   std::string _JITServerAOTCacheName; // Name of the server AOT cache that this client is using
+   bool        _JITServerUseAOTCachePersistence; // Whether to persist the JITServer AOT caches at the server
+   std::string _JITServerAOTCacheDir;  // Directory where the JITServer persistent AOT caches are located
 #endif /* defined(J9VM_OPT_JITSERVER) */
    };
 

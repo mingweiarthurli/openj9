@@ -1,6 +1,6 @@
 
 /*******************************************************************************
- * Copyright (c) 2017, 2020 IBM Corp. and others
+ * Copyright (c) 2017, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -28,11 +28,20 @@
 
 #include "MarkJavaStats.hpp"
 #include "ScavengerJavaStats.hpp"
+#include "GCExtensionsBase.hpp"
+#include "ObjectModel.hpp"
 
 struct OMR_VMThread;
 
+typedef struct GCmovedObjectHashCode {
+	uint32_t originalHashCode;
+	bool hasBeenMoved;
+	bool hasBeenHashed;
+} GCmovedObjectHashCode;
+
 class MM_EnvironmentBase;
 class MM_OwnableSynchronizerObjectBuffer;
+class MM_ContinuationObjectBuffer;
 class MM_ReferenceObjectBuffer;
 class MM_UnfinalizedObjectBuffer;
 
@@ -51,6 +60,9 @@ public:
 	MM_ReferenceObjectBuffer *_referenceObjectBuffer; /**< The thread-specific buffer of recently discovered reference objects */
 	MM_UnfinalizedObjectBuffer *_unfinalizedObjectBuffer; /**< The thread-specific buffer of recently allocated unfinalized objects */
 	MM_OwnableSynchronizerObjectBuffer *_ownableSynchronizerObjectBuffer; /**< The thread-specific buffer of recently allocated ownable synchronizer objects */
+	MM_ContinuationObjectBuffer *_continuationObjectBuffer; /**< The thread-specific buffer of recently allocated continuation objects */
+
+	struct GCmovedObjectHashCode movedObjectHashCodeCache; /**< Structure to aid on object movement and hashing */
 
 	/* Function members */
 private:
@@ -60,6 +72,7 @@ public:
 		:_referenceObjectBuffer(NULL)
 		,_unfinalizedObjectBuffer(NULL)
 		,_ownableSynchronizerObjectBuffer(NULL)
+		,_continuationObjectBuffer(NULL)
 	{}
 };
 
@@ -68,6 +81,7 @@ class MM_EnvironmentDelegate
 	/* Data members */
 private:
 	MM_EnvironmentBase *_env;
+	MM_GCExtensionsBase *_extensions;
 	J9VMThread *_vmThread;
 	GC_Environment _gcEnv;
 protected:
@@ -95,7 +109,7 @@ public:
 
 	void flushNonAllocationCaches();
 
-	void setGCMasterThread(bool isMasterThread);
+	void setGCMainThread(bool isMainThread);
 
 	/**
 	 * This will be called for every allocated object.  Note this is not necessarily done when the object is allocated.  You are however
@@ -159,6 +173,63 @@ public:
 
 	void forceOutOfLineVMAccess();
 
+	/**
+	 * This method is responsible for remembering object information before object is moved. Differently than
+	 * evacuation, we're sliding the object; therefore, we need to remember object's original information
+	 * before object moves and could potentially grow
+	 *
+	 * @param[in] objectPtr points to the object that is about to be moved
+	 * @see postObjectMoveForCompact(omrobjectptr_t)
+	 */
+	MMINLINE void
+	preObjectMoveForCompact(omrobjectptr_t objectPtr)
+	{
+		GC_ObjectModel *objectModel = &_extensions->objectModel;
+		bool hashed = objectModel->hasBeenHashed(objectPtr);
+		bool moved = objectModel->hasBeenMoved(objectPtr);
+
+		_gcEnv.movedObjectHashCodeCache.hasBeenHashed = hashed;
+		_gcEnv.movedObjectHashCodeCache.hasBeenMoved = moved;
+
+		if (hashed && !moved) {
+			/* calculate this BEFORE we (potentially) destroy the object */
+			_gcEnv.movedObjectHashCodeCache.originalHashCode = computeObjectAddressToHash((J9JavaVM *)_extensions->getOmrVM()->_language_vm, objectPtr);
+		}
+	}
+
+	/**
+	 * This method may be called during heap compaction, after the object has been moved to a new location.
+	 * The implementation may apply any information extracted and cached in the calling thread at this point.
+	 * It also updates indexable dataAddr field through fixupDataAddr.
+	 *
+	 * @param[in] destinationObjectPtr points to the object that has just been moved (new location)
+	 * @param[in] sourceObjectPtr points to the old object that has just been moved (old location)
+	 * @see preObjectMoveForCompact(omrobjectptr_t)
+	 */
+	MMINLINE void
+	postObjectMoveForCompact(omrobjectptr_t destinationObjectPtr, omrobjectptr_t sourceObjectPtr)
+	{
+		GC_ObjectModel *objectModel = &_extensions->objectModel;
+		if (_gcEnv.movedObjectHashCodeCache.hasBeenHashed && !_gcEnv.movedObjectHashCodeCache.hasBeenMoved) {
+			*(uint32_t*)((uintptr_t)destinationObjectPtr + objectModel->getHashcodeOffset(destinationObjectPtr)) = _gcEnv.movedObjectHashCodeCache.originalHashCode;
+			objectModel->setObjectHasBeenMoved(destinationObjectPtr);
+		}
+
+		if (_extensions->objectModel.isIndexable(destinationObjectPtr)) {
+			/* Updates internal field of indexable objects. Every indexable object have an extra field
+			 * that can be used to store any extra information about the indexable object. One use case is
+			 * OpenJ9 where we use this field to point to array data. In this case it will always point to
+			 * the address right after the header, in case of contiguous data it will point to the data
+			 * itself, and in case of discontiguous arraylet it will point to the first arrayiod. How to
+			 * updated dataAddr is up to the target language that must override fixupDataAddr */
+			_extensions->indexableObjectModel.fixupDataAddr(destinationObjectPtr);
+
+			if (_extensions->isVLHGC()) {
+				_extensions->indexableObjectModel.fixupInternalLeafPointersAfterCopy((J9IndexableObject *)destinationObjectPtr, (J9IndexableObject *)sourceObjectPtr);
+			}
+		}
+	}
+
 #if defined (OMR_GC_THREAD_LOCAL_HEAP)
 	/**
 	 * Disable inline TLH allocates by hiding the real heap top address from
@@ -206,6 +277,7 @@ public:
 		
 	
 		: _env(NULL)
+		, _extensions(NULL)
 		, _vmThread(NULL)
 	{ }
 };

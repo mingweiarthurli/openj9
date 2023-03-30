@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -224,7 +224,7 @@ MM_RegionBasedOverflowVLHGC::overflowItemInternal(MM_EnvironmentBase *env, void 
 				 * To avoid adding constructing object 
 				 */
 				envVLHGC->getGCEnvironment()->_ownableSynchronizerObjectBuffer->add(envVLHGC, objectPtr);
-				if (envVLHGC->_cycleState->_shouldRunCopyForward) {
+				if (MM_CycleState::CT_PARTIAL_GARBAGE_COLLECTION == envVLHGC->_cycleState->_collectionType) {
 					envVLHGC->_copyForwardStats._ownableSynchronizerSurvived += 1;
 				} else {
 					envVLHGC->_markVLHGCStats._ownableSynchronizerSurvived += 1;

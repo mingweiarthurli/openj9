@@ -1,8 +1,6 @@
 /*[INCLUDE-IF Sidecar16]*/
-package java.lang;
-
 /*******************************************************************************
- * Copyright (c) 2012, 2019 IBM Corp. and others
+ * Copyright (c) 2012, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -18,10 +16,12 @@ package java.lang;
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
+
+package java.lang;
 
 import java.util.Objects;
 import java.util.Properties;
@@ -34,6 +34,7 @@ import sun.reflect.ConstantPool;
 
 
 import com.ibm.oti.vm.*;
+import com.ibm.jit.JITHelpers;
 
 /**
  * Helper class to allow privileged access to classes
@@ -185,26 +186,56 @@ final class VMAccess implements VMLangAccess {
 	/*[ENDIF]*/
 
 	/**
-	 * Returns a InternalRamClass object.
-	 * 
-	 * @param addr - the native addr of the J9Class
-	 * @return A InternalRamClass reference object
-	 */ 
+	 * Returns an InternalConstantPool object.
+	 *
+	 * @param addr - the native addr of the J9ConstantPool
+	 * @return An InternalConstantPool reference object
+	 */
 	@Override
-	public Object createInternalRamClass(long addr) {
-		return new InternalRamClass(addr);
+	public Object createInternalConstantPool(long addr) {
+		return new InternalConstantPool(addr);
 	}
-	
+
 	/**
 	 * Returns a ConstantPool object
-	 * @param internalRamClass An object ref to a j9class
+	 * @param internalConstantPool An object ref to a j9constantpool
 	 * @return ConstantPool instance
 	 */
 	@Override
-	public ConstantPool getConstantPool(Object internalRamClass) {
-		return Access.getConstantPool(internalRamClass);
+	public ConstantPool getConstantPool(Object internalConstantPool) {
+		return Access.getConstantPool(internalConstantPool);
 	}
-	
+
+	/**
+	 * Returns an InternalConstantPool object from a J9Class address. The ConstantPool
+	 * natives expect an InternalConstantPool as the constantPoolOop parameter.
+	 *
+	 * @param j9class the native address of the J9Class
+	 * @return InternalConstantPool a wrapper for a j9constantpool
+	 */
+	public Object getInternalConstantPoolFromJ9Class(long j9class) {
+		long j9constantpool = VM.getJ9ConstantPoolFromJ9Class(j9class);
+		return createInternalConstantPool(j9constantpool);
+	}
+
+	/**
+	 * Returns an InternalConstantPool object from a Class. The ConstantPool
+	 * natives expect an InternalConstantPool as the constantPoolOop parameter.
+	 *
+	 * @param clazz the Class to fetch the constant pool from
+	 * @return an InternalConstantPool wrapper for a j9constantpool
+	 */
+	public Object getInternalConstantPoolFromClass(Class clazz) {
+		JITHelpers helpers = JITHelpers.getHelpers();
+		long j9class;
+		if (helpers.is32Bit()) {
+			j9class = helpers.getJ9ClassFromClass32(clazz);
+		} else {
+			j9class = helpers.getJ9ClassFromClass64(clazz);
+		}
+		return getInternalConstantPoolFromJ9Class(j9class);
+	}
+
 	/*[IF Sidecar19-SE]*/
 	@Override
 	public void addPackageToList(java.lang.Class<?> newClass, ClassLoader loader) {
@@ -220,4 +251,33 @@ final class VMAccess implements VMLangAccess {
 	public Thread createThread(Runnable runnable, String threadName, boolean isSystemThreadGroup, boolean inheritThreadLocals, boolean isDaemon, ClassLoader contextClassLoader) {
 		return new Thread(runnable, threadName, isSystemThreadGroup, inheritThreadLocals, isDaemon, contextClassLoader);
 	}
+
+	@Override
+	public void prepare(Class<?> theClass) {
+		J9VMInternals.prepare(theClass);
+	}
+
+	/*[IF JAVA_SPEC_VERSION >= 11]*/
+	/**
+	 * Returns whether the classloader name should be included in the stack trace for the provided StackTraceElement.
+	 *
+	 * @param element The StackTraceElement to check
+	 * @return true if the classloader name should be included, false otherwise
+	 */
+	@Override
+	public boolean getIncludeClassLoaderName(StackTraceElement element) {
+		return element.getIncludeClassLoaderName();
+	}
+
+	/**
+	 * Returns whether the module version should be included in the stack trace for the provided StackTraceElement.
+	 *
+	 * @param element The StackTraceElement to check
+	 * @return true if the module version should be included, false otherwise
+	 */
+	@Override
+	public boolean getIncludeModuleVersion(StackTraceElement element) {
+		return element.getIncludeModuleVersion();
+	}
+	/*[ENDIF] JAVA_SPEC_VERSION >= 11*/
 }

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2020 IBM Corp. and others
+ * Copyright (c) 2018, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -31,11 +31,14 @@ namespace JITServer
 class StreamFailure: public virtual std::exception
    {
 public:
-   StreamFailure() : _message("Generic stream failure") { }
-   StreamFailure(const std::string &message) : _message(message) { }
+   StreamFailure() : _message("Generic stream failure"), _retryConnectionImmediately(false) { }
+   StreamFailure(const std::string &message) : _message(message), _retryConnectionImmediately(false) { }
+   StreamFailure(const std::string &message, bool shouldRetry) : _message(message), _retryConnectionImmediately(shouldRetry) { }
    virtual const char* what() const throw() { return _message.c_str(); }
+   bool retryConnectionImmediately() const { return _retryConnectionImmediately; }
 private:
    std::string _message;
+   bool _retryConnectionImmediately;
    };
 
 class StreamInterrupted: public virtual std::exception
@@ -96,9 +99,12 @@ public:
    StreamMessageTypeMismatch() : _message("JITServer/JITClient message type mismatch detected") { }
    StreamMessageTypeMismatch(MessageType serverType, MessageType clientType)
       {
-      _message = "JITServer expected message type " + std::to_string(serverType) + " received " + std::to_string(clientType);
+      const char *expectedName = (serverType < MessageType_MAXTYPE) ? messageNames[serverType] : "";
+      const char *receivedName = (clientType < MessageType_MAXTYPE) ? messageNames[clientType] : "";
+      _message = "JITServer expected message type " + std::to_string(serverType) + " " + expectedName +
+                 " received " + std::to_string(clientType) + " " + receivedName;
       }
-   virtual const char* what() const throw() 
+   virtual const char* what() const throw()
       {
       return _message.c_str();
       }

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -122,7 +122,7 @@ buildInstructionMap (J9CfrClassFile * classfile, J9CfrAttributeCode * code, U_8 
 			break;
 
 		default:
-			if (bc > CFR_BC_jsr_w) {
+			if ((bc > CFR_BC_MaxDefined) || (bc == CFR_BC_breakpoint)) {
 				errorType = J9NLS_CFR_ERR_BC_UNKNOWN__ID;
 				goto _leaveProc;
 			}
@@ -183,6 +183,7 @@ checkBytecodeStructure (J9CfrClassFile * classfile, UDATA methodIndex, UDATA len
 	bcIndex = bcStart;
 	bcInstructionStart = bcIndex;
 	while (bcIndex < bcEnd) {
+		BOOLEAN noZeroIndex = FALSE;
 		bcInstructionStart = bcIndex;
 		/* Don't need to check that an instruction is in the code range here as method entries
 			have 4 extra bytes at the end - exception and attribute counts so we won't exceed
@@ -238,7 +239,7 @@ checkBytecodeStructure (J9CfrClassFile * classfile, UDATA methodIndex, UDATA len
 				case CFR_CONSTANT_String:
 					break;
 				case CFR_CONSTANT_Class:
-					if ((flags & BCT_MajorClassFileVersionMask) < BCT_Java5MajorVersionShifted) {
+					if ((flags & BCT_MajorClassFileVersionMask) < BCT_JavaMajorVersionShifted(5)) {
 						errorType = J9NLS_CFR_ERR_LDC_INDEX_INVALID_BEFORE_V49__ID;
 						errorDataIndex = index;
 						goto _verifyError;
@@ -246,7 +247,7 @@ checkBytecodeStructure (J9CfrClassFile * classfile, UDATA methodIndex, UDATA len
 					break;
 				case CFR_CONSTANT_MethodType:
 				case CFR_CONSTANT_MethodHandle:
-					if ((flags & BCT_MajorClassFileVersionMask) < BCT_Java7MajorVersionShifted) {
+					if ((flags & BCT_MajorClassFileVersionMask) < BCT_JavaMajorVersionShifted(7)) {
 						errorType = J9NLS_CFR_ERR_LDC_INDEX_INVALID_BEFORE_V51__ID;
 						errorDataIndex = index;
 						goto _verifyError;
@@ -255,7 +256,7 @@ checkBytecodeStructure (J9CfrClassFile * classfile, UDATA methodIndex, UDATA len
 				case CFR_CONSTANT_Dynamic:
 					{
 						J9CfrConstantPoolInfo *constantDynamicSignature = &classfile->constantPool[classfile->constantPool[info->slot2].slot2];
-						if ((flags & BCT_MajorClassFileVersionMask) < BCT_Java11MajorVersionShifted) {
+						if ((flags & BCT_MajorClassFileVersionMask) < BCT_JavaMajorVersionShifted(11)) {
 							errorType = J9NLS_CFR_ERR_LDC_INDEX_INVALID_BEFORE_V55__ID;
 							errorDataIndex = index;
 							goto _verifyError;
@@ -289,7 +290,7 @@ checkBytecodeStructure (J9CfrClassFile * classfile, UDATA methodIndex, UDATA len
 
 			if (CFR_CONSTANT_Dynamic == tag) {
 				J9CfrConstantPoolInfo *constantDynamicSignature = &classfile->constantPool[classfile->constantPool[info->slot2].slot2];
-				if ((flags & BCT_MajorClassFileVersionMask) < BCT_Java11MajorVersionShifted) {
+				if ((flags & BCT_MajorClassFileVersionMask) < BCT_JavaMajorVersionShifted(11)) {
 					errorType = J9NLS_CFR_ERR_LDC_INDEX_INVALID_BEFORE_V55__ID;
 					errorDataIndex = index;
 					goto _verifyError;
@@ -608,6 +609,8 @@ checkBytecodeStructure (J9CfrClassFile * classfile, UDATA methodIndex, UDATA len
 		case CFR_BC_jsr:
 			method->j9Flags |= CFR_J9FLAG_HAS_JSR;
 			classfile->j9Flags |= CFR_J9FLAG_HAS_JSR;
+			noZeroIndex = TRUE;
+
 			/* fall through */
 
 		case CFR_BC_goto:
@@ -636,6 +639,10 @@ checkBytecodeStructure (J9CfrClassFile * classfile, UDATA methodIndex, UDATA len
 			}
 			if (!map[target]) {
 				errorType = J9NLS_CFR_ERR_BC_JUMP_TARGET__ID;
+				goto _verifyError;
+			}
+			if (noZeroIndex && (0 == index)) {
+				errorType = J9NLS_CFR_ERR_BC_JUMP_RECURSIVE__ID;
 				goto _verifyError;
 			}
 			break;
@@ -805,7 +812,7 @@ checkBytecodeStructure (J9CfrClassFile * classfile, UDATA methodIndex, UDATA len
 			break;
 
 		case CFR_BC_areturn:
-			if ((sigChar != 'L') && (sigChar != '[')) {
+			if (!IS_REF_OR_VAL_SIGNATURE(sigChar) && (sigChar != '[')) {
 				/* fail, modify the bytecode to be incompatible in the second pass of verification */
 				if (sigChar != 'V') {
 					*(bcIndex - 1) = CFR_BC_return;
@@ -822,6 +829,9 @@ checkBytecodeStructure (J9CfrClassFile * classfile, UDATA methodIndex, UDATA len
 */
 			break;
 
+#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+		case CFR_BC_withfield:
+#endif /* J9VM_OPT_VALHALLA_VALUE_TYPES */
 		case CFR_BC_getstatic:
 		case CFR_BC_putstatic:
 		case CFR_BC_getfield:
@@ -857,7 +867,7 @@ checkBytecodeStructure (J9CfrClassFile * classfile, UDATA methodIndex, UDATA len
 			}
 			info = &(classfile->constantPool[index]);
 			if (info->tag != CFR_CONSTANT_Methodref) {
-				BOOLEAN isJava8orLater = ((flags & BCT_MajorClassFileVersionMask) >= BCT_Java8MajorVersionShifted) || J9_ARE_ANY_BITS_SET(flags, BCT_Unsafe);
+				BOOLEAN isJava8orLater = ((flags & BCT_MajorClassFileVersionMask) >= BCT_JavaMajorVersionShifted(8)) || J9_ARE_ANY_BITS_SET(flags, BCT_Unsafe);
 
 				if (isJava8orLater && (bc != CFR_BC_invokevirtual) && (info->tag == CFR_CONSTANT_InterfaceMethodref)) {
 					/* JVMS 4.9.1 Static Constraints:
@@ -875,10 +885,22 @@ checkBytecodeStructure (J9CfrClassFile * classfile, UDATA methodIndex, UDATA len
 			}
 			index = info->slot2;
 			info = &(classfile->constantPool[classfile->constantPool[index].slot1]);
+			U_16 returnChar = getReturnTypeFromSignature(classfile->constantPool[classfile->constantPool[index].slot2].bytes, classfile->constantPool[classfile->constantPool[index].slot2].slot1, NULL);
 			if (info->bytes[0] == '<') {
-				if ((bc != CFR_BC_invokespecial)
-						||(info->tag != CFR_CONSTANT_Utf8)
-						|| (strncmp((char *) info->bytes, "<init>", 6))) {
+				if ((info->tag != CFR_CONSTANT_Utf8)
+					|| !J9UTF8_DATA_EQUALS("<init>", 6, info->bytes, info->slot1)
+#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+#if defined(J9VM_OPT_VALHALLA_NEW_FACTORY_METHOD)
+					|| (J9UTF8_DATA_EQUALS("<new>", 5, info->bytes, info->slot1) && (bc != CFR_BC_invokestatic))
+					|| (!J9UTF8_DATA_EQUALS("<new>", 5, info->bytes, info->slot1) && (bc != CFR_BC_invokespecial))
+#else /* #if defined(J9VM_OPT_VALHALLA_NEW_FACTORY_METHOD) */
+					|| ((IS_QTYPE(returnChar) || IS_LTYPE(returnChar)) && (bc != CFR_BC_invokestatic))
+					|| (!(IS_QTYPE(returnChar) || IS_LTYPE(returnChar)) && (bc != CFR_BC_invokespecial))
+#endif /* #if defined(J9VM_OPT_VALHALLA_NEW_FACTORY_METHOD) */
+#else /* #if defined(J9VM_OPT_VALHALLA_VALUE_TYPES) */
+					|| (bc != CFR_BC_invokespecial)
+#endif /* #if defined(J9VM_OPT_VALHALLA_VALUE_TYPES) */
+				) {
 					errorType = J9NLS_CFR_ERR_BC_METHOD_INVALID__ID;
 					goto _verifyError;
 				}
@@ -956,6 +978,10 @@ checkBytecodeStructure (J9CfrClassFile * classfile, UDATA methodIndex, UDATA len
 			}
 			break;
 
+#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+		case CFR_BC_aconst_init:
+			/* fall through */
+#endif /* J9VM_OPT_VALHALLA_VALUE_TYPES */
 		case CFR_BC_new:
 			NEXT_U16(index, bcIndex);
 			if ((!index) || (index >= cpCount)) {
@@ -971,11 +997,17 @@ checkBytecodeStructure (J9CfrClassFile * classfile, UDATA methodIndex, UDATA len
 				errorDataIndex = index;
 				goto _verifyError;
 			}
-			info = &(classfile->constantPool[info->slot1]);
-			if (info->bytes[0] == '[') {
-				errorType = J9NLS_CFR_ERR_BC_NEW_ARRAY__ID;
+#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+			info = &(classfile->constantPool[classfile->constantPool[index].slot1]);
+			if ((CFR_BC_new == bc) && bcvIsReferenceTypeDescriptor(info)) {
+				errorType = J9NLS_CFR_ERR_NEW_INVALID_REFERENCETYPE_DESCRIPTOR__ID;
 				goto _verifyError;
 			}
+			if ((CFR_BC_aconst_init == bc) && ('[' == *info->bytes)) {
+				errorType = J9NLS_CFR_ERR_ACONST_INIT_INVALID_ARRAY__ID;
+				goto _verifyError;
+			}
+#endif /* #if defined(J9VM_OPT_VALHALLA_VALUE_TYPES) */
 			break;
 
 		case CFR_BC_newarray:
@@ -1161,6 +1193,8 @@ checkBytecodeStructure (J9CfrClassFile * classfile, UDATA methodIndex, UDATA len
 		case CFR_BC_jsr_w:
 			method->j9Flags |= CFR_J9FLAG_HAS_JSR;
 			classfile->j9Flags |= CFR_J9FLAG_HAS_JSR;
+			noZeroIndex = TRUE;
+
 			/* fall through */
 
 		case CFR_BC_goto_w:
@@ -1173,6 +1207,10 @@ checkBytecodeStructure (J9CfrClassFile * classfile, UDATA methodIndex, UDATA len
 			}
 			if (!map[target]) {
 				errorType = J9NLS_CFR_ERR_BC_JUMP_TARGET__ID;
+				goto _verifyError;
+			}
+			if (noZeroIndex && (0 == index)) {
+				errorType = J9NLS_CFR_ERR_BC_JUMP_RECURSIVE__ID;
 				goto _verifyError;
 			}
 			break;
@@ -1227,9 +1265,6 @@ checkStackMap (J9CfrClassFile* classfile, J9CfrMethod * method, J9CfrAttributeCo
 {
 	UDATA i;
 	IDATA errorCode = 0;
-	/* delayedErrorCode only used to hold the "stack map not at a bytecode boundary" error while completing other checks */
-	/* It is a verification retry error */
-	IDATA delayedErrorCode = 0;
 	J9CfrAttribute* attribute;
 
 	for (i = 0; i < code->attributesCount; i++) {
@@ -1273,18 +1308,8 @@ checkStackMap (J9CfrClassFile* classfile, J9CfrMethod * method, J9CfrAttributeCo
 				}
 				offset++;
 
-				if (offset < code->codeLength) {
-					/* Check only possibly valid offsets */
-					if (map[offset] == 0) {
-						/* invalid bytecode index */
-						/* Don't go to _failedCheck - delay reporting the VerifyError */
-						/* continue parsing the attribute to check for other failures first */
-						/* particularly extra or missing bytes */
-						delayedErrorCode = FALLBACK_VERIFY_ERROR;
-						exceptionDetails->stackmapFrameIndex = (I_32)j;
-						exceptionDetails->stackmapFrameBCI = (U_32)offset;
-					}
-				} else {
+				/* Throw the VerifyError without delay in the case of bad offset so as to match the RI's behavior */
+				if ((offset >= code->codeLength) || (0 == map[offset])) {
 					errorCode = FALLBACK_VERIFY_ERROR;
 					exceptionDetails->stackmapFrameIndex = (I_32)j;
 					exceptionDetails->stackmapFrameBCI = (U_32)offset;
@@ -1342,19 +1367,18 @@ checkStackMap (J9CfrClassFile* classfile, J9CfrMethod * method, J9CfrAttributeCo
 		}
 	}
 _failedCheck:
-	if (delayedErrorCode || (errorCode == FALLBACK_CLASS_FORMAT_ERROR) || (errorCode == FALLBACK_VERIFY_ERROR)) {
-		if ((classfile->majorVersion < CFR_MAJOR_VERSION_REQUIRING_STACKMAPS) && ((flags & J9_VERIFY_NO_FALLBACK) == 0)) {
+	if ((FALLBACK_CLASS_FORMAT_ERROR == errorCode)
+	|| (FALLBACK_VERIFY_ERROR == errorCode)
+	) {
+		if ((classfile->majorVersion < CFR_MAJOR_VERSION_REQUIRING_STACKMAPS)
+		&& (0 == (flags & J9_VERIFY_NO_FALLBACK))
+		) {
 			/* Hide the bad StackMap/StackMapTable attribute and error.  Major version 51 and greater do not allow fallback to type inference */
 			attribute->tag = CFR_ATTRIBUTE_Unknown;
-			errorCode = 0; 	
-			delayedErrorCode = 0;
+			errorCode = 0;
 		}
 	}
 
-	if (errorCode == 0) {
-		errorCode = delayedErrorCode;
-	}
-	
 	return errorCode;
 }
 
@@ -1422,7 +1446,7 @@ checkStackMapEntries (J9CfrClassFile* classfile, J9CfrAttributeCode * code, U_8 
 			}
 		}
 
-		/* A value of type long or double must occupy two consecutive local variables. Ensure that if there is is a long or double entry in 
+		/* A value of type long or double must occupy two consecutive local variables. Ensure that if there is a long or double entry in
 		 * an append frame maxLocals reflects the correct number of slots. An incorrect maxLocals value in all other cases will be handled 
 		 * in bcverify.c */
 		if (checkAppendArraySize) {
@@ -1540,10 +1564,16 @@ checkMethodStructure (J9PortLibrary * portLib, J9CfrClassFile * classfile, UDATA
 
 	/* Throw a class format error if we are given a static <init> method (otherwise later we will throw a verify error due to back stack shape) */
 	info = &(classfile->constantPool[method->nameIndex]);
-	if (info->slot1 == 6) {		/* size of '<init>' */
-		if ((info->tag == CFR_CONSTANT_Utf8)
-				&& (!strncmp ((char *)info->bytes, "<init>", 6))) {
-			if (method->accessFlags & CFR_ACC_STATIC) {
+	if ((method->accessFlags & CFR_ACC_STATIC)
+#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+#if !defined(J9VM_OPT_VALHALLA_NEW_FACTORY_METHOD)
+		&& (!J9_IS_CLASSFILE_VALUETYPE(classfile))
+#endif /* !defined(J9VM_OPT_VALHALLA_NEW_FACTORY_METHOD) */
+#endif /* #if defined(J9VM_OPT_VALHALLA_VALUE_TYPES) */
+	) {
+		if (CFR_CONSTANT_Utf8 == info->tag) {
+			if (J9UTF8_DATA_EQUALS("<init>", 6, info->bytes, info->slot1)) {
+				/* The error code here is for modifiers, return type check is done in j9bcv_verifyClassStructure(). */
 				errorType = J9NLS_CFR_ERR_ILLEGAL_METHOD_MODIFIERS__ID;
 				goto _formatError;
 			}
@@ -1657,6 +1687,9 @@ j9bcv_verifyClassStructure (J9PortLibrary * portLib, J9CfrClassFile * classfile,
 				end = utf8->slot1;
 
 				switch (utf8->bytes[arity]) {
+#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+				case 'Q':		/* fall through */
+#endif /* #if defined(J9VM_OPT_VALHALLA_VALUE_TYPES) */
 				case 'L':		/* object array */
 					if (utf8->bytes[--end] != ';') {
 						errorType = J9NLS_CFR_ERR_BAD_CLASS_NAME__ID;
@@ -1740,6 +1773,10 @@ j9bcv_verifyClassStructure (J9PortLibrary * portLib, J9CfrClassFile * classfile,
 			/* No static constraints defined (so far) on slot1 */
 		case CFR_CONSTANT_Methodref:
 		case CFR_CONSTANT_InterfaceMethodref:
+		{
+#if JAVA_SPEC_VERSION >= 18
+			BOOLEAN isConstantInvokeDynamic = (CFR_CONSTANT_InvokeDynamic == info->tag);
+#endif /* JAVA_SPEC_VERSION >= 18 */
 			nameAndSig = &classfile->constantPool[info->slot2];
 			utf8 = &classfile->constantPool[nameAndSig->slot1];
 			isInit = bcvCheckMethodName(utf8);
@@ -1752,11 +1789,18 @@ j9bcv_verifyClassStructure (J9PortLibrary * portLib, J9CfrClassFile * classfile,
 				errorType = J9NLS_CFR_ERR_BC_METHOD_INVALID_SIG__ID;
 				goto _formatError;
 			}
-			if (isInit) {
+			if (isInit
+#if JAVA_SPEC_VERSION >= 18
+			&& !isConstantInvokeDynamic
+#endif /* JAVA_SPEC_VERSION >= 18 */
+			) {
+/* This #if !defined check should be removed (along with all other code that references J9VM_OPT_VALHALLA_NEW_FACTORY_METHOD) once the <vnew> method is introduced */
+#if !defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
 				if (info->bytes[info->slot1 - 1] != 'V') {
 					errorType = J9NLS_CFR_ERR_BC_METHOD_INVALID_SIG__ID;
 					goto _formatError;
 				}
+#endif /* #if !defined(J9VM_OPT_VALHALLA_VALUE_TYPES) */
 			}
 			if (argCount > 255) {
 				errorType = J9NLS_CFR_ERR_TOO_MANY_ARGS__ID;
@@ -1764,7 +1808,7 @@ j9bcv_verifyClassStructure (J9PortLibrary * portLib, J9CfrClassFile * classfile,
 				goto _formatError;
 			}
 			break;
-
+		}
 		case CFR_CONSTANT_MethodType:
 			if (j9bcv_checkMethodSignature(&classfile->constantPool[info->slot1], FALSE) < 0) {
 				errorType = J9NLS_CFR_ERR_METHODTYPE_INVALID_SIG__ID;
@@ -1778,17 +1822,34 @@ j9bcv_verifyClassStructure (J9PortLibrary * portLib, J9CfrClassFile * classfile,
 				J9CfrConstantPoolInfo *methodref = &classfile->constantPool[info->slot2];
 				nameAndSig = &classfile->constantPool[methodref->slot2];
 				utf8 = &classfile->constantPool[nameAndSig->slot1];
-				isInit = bcvIsInitOrClinit(utf8);
+				isInit = bcvIsInitOrClinitOrNew(utf8);
 				if (CFR_METHOD_NAME_CLINIT == isInit) {
 					errorType = J9NLS_CFR_ERR_BAD_METHOD_NAME__ID;
 					goto _formatError;
 				}
 				if (CFR_METHOD_NAME_INIT == isInit) {
-					if (info->slot1 != MH_REF_NEWINVOKESPECIAL) {
+					if (
+						(info->slot1 != MH_REF_NEWINVOKESPECIAL)
+#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+#if !defined(J9VM_OPT_VALHALLA_NEW_FACTORY_METHOD)
+						&& (info->slot1 != MH_REF_INVOKESTATIC)
+#endif /* #if defined(J9VM_OPT_VALHALLA_VALUE_TYPES) */
+#endif /* #if !defined(J9VM_OPT_VALHALLA_NEW_FACTORY_METHOD) */
+					) {
 						errorType = J9NLS_CFR_ERR_BAD_METHOD_NAME__ID;
 						goto _formatError;
 					}
 				}
+#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+#if defined(J9VM_OPT_VALHALLA_NEW_FACTORY_METHOD)
+				if (CFR_METHOD_NAME_NEW == isInit) {
+					if (info->slot1 != MH_REF_INVOKESTATIC) {
+						errorType = J9NLS_CFR_ERR_BAD_METHOD_NAME__ID;
+						goto _formatError;
+					}
+				}
+#endif /* #if defined(J9VM_OPT_VALHALLA_NEW_FACTORY_METHOD) */
+#endif /* #if defined(J9VM_OPT_VALHALLA_VALUE_TYPES) */
 			}
 			break;
 
@@ -1836,7 +1897,7 @@ j9bcv_verifyClassStructure (J9PortLibrary * portLib, J9CfrClassFile * classfile,
 		 * J2SE_19 has been deprecated and replaced with J2SE_V11
 		 * if (J2SE_VERSION(vm) >= J2SE_V11) {
 		 */
-		if (vmVersionShifted >= BCT_Java9MajorVersionShifted) {
+		if (vmVersionShifted >= BCT_JavaMajorVersionShifted(9)) {
 			if (classfile->majorVersion >= 51) {
 				if ((CFR_METHOD_NAME_CLINIT == isInit) 
 					&& (0 != argCount) 
@@ -1861,7 +1922,35 @@ j9bcv_verifyClassStructure (J9PortLibrary * portLib, J9CfrClassFile * classfile,
 			}
 		}
 		if (isInit) {
-			if (info->bytes[info->slot1 - 1] != 'V') {
+			BOOLEAN invalidRetType = FALSE;
+			if (
+#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+#if defined(J9VM_OPT_VALHALLA_NEW_FACTORY_METHOD)
+				(CFR_METHOD_NAME_NEW == isInit)
+#else /* #if defined(J9VM_OPT_VALHALLA_NEW_FACTORY_METHOD) */
+				/* Check if classfile is a valuetype to differentiate between a regular <init> and an <init> that behaves like a <new> */
+				(CFR_METHOD_NAME_INIT == isInit) && J9_IS_CLASSFILE_VALUETYPE(classfile)
+#endif /* #if defined(J9VM_OPT_VALHALLA_NEW_FACTORY_METHOD) */
+#else /* #if defined(J9VM_OPT_VALHALLA_VALUE_TYPES) */
+				FALSE
+#endif /* #if defined(J9VM_OPT_VALHALLA_VALUE_TYPES) */
+			) {
+				U_16 returnChar = getReturnTypeFromSignature(info->bytes, info->slot1, NULL);
+				if (J9_IS_CLASSFILE_PRIMITIVE_VALUETYPE(classfile)) {
+					if (!IS_QTYPE(returnChar)) {
+						invalidRetType = TRUE;
+					}
+				} else {
+					if (!IS_LTYPE(returnChar)) {
+						invalidRetType = TRUE;
+					}
+				}
+			} else {
+				if (info->bytes[info->slot1 - 1] != 'V') {
+					invalidRetType = TRUE;
+				}
+			}
+			if (invalidRetType) {
 				Trc_STV_j9bcv_verifyClassStructure_MethodError(J9NLS_CFR_ERR_BC_METHOD_INVALID_SIG__ID, i);
 				buildMethodError((J9CfrError *)segment, errorType, CFR_ThrowClassFormatError, (I_32) i, 0, method, classfile->constantPool);
 				result = -1;

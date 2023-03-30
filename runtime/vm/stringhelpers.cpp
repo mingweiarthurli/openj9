@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -320,7 +320,7 @@ copyStringToJ9UTF8WithMemAlloc(J9VMThread *vmThread, j9object_t string, UDATA st
 
 	U_8* result = NULL;
 	UDATA stringLength = J9VMJAVALANGSTRING_LENGTH(vmThread, string);
-	UDATA length = sizeof(((J9UTF8*)0)->length) + prependStrLength + (stringLength * 3);
+	UDATA length = sizeof(J9UTF8) + prependStrLength + (stringLength * 3);
 
 	if (J9_ARE_ALL_BITS_SET(stringFlags, J9_STR_NULL_TERMINATE_RESULT)) {
 		++length;
@@ -338,10 +338,10 @@ copyStringToJ9UTF8WithMemAlloc(J9VMThread *vmThread, j9object_t string, UDATA st
 		UDATA computedUtf8Length = 0;
 
 		if (0 < prependStrLength) {
-			memcpy(result + sizeof(((J9UTF8*)0)->length), prependStr, prependStrLength);
+			memcpy(result + sizeof(J9UTF8), prependStr, prependStrLength);
 		}
 
-		computedUtf8Length = copyStringToUTF8Helper(vmThread, string, stringFlags, 0, stringLength, result + sizeof(((J9UTF8*)0)->length) + prependStrLength, length - sizeof(((J9UTF8*)0)->length) - prependStrLength);
+		computedUtf8Length = copyStringToUTF8Helper(vmThread, string, stringFlags, 0, stringLength, result + sizeof(J9UTF8) + prependStrLength, length - sizeof(J9UTF8) - prependStrLength);
 
 		J9UTF8_SET_LENGTH(result, (U_16)computedUtf8Length + (U_16)prependStrLength);
 	}
@@ -371,25 +371,19 @@ getStringUTF8Length(J9VMThread *vmThread, j9object_t string)
 }
 
 UDATA 
-verifyQualifiedName(J9VMThread *vmThread, j9object_t string)
+verifyQualifiedName(J9VMThread *vmThread, U_8 *className, UDATA classNameLength, UDATA allowedBitsForClassName)
 {
-	UDATA unicodeLength = J9VMJAVALANGSTRING_LENGTH(vmThread, string);
-	j9object_t unicodeBytes = J9VMJAVALANGSTRING_VALUE(vmThread, string);
-	BOOLEAN isStringCompressed = IS_STRING_COMPRESSED(vmThread, string);
-	UDATA remainingLength = unicodeLength;
+	UDATA result = CLASSNAME_INVALID;
+	UDATA remainingLength = classNameLength;
 	BOOLEAN separator = FALSE;
-	BOOLEAN unCheckedChar = FALSE;
-	U_8 currentChar = 0;
-	IDATA arity = 0;
+	UDATA arity = 0;
 	UDATA i = 0;
 
 	/* strip leading ['s for array classes */
-	for (i = 0; i < unicodeLength; i++) {
-		currentChar = isStringCompressed ? J9JAVAARRAYOFBYTE_LOAD(vmThread, unicodeBytes, i) : (U_8)J9JAVAARRAYOFCHAR_LOAD(vmThread, unicodeBytes, i);
-		if ('[' == currentChar) {
+	for (i = 0; i < classNameLength; i++) {
+		if ('[' == className[i]) {
 			arity += 1;
 		} else {
-			unCheckedChar = TRUE;
 			break;
 		}
 	}
@@ -401,23 +395,19 @@ verifyQualifiedName(J9VMThread *vmThread, j9object_t string)
 	}
 
 	/* check invalid characters in the class name */
-	for (; i < unicodeLength; i++) {
-		if (unCheckedChar) {
-			unCheckedChar = FALSE;
-		} else {
-			currentChar = isStringCompressed ? J9JAVAARRAYOFBYTE_LOAD(vmThread, unicodeBytes, i) : (U_8)J9JAVAARRAYOFCHAR_LOAD(vmThread, unicodeBytes, i);
-		}
-
+	for (; i < classNameLength; i++) {
 		/* check for illegal characters:  46(.) 47(/) 59(;) 60(<) 70(>) 91([) */
-		switch (currentChar) {
-		case '.': /* Fall through */
-		case '/':
-			/* Only valid between identifiers and not at end if not in loading classes */
-			if (('/' == currentChar) || separator) {
+		switch (className[i]) {
+		case '.':
+			if (separator) {
 				return CLASSNAME_INVALID;
 			}
+			/* convert the characters from '.' to '/' in the case of J9_STR_XLAT for later use in the caller */
+			className[i] = '/';
 			separator = TRUE;
 			break;
+		case '/':
+			return CLASSNAME_INVALID;
 		case ';':
 			/* Valid at the end of array classes */
 			if (arity && (1 == remainingLength)) {
@@ -443,18 +433,15 @@ verifyQualifiedName(J9VMThread *vmThread, j9object_t string)
 		return CLASSNAME_INVALID;
 	}
 
-	/* map the return code against the arity value from checkNameImpl (called by bcvCheckClassName):
-	 * 1) if arity = -1, then rc = CLASSNAME_INVALID(0)
-	 * 2) if arity = 0,  then rc = CLASSNAME_VALID_NON_ARRARY(1)
-	 * 3) if arity > 0,  then rc = CLASSNAME_VALID_ARRARY(2)
+	/* check the arity of the class name to see whether it is an array or not
+	 * and check whether the results are the allowed values by the caller.
 	 */
-	if (arity < 0) {
-		return CLASSNAME_INVALID;
-	} else if (0 == arity) {
-		return CLASSNAME_VALID_NON_ARRARY;
-	} else {
-		return CLASSNAME_VALID_ARRARY;
+	result = (0 == arity) ? CLASSNAME_VALID_NON_ARRARY : CLASSNAME_VALID_ARRARY;
+	if (J9_ARE_ANY_BITS_SET(result, allowedBitsForClassName)) {
+		return result;
 	}
+
+	return CLASSNAME_INVALID;
 }
 
 /**
@@ -511,7 +498,9 @@ catUtfToString4(J9VMThread * vmThread, const U_8 *data1, UDATA length1, const U_
 	j9object_t result = NULL;
 	UDATA totalLength = length1 + length2 + length3 + length4;
 	U_8 *buffer = (U_8*)j9mem_allocate_memory(totalLength, OMRMEM_CATEGORY_VM);
-	if (NULL != buffer) {
+	if (NULL == buffer) {
+		vmThread->javaVM->internalVMFunctions->setNativeOutOfMemoryError(vmThread, 0, 0);
+	} else {
 		U_8 *ptr = buffer;
 		memcpy(ptr, data1, length1);
 		ptr += length1;

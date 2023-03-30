@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2020, 2020 IBM Corp. and others
+ * Copyright (c) 2020, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -26,9 +26,10 @@
 namespace JITServer
 {
 MessageBuffer::MessageBuffer() :
-   _capacity(INITIAL_BUFFER_SIZE)
+   _capacity(INITIAL_BUFFER_SIZE),
+   _allocator(TR::Compiler->persistentGlobalAllocator())
    {
-   _storage = static_cast<char *>(TR_Memory::jitPersistentAlloc(_capacity));
+   _storage = allocateMemory(_capacity);
    if (!_storage)
       throw std::bad_alloc();
    _curPtr = _storage;
@@ -41,15 +42,7 @@ MessageBuffer::expandIfNeeded(uint32_t requiredSize)
    // expand the storage
    if (requiredSize > _capacity)
       {
-      _capacity = requiredSize * 2;
-      char *newStorage = static_cast<char *>(TR_Memory::jitPersistentAlloc(_capacity));
-      if (!newStorage)
-         throw std::bad_alloc();
-      uint32_t curSize = size();
-      memcpy(newStorage, _storage, curSize);
-      TR_Memory::jitPersistentFree(_storage);
-      _storage = newStorage;
-      _curPtr = _storage + curSize;
+      expand(requiredSize, size());
       }
    }
 
@@ -59,16 +52,16 @@ MessageBuffer::expand(uint32_t requiredSize, uint32_t numBytesToCopy)
    TR_ASSERT_FATAL((requiredSize > _capacity), "requiredSize %u has to be greater than _capacity %u", requiredSize, _capacity);
    TR_ASSERT_FATAL((numBytesToCopy <= _capacity), "numBytesToCopy %u has to be less than _capacity %u", numBytesToCopy, _capacity);
 
-   _capacity = requiredSize;
+   _capacity = computeRequiredCapacity(requiredSize);
    uint32_t curSize = size();
 
-   char *newStorage = static_cast<char *>(TR_Memory::jitPersistentAlloc(_capacity));
+   char *newStorage = allocateMemory(_capacity);
    if (!newStorage)
       throw std::bad_alloc();
 
    memcpy(newStorage, _storage, numBytesToCopy);
 
-   TR_Memory::jitPersistentFree(_storage);
+   freeMemory(_storage);
    _storage = newStorage;
    _curPtr = _storage + curSize;
    }
@@ -103,4 +96,17 @@ MessageBuffer::alignCurrentPositionOn64Bit()
 
    return padding;
    }
+
+uint32_t
+MessageBuffer::computeRequiredCapacity(uint32_t requiredSize)
+   {
+   // Compute the nearest power of 2 that can fit requiredSize bytes
+   if (requiredSize <= _capacity)
+      return _capacity;
+   uint32_t extendedCapacity = _capacity * 2;
+   while (requiredSize > extendedCapacity)
+      extendedCapacity *= 2;
+   return extendedCapacity;
+   }
 };
+

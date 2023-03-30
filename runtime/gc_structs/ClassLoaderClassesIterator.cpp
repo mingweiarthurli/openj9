@@ -1,6 +1,6 @@
 
 /*******************************************************************************
- * Copyright (c) 1991, 2014 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -47,15 +47,7 @@ GC_ClassLoaderClassesIterator::GC_ClassLoaderClassesIterator(MM_GCExtensionsBase
 J9Class *
 GC_ClassLoaderClassesIterator::nextSystemClass() 
 {
-	J9Class * result = NULL;
-	J9Class ** slot = NULL;
-	while (NULL != (slot = _vmClassSlotIterator.nextSlot())) {
-		result = *slot;
-		if (NULL != result) {
-			break;
-		}
-	}
-	return result;
+	return _vmClassSlotIterator.nextSlot();
 }
 
 J9Class *
@@ -65,7 +57,7 @@ GC_ClassLoaderClassesIterator::firstClass()
 	if (ANONYMOUS_CLASSES == _mode) {
 		result = nextAnonymousClass();
 	} else {
-		result = _javaVM->internalVMFunctions->hashClassTableStartDo(_classLoader, &_walkState);
+		result = _javaVM->internalVMFunctions->hashClassTableStartDo(_classLoader, &_walkState, 0);
 		if ( (NULL == result) && switchToSystemMode() ) {
 			result = nextSystemClass();
 		}

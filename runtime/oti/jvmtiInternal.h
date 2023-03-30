@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -50,7 +50,8 @@ typedef enum {
 typedef enum {
 	J9JVMTI_STACK_TRACE_PRUNE_UNREPORTED_METHODS	= COM_IBM_GET_STACK_TRACE_PRUNE_UNREPORTED_METHODS,
 	J9JVMTI_STACK_TRACE_ENTRY_LOCAL_STORAGE			= COM_IBM_GET_STACK_TRACE_ENTRY_LOCAL_STORAGE,
-	J9JVMTI_STACK_TRACE_EXTRA_FRAME_INFO			= COM_IBM_GET_STACK_TRACE_EXTRA_FRAME_INFO
+	J9JVMTI_STACK_TRACE_EXTRA_FRAME_INFO			= COM_IBM_GET_STACK_TRACE_EXTRA_FRAME_INFO,
+	J9JVMTI_STACK_TRACE_MARK_INLINED_FRAMES			= COM_IBM_GET_STACK_TRACE_MARK_INLINED_FRAMES
 } J9JVMTIStackTraceType;
 
 #define J9JVMTI_LOWEST_EXTENSION_EVENT (J9JVMTI_BEFORE_FIRST_EXTENSION_EVENT + 1)
@@ -60,6 +61,9 @@ typedef enum {
 
 #define J9JVMTI_UDATA_BITS (sizeof(UDATA) * 8)
 
+#define J9JVMTI_GETVMTHREAD_ERROR_ON_NULL_JTHREAD 0x1
+#define J9JVMTI_GETVMTHREAD_ERROR_ON_DEAD_THREAD 0x2
+#define J9JVMTI_GETVMTHREAD_ERROR_ON_VIRTUALTHREAD 0x4
 
 typedef struct {
 	J9NativeLibrary nativeLib;
@@ -162,7 +166,11 @@ typedef struct J9JVMTIEnv {
 	J9JVMTIEventEnableMap globalEventEnable;
 	J9HashTable *watchedClasses;
 	J9Pool* breakpoints;
+#if JAVA_SPEC_VERSION >= 19
+	UDATA tlsKey;
+#else /* JAVA_SPEC_VERSION >= 19 */
 	omrthread_tls_key_t tlsKey;
+#endif /* JAVA_SPEC_VERSION >= 19 */
 	J9JVMTIHookInterfaceWithID vmHook;
 	J9JVMTIHookInterfaceWithID gcHook;
 	J9JVMTIHookInterfaceWithID gcOmrHook;
@@ -449,13 +457,12 @@ typedef struct jvmtiGcp_translation {
 
 #define ENSURE_JOBJECT_NON_NULL(var) ENSURE_JNI_OBJECT_NON_NULL((var), JVMTI_ERROR_INVALID_OBJECT)
 #define ENSURE_JCLASS_NON_NULL(var) ENSURE_JNI_OBJECT_NON_NULL((var), JVMTI_ERROR_INVALID_CLASS)
-#define ENSURE_JTHREAD_NON_NULL(var) ENSURE_JNI_OBJECT_NON_NULL((var), JVMTI_ERROR_INVALID_THREAD)
 #define ENSURE_JTHREADGROUP_NON_NULL(var) ENSURE_JNI_OBJECT_NON_NULL((var), JVMTI_ERROR_INVALID_THREAD_GROUP)
 #define ENSURE_JOBJECT_NON_NULL(var) ENSURE_JNI_OBJECT_NON_NULL((var), JVMTI_ERROR_INVALID_OBJECT)
 
 #define ENSURE_JTHREAD(vmThread, jthrd) \
     do { \
-        if (!isSameOrSuperClassOf(J9VMJAVALANGTHREAD_OR_NULL((vmThread->javaVM)), J9OBJECT_CLAZZ((vmThread), *((j9object_t *) (jthrd))))) { \
+        if (!IS_JAVA_LANG_THREAD((vmThread), J9_JNI_UNWRAP_REFERENCE(jthrd))) { \
             JVMTI_ERROR(JVMTI_ERROR_INVALID_THREAD); \
         } \
     } while(0)
@@ -481,6 +488,22 @@ typedef struct jvmtiGcp_translation {
 		} \
 	} while(0)
 
+#if JAVA_SPEC_VERSION >= 19
+#define ENSURE_JTHREAD_NOT_VIRTUAL(vmThread, jthrd, error) \
+	do { \
+		if (IS_JAVA_LANG_VIRTUALTHREAD((vmThread), J9_JNI_UNWRAP_REFERENCE(jthrd))) { \
+			JVMTI_ERROR(error); \
+		} \
+	} while(0)
+
+#define ENSURE_JTHREADOBJECT_NOT_VIRTUAL(vmThread, jthrdObject, error) \
+	do { \
+		if (IS_JAVA_LANG_VIRTUALTHREAD((vmThread), (jthrdObject))) { \
+			JVMTI_ERROR(error); \
+		} \
+	} while(0)
+#endif /* JAVA_SPEC_VERSION >= 19 */
+
 #else
 
 #define ENSURE_PHASE_START_OR_LIVE(env) 
@@ -494,10 +517,13 @@ typedef struct jvmtiGcp_translation {
 #define ENSURE_JFIELDID_NON_NULL(var)
 #define ENSURE_JOBJECT_NON_NULL(var)
 #define ENSURE_JCLASS_NON_NULL(var)
-#define ENSURE_JTHREAD_NON_NULL(var)
 #define ENSURE_JTHREADGROUP_NON_NULL(var)
 #define ENSURE_VALID_HEAP_OBJECT_FILTER(var)
 #define ENSURE_MONITOR_NON_NULL(var)
+#if JAVA_SPEC_VERSION >= 19
+#define ENSURE_JTHREAD_NOT_VIRTUAL(vmThread, jthrd, error)
+#define ENSURE_JTHREADOBJECT_NOT_VIRTUAL(vmThread, jthrdObject, error)
+#endif /* JAVA_SPEC_VERSION >= 19 */
 
 #endif
 
@@ -539,11 +565,24 @@ typedef struct jvmtiGcp_translation {
 	((J9CLASS_DEPTH(clazz) == 0) ? NULL : \
 		(clazz)->superclasses[J9CLASS_DEPTH(clazz) - 1])
 
-#define THREAD_DATA_FOR_VMTHREAD(j9env, vmThread) \
-	((J9JVMTIThreadData *) omrthread_tls_get((vmThread)->osThread, (j9env)->tlsKey))
-
 #define IBMJVMTI_EXTENDED_CALLSTACK     1
 #define IBMJVMTI_UNEXTENDED_CALLSTACK   0
+
+#if JAVA_SPEC_VERSION >= 19
+/* These macros corresponds to the states in j.l.VirtualThread. */
+#define JVMTI_VTHREAD_STATE_NEW 0
+#define JVMTI_VTHREAD_STATE_STARTED 1
+#define JVMTI_VTHREAD_STATE_RUNNABLE 2
+#define JVMTI_VTHREAD_STATE_RUNNING 3
+#define JVMTI_VTHREAD_STATE_PARKING 4
+#define JVMTI_VTHREAD_STATE_PARKED 5
+#define JVMTI_VTHREAD_STATE_PINNED 6
+#define JVMTI_VTHREAD_STATE_YIELDING 7
+#define JVMTI_VTHREAD_STATE_TERMINATED 99
+#define JVMTI_VTHREAD_STATE_SUSPENDED (1 << 8)
+#define JVMTI_VTHREAD_STATE_RUNNABLE_SUSPENDED (JVMTI_VTHREAD_STATE_RUNNABLE | JVMTI_VTHREAD_STATE_SUSPENDED)
+#define JVMTI_VTHREAD_STATE_PARKED_SUSPENDED (JVMTI_VTHREAD_STATE_PARKED | JVMTI_VTHREAD_STATE_SUSPENDED)
+#endif /* JAVA_SPEC_VERSION >= 19 */
 
 /* The brace mismatches in the macros below are due to the usage pattern:
  *

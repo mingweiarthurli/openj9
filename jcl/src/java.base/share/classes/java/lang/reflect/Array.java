@@ -2,7 +2,7 @@
 package java.lang.reflect;
 
 /*******************************************************************************
- * Copyright (c) 1998, 2010 IBM Corp. and others
+ * Copyright (c) 1998, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -18,7 +18,7 @@ package java.lang.reflect;
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -70,8 +70,12 @@ public static Object get(Object array, int index) throws IllegalArgumentExceptio
 	} else if (arrayClass == short[].class) {
 		return ((short[])array)[index];
 	} else if (arrayClass == byte[].class) {
+		/*[IF JAVA_SPEC_VERSION <= 11]*/
 		/* Avoiding Byte cache yields 5x performance improvement. */
 		return new Byte(((byte[])array)[index]);
+		/*[ELSE]*/
+		return ((byte[])array)[index];
+		/*[ENDIF] JAVA_SPEC_VERSION <= 11 */
 	} else {
 		try {
 			return ((Object[])array)[index];
@@ -341,7 +345,7 @@ public static Object newInstance(Class<?> componentType, int... dimensions) thro
 	
 	for (int i = 0; i < length; i++) {
 		if (dimensions[i] < 0) {
-			throw new NegativeArraySizeException();
+			throw new NegativeArraySizeException(String.valueOf(dimensions[i]));
 		} else {
 			reversed[length - i - 1] = dimensions[i];
 		}
@@ -370,7 +374,7 @@ public static Object newInstance(Class<?> componentType, int size) throws Negati
 		throw new NullPointerException();
 	}
 	if (size < 0) { 
-		throw new NegativeArraySizeException();
+		throw new NegativeArraySizeException(String.valueOf(size));
 	}
 	if (componentType == Void.TYPE) {
 		throw new IllegalArgumentException();

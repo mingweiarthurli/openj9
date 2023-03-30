@@ -1,6 +1,5 @@
-
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -29,11 +28,11 @@
 #include "ModronAssertions.h"
 
 #include "Base.hpp"
-#include "MemoryPoolBumpPointer.hpp"
+#include "MemoryPoolAddressOrderedList.hpp"
 
 class MM_EnvironmentBase;
 class MM_EnvironmentVLHGC;
-class MM_MemoryPoolBumpPointer;
+class MM_MemoryPoolAddressOrderedList;
 class MM_HeapRegionDescriptorVLHGC;
 class MM_AllocationContextTarok;
 
@@ -50,16 +49,16 @@ public:
 protected:
 private:
 	MM_HeapRegionDescriptorVLHGC *_region;
-	J9IndexableObject *_spine; /**< If this region contains an arraylet leaf, this points to the the spine which owns the leaf */
+	J9IndexableObject *_spine; /**< If this region contains an arraylet leaf, this points to the spine which owns the leaf */
 	MM_HeapRegionDescriptorVLHGC *_nextArrayletLeafRegion; /**< If this region has a spine in it, this is a list of regions which represent the leaves of the region.  If this is a leaf region, it is the next leaf region in the list */
 	MM_HeapRegionDescriptorVLHGC *_previousArrayletLeafRegion; /**< If this region has a spine in it, this is NULL.  If this is a leaf region, it is the previous leaf region in the list */
-	UDATA _backingStore[((sizeof(MM_MemoryPoolBumpPointer) - 1)/sizeof(UDATA)) + 1]; /**< Allocate space for Memory Pool List */
+	UDATA _backingStore[((sizeof(MM_MemoryPoolAddressOrderedList) - 1)/sizeof(UDATA)) + 1]; /**< Allocate space for Memory Pool List */
 	
 public:
 
 	/**
-	 * If the receiver is FREE:  Initializes the _backingStore as an MM_MemoryPoolBumpPointer and sets the _region->_memoryPool to point at this pool.
-	 * If the receiver is BUMP_ALLOCATED_IDLE:  converts the receiver into BUMP_ALLOCATED.
+	 * If the receiver is FREE:  Initializes the _backingStore as an MM_MemoryPoolAddressOrderedList and sets the _region->_memoryPool to point at this pool.
+	 * If the receiver is ADDRESS_ORDERED_IDLE:  converts the receiver into ADDRESS_ORDERED.
 	 * 
 	 * @param[in] env - the current env
 	 * @param[in] context Allocation Context
@@ -67,7 +66,7 @@ public:
 	 * @return true if the pool initialization succeeded and has been set in _region->_memoryPool or false if the initialization failed
 	 * @note Assertion failure if this method is called on a descriptor who already has an initialized memory pool (since that implies an inconsistency in the assumptions of its user(s)).
 	 */
-	bool taskAsMemoryPoolBumpPointer(MM_EnvironmentBase *env, MM_AllocationContextTarok *context);
+	bool taskAsMemoryPool(MM_EnvironmentBase *env, MM_AllocationContextTarok *context);
 	
 	/**
 	 * Converts the receiver into a FREE region, tearing down any memory pool which may exist
@@ -76,7 +75,7 @@ public:
 	void taskAsFreePool(MM_EnvironmentBase *env);
 	
 	/**
-	 * Converts the receiver from an BUMP_ALLOCATED region into an BUMP_ALLOCATED_IDLE region.
+	 * Converts the receiver from an ADDRESS_ORDERED region into an ADDRESS_ORDERED_IDLE region.
 	 * @param env[in] The thread requesting the change of task
 	 */
 	void taskAsIdlePool(MM_EnvironmentVLHGC *env);

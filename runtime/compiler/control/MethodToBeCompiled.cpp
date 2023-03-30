@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -52,57 +52,58 @@ TR_MethodToBeCompiled *TR_MethodToBeCompiled::allocate(J9JITConfig *jitConfig)
    return entry;
    }
 
-void TR_MethodToBeCompiled::initialize(TR::IlGeneratorMethodDetails & details, void *oldStartPC, CompilationPriority p, TR_OptimizationPlan *optimizationPlan)
+void TR_MethodToBeCompiled::initialize(TR::IlGeneratorMethodDetails &details, void *oldStartPC,
+                                       CompilationPriority priority, TR_OptimizationPlan *optimizationPlan)
    {
-   _methodDetails = TR::IlGeneratorMethodDetails::clone(_methodDetailsStorage, details);
-   _optimizationPlan = optimizationPlan;
    _next = NULL;
+   _methodDetails = TR::IlGeneratorMethodDetails::clone(_methodDetailsStorage, details);
    _oldStartPC = oldStartPC;
    _newStartPC = NULL;
-   _priority = p;
+   _optimizationPlan = optimizationPlan;
+   if (_optimizationPlan)
+      _optimizationPlan->setIsAotLoad(false);
+   _entryTime = 0;
+   _compInfoPT = NULL;
+   _aotCodeToBeRelocated = NULL;
+
+   _priority = priority;
    _numThreadsWaiting = 0;
+   _compilationAttemptsLeft = TR::Options::canJITCompile() ? MAX_COMPILE_ATTEMPTS : 1;
    _compErrCode = compilationOK;
-   _compilationAttemptsLeft = (TR::Options::canJITCompile()) ? MAX_COMPILE_ATTEMPTS : 1;
+   _methodIsInSharedCache = TR_maybe;
+   _reqFromSecondaryQueue = TR_MethodToBeCompiled::REASON_NONE;
+
+   _reqFromJProfilingQueue = false;
    _unloadedMethod = false;
    _doAotLoad = false;
    _useAotCompilation = false;
    _doNotUseAotCodeFromSharedCache = false;
    _tryCompilingAgain = false;
-   _compInfoPT = NULL;
-   _aotCodeToBeRelocated = NULL;
-   if (_optimizationPlan)
-      _optimizationPlan->setIsAotLoad(false);
    _async = false;
-   _reqFromSecondaryQueue = TR_MethodToBeCompiled::REASON_NONE;
-   _reqFromJProfilingQueue = false;
    _changedFromAsyncToSync = false;
    _entryShouldBeDeallocated = false;
-   _hasIncrementedNumCompThreadsCompilingHotterMethods = false;
-   _weight = 0;
-   _jitStateWhenQueued = UNDEFINED_STATE;
    _entryIsCountedAsInvRequest = false;
    _GCRrequest = false;
+   _hasIncrementedNumCompThreadsCompilingHotterMethods = false;
 
-   _methodIsInSharedCache = TR_maybe;
+   _weight = 0;
+   _jitStateWhenQueued = UNDEFINED_STATE;
+
 #if defined(J9VM_OPT_JITSERVER)
    _remoteCompReq = false;
-   _stream = NULL;
-   _clientOptions = NULL;
-   _clientOptionsSize = 0;
+   _shouldUpgradeOutOfProcessCompilation = false;
+   _doNotLoadFromJITServerAOTCache = false;
    _origOptLevel = unknownHotness;
+   _stream = NULL;
 #endif /* defined(J9VM_OPT_JITSERVER) */
 
    TR_ASSERT_FATAL(_freeTag & ENTRY_IN_POOL_FREE, "initializing an entry which is not free");
-
    _freeTag = ENTRY_INITIALIZED;
    }
 
 void
 TR_MethodToBeCompiled::shutdown()
    {
-#if defined(J9VM_OPT_JITSERVER)
-   freeJITServerAllocations();
-#endif /* defined(J9VM_OPT_JITSERVER) */
    TR::MonitorTable *table = TR::MonitorTable::get();
    if (!table) return;
    table->removeAndDestroy(_monitor);
@@ -114,15 +115,13 @@ void TR_MethodToBeCompiled::acquireSlotMonitor(J9VMThread *vmThread)
    {
    getMonitor()->enter();
    // Must have the compilationMonitor in hand to be able to call this method
-   //addCompilationTraceEntry(vmThread, OP_HasAcquiredCompilationMonitor);
    //fprintf(stderr, "Thread %p has acquired slot monitor\n", vmThread);
    }
 
 void TR_MethodToBeCompiled::releaseSlotMonitor(J9VMThread *vmThread)
    {
    // Must have the compilationMonitor in hand to be able to call this method
-    //addCompilationTraceEntry(vmThread, OP_HasAcquiredCompilationMonitor);
-    //fprintf(stderr, "Thread %p will release slot monitor\n", vmThread);
+   //fprintf(stderr, "Thread %p will release slot monitor\n", vmThread);
    getMonitor()->exit();
    }
 
@@ -150,15 +149,5 @@ uint64_t
 TR_MethodToBeCompiled::getClientUID() const
    {
    return _stream->getClientId();
-   }
-
-void
-TR_MethodToBeCompiled::freeJITServerAllocations()
-   {
-   if (_clientOptions)
-      {
-      _compInfoPT->getCompilationInfo()->persistentMemory()->freePersistentMemory((void *)_clientOptions);
-      _clientOptions = NULL;
-      }
    }
 #endif /* defined(J9VM_OPT_JITSERVER) */

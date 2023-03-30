@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -96,10 +96,6 @@ class TR_MultipleCallTargetInliner : public TR_InlinerBase
       float getScalingFactor(float factor);
       virtual bool supportsMultipleTargetInlining () { return true ; }
 
-      void walkCallSites(TR::ResolvedMethodSymbol *, TR_CallStack *, TR_InnerPreexistenceInfo *, int32_t walkDepth);
-      void walkCallSite( TR::ResolvedMethodSymbol * calleeSymbol, TR_CallStack * callStack,
-                         TR::TreeTop * callNodeTreeTop, TR::Node * parent, TR::Node * callNode, TR_VirtualGuardSelection *guard,
-                         TR_OpaqueClassBlock * thisClass, bool inlineNonRecursively, int32_t walkDepth);
    private:
       bool analyzeCallSite(TR::ResolvedMethodSymbol *, TR_CallStack *, TR::TreeTop *, TR::Node *, TR::Node *);
       void weighCallSite( TR_CallStack * callStack , TR_CallSite *callsite, bool currentBlockHasExceptionSuccessors,bool dontAddCalls=false);
@@ -150,6 +146,7 @@ class TR_J9InlinerUtil: public OMR_InlinerUtil
       virtual TR_InlinerTracer * getInlinerTracer(TR::Optimization *optimization);
       virtual TR_PrexArgInfo *computePrexInfo(TR_CallTarget *target);
       virtual TR_PrexArgInfo *computePrexInfo(TR_CallTarget *target, TR_PrexArgInfo *callerArgInfo);
+      static  TR_PrexArgInfo *computePrexInfo(TR_InlinerBase *inliner, TR_CallSite *site, TR_PrexArgInfo *callerArgInfo = NULL);
       virtual void refineInlineGuard(TR::Node *callNode, TR::Block *&block1, TR::Block *&block2,
                    bool &appendTestToBlock1, TR::ResolvedMethodSymbol * callerSymbol, TR::TreeTop *cursorTree,
                    TR::TreeTop *&virtualGuard, TR::Block *block4);
@@ -197,6 +194,7 @@ class TR_J9InlinerPolicy : public OMR_InlinerPolicy
       virtual bool inlineMethodEvenForColdBlocks(TR_ResolvedMethod *method);
       virtual bool willBeInlinedInCodeGen(TR::RecognizedMethod method);
       virtual bool canInlineMethodWhileInstrumenting(TR_ResolvedMethod *method);
+      virtual bool shouldRemoveDifferingTargets(TR::Node *callNode);
       virtual bool skipHCRGuardForCallee(TR_ResolvedMethod* callee);
       virtual bool dontPrivatizeArgumentsForRecognizedMethod(TR::RecognizedMethod recognizedMethod);
       virtual bool replaceSoftwareCheckWithHardwareCheck(TR_ResolvedMethod *calleeMethod);

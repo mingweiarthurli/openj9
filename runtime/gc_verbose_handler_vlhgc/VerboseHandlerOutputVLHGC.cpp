@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -224,9 +224,9 @@ MM_VerboseHandlerOutputVLHGC::getThreadName(char *buf, UDATA bufLen, OMR_VMThrea
 }
 
 void
-MM_VerboseHandlerOutputVLHGC::writeVmArgs(MM_EnvironmentBase* env)
+MM_VerboseHandlerOutputVLHGC::writeVmArgs(MM_EnvironmentBase* env, MM_VerboseBuffer* buffer)
 {
-	MM_VerboseHandlerJava::writeVmArgs(_manager, env, static_cast<J9JavaVM*>(_omrVM->_language_vm));
+	MM_VerboseHandlerJava::writeVmArgs(env, buffer, static_cast<J9JavaVM*>(_omrVM->_language_vm));
 }
 
 void
@@ -274,6 +274,14 @@ MM_VerboseHandlerOutputVLHGC::outputOwnableSynchronizerInfo(MM_EnvironmentBase *
 }
 
 void
+MM_VerboseHandlerOutputVLHGC::outputContinuationInfo(MM_EnvironmentBase *env, UDATA indent, UDATA continuationCandidates, UDATA continuationCleared)
+{
+	if (0 != continuationCandidates) {
+		_manager->getWriterChain()->formatAndOutput(env, indent, "<continuations candidates=\"%zu\" cleared=\"%zu\" />", continuationCandidates, continuationCleared);
+	}
+}
+
+void
 MM_VerboseHandlerOutputVLHGC::outputReferenceInfo(MM_EnvironmentBase *env, UDATA indent, const char *referenceType, MM_ReferenceStats *referenceStats, UDATA dynamicThreshold, UDATA maxThreshold)
 {
 	if(0 != referenceStats->_candidates) {
@@ -288,9 +296,8 @@ MM_VerboseHandlerOutputVLHGC::outputReferenceInfo(MM_EnvironmentBase *env, UDATA
 }
 
 void
-MM_VerboseHandlerOutputVLHGC::handleInitializedInnerStanzas(J9HookInterface** hook, UDATA eventNum, void* eventData)
-{
-	handleInitializedRegion(hook, eventNum, eventData);
+MM_VerboseHandlerOutputVLHGC::outputInitializedInnerStanza(MM_EnvironmentBase *env, MM_VerboseBuffer *buffer){
+	outputInitializedRegion(env, buffer);
 }
 
 void
@@ -305,6 +312,18 @@ bool
 MM_VerboseHandlerOutputVLHGC::hasOutputMemoryInfoInnerStanza()
 {
 	return true;
+}
+
+const char *
+MM_VerboseHandlerOutputVLHGC::getSubSpaceType(uintptr_t typeFlags)
+{
+	const char *subSpaceType = NULL;
+	if (MEMORY_TYPE_NEW == typeFlags) {
+		subSpaceType = "eden";
+	} else {
+		subSpaceType = "total heap";
+	}
+	return subSpaceType;
 }
 
 void
@@ -412,12 +431,14 @@ MM_VerboseHandlerOutputVLHGC::handleCopyForwardEnd(J9HookInterface** hook, UDATA
 
 	outputUnfinalizedInfo(env, 1, copyForwardStats->_unfinalizedCandidates, copyForwardStats->_unfinalizedEnqueued);
 	outputOwnableSynchronizerInfo(env, 1, copyForwardStats->_ownableSynchronizerCandidates, (copyForwardStats->_ownableSynchronizerCandidates-copyForwardStats->_ownableSynchronizerSurvived));
+	outputContinuationInfo(env, 1, copyForwardStats->_continuationCandidates, copyForwardStats->_continuationCleared);
 
 	outputReferenceInfo(env, 1, "soft", &copyForwardStats->_softReferenceStats, extensions->getDynamicMaxSoftReferenceAge(), extensions->getMaxSoftReferenceAge());
 	outputReferenceInfo(env, 1, "weak", &copyForwardStats->_weakReferenceStats, 0, 0);
 	outputReferenceInfo(env, 1, "phantom", &copyForwardStats->_phantomReferenceStats, 0, 0);
 
 	outputStringConstantInfo(env, 1, copyForwardStats->_stringConstantsCandidates, copyForwardStats->_stringConstantsCleared);
+	outputMonitorReferenceInfo(env, 1, copyForwardStats->_monitorReferenceCandidates, copyForwardStats->_monitorReferenceCleared);
 
 	if(0 != copyForwardStats->_heapExpandedCount) {
 		U_64 expansionMicros = j9time_hires_delta(0, copyForwardStats->_heapExpandedTime, J9PORT_TIME_DELTA_IN_MICROSECONDS);
@@ -461,25 +482,15 @@ MM_VerboseHandlerOutputVLHGC::handleConcurrentEndInternal(J9HookInterface** hook
 	MM_VerboseWriterChain* writer = _manager->getWriterChain();
 	MM_EnvironmentBase *env = MM_EnvironmentBase::getEnvironment(event->currentThread);
 
-	const char *reasonForTermination = NULL;
+	uint64_t duration = 0;
+	MM_MarkVLHGCStats *markStats = &static_cast<MM_CycleStateVLHGC*>(env->_cycleState)->_vlhgcIncrementStats._markStats;
+	bool deltaTimeSuccess = getTimeDeltaInMicroSeconds(&duration, markStats->_startTime, markStats->_endTime);
+
+	handleGCOPOuterStanzaStart(env, "mark increment", stats->_cycleID, duration, deltaTimeSuccess);
+
 	UDATA bytesScanned = stats->_bytesScanned;
-	bool didComplete = bytesScanned >= stats->_scanTargetInBytes;
-	if (stats->_terminationWasRequested) {
-		if (didComplete) {
-			reasonForTermination = "Work target met and termination requested";
-		} else {
-			reasonForTermination = "Termination requested";
-		}
-	} else {
-		if (didComplete) {
-			reasonForTermination = "Work target met";
-		} else {
-			reasonForTermination = "Completed all work in GC phase";
-		}
-	}
-
-	writer->formatAndOutput(env, 1, "<concurrent-mark-end bytesScanned=\"%zu\" reasonForTermination=\"%s\" />", bytesScanned, reasonForTermination);
-
+	writer->formatAndOutput(env, 1, "<trace-info scanbytes=\"%zu\" />", bytesScanned);
+	handleGCOPOuterStanzaEnd(env);
 }
 
 void
@@ -568,12 +579,14 @@ MM_VerboseHandlerOutputVLHGC::outputMarkSummary(MM_EnvironmentBase *env, const c
 
 	outputUnfinalizedInfo(env, 1, markStats->_unfinalizedCandidates, markStats->_unfinalizedEnqueued);
 	outputOwnableSynchronizerInfo(env, 1, markStats->_ownableSynchronizerCandidates, markStats->_ownableSynchronizerCleared);
+	outputContinuationInfo(env, 1, markStats->_continuationCandidates, markStats->_continuationCleared);
 
 	outputReferenceInfo(env, 1, "soft", &markStats->_softReferenceStats, extensions->getDynamicMaxSoftReferenceAge(), extensions->getMaxSoftReferenceAge());
 	outputReferenceInfo(env, 1, "weak", &markStats->_weakReferenceStats, 0, 0);
 	outputReferenceInfo(env, 1, "phantom", &markStats->_phantomReferenceStats, 0, 0);
 
 	outputStringConstantInfo(env, 1, markStats->_stringConstantsCandidates, markStats->_stringConstantsCleared);
+	outputMonitorReferenceInfo(env, 1, markStats->_monitorReferenceCandidates, markStats->_monitorReferenceCleared);
 
 	switch (env->_cycleState->_reasonForMarkCompactPGC) {
 	case MM_CycleState::reason_not_exceptional:
@@ -742,6 +755,30 @@ MM_VerboseHandlerOutputVLHGC::getCycleType(UDATA type)
 	}
 
 	return cycleType;
+}
+
+const char *
+MM_VerboseHandlerOutputVLHGC::getConcurrentTerminationReason(MM_ConcurrentPhaseStatsBase *stats)
+{
+	const char *reasonForTermination = NULL;
+	UDATA bytesScanned = stats->_bytesScanned;
+	bool didComplete = bytesScanned >= stats->_scanTargetInBytes;
+
+	if (stats->_terminationWasRequested) {
+		if (didComplete) {
+			reasonForTermination = "Work target met and termination requested";
+		} else {
+			reasonForTermination = "Termination requested";
+		}
+	} else {
+		if (didComplete) {
+			reasonForTermination = "Work target met";
+		} else {
+			reasonForTermination = "Completed all work in GC phase";
+		}
+	}
+
+	return reasonForTermination;
 }
 
 void

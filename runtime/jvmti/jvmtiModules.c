@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2016, 2019 IBM Corp. and others
+ * Copyright (c) 2016, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -24,12 +24,15 @@
 #include "j9cp.h"
 #include "j2sever.h"
 
+#if JAVA_SPEC_VERSION >= 11
+
 #define JVMTI_PACKAGE_NAME_BUFFER_LENGTH 80
 
 static void
-charReplace(J9UTF8 * utf8, char oldChar, char newChar) {
+charReplace(J9UTF8 * utf8, char oldChar, char newChar)
+{
 	IDATA i = 0;
-	for (;i < J9UTF8_LENGTH(utf8); i++) {
+	for (; i < J9UTF8_LENGTH(utf8); i++) {
 		if (oldChar == J9UTF8_DATA(utf8)[i]) {
 			J9UTF8_DATA(utf8)[i] = newChar;
 		}
@@ -80,13 +83,13 @@ addModuleExportsOrOpens(jvmtiEnv* jvmtiEnv, jobject fromModule, const char* pkgN
 		} else  {
 			IDATA len = strlen(pkgName);
 			J9UTF8 *pkgNameUTF8 = NULL;
-			char buf[JVMTI_PACKAGE_NAME_BUFFER_LENGTH + sizeof(pkgNameUTF8->length) + 1];
+			char buf[JVMTI_PACKAGE_NAME_BUFFER_LENGTH + sizeof(J9UTF8) + 1];
 			PORT_ACCESS_FROM_VMC(currentThread);
 			J9Module *foundModule = NULL;
 
 			pkgNameUTF8 = (J9UTF8 *) buf;
 			if (JVMTI_PACKAGE_NAME_BUFFER_LENGTH < len) {
-				pkgNameUTF8 = j9mem_allocate_memory(len + sizeof(pkgNameUTF8->length) + 1, OMRMEM_CATEGORY_VM);
+				pkgNameUTF8 = j9mem_allocate_memory(len + sizeof(J9UTF8) + 1, OMRMEM_CATEGORY_VM);
 				if (NULL == pkgNameUTF8) {
 					rc = JVMTI_ERROR_OUT_OF_MEMORY;
 					vmFuncs->internalExitVMToJNI(currentThread);
@@ -272,7 +275,7 @@ jvmtiGetNamedModule(jvmtiEnv* jvmtiEnv, jobject class_loader, const char* packag
 		J9ClassLoader *vmClassLoader = NULL;
 		J9Module *vmModule = NULL;
 		J9UTF8 *packageName = NULL;
-		char buf[J9VM_PACKAGE_NAME_BUFFER_LENGTH + sizeof(packageName->length) + 1];
+		char buf[J9VM_PACKAGE_NAME_BUFFER_LENGTH + sizeof(J9UTF8) + 1];
 		UDATA packageNameLength = 0;
 		PORT_ACCESS_FROM_JAVAVM(vm);
 
@@ -304,7 +307,7 @@ jvmtiGetNamedModule(jvmtiEnv* jvmtiEnv, jobject class_loader, const char* packag
 		packageNameLength = strlen(package_name);
 		packageName = (J9UTF8 *) buf;
 		if (packageNameLength > JVMTI_PACKAGE_NAME_BUFFER_LENGTH) {
-			packageName = j9mem_allocate_memory(packageNameLength + sizeof(packageName->length) + 1, J9MEM_CATEGORY_JVMTI_ALLOCATE);
+			packageName = j9mem_allocate_memory(packageNameLength + sizeof(J9UTF8) + 1, J9MEM_CATEGORY_JVMTI_ALLOCATE);
 			if (NULL == packageName) {
 				rc = JVMTI_ERROR_OUT_OF_MEMORY;
 				goto done;
@@ -665,3 +668,5 @@ done:
 	}
 	return rc;
 }
+
+#endif /* JAVA_SPEC_VERSION >= 11 */

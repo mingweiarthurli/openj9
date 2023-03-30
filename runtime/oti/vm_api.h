@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -45,6 +45,11 @@ extern "C" {
 #define J9_CREATEJAVAVM_ARGENCODING_UTF8 4
 #define J9_CREATEJAVAVM_ARGENCODING_PLATFORM 8
 #define J9_CREATEJAVAVM_START_JITSERVER 16
+
+#define HELPER_TYPE_MONITOR_WAIT_INTERRUPTABLE 1
+#define HELPER_TYPE_MONITOR_WAIT_TIMED         2
+#define HELPER_TYPE_THREAD_PARK                3
+#define HELPER_TYPE_THREAD_SLEEP               4
 
 typedef struct J9CreateJavaVMParams {
 	UDATA j2seVersion;
@@ -211,7 +216,7 @@ getNamedElementFromAnnotation(J9AnnotationInfoEntry *annotation, char *name, U_3
 * @param allocationType
 * @return j9object_t
 */
-j9object_t 
+j9object_t
 helperMultiANewArray(J9VMThread *vmStruct, J9ArrayClass *classPtr, UDATA dimensions, I_32 *dimensionArray, UDATA allocationType);
 
 
@@ -267,29 +272,17 @@ freeNativeMethodBindTable(J9JavaVM *vm);
 * @param runtimeBind
 * @return UDATA
 */
-UDATA   
+UDATA
 resolveNativeAddress(J9VMThread *currentThread, J9Method *nativeMethod, UDATA runtimeBind);
 
 
 /* ---------------- classallocation.c ---------------- */
 
 /**
-* @brief Get Package ID for the ROM class. NOTE: You must own the class table mutex before calling this function.
-* @param *classLoader Classloader for the class
-* @param *romClass ROM class with package name
-* @param *vmThread J9VMThread instance
-* @param entryIndex classpath index
-* @param locationType location type of class
-* @return UDATA Package ID
-*/
-UDATA
-initializePackageID(J9ClassLoader *classLoader, J9ROMClass *romClass, J9VMThread *vmThread, IDATA entryIndex, I_32 locationType);
-
-/**
 * @brief
 * @param *javaVM
 * @param *classLoaderObject
-* @return J9ClassLoader 
+* @return J9ClassLoader
 */
 J9ClassLoader*
 internalAllocateClassLoader(J9JavaVM *javaVM, j9object_t classLoaderObject) ;
@@ -310,12 +303,27 @@ allocateClassLoader(J9JavaVM *javaVM);
 * @param needsFrameBuild
 * @return void
 */
-void  
+void
 freeClassLoader(J9ClassLoader *classLoader, J9JavaVM *javaVM, J9VMThread *vmThread, UDATA needsFrameBuild);
 
+/* ---------------- classsname.cpp ---------------- */
+
+/**
+ * Get the String representing the name of a Class. If the String has not been created
+ * yet, create it and optionally intern and assign it to the Class.
+ *
+ * Current thread must have VM access and have a special frame on top of stack
+ * with the J9VMThread roots up-to-date.
+ *
+ * @param[in] currentThread the current J9VMThread
+ * @param[in] classObject the java/lang/Class being queried
+ * @param[im] internAndAssign if true, intern the String and assign it to the Class object
+ * @return the Class name String, or NULL on out of memory (exception will be pending)
+ */
+j9object_t
+getClassNameString(J9VMThread *currentThread, j9object_t classObject, jboolean internAndAssign);
+
 /* ---------------- classsupport.c ---------------- */
-
-
 
 /**
 * @brief
@@ -345,38 +353,40 @@ peekClassHashTable(J9VMThread* currentThread, J9ClassLoader* classLoader, U_8* c
 * @param elementClass
 * @return J9Class*
 */
-J9Class* 
+J9Class*
 internalCreateArrayClass(J9VMThread* vmThread, J9ROMArrayClass* romClass, J9Class* elementClass);
 
 /**
  * Load the class with the specified name in a given module
- * 
+ *
  * @param currentThread Current VM thread
  * @param moduleName j.l.String object representing module name; can be null
  * @param className String object representing name of the class to load
  * @param classLoader J9ClassLoader to use
  * @param options load options such as J9_FINDCLASS_FLAG_EXISTING_ONLY
- * 
+ * @param allowedBitsForClassName the allowed bits for a valid class name,
+ *        including CLASSNAME_INVALID, CLASSNAME_VALID_NON_ARRARY, CLASSNAME_VALID_ARRARY, or CLASSNAME_VALID.
+ *
  * @return pointer to J9Class if success, NULL if fail
  *
  */
-J9Class*  
-internalFindClassString(J9VMThread* currentThread, j9object_t moduleName, j9object_t className, J9ClassLoader* classLoader, UDATA options);
+J9Class*
+internalFindClassString(J9VMThread* currentThread, j9object_t moduleName, j9object_t className, J9ClassLoader* classLoader, UDATA options, UDATA allowedBitsForClassName);
 
 /**
  * Load the class with the specified name in the given module.
- * 
+ *
  * @param currentThread Current VM thread
  * @param moduleName Pointer to J9Module representing the module containing the class
  * @param className Name of class to load
  * @param classNameLength Length of the class name
  * @param classLoader J9ClassLoader to use
  * @param options load options such as J9_FINDCLASS_FLAG_EXISTING_ONLY
- * 
+ *
  * @return pointer to J9Class if success, NULL if fail
  *
  */
-J9Class*  
+J9Class*
 internalFindClassInModule(J9VMThread* vmThread, J9Module* j9module, U_8* className, UDATA classNameLength, J9ClassLoader* classLoader, UDATA options);
 
 
@@ -405,7 +415,7 @@ internalRunPreInitInstructions(J9Class * ramClass, J9VMThread * vmThread);
 * @param index
 * @return J9Class*
 */
-J9Class*  
+J9Class*
 resolveKnownClass(J9JavaVM * vm, UDATA index);
 
 /**
@@ -430,6 +440,10 @@ contendedLoadTableFree(J9JavaVM* vm);
  * Use this if you don't have the class path index.
  */
 #define J9_CP_INDEX_NONE -1
+/**
+ * Use this to peek the package ID table
+ */
+#define J9_CP_INDEX_PEEK -2
 
 /**
  * Checks stack to see if element exists, if not adds the new element and returns TRUE. Otherwise, returns FALSE
@@ -473,11 +487,115 @@ popLoadingOrLinkingStack(J9VMThread *vmThread, J9StackElement **stack, J9Pool *s
 * @param locationType
 * @return J9Class*
 */
-J9Class *   
+J9Class *
 internalCreateRAMClassFromROMClass(J9VMThread *vmThread, J9ClassLoader *classLoader, J9ROMClass *romClass,
 	UDATA options, J9Class* elementClass, j9object_t protectionDomain, J9ROMMethod ** methodRemapArray,
 	IDATA entryIndex, I_32 locationType, J9Class *classBeingRedefined, J9Class *hostClass);
-	
+
+
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+
+/* ---------------- CRIUHelpers.cpp ---------------- */
+/**
+ * @brief Queries if CRIU support is enabled. By default support
+ * is not enabled, it can be enabled with `-XX:+EnableCRIUSupport`
+ *
+ * @param currentThread vmthread token
+ * @return TRUE if enabled, FALSE otherwise
+ */
+BOOLEAN
+isCRIUSupportEnabled(J9VMThread *currentThread);
+
+/**
+ * @brief Queries if checkpointing is permitted. Note, when
+ * -XX:+CRIURestoreNonPortableMode option is specified checkpointing
+ * will not be permitted after the JVM has been restored from a checkpoint
+ * (checkpoint once mode).
+ *
+ * @param currentThread vmthread token
+ * @return TRUE if permitted, FALSE otherwise
+ */
+BOOLEAN
+isCheckpointAllowed(J9VMThread *currentThread);
+
+/**
+ * @brief Queries if non-portable restore mode (specified via
+ * -XX:+CRIURestoreNonPortableMode) is enabled. If so, checkpointing will
+ * not be permitted after the JVM has been restored from a checkpoint
+ * (checkpoint once mode).
+ *
+ * @param currentThread vmthread token
+ * @return TRUE if enabled, FALSE otherwise
+ */
+BOOLEAN
+isNonPortableRestoreMode(J9VMThread *currentThread);
+
+/**
+ * @brief JVM hooks to run before performing a JVM checkpoint
+ *
+ * @param currentThread vmthread token
+ * @return TRUE on success, FALSE otherwise
+ */
+BOOLEAN
+jvmCheckpointHooks(J9VMThread *currentThread);
+
+/**
+ * @brief JVM hooks to run after performing a JVM checkpoint. If
+ * there is a fatal error, the process will terminate.
+ *
+ * @param currentThread vmthread token
+ * @return TRUE on success, FALSE otherwise
+ */
+BOOLEAN
+jvmRestoreHooks(J9VMThread *currentThread);
+
+/**
+ * @brief This iterates heap objects first, then goes through hook records,
+ * and runs the checkpoint hook function.
+ * ExclusiveVMAccess is required since J9InternalHookRecord holds live object references
+ * and GC is not allowed while running these hook functions.
+ *
+ * @param currentThread vmthread token
+ * @return BOOLEAN TRUE if no error, otherwise FALSE
+ */
+BOOLEAN
+runInternalJVMCheckpointHooks(J9VMThread *currentThread);
+
+/**
+ * @brief This runs the restore hook function, and cleanup.
+ * ExclusiveVMAccess is required since J9InternalHookRecord hold live object references
+ * and GC are not allowed while running these hook functions.
+ *
+ * @param currentThread vmthread token
+ * @param isRestore If FALSE, run the hook specified for checkpoint, otherwise run the hook specified for restore
+ * @return BOOLEAN TRUE if no error, otherwise FALSE
+ */
+BOOLEAN
+runInternalJVMRestoreHooks(J9VMThread *currentThread);
+
+/**
+ * @brief This function runs the identity operations that were delayed
+ * during the Java checkpoint and restore hooks.
+ *
+ * @param currentThread thread token
+ * @return BOOLEAN TRUE if no error, otherwise FALSE
+ */
+BOOLEAN
+runDelayedLockRelatedOperations(J9VMThread *currentThread);
+
+/**
+ * @brief This function delays the identity operations during the Java checkpoint and restore hooks.
+ *
+ * @param currentThread thread token
+ * @param instance the identity object
+ * @param operation the operation specified for the instance
+ *
+ * @return BOOLEAN TRUE if no error, otherwise FALSE
+ */
+BOOLEAN
+delayedLockingOperation(J9VMThread *currentThread, j9object_t instance, UDATA operation);
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
+
 /* ---------------- classloadersearch.c ---------------- */
 
 /**
@@ -521,7 +639,11 @@ getJimModules(J9VMThread *currentThread);
 * @return void
 */
 void
+#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+calculateInstanceDescription( J9VMThread *vmThread, J9Class *ramClass, J9Class *ramSuperClass, UDATA *storage, J9ROMFieldOffsetWalkState *walkState, J9ROMFieldOffsetWalkResult *walkResult, BOOLEAN hasReferences);
+#else /* J9VM_OPT_VALHALLA_VALUE_TYPES */
 calculateInstanceDescription( J9VMThread *vmThread, J9Class *ramClass, J9Class *ramSuperClass, UDATA *storage, J9ROMFieldOffsetWalkState *walkState, J9ROMFieldOffsetWalkResult *walkResult);
+#endif /* J9VM_OPT_VALHALLA_VALUE_TYPES */
 
 #define NO_LOCKWORD_NEEDED (UDATA) -1
 #define LOCKWORD_NEEDED		(UDATA) -2
@@ -565,10 +687,10 @@ IDATA shutdownDLL(J9JavaVM * vm, UDATA descriptor, UDATA shutdownDueToExit);
 * @param env
 * @return void
 */
-void JNICALL   
+void JNICALL
 exceptionDescribe(JNIEnv * env);
 
-void   
+void
 internalExceptionDescribe(J9VMThread *vmThread);
 
 /**
@@ -586,10 +708,11 @@ internalExceptionDescribe(J9VMThread *vmThread);
 * @param ramClass)
 * @param userData
 * @param pruneConstructors
+* @param skipHiddenFrames
 * @return UDATA
 */
 UDATA
-iterateStackTrace(J9VMThread * vmThread, j9object_t* exception,  UDATA  (*callback) (J9VMThread * vmThread, void * userData, UDATA bytecodeOffset, J9ROMClass * romClass, J9ROMMethod * romMethod, J9UTF8 * fileName, UDATA lineNumber, J9ClassLoader* classLoader, J9Class* ramClass), void * userData, UDATA pruneConstructors);
+iterateStackTrace(J9VMThread * vmThread, j9object_t* exception,  UDATA  (*callback) (J9VMThread * vmThread, void * userData, UDATA bytecodeOffset, J9ROMClass * romClass, J9ROMMethod * romMethod, J9UTF8 * fileName, UDATA lineNumber, J9ClassLoader* classLoader, J9Class* ramClass), void * userData, UDATA pruneConstructors, UDATA skipHiddenFrames);
 
 
 /* ---------------- exceptionsupport.c ---------------- */
@@ -602,7 +725,7 @@ iterateStackTrace(J9VMThread * vmThread, j9object_t* exception,  UDATA  (*callba
 * @param *walkState
 * @return UDATA
 */
-UDATA   
+UDATA
 exceptionHandlerSearch(J9VMThread *currentThread, J9StackWalkState *walkState);
 
 
@@ -615,7 +738,7 @@ exceptionHandlerSearch(J9VMThread *currentThread, J9StackWalkState *walkState);
 * @param *walkState
 * @return UDATA
 */
-UDATA  
+UDATA
 isExceptionTypeCaughtByHandler(J9VMThread *currentThread, J9Class *thrownExceptionClass, J9ConstantPool *constantPool, UDATA handlerIndex, J9StackWalkState *walkState);
 
 
@@ -627,7 +750,7 @@ isExceptionTypeCaughtByHandler(J9VMThread *currentThread, J9Class *thrownExcepti
 * @param *method
 * @return void
 */
-void  
+void
 setNativeBindOutOfMemoryError(J9VMThread * currentThread, J9Method * method);
 
 
@@ -637,7 +760,7 @@ setNativeBindOutOfMemoryError(J9VMThread * currentThread, J9Method * method);
 * @param *method
 * @return void
 */
-void  
+void
 setRecursiveBindError(J9VMThread * currentThread, J9Method * method);
 
 
@@ -647,7 +770,7 @@ setRecursiveBindError(J9VMThread * currentThread, J9Method * method);
 * @param *method
 * @return void
 */
-void  
+void
 setNativeNotFoundError(J9VMThread * currentThread, J9Method * method);
 
 
@@ -658,7 +781,7 @@ setNativeNotFoundError(J9VMThread * currentThread, J9Method * method);
 * @param *existingClass
 * @return void
 */
-void  
+void
 setClassLoadingConstraintError(J9VMThread * currentThread, J9ClassLoader * initiatingLoader, J9Class * existingClass);
 
 
@@ -669,9 +792,17 @@ setClassLoadingConstraintError(J9VMThread * currentThread, J9ClassLoader * initi
 * @param castClass
 * @return void
 */
-void  
+void
 setClassCastException(J9VMThread *currentThread, J9Class * instanceClass, J9Class * castClass);
 
+/**
+ * @brief
+ * @param *currentThread
+ * @param size
+ * @return void
+ */
+void
+setNegativeArraySizeException(J9VMThread *currentThread, I_32 size);
 
 /**
 * @brief
@@ -680,7 +811,7 @@ setClassCastException(J9VMThread *currentThread, J9Class * instanceClass, J9Clas
 * @param *detailMessage
 * @return void
 */
-void  
+void
 setCurrentException(J9VMThread *currentThread, UDATA exceptionNumber, UDATA *detailMessage);
 
 
@@ -692,7 +823,7 @@ setCurrentException(J9VMThread *currentThread, UDATA exceptionNumber, UDATA *det
 * @param cause
 * @return void
 */
-void  
+void
 setCurrentExceptionWithCause(J9VMThread *currentThread, UDATA exceptionNumber, UDATA *detailMessage, j9object_t cause);
 
 /**
@@ -717,7 +848,7 @@ setCurrentExceptionWithUtfCause(J9VMThread *currentThread, UDATA exceptionNumber
 * @param messageNumber
 * @return void
 */
-void  
+void
 setCurrentExceptionNLS(J9VMThread * vmThread, UDATA exceptionNumber, U_32 moduleName, U_32 messageNumber);
 
 /**
@@ -751,7 +882,7 @@ setCurrentExceptionNLSWithArgs(J9VMThread * vmThread, U_32 nlsModule, U_32 nlsID
 * @param currentThread
 * @return void
 */
-void  
+void
 setHeapOutOfMemoryError(J9VMThread * currentThread);
 
 
@@ -760,7 +891,7 @@ setHeapOutOfMemoryError(J9VMThread * currentThread);
 * @param currentThread
 * @return void
 */
-void  
+void
 setArrayIndexOutOfBoundsException(J9VMThread * currentThread, IDATA index);
 
 
@@ -771,7 +902,7 @@ setArrayIndexOutOfBoundsException(J9VMThread * currentThread, IDATA index);
 * @param messageNumber
 * @return void
 */
-void  
+void
 setNativeOutOfMemoryError(J9VMThread * vmThread, U_32 moduleName, U_32 messageNumber);
 
 
@@ -782,7 +913,7 @@ setNativeOutOfMemoryError(J9VMThread * vmThread, U_32 moduleName, U_32 messageNu
 * @param messageNumber
 * @return void
 */
-void  
+void
 setThreadForkOutOfMemoryError(J9VMThread * vmThread, U_32 moduleName, U_32 messageNumber);
 
 
@@ -792,7 +923,7 @@ setThreadForkOutOfMemoryError(J9VMThread * vmThread, U_32 moduleName, U_32 messa
 * @param method - J9Method representing the conflict method.  (See Jazz 62438)
 * @return void
 */
-void  
+void
 setIncompatibleClassChangeErrorForDefaultConflict(J9VMThread * vmThread, J9Method *method);
 
 
@@ -802,7 +933,7 @@ setIncompatibleClassChangeErrorForDefaultConflict(J9VMThread * vmThread, J9Metho
 * @param method - J9Method* representing the non-public method being invoked.
 * @return void
 */
-void  
+void
 setIllegalAccessErrorNonPublicInvokeInterface(J9VMThread *vmThread, J9Method *method);
 
 
@@ -834,7 +965,7 @@ initializeHeapOOMMessage(J9VMThread *currentThread);
  * @param field J9ROMFieldShape of the final field
  * @param romMethod J9ROMMethod of the accessing method
  */
-void  
+void
 setIllegalAccessErrorFinalFieldSet(J9VMThread *currentThread, UDATA isStatic, J9ROMClass *romClass, J9ROMFieldShape *field, J9ROMMethod *romMethod);
 
 /**
@@ -844,7 +975,7 @@ setIllegalAccessErrorFinalFieldSet(J9VMThread *currentThread, UDATA isStatic, J9
 * @param detailUTF
 * @return void
 */
-void  
+void
 setCurrentExceptionUTF(J9VMThread * vmThread, UDATA exceptionNumber, const char * detailUTF);
 
 
@@ -855,30 +986,42 @@ setCurrentExceptionUTF(J9VMThread * vmThread, UDATA exceptionNumber, const char 
 * @param walkOnly
 * @return j9object_t (a java/lang/Throwable)
 */
-j9object_t   
+j9object_t
 walkStackForExceptionThrow(J9VMThread * currentThread, j9object_t exception, UDATA walkOnly);
 
 
 struct J9Class;
-void  
+void
 setClassLoadingConstraintSignatureError(J9VMThread *currentThread, J9ClassLoader *loader1, J9Class *class1, J9ClassLoader *loader2, J9Class *class2, J9Class *exceptionClass, U_8 *methodName, UDATA methodNameLength, U_8 *signature, UDATA signatureLength);
 
-void  
+void
 setClassLoadingConstraintOverrideError(J9VMThread *currentThread, J9UTF8 *newClassNameUTF, J9ClassLoader *loader1, J9UTF8 *class1NameUTF, J9ClassLoader *loader2, J9UTF8 *class2NameUTF, J9UTF8 *exceptionClassNameUTF, U_8 *methodName, UDATA methodNameLength, U_8 *signature, UDATA signatureLength);
 
+#if defined(J9VM_OPT_CRIU_SUPPORT)
 /**
-* Return an extended NPE message.
-*
-* Note: the caller is responsible for freeing the returned string if it is not NULL.
-*
-* @param vmThread The current J9VMThread
-* @param bcCurrentPtr The pointer to the bytecode being executed and caused the NPE
-* @param romClass The romClass of the bytecode
-* @param npeCauseMsg The cause of NPE, reserved for future use.
-* @return char* An extended NPE message or NULL if such a message can't be generated
-*/
+ * @brief Set JVMCRIUException to indicate that current operation is not allowed in CRIU single thread mode.
+ * @param vmThread[in] the current J9VMThread
+ * @param moduleName[in] the NLS module
+ * @param messageNumber[in] the NLS message
+ *
+ * @return void
+ */
+void
+setCRIUSingleThreadModeJVMCRIUException(J9VMThread *vmThread, U_32 moduleName, U_32 messageNumber);
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
+
+/* ---------------- extendedMessageNPE.cpp ---------------- */
+
+/**
+ * Return an extended NPE message.
+ *
+ * Note: the caller is responsible for freeing the returned string if it is not NULL.
+ *
+ * @param npeMsgData - the J9NPEMessageData structure holding romClass/romMethod/npePC
+ * @return char* An extended NPE message or NULL if such a message can't be generated
+ */
 char*
-getCompleteNPEMessage(J9VMThread *vmThread, U_8 *bcCurrentPtr, J9ROMClass *romClass, const char *npeCauseMsg);
+getNPEMessage(J9NPEMessageData *npeMsgData);
 
 /* ---------------- gphandle.c ---------------- */
 
@@ -936,7 +1079,7 @@ freeStacks(J9VMThread * vmThread, UDATA * bp);
 * @param newStackSize
 * @return UDATA
 */
-UDATA  
+UDATA
 growJavaStack(J9VMThread * vmThread, UDATA newStackSize);
 
 
@@ -982,6 +1125,15 @@ void
 initializeInitialMethods(J9JavaVM *vm);
 
 /* ---------------- jnicsup.c ---------------- */
+
+/**
+* @brief Determine if a JNI ref is an internal class ref
+* @param *vm
+* @param ref
+* @return UDATA
+*/
+UDATA
+jniIsInternalClassRef(J9JavaVM *vm, jobject ref);
 
 /**
 * @brief
@@ -1060,7 +1212,7 @@ fatalError(JNIEnv *env, const char *msg);
 * @param args
 * @return void
 */
-void   
+void
 gpCheckCallin(JNIEnv *env, jobject receiver, jclass cls, jmethodID methodID, void* args);
 
 
@@ -1070,7 +1222,7 @@ gpCheckCallin(JNIEnv *env, jobject receiver, jclass cls, jmethodID methodID, voi
 * @param clazz
 * @return void
 */
-void JNICALL   
+void JNICALL
 gpCheckInitialize(J9VMThread* env, J9Class* clazz);
 
 
@@ -1081,7 +1233,7 @@ gpCheckInitialize(J9VMThread* env, J9Class* clazz);
 * @param detailMessage
 * @return void
 */
-void JNICALL   
+void JNICALL
 gpCheckSetCurrentException(J9VMThread* env, UDATA exceptionNumber, UDATA* detailMessage);
 
 
@@ -1093,7 +1245,7 @@ gpCheckSetCurrentException(J9VMThread* env, UDATA exceptionNumber, UDATA* detail
 * @param messageNumber
 * @return void
 */
-void JNICALL   
+void JNICALL
 gpCheckSetCurrentExceptionNLS(J9VMThread* env, UDATA exceptionNumber, U_32 moduleName, U_32 messageNumber);
 
 
@@ -1104,8 +1256,18 @@ gpCheckSetCurrentExceptionNLS(J9VMThread* env, UDATA exceptionNumber, U_32 modul
 * @param messageNumber
 * @return void
 */
-void JNICALL   
+void JNICALL
 gpCheckSetNativeOutOfMemoryError(J9VMThread* env, U_32 moduleName, U_32 messageNumber);
+
+
+/**
+* @brief
+* @param env
+* @param size
+* @return void
+*/
+void JNICALL
+gpCheckSetNegativeArraySizeException(J9VMThread* env, I_32 size);
 
 
 /**
@@ -1113,7 +1275,7 @@ gpCheckSetNativeOutOfMemoryError(J9VMThread* env, U_32 moduleName, U_32 messageN
 * @param env
 * @return void
 */
-void JNICALL   
+void JNICALL
 gpCheckSetHeapOutOfMemoryError(J9VMThread* env);
 
 
@@ -1185,7 +1347,7 @@ jniPopFrame(J9VMThread * vmThread, UDATA type);
 * @param *args
 * @return UDATA
 */
-UDATA JNICALL  
+UDATA JNICALL
 pushArguments(J9VMThread *vmThread, J9Method* method, void *args);
 
 
@@ -1430,7 +1592,7 @@ deallocateVMThread(J9VMThread * vmThread, UDATA decrementZombieCount, UDATA send
 * @return void
 */
 void
-freeClassLoaderEntries(J9VMThread * vmThread, J9ClassPathEntry * entries, UDATA count);
+freeClassLoaderEntries(J9VMThread * vmThread, J9ClassPathEntry **entries, UDATA count, UDATA initCount);
 
 /**
 * @brief
@@ -1472,6 +1634,17 @@ printBytecodePairs(J9JavaVM *vm);
  */
 BOOLEAN
 areValueTypesEnabled(J9JavaVM *vm);
+
+
+/**
+ * @brief Queries if -XX:DiagnoseSyncOnValueBasedClasses=1 or -XX:DiagnoseSyncOnValueBasedClasses=2 are found in the CML
+ * @param[in] vm pointer to the J9JavaVM
+ * @return FALSE if neither of -XX:DiagnoseSyncOnValueBasedClasses=1/-XX:DiagnoseSyncOnValueBasedClasses=2 are found in the CML.
+ * 			(i.e. neither J9_EXTENDED_RUNTIME2_VALUE_BASED_EXCEPTION/J9_EXTENDED_RUNTIME2_VALUE_BASED_WARNING are set in
+ * 			vm->extendedRuntimeFlags2)
+ * 			Otherwise, return TRUE.
+ */
+BOOLEAN areValueBasedMonitorChecksEnabled(J9JavaVM *vm);
 
 /**
 * @brief
@@ -1623,12 +1796,12 @@ VMInitStages(J9JavaVM *vm, IDATA stage, void* reserved);
  * @param[in] classPathSeparator platform specific class path separator
  * @param[in] cpFlags clas path entry flags
  * @param[in] initClassPathEntry if TRUE initialize each class path entry
- * @param[out] classPathEntries returns the class path entries allocated and initialized by the function
+ * @param[out] classPathEntries returns the pointer array of class path entries.
  *
  * @return number of class path entries initialized
  */
 UDATA
-initializeClassPath(J9JavaVM *vm, char *classPath, U_8 classPathSeparator, U_16 cpFlags, BOOLEAN initClassPathEntry, J9ClassPathEntry **classPathEntries);
+initializeClassPath(J9JavaVM *vm, char *classPath, U_8 classPathSeparator, U_16 cpFlags, BOOLEAN initClassPathEntry, J9ClassPathEntry ***classPathEntries);
 
 /*
  * Initialize the given class path entry. This involves determining what kind
@@ -1638,10 +1811,10 @@ initializeClassPath(J9JavaVM *vm, char *classPath, U_8 classPathSeparator, U_16 
  * @param[in] cpEntry pointer to J9ClassPathEntry to be initialized
  *
  * @return IDATA type of the entry which is one of the following
- * 		CPE_TYPE_DIRECTORY if its a a directory
- * 		CPE_TYPE_JAR if its a ZIP file, extraInfo contains the J9ZipFile
- * 		CPE_TYPE_JIMAGE if its a jimage file
- * 		CPE_TYPE_USUSABLE if its a bad entry, don't try to use it anymore
+ * 		CPE_TYPE_DIRECTORY if it's a directory
+ * 		CPE_TYPE_JAR if it's a ZIP file, extraInfo contains the J9ZipFile
+ * 		CPE_TYPE_JIMAGE if it's a jimage file
+ * 		CPE_TYPE_USUSABLE if it's a bad entry, don't try to use it anymore
  */
 IDATA
 initializeClassPathEntry (J9JavaVM * javaVM, J9ClassPathEntry *cpEntry);
@@ -1655,7 +1828,7 @@ initializeClassPathEntry (J9JavaVM * javaVM, J9ClassPathEntry *cpEntry);
  * @param[in] javaVM		pointer to the J9JavaVM
  * @param[in] j9module		pointer to J9Module for which patch path is to be set
  * @param[in] moduleName	name of the module
- * @return TRUE on success, FALSE if an internal error occurs 
+ * @return TRUE on success, FALSE if an internal error occurs
  */
 BOOLEAN
 setBootLoaderModulePatchPaths(J9JavaVM * javaVM, J9Module * j9module, const char * moduleName);
@@ -1735,6 +1908,11 @@ setExceptionForErroredRomClass( J9ROMClass *romClass, J9VMThread *vmThread );
 
 
 /* ---------------- KeyHashTable.c ---------------- */
+
+/* Flag(s) used by hashClassTableStartDo()/hashClassTableNextDo() and set to J9HashTableState.flags
+ * to control whether to skip special classes, like hidden classes, in the hash table iteration.
+ */
+#define J9_HASH_TABLE_STATE_FLAG_SKIP_HIDDEN 1
 
 /**
 * Searches classLoader for any loaded classes in a specific package
@@ -1822,12 +2000,13 @@ hashClassTableReplace(J9VMThread* vmThread, J9ClassLoader *classLoader, J9Class 
 
 /**
 * @brief Iterate over the classes defined by or cached in the specified class loader
-* @param *classLoader
-* @param *walkState
+* @param *classLoader The class loader to use.
+* @param *walkState The J9HashTableState.
+* @param flags Flags to control whether to skip special classes, like hidden classes, in the iteration.
 * @return J9Class*
 */
 J9Class*
-hashClassTableStartDo(J9ClassLoader *classLoader, J9HashTableState* walkState);
+hashClassTableStartDo(J9ClassLoader *classLoader, J9HashTableState* walkState, UDATA flags);
 
 /**
 * @brief Iterate over the classes defined by or cached in the specified class loader
@@ -1846,7 +2025,7 @@ J9HashTable *
 hashClassLocationTableNew(J9JavaVM *javaVM, U_32 initialSize);
 
 /**
- * @brief Locates and returns a structure containing load location for the given class 
+ * @brief Locates and returns a structure containing load location for the given class
  * Caller must acquire classLoaderModuleAndLocationMutex before making the call
  *
  * @param currentThread current thread pointer
@@ -1864,7 +2043,7 @@ findClassLocationForClass(J9VMThread *currentThread, J9Class *clazz);
  * Create a new J9HashTable with hashFn (moduleNameHashFn) and hashEqualFn (moduleNameHashEqualFn).
  * Using module name as the key can determine if two modules are same based on their module names.
  *
- * @param javaVM A java VM 
+ * @param javaVM A java VM
  * @param initialSize initial size
  * @return an initialized J9HashTable on success, otherwise NULL.
  */
@@ -1876,7 +2055,7 @@ hashModuleNameTableNew(J9JavaVM *javaVM, U_32 initialSize);
  * which might contain modules loaded by different classloader but with same module names.
  * Create a new J9HashTable with hashFn (modulePointerHashFn) and hashEqualFn (modulePointerHashEqualFn).
  * Using J9Module pointer as the key can differentiate modules loaded by different classloader with same module name.
- * @param javaVM A java VM 
+ * @param javaVM A java VM
  * @param initialSize initial size
  * @return an initialized J9HashTable on success, otherwise NULL.
  */
@@ -1945,18 +2124,18 @@ findModuleInfoForModule(J9VMThread *currentThread, J9ClassLoader *classLoader, J
  *
  * @returns the method (if found) or NULL otherwise
  */
-J9Method* 
+J9Method*
 searchClassForMethod(J9Class *clazz, U_8 *name, UDATA nameLength, U_8 *sig, UDATA sigLength) ;
 
 /**
  * Redirects to javaLookupMethodImpl with foundDefaultConflicts = NULL.
- * 
+ *
  * @brief
  * @param currentThread
  * @param method
  * @return J9Method*
  */
-UDATA 
+UDATA
 javaLookupMethod (J9VMThread *vmContext, J9Class *clazz, J9ROMNameAndSignature *selector, J9Class *senderClass, UDATA options);
 
 /**
@@ -2101,6 +2280,7 @@ cacheObjectMonitorForLookup(J9JavaVM* vm, J9VMThread* vmStruct, J9ObjectMonitor*
 
 /**
 * @brief Find the package ID for the given name and length
+* @note Must own the classTableMutex.
 * @param *vmThread J9VMThread instance
 * @param *classLoader Classloader for the class
 * @param *romClass ROM class with the package name
@@ -2113,7 +2293,8 @@ hashPkgTableIDFor(J9VMThread *vmThread, J9ClassLoader *classLoader, J9ROMClass* 
 
 /**
 * @brief Look up the package information given a ROM class.
-* @note the ROM class may be a dummy with only  the package name.
+* @note Must own the classTableMutex.
+* @note The ROM class may be a dummy with only the package name.
 * @param *classLoader Classloader for the class
 * @param *romClass ROM class with the package name
 * @return J9PackageIDTableEntry* ROM class representing a package
@@ -2165,7 +2346,6 @@ profilingBytecodeBufferFullHookRegistered(J9JavaVM* vm);
 
 /* ---------------- rasdump.c ---------------- */
 
-#if (defined(J9VM_RAS_DUMP_AGENTS))
 /**
 * @brief
 * @param *vm
@@ -2173,7 +2353,6 @@ profilingBytecodeBufferFullHookRegistered(J9JavaVM* vm);
 */
 IDATA
 configureRasDump(J9JavaVM *vm);
-#endif /* J9VM_RAS_DUMP_AGENTS */
 
 
 struct J9JavaVM;
@@ -2228,6 +2407,19 @@ freeHiddenInstanceFieldsList(J9JavaVM *vm);
  */
 UDATA
 addHiddenInstanceField(J9JavaVM *vm, const char *className, const char *fieldName, const char *fieldSignature, UDATA *offsetReturn);
+
+/**
+ * Report a hot field if the JIT has determined that the field has met appropriate thresholds to be determined a hot field.
+ * Valid if dynamicBreadthFirstScanOrdering is enabled.
+ *
+ * @param vm[in] pointer to the J9JavaVM
+ * @param reducedCpuUtil normalized cpu utilization of the hot field for the method being compiled
+ * @param clazz pointer to the class where a hot field should be added
+ * @param fieldOffset value of the field offset that should be added as a hot field for the given class
+ * @param reducedFrequency normalized block frequency of the hot field for the method being compiled
+ */
+void
+reportHotField(J9JavaVM *javaVM, int32_t reducedCpuUtil, J9Class* clazz, uint8_t fieldOffset,  uint32_t reducedFrequency);
 
 /**
 * @brief
@@ -2298,7 +2490,7 @@ calculateFlattenedFieldAddresses(J9VMThread *currentThread, J9Class *clazz);
  * @param[in] *currentThread the current thread
  * @param[in] *clazz the resolved class
  * @param[in] instance J9Object with unflattened flattenable fields
- * 
+ *
  * @returns void
  */
 void
@@ -2332,17 +2524,61 @@ BOOLEAN
 valueTypeCapableAcmp(J9VMThread *currentThread, j9object_t lhs, j9object_t rhs);
 
 /**
+ * Determines if a name or a signature pointed by a J9UTF8 pointer is a Qtype.
+ *
+ * @param[in] utfWrapper J9UTF8 pointer that points to the name or the signature
+ *
+ * @return TRUE if the name or the signature pointed by the J9UTF8 pointer is a Qtype, FALSE otherwise
+ */
+BOOLEAN
+isNameOrSignatureQtype(J9UTF8 *utfWrapper);
+
+
+/**
  * Determines if the classref c=signature is a Qtype. There is no validation performed
  * to ensure that the cpIndex points at a classref.
  *
  * @param[in] cpContextClass ramClass that owns the constantpool being queried
  * @param[in] cpIndex the CP index
  *
- * @return TRUE if classref is a Qtype, false otherwise
+ * @return TRUE if classref is a Qtype, FALSE otherwise
  */
 BOOLEAN
 isClassRefQtype(J9Class *cpContextClass, U_16 cpIndex);
 
+/**
+ * Performs an aaload operation on an object. Handles flattened and non-flattened cases.
+ *
+ * Assumes recieverObject is not null.
+ * All AIOB exceptions must be thrown before calling.
+ *
+ * Returns null if newObjectRef retrieval fails.
+ *
+ * If fast == false, special stack frame must be built and receiverObject must be pushed onto it.
+ *
+ * @param[in] currentThread thread token
+ * @param[in] receiverObject arrayObject
+ * @param[in] index array index
+ * @param[in] fast bool for fast or slow path
+ *
+ * @return array element
+ */
+j9object_t
+loadFlattenableArrayElement(J9VMThread *currentThread, j9object_t receiverObject, U_32 index, BOOLEAN fast);
+
+/**
+ * Performs an aastore operation on an object. Handles flattened and non-flattened cases.
+ *
+ * Assumes recieverObject and paramObject are not null.
+ * All AIOB exceptions must be thrown before calling.
+ *
+ * @param[in] currentThread thread token
+ * @param[in] receiverObject arrayObject
+ * @param[in] index array index
+ * @param[in] paramObject obj arg
+ */
+void
+storeFlattenableArrayElement(J9VMThread *currentThread, j9object_t receiverObject, U_32 index, j9object_t paramObject);
 
 /**
 * @brief Iterate over fields of the specified class in JVMTI order.
@@ -2456,6 +2692,49 @@ UDATA
 arrayElementSize(J9ArrayClass* arrayClass);
 
 /**
+ * Performs a getfield operation on an object. Handles flattened and non-flattened cases.
+ * This helper assumes that the cpIndex points to the fieldRef of a resolved Qtype. This helper
+ * also assumes that the cpIndex points to an instance field.
+ *
+ * @param currentThread thread token
+ * @param cpEntry the RAM cpEntry for the field, needs to be resolved
+ * @param receiver receiver object
+ * @param fastPath performs fastpath allocation, no GC. If this is false
+ * 			frame must be built before calling as GC may occur
+ *
+ * @return NULL if allocation fails, valuetype otherwise
+ */
+j9object_t
+getFlattenableField(J9VMThread *currentThread, J9RAMFieldRef *cpEntry, j9object_t receiver, BOOLEAN fastPath);
+
+/**
+ * Performs a clone operation on an object.
+ *
+ * @param currentThread thread token
+ * @param receiverClass j9class of original object
+ * @param original object to be cloned
+ * @param fastPath performs fastpath allocation, no GC. If this is false
+ * 			frame must be built before calling as GC may occur
+ *
+ * @return NULL if allocation fails, valuetype otherwise
+ */
+j9object_t
+cloneValueType(J9VMThread *currentThread, J9Class *receiverClass, j9object_t original, BOOLEAN fastPath);
+
+/**
+ * Performs a putfield operation on an object. Handles flattened and non-flattened cases.
+ * This helper assumes that the cpIndex points to the fieldRef of a resolved Qtype. This helper
+ * also assumes that the cpIndex points to an instance field.
+ *
+ * @param currentThread thread token
+ * @param cpEntry the RAM cpEntry for the field, needs to be resolved
+ * @param receiver receiver object
+ * @param paramObject parameter object
+ */
+void
+putFlattenableField(J9VMThread *currentThread, J9RAMFieldRef *cpEntry, j9object_t receiver, j9object_t paramObject);
+
+/**
 * @brief
 * @param *vmStruct
 * @param *clazz
@@ -2469,8 +2748,24 @@ arrayElementSize(J9ArrayClass* arrayClass);
 * @param *sourceClass
 * @return void *
 */
-void *  
+void *
 staticFieldAddress(J9VMThread *vmStruct, J9Class *clazz, U_8 *fieldName, UDATA fieldNameLength, U_8 *signature, UDATA signatureLength, J9Class **definingClass, UDATA *staticField, UDATA options, J9Class *sourceClass);
+
+/**
+ *@brief find field in class
+ *@param vmstruct vmthread token
+ *@param clazz ramclass
+ *@param fieldName name of field
+ *@param fieldNameLength length of field name
+ *@param signature field signature
+ *@param signatureLength length of field name signature
+ *@param definingClass class that defines the field
+ *@param offsetAddress instance field offset or static field address
+ *@param options lookup options
+ *@return romfieldShape if field is found
+ */
+J9ROMFieldShape*
+findFieldExt(J9VMThread *vmStruct, J9Class *clazz, U_8 *fieldName, UDATA fieldNameLength, U_8 *signature, UDATA signatureLength, J9Class **definingClass, UDATA *offsetOrAddress, UDATA options);
 
 /**
 * @brief
@@ -2498,7 +2793,7 @@ fieldIndexTableRemove(J9JavaVM* vm, J9Class *ramClass);
  * @param canRunJavaCode non-zero if the current thread is in a state that java code can be executed
  * @return UDATA non-zero if the access is legal
  */
-UDATA   
+UDATA
 packageAccessIsLegal(J9VMThread *currentThread, J9Class *targetClass, j9object_t protectionDomain, UDATA canRunJavaCode);
 
 /**
@@ -2521,7 +2816,7 @@ requirePackageAccessCheck(J9JavaVM *vm, J9ClassLoader *srcClassLoader, J9Module 
  * @param cpIndex
  * @return j9object_t
  */
-j9object_t   
+j9object_t
 resolveStringRef (J9VMThread *vmStruct, J9ConstantPool *constantPool, UDATA cpIndex, UDATA resolveFlags);
 
 
@@ -2533,7 +2828,7 @@ resolveStringRef (J9VMThread *vmStruct, J9ConstantPool *constantPool, UDATA cpIn
  * @param resolveFlags
  * @return J9Class *
  */
-J9Class *   
+J9Class *
 resolveClassRef(J9VMThread *vmStruct, J9ConstantPool *ramCP, UDATA cpIndex, UDATA resolveFlags);
 
 
@@ -2544,7 +2839,7 @@ resolveClassRef(J9VMThread *vmStruct, J9ConstantPool *ramCP, UDATA cpIndex, UDAT
  * @param fieldRefCpIndex
  * @return J9Class *
  */
-J9Class *   
+J9Class *
 findFieldSignatureClass(J9VMThread *vmStruct, J9ConstantPool *ramCP, UDATA fieldRefCpIndex);
 
 
@@ -2557,7 +2852,7 @@ findFieldSignatureClass(J9VMThread *vmStruct, J9ConstantPool *ramCP, UDATA field
  * @param *ramCPEntry
  * @return J9Method *
  */
-J9Method *   
+J9Method *
 resolveStaticMethodRefInto(J9VMThread *vmStruct, J9ConstantPool *ramCP, UDATA cpIndex, UDATA resolveFlags, J9RAMStaticMethodRef *ramCPEntry);
 
 
@@ -2569,7 +2864,7 @@ resolveStaticMethodRefInto(J9VMThread *vmStruct, J9ConstantPool *ramCP, UDATA cp
  * @param resolveFlags
  * @return J9Method *
  */
-J9Method *   
+J9Method *
 resolveStaticMethodRef(J9VMThread *vmStruct, J9ConstantPool *ramCP, UDATA cpIndex, UDATA resolveFlags);
 
 
@@ -2581,7 +2876,7 @@ resolveStaticMethodRef(J9VMThread *vmStruct, J9ConstantPool *ramCP, UDATA cpInde
  * @param resolveFlags
  * @return J9Method *
  */
-J9Method *   
+J9Method *
 resolveStaticSplitMethodRef(J9VMThread *vmStruct, J9ConstantPool *ramCP, UDATA splitTableIndex, UDATA resolveFlags);
 
 /**
@@ -2595,7 +2890,7 @@ resolveStaticSplitMethodRef(J9VMThread *vmStruct, J9ConstantPool *ramCP, UDATA s
  * @param *ramCPEntry
  * @return void *
  */
-void *    
+void *
 resolveStaticFieldRefInto(J9VMThread *vmStruct, J9Method *method, J9ConstantPool *ramCP, UDATA cpIndex, UDATA resolveFlags, J9ROMFieldShape **resolvedField, J9RAMStaticFieldRef *ramCPEntry);
 
 
@@ -2609,7 +2904,7 @@ resolveStaticFieldRefInto(J9VMThread *vmStruct, J9Method *method, J9ConstantPool
  * @param **resolvedField
  * @return void *
  */
-void *   
+void *
 resolveStaticFieldRef(J9VMThread *vmStruct, J9Method *method, J9ConstantPool *ramCP, UDATA cpIndex, UDATA resolveFlags, J9ROMFieldShape **resolvedField);
 
 
@@ -2624,7 +2919,7 @@ resolveStaticFieldRef(J9VMThread *vmStruct, J9Method *method, J9ConstantPool *ra
  * @param *ramCPEntry
  * @return IDATA
  */
-IDATA   
+IDATA
 resolveInstanceFieldRefInto(J9VMThread *vmStruct, J9Method *method, J9ConstantPool *ramCP, UDATA cpIndex, UDATA resolveFlags, J9ROMFieldShape **resolvedField, J9RAMFieldRef *ramCPEntry);
 
 
@@ -2638,7 +2933,7 @@ resolveInstanceFieldRefInto(J9VMThread *vmStruct, J9Method *method, J9ConstantPo
  * @param **resolvedField
  * @return IDATA
  */
-IDATA   
+IDATA
 resolveInstanceFieldRef(J9VMThread *vmStruct, J9Method *method, J9ConstantPool *ramCP, UDATA cpIndex, UDATA resolveFlags, J9ROMFieldShape **resolvedField);
 
 
@@ -2651,7 +2946,7 @@ resolveInstanceFieldRef(J9VMThread *vmStruct, J9Method *method, J9ConstantPool *
  * @param *ramCPEntry
  * @return UDATA
  */
-J9Method *   
+J9Method *
 resolveInterfaceMethodRefInto(J9VMThread *vmStruct, J9ConstantPool *ramCP, UDATA cpIndex, UDATA resolveFlags, J9RAMInterfaceMethodRef *ramCPEntry);
 
 
@@ -2663,7 +2958,7 @@ resolveInterfaceMethodRefInto(J9VMThread *vmStruct, J9ConstantPool *ramCP, UDATA
  * @param resolveFlags
  * @return UDATA
  */
-J9Method *   
+J9Method *
 resolveInterfaceMethodRef(J9VMThread *vmStruct, J9ConstantPool *ramCP, UDATA cpIndex, UDATA resolveFlags);
 
 
@@ -2676,7 +2971,7 @@ resolveInterfaceMethodRef(J9VMThread *vmStruct, J9ConstantPool *ramCP, UDATA cpI
  * @param *ramCPEntry
  * @return J9Method *
  */
-J9Method *   
+J9Method *
 resolveSpecialMethodRefInto(J9VMThread *vmStruct, J9ConstantPool *ramCP, UDATA cpIndex, UDATA resolveFlags, J9RAMSpecialMethodRef *ramCPEntry);
 
 
@@ -2688,7 +2983,7 @@ resolveSpecialMethodRefInto(J9VMThread *vmStruct, J9ConstantPool *ramCP, UDATA c
  * @param resolveFlags
  * @return J9Method *
  */
-J9Method *   
+J9Method *
 resolveSpecialMethodRef(J9VMThread *vmStruct, J9ConstantPool *ramCP, UDATA cpIndex, UDATA resolveFlags);
 
 /**
@@ -2699,7 +2994,7 @@ resolveSpecialMethodRef(J9VMThread *vmStruct, J9ConstantPool *ramCP, UDATA cpInd
  * @param resolveFlags
  * @return J9Method *
  */
-J9Method *   
+J9Method *
 resolveSpecialSplitMethodRef(J9VMThread *vmStruct, J9ConstantPool *ramCP, UDATA splitTableIndex, UDATA resolveFlags);
 
 /**
@@ -2711,7 +3006,7 @@ resolveSpecialSplitMethodRef(J9VMThread *vmStruct, J9ConstantPool *ramCP, UDATA 
  * @param *ramCPEntry
  * @return UDATA
  */
-UDATA   
+UDATA
 resolveVirtualMethodRefInto(J9VMThread *vmStruct, J9ConstantPool *ramCP, UDATA cpIndex, UDATA resolveFlags, J9Method **resolvedMethod, J9RAMVirtualMethodRef *ramCPEntry);
 
 
@@ -2723,7 +3018,7 @@ resolveVirtualMethodRefInto(J9VMThread *vmStruct, J9ConstantPool *ramCP, UDATA c
  * @param resolveFlags
  * @return UDATA
  */
-UDATA   
+UDATA
 resolveVirtualMethodRef(J9VMThread *vmStruct, J9ConstantPool *ramCP, UDATA cpIndex, UDATA resolveFlags, J9Method **resolvedMethod);
 
 
@@ -2942,6 +3237,14 @@ freeMemorySegmentList(J9JavaVM *javaVM,J9MemorySegmentList *segmentList);
 void
 freeMemorySegmentListEntry(J9MemorySegmentList *segmentList, J9MemorySegment *segment);
 
+/**
+* @brief Iterate through the segmentList and pass the J9MemorySegment * to the segmentCallback
+* @param segmentList The J9MemorySegmentList to iterate through.  Must not be NULL
+* @param segmentCallBack The user supplied callback that operates on the segment.  Must not be NULL.
+* @param userData A void* passed through to the callback for tracking state
+*/
+void
+allSegmentsInMemorySegmentListDo(J9MemorySegmentList *segmentList, void (* segmentCallback)(J9MemorySegment*, void*), void *userData);
 
 /**
 * @brief
@@ -2995,7 +3298,7 @@ addStatistic (J9JavaVM* javaVM, U_8 * name, U_8 dataType);
 void *
 getStatistic (J9JavaVM* javaVM, U_8 * name);
 
-/* ---------------- stringhelpers.c ---------------- */
+/* ---------------- stringhelpers.cpp ---------------- */
 
 /**
  * @brief Compare a java string to another java string for character equality.
@@ -3009,7 +3312,7 @@ UDATA
 compareStrings(J9VMThread *vmThread, j9object_t string1, j9object_t string2);
 
 /**
- * @brief 
+ * @brief
  * @param *javaVM
  * @param *stringObject
  * @param stringFlags
@@ -3114,11 +3417,15 @@ getStringUTF8Length(J9VMThread *vmThread,j9object_t string);
 * 	CLASSNAME_VALID_ARRARY - if it is valid and there is a '[' at beginning of class name string.
 *
 * @param[in] *vmThread current thread
-* @param[in] string the class name string
+* @param[in] className the class name string
+* @param[in] classNameLength the length of the class name string
+* @param[in] allowedBitsForClassName the allowed bits for a valid class name,
+*            including CLASSNAME_VALID_NON_ARRARY, CLASSNAME_VALID_ARRARY, or CLASSNAME_VALID.
+*
 * @return a UDATA to indicate the nature of incoming class name string, see descriptions above.
 */
 UDATA
-verifyQualifiedName(J9VMThread *vmThread, j9object_t string);
+verifyQualifiedName(J9VMThread *vmThread, U_8 *className, UDATA classNameLength, UDATA allowedBitsForClassName);
 
 
 /* ---------------- swalk.c ---------------- */
@@ -3215,7 +3522,7 @@ walkFrame(J9StackWalkState * walkState);
 * @param *walkState
 * @return UDATA
 */
-UDATA 
+UDATA
 walkStackFrames(J9VMThread *currentThread, J9StackWalkState *walkState);
 
 
@@ -3287,7 +3594,7 @@ preHelperCall(J9VMThread * vmc, void *sp, void *pc, void *literals, void *arg0EA
 * @param *vmStruct
 * @return void
 */
-void 
+void
 trace(J9VMThread *vmStruct);
 
 
@@ -3353,7 +3660,7 @@ resumeThreadForInspection(J9VMThread * currentThread, J9VMThread * vmThread);
 * @param vmThread
 * @return void
 */
-void  
+void
 acquireExclusiveVMAccess(J9VMThread * vmThread);
 
 /**
@@ -3361,7 +3668,7 @@ acquireExclusiveVMAccess(J9VMThread * vmThread);
 * @param vmThread
 * @return void
 */
-void  
+void
 acquireSafePointVMAccess(J9VMThread * vmThread);
 
 
@@ -3380,7 +3687,7 @@ acquireExclusiveVMAccessFromExternalThread(J9JavaVM * vm);
 * @param flags
 * @return void
 */
-void  
+void
 internalAcquireVMAccessClearStatus(J9VMThread * vmThread, UDATA flags);
 
 
@@ -3389,7 +3696,7 @@ internalAcquireVMAccessClearStatus(J9VMThread * vmThread, UDATA flags);
 * @param vmThread
 * @return void
 */
-void  
+void
 internalAcquireVMAccessNoMutex(J9VMThread * vmThread);
 
 
@@ -3398,7 +3705,7 @@ internalAcquireVMAccessNoMutex(J9VMThread * vmThread);
 * @param vmThread
 * @return void
 */
-void 
+void
 mustHaveVMAccess(J9VMThread * vmThread);
 
 /**
@@ -3407,7 +3714,7 @@ mustHaveVMAccess(J9VMThread * vmThread);
 * @param haltMask
 * @return void
 */
-void  
+void
 internalAcquireVMAccessNoMutexWithMask(J9VMThread * vmThread, UDATA haltMask);
 
 
@@ -3417,7 +3724,7 @@ internalAcquireVMAccessNoMutexWithMask(J9VMThread * vmThread, UDATA haltMask);
 * @param haltMask
 * @return void
 */
-void  
+void
 internalAcquireVMAccessWithMask(J9VMThread * vmThread, UDATA haltMask);
 
 
@@ -3426,7 +3733,7 @@ internalAcquireVMAccessWithMask(J9VMThread * vmThread, UDATA haltMask);
 * @param vmThread
 * @return void
 */
-void 
+void
 internalReleaseVMAccessNoMutex(J9VMThread * vmThread);
 
 
@@ -3436,7 +3743,7 @@ internalReleaseVMAccessNoMutex(J9VMThread * vmThread);
 * @param flags
 * @return void
 */
-void 
+void
 internalReleaseVMAccessSetStatus(J9VMThread * vmThread, UDATA flags);
 
 
@@ -3445,7 +3752,7 @@ internalReleaseVMAccessSetStatus(J9VMThread * vmThread, UDATA flags);
 * @param vmThread
 * @return IDATA
 */
-IDATA  
+IDATA
 internalTryAcquireVMAccessNoMutex(J9VMThread * vmThread);
 
 
@@ -3455,7 +3762,7 @@ internalTryAcquireVMAccessNoMutex(J9VMThread * vmThread);
 * @param haltMask
 * @return IDATA
 */
-IDATA  
+IDATA
 internalTryAcquireVMAccessWithMask(J9VMThread * vmThread, UDATA haltMask);
 
 
@@ -3492,7 +3799,7 @@ releaseExclusiveVMAccessFromExternalThread(J9JavaVM * vm);
 * @param block input parameter specifying whether caller should block if another request is ongoing
 * @param responsesRequired the number of mutator threads that must voluntarily quiesce themselves
 * @param gcPriority returned the new gc collector priority
-* @return effectively a boolean the request is successful or not 
+* @return effectively a boolean the request is successful or not
 */
 UDATA
 requestExclusiveVMAccessMetronome(J9JavaVM *vm, UDATA block, UDATA *responsesRequired, UDATA *gcPriority);
@@ -3547,7 +3854,7 @@ releaseExclusiveVMAccessMetronome(J9VMThread * vmThread);
  * @param vmThread  the J9VMThread requesting access
  * @param accessMask  the types of access to re-acquire
  */
-void  
+void
 releaseAccess(J9VMThread* vmThread, UDATA* accessMask);
 
 /**
@@ -3559,7 +3866,7 @@ releaseAccess(J9VMThread* vmThread, UDATA* accessMask);
  * @param vmThread  the J9VMThread requesting access
  * @param accessMask  the types of access that were held
  */
-void  
+void
 reacquireAccess(J9VMThread* vmThread, UDATA accessMask);
 
 /* ---------------- vmbootlib.c ---------------- */
@@ -3600,7 +3907,7 @@ registerBootstrapLibrary(J9VMThread * vmThread, const char * libName, J9NativeLi
 * @return UDATA
 */
 UDATA
-registerNativeLibrary(J9VMThread * vmThread, J9ClassLoader * classLoader, const char * libName, char * libraryPath, J9NativeLibrary** libraryPtr, char* errorBuffer, UDATA bufferLength);
+registerNativeLibrary(J9VMThread *vmThread, J9ClassLoader *classLoader, const char *libName, const char *libraryPath, J9NativeLibrary **libraryPtr, char *errorBuffer, UDATA bufferLength);
 
 
 /**
@@ -3643,6 +3950,13 @@ getVMHookInterface(J9JavaVM* vm);
 IDATA
 initializeVMHookInterface(J9JavaVM* vm);
 
+/**
+ * @brief Retrieves the address of the default value slot for a value class
+ * @param clazz The class to retrieve the default address value for. Must be an initialized value class.
+ * @return the address of the default value slot for the value class
+ */
+j9object_t*
+getDefaultValueSlotAddress(J9Class* clazz);
 
 /**
 * @brief
@@ -3789,7 +4103,7 @@ updateVMRuntimeState(J9JavaVM *vm, U_32 newState);
  *
  * @param vm
  *
- * @return minimum idle wait time 
+ * @return minimum idle wait time
  */
 U_32
 getVMMinIdleWaitTime(J9JavaVM *vm);
@@ -3822,12 +4136,12 @@ void
 terminateVMThreading(J9JavaVM *vm);
 
 
-/* ---------------- vmthread.c ---------------- */
+/* ---------------- vmthread.cpp ---------------- */
 
 /*
  * Perform thread setup before any java code is run on the thread.
  * Triggers J9HOOK_THREAD_ABOUT_TO_START.
- * 
+ *
  * @param currentThread the current J9VMThread
  */
 void
@@ -3920,7 +4234,6 @@ IDATA J9THREAD_PROC
 javaThreadProc(void *entryarg);
 
 
-#if (defined(J9VM_RAS_DUMP_AGENTS))  || (defined(J9VM_INTERP_SIG_QUIT_THREAD))
 /**
 * @brief
 * @param *vm
@@ -3930,7 +4243,6 @@ javaThreadProc(void *entryarg);
 */
 void
 printThreadInfo(J9JavaVM *vm, J9VMThread *self, char *toFile, BOOLEAN allThreads);
-#endif /* J9VM_('RAS_DUMP_AGENTS' 'INTERP_SIG_QUIT_THREAD') */
 
 
 /**
@@ -3945,7 +4257,7 @@ printThreadInfo(J9JavaVM *vm, J9VMThread *self, char *toFile, BOOLEAN allThreads
 * @param schedulingParameters
 * @return UDATA
 */
-UDATA   
+UDATA
 startJavaThread(J9VMThread * currentThread, j9object_t threadObject, UDATA privateFlags,
 	UDATA osStackSize, UDATA priority, omrthread_entrypoint_t entryPoint, void * entryArg, j9object_t schedulingParameters);
 
@@ -3979,13 +4291,12 @@ jint
 threadParseArguments(J9JavaVM *vm, char *optArg);
 
 /**
- * @brief  returns the Java priority for the thread specified.  For RealtimeThreads the priority comes
- *         from the priority field in PriorityParameters while for regular threads or any thread in a non-realtime vm it
- *         comes from the priority field in Thread
- *         Callers of this method must ensure that the Java Thread object for the thread is not NULL and
- *         that this cannot change while the call is being made
- *         This method should also only be called when we don't need barrier checks such as call from
- *         jvmti and ras
+ * @brief Returns the Java priority for the thread specified. For RealtimeThreads, the priority
+ * comes from the priority field in PriorityParameters while for regular threads or any thread
+ * in a non-realtime vm it comes from the priority field in Thread. Callers of this method must
+ * ensure that the Java Thread object for the thread is not NULL and that this cannot change
+ * while the call is being made. This method should also only be called when we don't need barrier
+ * checks such as call from jvmti and ras.
  *
  * @param vm the vm used to lookup the priority
  * @param thread the thread for which the priority should be returned
@@ -3994,6 +4305,79 @@ threadParseArguments(J9JavaVM *vm, char *optArg);
 UDATA
 getJavaThreadPriority(struct J9JavaVM *vm, J9VMThread* thread );
 
+#if JAVA_SPEC_VERSION >= 19
+/* ---------------- ContinuationHelpers.cpp ---------------- */
+
+/**
+ * @brief Create the native J9VMContinuation structure for Continuation.
+ *
+ * @param currentThread
+ * @param continuationObject
+ * @return BOOLEAN
+ */
+BOOLEAN
+createContinuation(J9VMThread *currentThread, j9object_t continuationObject);
+
+/**
+ * @brief Enters the Continuation runnable.
+ * If the Continuation has not started, start the runnable task via callin to interpreter on the method Continuation.execute.
+ * If the Continuation has already started, resume the execution with a new interpreter instance on the stack.
+ *
+ * @param currentThread the thread to mount Continuation.
+ * @param continuationObject
+ * @return BOOLEAN
+ */
+BOOLEAN
+enterContinuation(struct J9VMThread *currentThread, j9object_t continuationObject);
+
+/**
+ * @brief Suspends the Continuation runnable.
+ *
+ * @param currentThread
+ * @return BOOLEAN
+ */
+BOOLEAN
+yieldContinuation(struct J9VMThread *currentThread);
+
+/**
+ * @brief Free the native memory allocated by Continuation.
+ *
+ * @param currentThread the thread unmounting Continuation.
+ * @param continuationObject
+ */
+void
+freeContinuation(J9VMThread *currentThread, j9object_t continuationObject);
+
+/**
+ * @brief Determine if the current continuation is pinned.
+ *
+ * @param currentThread
+ * @return 0 if not pinned; otherwise, an error code corresponding to the pinned reason.
+ */
+jint
+isPinnedContinuation(J9VMThread *currentThread);
+
+/**
+ * @brief Copy data from Continuation struct to vmThread.
+ *
+ * @param currentThread
+ * @param allocated J9VMThread pointer
+ * @param allocated J9VMEntryLocalStorage pointer
+ * @param continuation struct
+ */
+void
+copyFieldsFromContinuation(J9VMThread *currentThread, J9VMThread *vmThread, J9VMEntryLocalStorage *els, J9VMContinuation *continuation);
+
+/**
+ * @brief Walk the stackframes associated with a continuation.
+ *
+ * @param currentThread current thread
+ * @param continuation the continuation to be walked
+ * @return 0 on success and non-zero on failure
+ */
+UDATA
+walkContinuationStackFrames(J9VMThread *currentThread, J9VMContinuation *continuation, J9StackWalkState *walkState);
+#endif /* JAVA_SPEC_VERSION >= 19 */
 
 /* ---------------- hookableAsync.c ---------------- */
 
@@ -4075,7 +4459,7 @@ dispatchAsyncEvents(J9VMThread * currentThread, UDATA asyncEventFlags);
 *
 * Returns the romclass, or NULL on failure.
 */
-J9ROMClass * 
+J9ROMClass *
 	findROMClassInSegment(J9VMThread *vmThread, J9MemorySegment *memorySegment, UDATA methodPC);
 
 /**
@@ -4087,7 +4471,7 @@ J9ROMClass *
 *
 * Returns the method, or NULL on failure.
 */
-J9ROMMethod * 
+J9ROMMethod *
 	findROMMethodInROMClass(J9VMThread *vmThread, J9ROMClass *romClass, UDATA methodPC);
 
 /**
@@ -4101,7 +4485,7 @@ J9ROMMethod *
 *
 * Returns the rom class, or NULL on failure.  resultClassLoader is filled in if non-null with the classloader associated.
 */
-J9ROMClass * 
+J9ROMClass *
 	findROMClassFromPC(J9VMThread *vmThread, UDATA methodPC, J9ClassLoader **resultClassLoader);
 
 /* ---------------- ownedmonitors.c ---------------- */
@@ -4110,6 +4494,16 @@ typedef struct J9ObjectMonitorInfo {
 	IDATA depth;
 	UDATA count;
 } J9ObjectMonitorInfo;
+
+/**
+ * @brief See if an object is being waited on by targetThread
+ * @param currentThread
+ * @param targetThread
+ * @param obj
+ * @return BOOLEAN
+ */
+BOOLEAN
+objectIsBeingWaitedOn(J9VMThread *currentThread, J9VMThread *targetThread, j9object_t obj);
 
 /**
  * @brief Get the object monitors locked by a thread
@@ -4173,16 +4567,18 @@ queryLogOptions (J9JavaVM *vm, I_32 buffer_size, void *options, I_32 *data_size)
 UDATA
 setLogOptions (J9JavaVM *vm, char *options);
 
-/* -------------------- MHInterpreter.cpp ------------ */
+/* -------------------- NativeHelpers.cpp ------------ */
 
+#if defined(J9VM_OPT_METHOD_HANDLE)
 /**
 * @brief
 * @param currentThread
 * @param methodType
 * @return J9SFMethodTypeFrame The frame
 */
-J9SFMethodTypeFrame * 
+J9SFMethodTypeFrame *
 buildMethodTypeFrame(J9VMThread * currentThread, j9object_t methodType);
+#endif /* defined(J9VM_OPT_METHOD_HANDLE) */
 
 /* -------------------- drophelp.c ------------ */
 
@@ -4192,7 +4588,7 @@ buildMethodTypeFrame(J9VMThread * currentThread, j9object_t methodType);
 * @param currentThread
 * @return UDATA TRUE or FALSE - is this a bytecoded frame (i.e. can't push on top of it)?
 */
-UDATA  
+UDATA
 dropPendingSendPushes(J9VMThread *currentThread);
 
 /**
@@ -4200,7 +4596,7 @@ dropPendingSendPushes(J9VMThread *currentThread);
 * @param currentThread
 * @return void
 */
-void  
+void
 prepareForExceptionThrow(J9VMThread *currentThread);
 
 /**
@@ -4259,7 +4655,7 @@ initializeImpl(J9VMThread *currentThread, J9Class *j9clazz);
  * @param[in] *currentThread current thread
  * @param[in] *clazz the J9Class to prepare
  */
-void  
+void
 prepareClass(J9VMThread *currentThread, J9Class *clazz);
 
 /**
@@ -4268,22 +4664,62 @@ prepareClass(J9VMThread *currentThread, J9Class *clazz);
  * @param[in] *currentThread current thread
  * @param[in] *clazz the J9Class to initialize
 */
-void  
+void
 initializeClass(J9VMThread *currentThread, J9Class *clazz);
 
 /* -------------------- threadpark.c ------------ */
 
+/**
+ * @param[in] vmThread the current thread
+ * @param[in] timeoutIsEpochRelative is the timeout in milliseconds relative to the beginning of the epoch
+ * @param[in] timeout nanosecond or millisecond timeout
+ */
 void
-threadParkImpl (J9VMThread* vmThread, IDATA timeoutIsEpochRelative, I_64 timeout);
+threadParkImpl(J9VMThread *vmThread, BOOLEAN timeoutIsEpochRelative, I_64 timeout);
 void
 threadUnparkImpl (J9VMThread* vmThread, j9object_t threadObject);
 
 /* -------------------- threadhelp.cpp ------------ */
 
+/**
+ * A time compensation helper for Object.wait(), Thread.sleep(), and Unsafe.park().
+ * No time compensation for these APIs if CRIU is disabled.
+ *
+ * @param[in] vmThread the current thread
+ * @param[in] threadHelperType the helper type
+ *            HELPER_TYPE_MONITOR_WAIT_INTERRUPTABLE - omrthread_monitor_wait_interruptable
+ *            HELPER_TYPE_MONITOR_WAIT_TIMED         - omrthread_monitor_wait_timed
+ *            HELPER_TYPE_THREAD_PARK                - omrthread_park
+ *            HELPER_TYPE_THREAD_SLEEP               - omrthread_sleep_interruptable
+ * @param[in] monitor the object monitor waiting on
+ * @param[in] millis milliseconds timeout
+ * @param[in] nanos nanosecond timeout
+ */
 IDATA
-monitorWaitImpl(J9VMThread *vmThread, j9object_t object, I_64 millis, I_32 nanos, UDATA interruptable);
+timeCompensationHelper(J9VMThread *vmThread, U_8 threadHelperType, omrthread_monitor_t monitor, I_64 millis, I_32 nanos);
+
+/**
+ * @param[in] vmThread current thread
+ * @param[in] object the object to wait on
+ * @param[in] millis millisecond timeout
+ * @param[in] nanos nanosecond timeout
+ * @param[in] interruptable set to FALSE to ignore interrupts
+ *
+ * @return 0 on success, non-zero on failure. This function always sets the current exception on failure.
+ */
 IDATA
-threadSleepImpl(J9VMThread* vmThread, I_64 millis, I_32 nanos);
+monitorWaitImpl(J9VMThread *vmThread, j9object_t object, I_64 millis, I_32 nanos, BOOLEAN interruptable);
+
+/**
+ * @param[in] vmThread current thread
+ * @param[in] millis millisecond timeout
+ * @param[in] nanos nanosecond timeout
+ *
+ * @return 0 on success, non-zero on failure. This function always sets the current exception on failure.
+ */
+IDATA
+threadSleepImpl(J9VMThread *vmThread, I_64 millis, I_32 nanos);
+
 omrthread_monitor_t
 getMonitorForWait (J9VMThread* vmThread, j9object_t object);
 /**
@@ -4301,7 +4737,7 @@ getMonitorForWait (J9VMThread* vmThread, j9object_t object);
  * @return success or error code
  * @retval J9THREAD_SUCCESS success
  * @retval J9THREAD_ERR_xxx failure
- * 
+ *
  * @see omrthread_create
  */
 IDATA
@@ -4334,18 +4770,29 @@ createJoinableThreadWithCategory(omrthread_t* handle, UDATA stacksize, UDATA pri
  * Helper function to attach a thread with a specific category.
  *
  * If the OS thread is already attached, handle is set to point to the existing omrthread_t.
- * 
+ *
  * @param[out] handle a pointer to a omrthread_t which will point to the thread (if successfully attached)
  * @param[in]  category thread category
  *
  * @return success or error code
  * @retval J9THREAD_SUCCESS success
  * @retval J9THREAD_ERR_xxx failure
- * 
+ *
  * @see omrthread_attach
  */
 IDATA
 attachThreadWithCategory(omrthread_t* handle, U_32 category);
+
+#if JAVA_SPEC_VERSION >= 19
+/**
+ * Frees a thread object's TLS array.
+ *
+ * @param[in] currentThread the current thread
+ * @param[in] threadObj the thread object to free TLS from
+ */
+void
+freeTLS(J9VMThread *currentThread, j9object_t threadObj);
+#endif /* JAVA_SPEC_VERSION >= 19 */
 
 /* -------------------- J9OMRHelpers.cpp ------------ */
 
@@ -4431,6 +4878,16 @@ detachVMFromOMR(J9JavaVM *vm);
 UDATA
 pushReflectArguments(J9VMThread *currentThread, j9object_t parameterTypes, j9object_t arguments);
 
+#if JAVA_SPEC_VERSION >= 19
+/**
+ * Pop off the Callin frame from stack and update thread states.
+ *
+ * @param currentThread
+ */
+void
+restoreCallInFrame(J9VMThread *currentThread);
+#endif /* JAVA_SPEC_VERSION >= 19 */
+
 /* Thread library API accessible via GetEnv() */
 #define J9THREAD_VERSION_1_1 0x7C010001
 
@@ -4474,8 +4931,126 @@ throwNativeOOMError(JNIEnv *env, U_32 moduleName, U_32 messageNumber);
 void
 throwNewJavaIoIOException(JNIEnv *env, const char *message);
 
+#if JAVA_SPEC_VERSION >= 16
+
+/* ------------------- UpcallThunkGen.cpp ----------------- */
+
+/**
+ * @brief Generate the appropriate thunk/adaptor for a given J9UpcallMetaData
+ *
+ * @param metaData[in/out] a pointer to the given J9UpcallMetaData
+ * @return the address for this future upcall function handle, either the thunk or the thunk-descriptor
+ */
+void *
+createUpcallThunk(J9UpcallMetaData *data);
+
+/**
+ * @brief Calculate the requested argument in-stack memory address to return
+ *
+ * @param nativeSig a pointer to the J9UpcallNativeSignature
+ * @param argListPtr a pointer to the argument list prepared by the thunk
+ * @param argIdx the requested argument index
+ * @return the address in argument list for the requested argument
+ *
+ * Details:
+ *   A quick walk-through of the argument list ahead of the requested one
+ *   Calculating its address based on argListPtr
+ */
+void *
+getArgPointer(J9UpcallNativeSignature *nativeSig, void *argListPtr, int argIdx);
+
+/**
+ * @brief Allocate a piece of thunk memory with a given size from the existing virtual memory block
+ *
+ * @param data a pointer to J9UpcallMetaData
+ * @return the start address of the upcall thunk memory, or NULL on failure.
+ */
+void *
+allocateUpcallThunkMemory(J9UpcallMetaData *data);
+
+
+/**
+ * @brief Flush the generated thunk to the memory
+ *
+ * @param data a pointer to J9UpcallMetaData
+ * @param thunkAddress the address of the generated thunk
+ * @return void
+ */
+void
+doneUpcallThunkGeneration(J9UpcallMetaData *data, void *thunkAddress);
+
+/* ------------------- UpcallVMHelpers.cpp ----------------- */
+
+/**
+ * @brief Call into the interpreter via native2InterpJavaUpcallImpl to invoke the upcall
+ * specific method handle and ignore the return value in the case of void.
+ *
+ * @param data a pointer to J9UpcallMetaData
+ * @param argsListPointer a pointer to the argument list
+ * @return void
+ */
+void JNICALL
+native2InterpJavaUpcall0(J9UpcallMetaData *data, void *argsListPointer);
+
+/**
+ * @brief Call into the interpreter via native2InterpJavaUpcallImpl to invoke the upcall
+ * specific method handle and return an I_32 value in the case of byte/char/short/int.
+ *
+ * @param data a pointer to J9UpcallMetaData
+ * @param argsListPointer a pointer to the argument list
+ * @return an I_32 value
+ */
+I_32 JNICALL
+native2InterpJavaUpcall1(J9UpcallMetaData *data, void *argsListPointer);
+
+/**
+ * @brief Call into the interpreter via native2InterpJavaUpcallImpl to invoke the upcall
+ * specific method handle and return an I_64 value in the case of long/pointer.
+ *
+ * @param data a pointer to J9UpcallMetaData
+ * @param argsListPointer a pointer to the argument list
+ * @return an I_64 value
+ */
+I_64 JNICALL
+native2InterpJavaUpcallJ(J9UpcallMetaData *data, void *argsListPointer);
+
+/**
+ * @brief Call into the interpreter via native2InterpJavaUpcallImpl to invoke the upcall
+ * specific method handle and return a float value as specified in the return type.
+ *
+ * @param data a pointer to J9UpcallMetaData
+ * @param argsListPointer a pointer to the argument list
+ * @return a float
+ */
+float JNICALL
+native2InterpJavaUpcallF(J9UpcallMetaData *data, void *argsListPointer);
+
+/**
+ * @brief Call into the interpreter via native2InterpJavaUpcallImpl to invoke the upcall
+ * specific method handle and return a double value as specified in the return type.
+ *
+ * @param data a pointer to J9UpcallMetaData
+ * @param argsListPointer a pointer to the argument list
+ * @return a double
+ */
+double JNICALL
+native2InterpJavaUpcallD(J9UpcallMetaData *data, void *argsListPointer);
+
+/**
+ * @brief Call into the interpreter via native2InterpJavaUpcallImpl to invoke the upcall
+ * specific method handle and return a U_8 pointer to the requested struct.
+ *
+ * @param data a pointer to J9UpcallMetaData
+ * @param argsListPointer a pointer to the argument list
+ * @return a U_8 pointer
+ */
+U_8 * JNICALL
+native2InterpJavaUpcallStruct(J9UpcallMetaData *data, void *argsListPointer);
+
+#endif /* JAVA_SPEC_VERSION >= 16 */
+
 #ifdef __cplusplus
-}
+} /* extern "C" */
 #endif
 
 #endif /* vm_api_h */

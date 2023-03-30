@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,13 +15,13 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
 
-#ifndef TR_J9_X86_CODEGENERATORBASE_INCL
-#define TR_J9_X86_CODEGENERATORBASE_INCL
+#ifndef J9_X86_CODEGENERATOR_INCL
+#define J9_X86_CODEGENERATOR_INCL
 
 #include "compiler/codegen/J9CodeGenerator.hpp"
 
@@ -35,9 +35,14 @@ namespace X86
 
 class OMR_EXTENSIBLE CodeGenerator : public J9::CodeGenerator
    {
-   public:
 
-   CodeGenerator();
+protected:
+
+   CodeGenerator(TR::Compilation *comp);
+
+public:
+
+   void initialize();
 
    TR::Recompilation *allocateRecompilationInfo();
 
@@ -82,6 +87,20 @@ class OMR_EXTENSIBLE CodeGenerator : public J9::CodeGenerator
     */
    void reserveNTrampolines(int32_t numTrampolines);
 
+   /**
+    * \brief Determines whether the code generator supports stack allocations
+    */
+   bool supportsStackAllocations() { return true; }
+   /** \brief
+    *     Determines whether to insert instructions to check DF flag and break on DF set
+    */
+   bool canEmitBreakOnDFSet();
+
+   // See J9::CodeGenerator::guaranteesResolvedDirectDispatchForSVM
+   bool guaranteesResolvedDirectDispatchForSVM() { return true; }
+
+   // See J9::CodeGenerator::guaranteesResolvedVirtualDispatchForSVM
+   bool guaranteesResolvedVirtualDispatchForSVM() { return true; }
    };
 
 }

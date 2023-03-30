@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2017, 2019 IBM Corp. and others
+ * Copyright (c) 2017, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -54,24 +54,28 @@ GC_ObjectModelDelegate::initializeAllocation(MM_EnvironmentBase *env, void *allo
 void
 GC_ObjectModelDelegate::calculateObjectDetailsForCopy(MM_EnvironmentBase *env, MM_ForwardedHeader *forwardedHeader, uintptr_t *objectCopySizeInBytes, uintptr_t *reservedObjectSizeInBytes, uintptr_t *hotFieldAlignmentDescriptor)
 {
-	GC_ObjectModel *objectModel = &(env->getExtensions()->objectModel);
+	/* NOTE: the size is fetched by hand from the class in the mixed case because a forwarding pointer could have been substituted into the clazz slot.
+	 * the class pointer passed into this routine is guaranteed to have been checked
+	 */
+	GC_ObjectModel *objectModel = &env->getExtensions()->objectModel;
 	J9Class* clazz = objectModel->getPreservedClass(forwardedHeader);
 	uintptr_t actualObjectCopySizeInBytes = 0;
 	uintptr_t hashcodeOffset = 0;
 
 	if (objectModel->isIndexable(clazz)) {
-		uint32_t size = objectModel->getPreservedIndexableSize(forwardedHeader);
-		*objectCopySizeInBytes = getArrayObjectModel()->getSizeInBytesWithHeader(clazz, size);
-		hashcodeOffset = getArrayObjectModel()->getHashcodeOffset(clazz, size);
+		*objectCopySizeInBytes = env->getExtensions()->indexableObjectModel.calculateObjectSizeAndHashcode(forwardedHeader, &hashcodeOffset);
 	} else {
-		*objectCopySizeInBytes = clazz->totalInstanceSize + J9GC_OBJECT_HEADER_SIZE(this);
-		hashcodeOffset = getMixedObjectModel()->getHashcodeOffset(clazz);
+		*objectCopySizeInBytes = clazz->totalInstanceSize + J9GC_OBJECT_HEADER_SIZE(env->getExtensions());
+		hashcodeOffset = env->getExtensions()->mixedObjectModel.getHashcodeOffset(clazz);
 	}
 
+	/* IF the object has been hashed and has not been moved, then we need generate hash from the old address */
+	uintptr_t forwardedHeaderPreservedFlags = objectModel->getPreservedFlags(forwardedHeader);
+
 	if (hashcodeOffset == *objectCopySizeInBytes) {
-		if (objectModel->hasBeenMoved(objectModel->getPreservedFlags(forwardedHeader))) {
+		if (objectModel->hasBeenMoved(forwardedHeaderPreservedFlags)) {
 			*objectCopySizeInBytes += sizeof(uintptr_t);
-		} else if (objectModel->hasBeenHashed(objectModel->getPreservedFlags(forwardedHeader))) {
+		} else if (objectModel->hasBeenHashed(forwardedHeaderPreservedFlags)) {
 			actualObjectCopySizeInBytes += sizeof(uintptr_t);
 		}
 	}
@@ -80,3 +84,17 @@ GC_ObjectModelDelegate::calculateObjectDetailsForCopy(MM_EnvironmentBase *env, M
 	*hotFieldAlignmentDescriptor = clazz->instanceHotFieldDescription;
 }
 #endif /* defined(OMR_GC_MODRON_SCAVENGER) */
+
+void
+GC_ObjectModelDelegate::initializeMinimumSizeObject(MM_EnvironmentBase *env, void *allocAddr)
+{
+	J9JavaVM *javaVM = (J9JavaVM *)env->getLanguageVM();
+	J9Class *clazz = J9VMJAVALANGOBJECT_OR_NULL(javaVM);
+	j9object_t instance = (j9object_t) allocAddr;
+
+	memset(instance, 0, OMR_MINIMUM_OBJECT_SIZE);
+
+	MM_GCExtensions::getExtensions(env)->objectModel.setObjectClass(instance, clazz);
+
+	Assert_MM_true(J9GC_J9OBJECT_CLAZZ(allocAddr, env) == clazz);
+}

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1998, 2020 IBM Corp. and others
+ * Copyright (c) 1998, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,17 +15,18 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
 package org.openj9.test.java.lang;
 
+import java.lang.ref.WeakReference;
+import org.openj9.test.util.VersionCheck;
 import org.testng.annotations.AfterMethod;
 import org.testng.annotations.Test;
 import org.testng.Assert;
 import org.testng.AssertJUnit;
-import java.lang.ref.WeakReference;
 
 @Test(groups = { "level.sanity" })
 public class Test_Thread {
@@ -33,6 +34,7 @@ public class Test_Thread {
 	static class SimpleThread implements Runnable {
 		int delay;
 
+		@Override
 		public void run() {
 			try {
 				synchronized (this) {
@@ -42,18 +44,17 @@ public class Test_Thread {
 			} catch (InterruptedException e) {
 				return;
 			}
-
 		}
 
 		public SimpleThread(int d) {
-			if (d >= 0)
-				delay = d;
+			delay = Math.max(d, 0);
 		}
 	}
 
 	static class YieldThread implements Runnable {
 		volatile int delay;
 
+		@Override
 		public void run() {
 			int x = 0;
 			while (true) {
@@ -62,8 +63,7 @@ public class Test_Thread {
 		}
 
 		public YieldThread(int d) {
-			if (d >= 0)
-				delay = d;
+			delay = Math.max(d, 0);
 		}
 	}
 
@@ -71,6 +71,7 @@ public class Test_Thread {
 		Thread parent;
 		volatile int checkVal = -1;
 
+		@Override
 		public void run() {
 			try {
 				synchronized (this) {
@@ -123,36 +124,9 @@ public class Test_Thread {
 
 	Thread st, ct, spinner;
 
-	static boolean calledMySecurityManager = false;
-
 	// used in test_defaultMemoryArea to pass status from thread started
 	// back to thread running test case
 	boolean pass = true;
-
-	/**
-	 * @tests java.lang.Thread#Thread()
-	 */
-	@Test
-	public void test_Constructor() {
-		Thread t;
-		SecurityManager m = new SecurityManager() {
-			public ThreadGroup getThreadGroup() {
-				calledMySecurityManager = true;
-				return Thread.currentThread().getThreadGroup();
-			}
-		};
-		try {
-			System.setSecurityManager(m); // To see if it checks Thread creation
-			// with our SecurityManager
-
-			t = new Thread();
-		} finally {
-			System.setSecurityManager(null); // restore original, no
-			// side-effects
-		}
-		AssertJUnit.assertTrue("Did not call SecurityManager.getThreadGroup ()", calledMySecurityManager);
-		t.start();
-	}
 
 	/**
 	 * @tests java.lang.Thread#Thread(java.lang.Runnable)
@@ -221,20 +195,20 @@ public class Test_Thread {
 		tg.destroy();
 
 		Runnable r = new Runnable() {
+			@Override
 			public void run() {
 			}
 		};
 
-		ThreadGroup foo = null;
+		ThreadGroup foo = new ThreadGroup("foo");
 		try {
-			new Thread(foo = new ThreadGroup("foo"), r, null);
+			new Thread(foo, r, null);
 			// Should not get here
 			AssertJUnit.assertTrue("Null cannot be accepted as Thread name", false);
 		} catch (NullPointerException npe) {
-			AssertJUnit.assertTrue("Null cannot be accepted as Thread name", true);
+			// expected: null cannot be accepted as thread name
 			foo.destroy();
 		}
-
 	}
 
 	/**
@@ -259,93 +233,6 @@ public class Test_Thread {
 		try {
 			t.join();
 		} catch (InterruptedException e) {
-		}
-	}
-
-	/**
-	 * @tests java.lang.Thread#checkAccess()
-	 */
-	@Test
-	public void test_checkAccess() {
-		ThreadGroup tg = new ThreadGroup("Test Group3");
-		try {
-			st = new Thread(tg, new SimpleThread(1), "SimpleThread5");
-			st.checkAccess();
-			AssertJUnit.assertTrue("CheckAccess passed", true);
-		} catch (SecurityException e) {
-			Assert.fail("CheckAccess failed", e);
-		}
-		st.start();
-		try {
-			st.join();
-		} catch (InterruptedException e) {
-		}
-		tg.destroy();
-	}
-
-	/**
-	 * @tests java.lang.Thread#checkAccess_interrupt_self()
-	 */
-	@Test
-	public void test_checkAccess_interrupt_self() {
-		try {
-			System.setSecurityManager(new SecurityManager() {
-				public void checkAccess(Thread t) {
-					Assert.fail("CheckAccess() was invoked");
-				}
-			});
-
-			Thread.currentThread().interrupt();
-			AssertJUnit.assertTrue("Failed to interrupt current thread", Thread.interrupted());
-		} finally {
-			System.setSecurityManager(null);
-		}
-	}
-
-	/**
-	 * @tests java.lang.Thread#checkAccess_interrupt_not_self()
-	 */
-	@Test
-	public void test_checkAccess_interrupt_not_self() {
-		try {
-			SimpleThread simple = new SimpleThread(5000);
-
-			st = new Thread(simple);
-
-			synchronized (simple) {
-				st.start();
-
-				try {
-					simple.wait();
-				} catch (InterruptedException e) {
-				}
-			}
-
-			class MySecurityManager extends SecurityManager {
-				public volatile boolean called = false;
-
-				public void checkAccess(Thread t) {
-					called = true;
-				}
-			}
-
-			MySecurityManager sm = new MySecurityManager();
-
-			System.setSecurityManager(sm);
-
-			AssertJUnit.assertTrue("Thread should be alive", st.isAlive());
-
-			st.interrupt();
-
-			AssertJUnit.assertTrue("checkAccess() was not called", sm.called);
-
-			try {
-				st.join(10000);
-			} catch (InterruptedException e) {
-				Assert.fail("Join failed ", e);
-			}
-		} finally {
-			System.setSecurityManager(null);
 		}
 	}
 
@@ -379,7 +266,7 @@ public class Test_Thread {
 	 */
 	@Test
 	public void test_currentThread() {
-		// Test for method java.lang.Thread java.lang.Thread.currentThread()
+		// Test for method java.lang.Thread.currentThread()
 		AssertJUnit.assertTrue("Current thread was not main thread: " + Thread.currentThread().getName(),
 				Thread.currentThread().getName().equals("main"));
 	}
@@ -401,6 +288,7 @@ public class Test_Thread {
 				return enumerateCount;
 			}
 
+			@Override
 			public synchronized void run() {
 				try {
 					this.notify();
@@ -494,72 +382,6 @@ public class Test_Thread {
 	}
 
 	/**
-	 * @tests java.lang.Thread#getContextClassLoader()
-	 */
-	@Test
-	public void test_getContextClassLoader() {
-		Thread t = new Thread();
-		AssertJUnit.assertTrue("Incorrect class loader returned",
-				t.getContextClassLoader() == Thread.currentThread().getContextClassLoader());
-		t.start();
-
-		/* [PR CMVC 90230] behavior change in 1.5 */
-		// behavior change in 1.5, Thread constructors should call
-		// parentThread.getContextClassLoader()
-		// instead of accessing field
-		final ClassLoader loader = new ClassLoader() {
-		};
-		class ContextThread extends Thread {
-			private ClassLoader contextClassLoader;
-
-			public ClassLoader getContextClassLoader() {
-				return contextClassLoader;
-			}
-
-			public void setContextClassLoader(ClassLoader loader) {
-				contextClassLoader = loader;
-			}
-
-			public void run() {
-				Thread thread = new Thread();
-				ClassLoader contextLoader = thread.getContextClassLoader();
-				AssertJUnit.assertTrue("incorrect context class loader", contextLoader == loader);
-			}
-		}
-		;
-		Thread sub = new ContextThread();
-		sub.setContextClassLoader(loader);
-		sub.start();
-		/* [PR CMVC 90230] behavior change in 1.5 */
-		// behavior change in 1.5, Thread constructors should check
-		// enableContextClassLoaderOverride
-		// if thread overrides getContextClassLoader() or
-		// setContextClassLoader() */
-		class SubContextThread extends ContextThread {
-		}
-		;
-		System.setSecurityManager(new SecurityManager());
-		try {
-			// creating a new Thread, or subclass of Thread should not cause an
-			// exception
-			new Thread();
-			new Thread() {
-			};
-			boolean exception = false;
-			try {
-				new SubContextThread();
-			} catch (SecurityException e) {
-				AssertJUnit.assertTrue("wrong exception: " + e,
-						e.getMessage().indexOf("enableContextClassLoaderOverride") != -1);
-				exception = true;
-			}
-			AssertJUnit.assertTrue("exception not thrown", exception);
-		} finally {
-			System.setSecurityManager(null);
-		}
-	}
-
-	/**
 	 * @tests java.lang.Thread#getName()
 	 */
 	@Test
@@ -601,6 +423,7 @@ public class Test_Thread {
 		/* [PR CMVC 88976] the Thread is alive until cleanup() is called */
 		final Object lock = new Object();
 		Thread t = new Thread() {
+			@Override
 			public void run() {
 				synchronized (lock) {
 					lock.notifyAll();
@@ -631,6 +454,7 @@ public class Test_Thread {
 			Thread parent;
 			boolean sync;
 
+			@Override
 			public void run() {
 				if (sync) {
 					synchronized (lock) {
@@ -732,11 +556,14 @@ public class Test_Thread {
 		class SpinThread implements Runnable {
 			public volatile boolean done = false;
 
+			@Override
 			public void run() {
-				while (!Thread.currentThread().isInterrupted())
-					;
-				while (!done)
-					;
+				while (!Thread.currentThread().isInterrupted()) {
+					/* wait to be interrupted */
+				}
+				while (!done) {
+					/* wait to be told we're done */
+				}
 			}
 		}
 
@@ -763,12 +590,8 @@ public class Test_Thread {
 		SimpleThread simple;
 		try {
 			st = new Thread(simple = new SimpleThread(100));
-			AssertJUnit.assertTrue("Thread is alive", !st.isAlive()); // cause isAlive() to
-			// be compiled by
-			// the jit, as it
-			// must be called
-			// within 100ms
-			// below
+			AssertJUnit.assertTrue("Thread is alive", !st.isAlive()); // cause isAlive()
+			// to be compiled by the jit, as it must be called within 100ms below
 			synchronized (simple) {
 				st.start();
 				simple.wait();
@@ -795,12 +618,8 @@ public class Test_Thread {
 		SimpleThread simple;
 		try {
 			st = new Thread(simple = new SimpleThread(1000), "SimpleThread12");
-			AssertJUnit.assertTrue("Thread is alive", !st.isAlive()); // cause isAlive() to
-			// be compiled by
-			// the jit, as it
-			// must be called
-			// within 100ms
-			// below
+			AssertJUnit.assertTrue("Thread is alive", !st.isAlive()); // cause isAlive()
+			// to be compiled by the jit, as it must be called within 100ms below
 			synchronized (simple) {
 				st.start();
 				simple.wait();
@@ -828,6 +647,7 @@ public class Test_Thread {
 		final Object lock = new Object();
 		final Thread main = Thread.currentThread();
 		Thread killer = new Thread(new Runnable() {
+			@Override
 			public void run() {
 				try {
 					synchronized (lock) {
@@ -860,9 +680,9 @@ public class Test_Thread {
 	 */
 	@Test
 	public void test_join3() {
-		SimpleThread simple;
 		try {
-			Thread t = new Thread(simple = new SimpleThread(3000), "Squawk1");
+			SimpleThread simple = new SimpleThread(60 * 1000);
+			Thread t = new Thread(simple, "Squawk1");
 			synchronized (simple) {
 				t.start();
 				simple.wait();
@@ -870,8 +690,9 @@ public class Test_Thread {
 			long firstRead = System.currentTimeMillis();
 			t.join(100, 999999);
 			long secondRead = System.currentTimeMillis();
-			AssertJUnit.assertTrue("Did not join by appropriate time: " + secondRead + "-" + firstRead + "="
-					+ (secondRead - firstRead), secondRead - firstRead >= 100);
+			long delta = secondRead - firstRead;
+			AssertJUnit.assertTrue("Did not join by appropriate time: " + secondRead + "-" + firstRead + "=" + delta,
+					delta >= 100);
 			AssertJUnit.assertTrue("Joined thread is not alive", t.isAlive());
 			t.interrupt();
 		} catch (Exception e) {
@@ -881,6 +702,7 @@ public class Test_Thread {
 		final Object lock = new Object();
 		final Thread main = Thread.currentThread();
 		Thread killer = new Thread(new Runnable() {
+			@Override
 			public void run() {
 				try {
 					synchronized (lock) {
@@ -913,29 +735,38 @@ public class Test_Thread {
 	 */
 	@Test
 	public void test_resume() {
-		int orgval;
-		ResSupThread t;
-		try {
-			t = new ResSupThread(Thread.currentThread());
-			synchronized (t) {
-				ct = new Thread(t, "Interupt Test2");
-				ct.start();
-				t.wait();
+		if (VersionCheck.major() < 20) {
+			int orgval;
+			ResSupThread t;
+			try {
+				t = new ResSupThread(Thread.currentThread());
+				synchronized (t) {
+					ct = new Thread(t, "Interupt Test2");
+					ct.start();
+					t.wait();
+				}
+				ct.suspend();
+				// Wait to be sure the suspend has occurred
+				Thread.sleep(500);
+				orgval = t.getCheckVal();
+				// Wait to be sure the thread is suspended
+				Thread.sleep(500);
+				AssertJUnit.assertTrue("Failed to suspend thread", orgval == t.getCheckVal());
+				ct.resume();
+				// Wait to be sure the resume has occurred.
+				Thread.sleep(500);
+				AssertJUnit.assertTrue("Failed to resume thread", orgval != t.getCheckVal());
+				ct.interrupt();
+			} catch (InterruptedException e) {
+				Assert.fail("Unexpected interrupt occurred", e);
 			}
-			ct.suspend();
-			// Wait to be sure the suspend has occurred
-			Thread.sleep(500);
-			orgval = t.getCheckVal();
-			// Wait to be sure the thread is suspended
-			Thread.sleep(500);
-			AssertJUnit.assertTrue("Failed to suspend thread", orgval == t.getCheckVal());
-			ct.resume();
-			// Wait to be sure the resume has occurred.
-			Thread.sleep(500);
-			AssertJUnit.assertTrue("Failed to resume thread", orgval != t.getCheckVal());
-			ct.interrupt();
-		} catch (InterruptedException e) {
-			Assert.fail("Unexpected interrupt occurred", e);
+		} else {
+			try {
+				Thread.currentThread().resume();
+				Assert.fail("expected UnsupportedOperationException");
+			} catch (UnsupportedOperationException e) {
+				// expected
+			}
 		}
 	}
 
@@ -947,6 +778,7 @@ public class Test_Thread {
 		class RunThread implements Runnable {
 			boolean didThreadRun = false;
 
+			@Override
 			public void run() {
 				didThreadRun = true;
 			}
@@ -963,7 +795,7 @@ public class Test_Thread {
 			AssertJUnit.assertTrue("Thread did not run", rt.didThreadRun);
 			t.join();
 		} catch (InterruptedException e) {
-			AssertJUnit.assertTrue("Joined thread was interrupted", true);
+			// expected: joined thread was interrupted
 		}
 		AssertJUnit.assertTrue("Joined thread is still alive", !t.isAlive());
 	}
@@ -991,8 +823,7 @@ public class Test_Thread {
 			st.setName(null);
 			AssertJUnit.assertTrue("Null should not be accepted as a valid name", false);
 		} catch (NullPointerException e) {
-			// success
-			AssertJUnit.assertTrue("Null should not be accepted as a valid name", true);
+			// expected: null should not be accepted as a valid name
 		}
 		st.start();
 	}
@@ -1043,8 +874,9 @@ public class Test_Thread {
 			/* [PR CMVC 133063] timing related test failure */
 			for (int i = 0; i < 5; i++) {
 				Thread.sleep(150);
-				if (orgval != t.getCheckVal())
+				if (orgval != t.getCheckVal()) {
 					break;
+				}
 			}
 			AssertJUnit.assertTrue("Thread is not running2", orgval != t.getCheckVal());
 			ct.interrupt();
@@ -1077,7 +909,7 @@ public class Test_Thread {
 				} catch (IllegalThreadStateException e) {
 					/* IllegalThreadStateException is expected
 					 *
-					 *  This thread's group should only have this thread as child since it is alive and still running.
+					 * This thread's group should only have this thread as child since it is alive and still running.
 					 */
 					if (myGroup.activeCount() != 1) {
 						testResult = "This running thread's thread group does not have one child which should be this thread";
@@ -1111,13 +943,14 @@ public class Test_Thread {
 	public void test_start_WeakReference() {
 		/* [PR CVMC 118827] references are not removed in dead threads */
 		Object o = new Object();
-		final WeakReference ref = new WeakReference(o);
+		final WeakReference<Object> ref = new WeakReference<>(o);
 		Thread t = new Thread(new Runnable() {
 			// If Thread.runnable isn't cleared, "save" holds a reference
 			Object save;
 			ThreadLocal tl = new ThreadLocal();
 			InheritableThreadLocal itl = new InheritableThreadLocal();
 
+			@Override
 			public void run() {
 				save = ref.get();
 				tl.set(save);
@@ -1141,69 +974,39 @@ public class Test_Thread {
 	 */
 	@Test
 	public void test_stop() {
-		try {
-			Runnable r = new ResSupThread(null);
-			synchronized (r) {
-				st = new Thread(r, "Interupt Test5");
-				st.start();
-				r.wait();
-			}
-
-		} catch (InterruptedException e) {
-			Assert.fail("Unexpected interrupt received", e);
-		}
-		st.stop();
-
-		/*
-		 * Thread.stop() implementation is changed from 1.1.7 to the 1.2
-		 * behaviour. now stop() doesn't ensure immediate thread death, so we
-		 * have to wait till st thread joins back to current thread, before
-		 * making an isAlive() check.
-		 */
-		try {
-			st.join(10000);
-		} catch (InterruptedException e1) {
-			st.interrupt();
-			Assert.fail("Failed to stopThread before 10000 timeout", e1);
-		}
-		AssertJUnit.assertTrue("Failed to stopThread", !st.isAlive());
-	}
-
-	/**
-	 * @tests java.lang.Thread#stop()
-	 */
-	@Test
-	public void test_stop2() {
-		/* [PR CMVC 94728] AccessControlException on dead Thread */
-		Thread t = new Thread("t");
-		class MySecurityManager extends SecurityManager {
-			public boolean intest = false;
-
-			public void checkAccess(Thread t) {
-				if (intest) {
-					Assert.fail("checkAccess called");
+		if (VersionCheck.major() < 20) {
+			try {
+				Runnable r = new ResSupThread(null);
+				synchronized (r) {
+					st = new Thread(r, "Interupt Test5");
+					st.start();
+					r.wait();
 				}
-			}
-		}
-		MySecurityManager sm = new MySecurityManager();
-		System.setSecurityManager(sm);
-		try {
-			sm.intest = false;
-			t.start();
-			try {
-				t.join(2000);
 			} catch (InterruptedException e) {
+				Assert.fail("Unexpected interrupt received", e);
 			}
-			sm.intest = true;
+			st.stop();
+
+			/*
+			 * Thread.stop() implementation is changed from 1.1.7 to the 1.2
+			 * behaviour. now stop() doesn't ensure immediate thread death, so we
+			 * have to wait till st thread joins back to current thread, before
+			 * making an isAlive() check.
+			 */
 			try {
-				t.stop();
-				// Ignore any SecurityExceptions, may not have stopThread
-				// permission
-			} catch (SecurityException e) {
+				st.join(10000);
+			} catch (InterruptedException e1) {
+				st.interrupt();
+				Assert.fail("Failed to stopThread before 10000 timeout", e1);
 			}
-			sm.intest = false;
-		} finally {
-			System.setSecurityManager(null);
+			AssertJUnit.assertTrue("Failed to stopThread", !st.isAlive());
+		} else {
+			try {
+				Thread.currentThread().stop();
+				Assert.fail("expected UnsupportedOperationException");
+			} catch (UnsupportedOperationException e) {
+				// expected
+			}
 		}
 	}
 
@@ -1215,22 +1018,32 @@ public class Test_Thread {
 		class StopBeforeStartThread extends Thread {
 			public boolean failed = false;
 
+			@Override
 			public void run() {
 				synchronized (this) {
 					failed = true;
 				}
 			}
 		}
-		try {
-			StopBeforeStartThread t = new StopBeforeStartThread();
-			t.stop();
-			t.start();
-			t.join();
-			synchronized (t) {
-				AssertJUnit.assertFalse("thread should not run if stop called before start, stop()", t.failed);
+		if (VersionCheck.major() < 20) {
+			try {
+				StopBeforeStartThread t = new StopBeforeStartThread();
+				t.stop();
+				t.start();
+				t.join();
+				synchronized (t) {
+					AssertJUnit.assertFalse("thread should not run if stop called before start, stop()", t.failed);
+				}
+			} catch (Exception e) {
+				Assert.fail("Unexpected exception:", e);
 			}
-		} catch (Exception e) {
-			Assert.fail("Unexpected exception:", e);
+		} else {
+			try {
+				Thread.currentThread().stop();
+				Assert.fail("expected UnsupportedOperationException");
+			} catch (UnsupportedOperationException e) {
+				// expected
+			}
 		}
 	}
 
@@ -1239,54 +1052,64 @@ public class Test_Thread {
 	 */
 	@Test
 	public void test_suspend() {
-		int orgval;
-		ResSupThread t = new ResSupThread(Thread.currentThread());
-		try {
-			synchronized (t) {
-				ct = new Thread(t, "Interupt Test6");
-				ct.start();
-				t.wait();
-			}
-			ct.suspend();
-			// Wait to be sure the suspend has occurred
-			Thread.sleep(500);
-			orgval = t.getCheckVal();
-			// Wait to be sure the thread is suspended
-			Thread.sleep(500);
-			AssertJUnit.assertTrue("Failed to suspend thread", orgval == t.getCheckVal());
-			ct.resume();
-			// Wait to be sure the resume has occurred.
-			Thread.sleep(500);
-			AssertJUnit.assertTrue("Failed to resume thread", orgval != t.getCheckVal());
-			ct.interrupt();
-		} catch (InterruptedException e) {
-			Assert.fail("Unexpected interrupt occurred", e);
-		}
-
-		/*
-		 * [PR 106321] suspend() must not synchronize when a Thread is
-		 * suspending itself
-		 */
-		final Object notify = new Object();
-		Thread t1 = new Thread(new Runnable() {
-			public void run() {
-				synchronized (notify) {
-					notify.notify();
+		if (VersionCheck.major() < 20) {
+			int orgval;
+			ResSupThread t = new ResSupThread(Thread.currentThread());
+			try {
+				synchronized (t) {
+					ct = new Thread(t, "Interupt Test6");
+					ct.start();
+					t.wait();
 				}
+				ct.suspend();
+				// Wait to be sure the suspend has occurred
+				Thread.sleep(500);
+				orgval = t.getCheckVal();
+				// Wait to be sure the thread is suspended
+				Thread.sleep(500);
+				AssertJUnit.assertTrue("Failed to suspend thread", orgval == t.getCheckVal());
+				ct.resume();
+				// Wait to be sure the resume has occurred.
+				Thread.sleep(500);
+				AssertJUnit.assertTrue("Failed to resume thread", orgval != t.getCheckVal());
+				ct.interrupt();
+			} catch (InterruptedException e) {
+				Assert.fail("Unexpected interrupt occurred", e);
+			}
+
+			/*
+			 * [PR 106321] suspend() must not synchronize when a Thread is
+			 * suspending itself
+			 */
+			final Object notify = new Object();
+			Thread t1 = new Thread(new Runnable() {
+				@Override
+				public void run() {
+					synchronized (notify) {
+						notify.notify();
+					}
+					Thread.currentThread().suspend();
+				}
+			});
+			try {
+				synchronized (notify) {
+					t1.start();
+					notify.wait();
+				}
+				// wait for Thread to suspend
+				Thread.sleep(500);
+				AssertJUnit.assertTrue("Thread should be alive", t1.isAlive());
+				t1.resume();
+				t1.join();
+			} catch (InterruptedException e) {
+			}
+		} else {
+			try {
 				Thread.currentThread().suspend();
+				Assert.fail("expected UnsupportedOperationException");
+			} catch (UnsupportedOperationException e) {
+				// expected
 			}
-		});
-		try {
-			synchronized (notify) {
-				t1.start();
-				notify.wait();
-			}
-			// wait for Thread to suspend
-			Thread.sleep(500);
-			AssertJUnit.assertTrue("Thread should be alive", t1.isAlive());
-			t1.resume();
-			t1.join();
-		} catch (InterruptedException e) {
 		}
 	}
 
@@ -1316,18 +1139,21 @@ public class Test_Thread {
 	@AfterMethod
 	protected void tearDown() {
 		try {
-			if (st != null)
+			if (st != null) {
 				st.interrupt();
+			}
 		} catch (Exception e) {
 		}
 		try {
-			if (spinner != null)
+			if (spinner != null) {
 				spinner.interrupt();
+			}
 		} catch (Exception e) {
 		}
 		try {
-			if (ct != null)
+			if (ct != null) {
 				ct.interrupt();
+			}
 		} catch (Exception e) {
 		}
 
@@ -1339,13 +1165,14 @@ public class Test_Thread {
 		} catch (Exception e) {
 		}
 
-		/*Make sure that the current thread is not interrupted. If it is, set it back to false.*/
-		/*Otherwise any call to join, wait, sleep from the current thread throws either InterruptedException or IllegalMonitorStateException*/
+		/* Make sure that the current thread is not interrupted. If it is, set it back to false. */
+		/* Otherwise any call to join, wait, sleep from the current thread throws either
+		 * InterruptedException or IllegalMonitorStateException. */
 		if (Thread.currentThread().isInterrupted()) {
 			try {
 				Thread.currentThread().join(10);
 			} catch (InterruptedException e) {
-				//If we are here, current threads interrupted status is set to false.
+				// If we are here, current threads interrupted status is set to false.
 			}
 		}
 	}

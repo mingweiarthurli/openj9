@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1998, 2019 IBM Corp. and others
+ * Copyright (c) 1998, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -317,6 +317,20 @@ public class Test_String {
 		AssertJUnit.assertTrue("0x130 should compare = to 'i'", "\u0130".compareToIgnoreCase("i") == 0);
 		AssertJUnit.assertTrue("0x131 should compare = to 'i'", "\u0131".compareToIgnoreCase("i") == 0);
 
+		AssertJUnit.assertTrue("Turkish 'ı' at beginning of string returned incorrect value for first = second",
+				"\u0131\u0130j".compareToIgnoreCase("\u0069\u0049J") == 0);
+		AssertJUnit.assertTrue("Turkish 'ı' in middle of string returned incorrect value for first = second",
+				"J\u0131j".compareToIgnoreCase("j\u0130J") == 0);
+		AssertJUnit.assertTrue("Turkish 'ı' at end of string returned incorrect value for first = second",
+				"j\u0131".compareToIgnoreCase("J\u0130") == 0);
+
+		if (VersionCheck.major() >= 16) {
+			AssertJUnit.assertTrue("DESERET CAPITAL LETTER LONG I should compare == to DESERET SMALL LETTER LONG I",
+				"\ud801\udc00".compareToIgnoreCase("\ud801\udc28") == 0);
+			AssertJUnit.assertTrue("low surrogate only of a Deseret capital/small letter pair at end of string should compare unequal",
+				"A\udc00".compareToIgnoreCase("A\udc28") != 0);
+		}
+
 		Locale defLocale = Locale.getDefault();
 		try {
 			Locale.setDefault(new Locale("tr", ""));
@@ -579,6 +593,20 @@ public class Test_String {
 	@Test
 	public void test_equalsIgnoreCase() {
 		AssertJUnit.assertTrue("lc version returned unequal to uc", hwlc.equalsIgnoreCase(hwuc));
+
+		AssertJUnit.assertTrue("Turkish 'ı' at beginning of string lc version returned unequal to uc",
+				"\u0131\u0130j".equalsIgnoreCase("\u0069\u0049J"));
+		AssertJUnit.assertTrue("Turkish 'ı' in middle of string lc version returned unequal to uc",
+				"J\u0131j".equalsIgnoreCase("j\u0130J"));
+		AssertJUnit.assertTrue("Turkish 'ı' at end of string lc version returned unequal to uc",
+				"j\u0131".equalsIgnoreCase("J\u0130"));
+
+		if (VersionCheck.major() >= 16) {
+			AssertJUnit.assertTrue("DESERET CAPITAL LETTER LONG I returned unequal to DESERET SMALL LETTER LONG I",
+				"\ud801\udc00".equalsIgnoreCase("\ud801\udc28"));
+			AssertJUnit.assertFalse("low surrogate only of a Deseret capital/small letter pair at end of string should return unequal",
+				"A\udc00".equalsIgnoreCase("A\udc28"));
+		}
 	}
 
 	/**
@@ -1031,6 +1059,20 @@ public class Test_String {
 		AssertJUnit.assertTrue("Different regions returned true", !hw1.regionMatches(true, 2, bogusString, 2, 5));
 		AssertJUnit.assertTrue("identical regions failed comparison with different cases",
 				hw1.regionMatches(false, 2, hw2, 2, 5));
+
+		AssertJUnit.assertTrue("Turkish 'ı' at beginning of string failed comparison with different cases",
+				"\u0131\u0130j".regionMatches(true, 0, "\u0069\u0049J", 0, 3));
+		AssertJUnit.assertTrue("Turkish 'ı' in middle of string failed comparison with different cases",
+				"J\u0131j".regionMatches(true, 0, "j\u0130J", 0, 3));
+		AssertJUnit.assertTrue("Turkish 'ı' at end of string failed comparison with different cases",
+				"jJ\u0131".regionMatches(true, 0, "Jj\u0130", 0, 3));
+
+		if (VersionCheck.major() >= 16) {
+			AssertJUnit.assertTrue("DESERET CAPITAL LETTER LONG I and DESERET SMALL LETTER LONG I should match when case insensitive",
+				"\ud801\udc00".regionMatches(true, 0, "\ud801\udc28", 0 ,2));
+			AssertJUnit.assertFalse("low surrogate only of a Deseret capital/small letter pair at end of region should not match when case insensitive",
+				"A\udc00B".regionMatches(true, 0, "A\udc28B", 0 ,2));
+		}
 	}
 
 	/**
@@ -1524,28 +1566,41 @@ public class Test_String {
 	@Test
 	public void test_offsetByCodePoints() {
 		String s1 = "A\ud800\udc00C";
-		AssertJUnit.assertTrue("wrong offset 0, 0", s1.offsetByCodePoints(0, 0) == 0);
-		AssertJUnit.assertTrue("wrong offset 0, 1", s1.offsetByCodePoints(0, 1) == 1);
-		AssertJUnit.assertTrue("wrong offset 0, 2", s1.offsetByCodePoints(0, 2) == 3);
-		AssertJUnit.assertTrue("wrong offset 0, 3", s1.offsetByCodePoints(0, 3) == 4);
-		AssertJUnit.assertTrue("wrong offset 1, 0", s1.offsetByCodePoints(1, 0) == 1);
-		AssertJUnit.assertTrue("wrong offset 1, 1", s1.offsetByCodePoints(1, 1) == 3);
-		AssertJUnit.assertTrue("wrong offset 1, 2", s1.offsetByCodePoints(1, 2) == 4);
-		AssertJUnit.assertTrue("wrong offset 2, 0", s1.offsetByCodePoints(2, 0) == 2);
-		AssertJUnit.assertTrue("wrong offset 2, 1", s1.offsetByCodePoints(2, 1) == 3);
-		AssertJUnit.assertTrue("wrong offset 2, 2", s1.offsetByCodePoints(2, 2) == 4);
-		AssertJUnit.assertTrue("wrong offset 3, 0", s1.offsetByCodePoints(3, 0) == 3);
-		AssertJUnit.assertTrue("wrong offset 3, 1", s1.offsetByCodePoints(3, 1) == 4);
-		AssertJUnit.assertTrue("wrong offset 4, 0", s1.offsetByCodePoints(4, 0) == 4);
+		AssertJUnit.assertEquals("wrong offset 0, 0", 0, s1.offsetByCodePoints(0, 0));
+		AssertJUnit.assertEquals("wrong offset 0, 1", 1, s1.offsetByCodePoints(0, 1));
+		AssertJUnit.assertEquals("wrong offset 0, 2", 3, s1.offsetByCodePoints(0, 2));
+		AssertJUnit.assertEquals("wrong offset 0, 3", 4, s1.offsetByCodePoints(0, 3));
+		AssertJUnit.assertEquals("wrong offset 1, 0", 1, s1.offsetByCodePoints(1, 0));
+		AssertJUnit.assertEquals("wrong offset 1, 1", 3, s1.offsetByCodePoints(1, 1));
+		AssertJUnit.assertEquals("wrong offset 1, 2", 4, s1.offsetByCodePoints(1, 2));
+		AssertJUnit.assertEquals("wrong offset 2, 0", 2, s1.offsetByCodePoints(2, 0));
+		AssertJUnit.assertEquals("wrong offset 2, 1", 3, s1.offsetByCodePoints(2, 1));
+		AssertJUnit.assertEquals("wrong offset 2, 2", 4, s1.offsetByCodePoints(2, 2));
+		AssertJUnit.assertEquals("wrong offset 3, 0", 3, s1.offsetByCodePoints(3, 0));
+		AssertJUnit.assertEquals("wrong offset 3, 1", 4, s1.offsetByCodePoints(3, 1));
+		AssertJUnit.assertEquals("wrong offset 4, 0", 4, s1.offsetByCodePoints(4, 0));
 
-		AssertJUnit.assertTrue("wrong offset 4, -1", s1.offsetByCodePoints(4, -1) == 3);
-		AssertJUnit.assertTrue("wrong offset 4, -2", s1.offsetByCodePoints(4, -2) == 1);
-		AssertJUnit.assertTrue("wrong offset 4, -3", s1.offsetByCodePoints(4, -3) == 0);
-		AssertJUnit.assertTrue("wrong offset 3, -1", s1.offsetByCodePoints(3, -1) == 1);
-		AssertJUnit.assertTrue("wrong offset 3, -2", s1.offsetByCodePoints(3, -2) == 0);
-		AssertJUnit.assertTrue("wrong offset 2, -1", s1.offsetByCodePoints(2, -1) == 1);
-		AssertJUnit.assertTrue("wrong offset 2, -2", s1.offsetByCodePoints(2, -2) == 0);
-		AssertJUnit.assertTrue("wrong offset 1, -1", s1.offsetByCodePoints(1, -1) == 0);
+		AssertJUnit.assertEquals("wrong offset 4, -1", 3, s1.offsetByCodePoints(4, -1));
+		AssertJUnit.assertEquals("wrong offset 4, -2", 1, s1.offsetByCodePoints(4, -2));
+		AssertJUnit.assertEquals("wrong offset 4, -3", 0, s1.offsetByCodePoints(4, -3));
+		AssertJUnit.assertEquals("wrong offset 3, -1", 1, s1.offsetByCodePoints(3, -1));
+		AssertJUnit.assertEquals("wrong offset 3, -2", 0, s1.offsetByCodePoints(3, -2));
+		AssertJUnit.assertEquals("wrong offset 2, -1", 1, s1.offsetByCodePoints(2, -1));
+		AssertJUnit.assertEquals("wrong offset 2, -2", 0, s1.offsetByCodePoints(2, -2));
+		AssertJUnit.assertEquals("wrong offset 1, -1", 0, s1.offsetByCodePoints(1, -1));
+
+		try {
+			s1.offsetByCodePoints(s1.length(), 1);
+			AssertJUnit.fail("returned index greater than length should fail");
+		} catch (IndexOutOfBoundsException e) {
+			// correct exception thrown
+		}
+		try {
+			s1.offsetByCodePoints(0, -1);
+			AssertJUnit.fail("returned index less than zero should fail");
+		} catch (IndexOutOfBoundsException e) {
+			// correct exception thrown
+		}
 	}
 
 	/**

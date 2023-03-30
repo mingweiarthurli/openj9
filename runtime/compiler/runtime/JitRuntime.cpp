@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -53,12 +53,14 @@
 #include "env/PersistentInfo.hpp"
 #include "env/TRMemory.hpp"
 #include "env/ut_j9jit.h"
+#include "env/VerboseLog.hpp"
 #include "runtime/asmprotos.h"
 #include "runtime/CodeCacheManager.hpp"
 #include "runtime/J9Runtime.hpp"
 #include "runtime/J9ValueProfiler.hpp"
 #include "runtime/IProfiler.hpp"
 #include "ilgen/IlGeneratorMethodDetails_inlines.hpp"
+#include "omrformatconsts.h"
 
 #if defined(TR_HOST_X86) || defined(TR_HOST_POWER) || defined(TR_HOST_S390) || defined(TR_HOST_ARM) || defined(TR_HOST_ARM64)
 #include "codegen/PicHelpers.hpp"
@@ -93,7 +95,6 @@ int32_t J9::Recompilation::limitMethodsCompiled = 0;
 int32_t J9::Recompilation::hotThresholdMethodsCompiled = 0;
 int32_t J9::Recompilation::scorchingThresholdMethodsCompiled = 0;
 
-#if !defined(TR_CROSS_COMPILE_ONLY)
 bool
 J9::Recompilation::isAlreadyBeingCompiled(
       TR_OpaqueMethodBlock *methodInfo,
@@ -105,7 +106,6 @@ J9::Recompilation::isAlreadyBeingCompiled(
       return fej9->isBeingCompiled(methodInfo, startPC);
    return TR::Recompilation::isAlreadyPreparedForRecompile(startPC);
    }
-#endif
 
 void setDllSlip(char*CodeStart,char*CodeEnd,char*dllName, TR::Compilation * comp)
 {
@@ -180,7 +180,6 @@ J9::Recompilation::sampleMethod(
 
    int32_t totalSampleCount = globalSampleCount;
 
-#if !defined(TR_CROSS_COMPILE_ONLY)
    J9Method * j9method = (J9Method *) methodInfo;
 
    /* Reject samples to native methods */
@@ -234,7 +233,6 @@ J9::Recompilation::sampleMethod(
             TR::Recompilation::jitRecompilationsInduced++;
          }
       }
-#endif
    }
 
 
@@ -811,7 +809,7 @@ void dumpMethodsForClass(::FILE *fp, J9Class *classPointer)
       J9UTF8 * clazzUTRF8;
       getClassNameSignatureFromMethod(((J9Method *)&(resolvedMethods[i])), clazzUTRF8, nameUTF8, signatureUTF8);
 
-      fprintf(fp, "\t%u, %.*s.%.*s%.*s\n", &(resolvedMethods[i]), J9UTF8_LENGTH(clazzUTRF8), J9UTF8_DATA(clazzUTRF8), J9UTF8_LENGTH(nameUTF8), J9UTF8_DATA(nameUTF8), J9UTF8_LENGTH(signatureUTF8), J9UTF8_DATA(signatureUTF8));
+      fprintf(fp, "\t%" OMR_PRIuPTR ", %.*s.%.*s%.*s\n", (uintptr_t)&(resolvedMethods[i]), J9UTF8_LENGTH(clazzUTRF8), J9UTF8_DATA(clazzUTRF8), J9UTF8_LENGTH(nameUTF8), J9UTF8_DATA(nameUTF8), J9UTF8_LENGTH(signatureUTF8), J9UTF8_DATA(signatureUTF8));
       }
    }
 
@@ -845,13 +843,13 @@ void dumpInstanceFieldsForClass(::FILE *fp, J9Class *instanceClass, J9VMThread *
             J9UTF8* sigUTF = J9ROMFIELDSHAPE_SIGNATURE(romFieldCursor);
             IDATA offset;
 
-            fprintf(fp, "%u, %.*s, %.*s, %08x, ", instanceClass, J9UTF8_LENGTH(sigUTF), J9UTF8_DATA(sigUTF), J9UTF8_LENGTH(nameUTF), J9UTF8_DATA(nameUTF), romFieldCursor->modifiers);
+            fprintf(fp, "%" OMR_PRIuPTR ", %.*s, %.*s, %08x, ", (uintptr_t)instanceClass, J9UTF8_LENGTH(sigUTF), J9UTF8_DATA(sigUTF), J9UTF8_LENGTH(nameUTF), J9UTF8_DATA(nameUTF), romFieldCursor->modifiers);
 
             offset = javaVM->internalVMFunctions->instanceFieldOffset(vmThread, superclass, J9UTF8_DATA(nameUTF), J9UTF8_LENGTH(nameUTF), J9UTF8_DATA(sigUTF), J9UTF8_LENGTH(sigUTF), NULL, NULL, J9_LOOK_NO_JAVA);
 
             if (offset >= 0)
                {
-               fprintf(fp, "%d\n", offset + TR::Compiler->om.objectHeaderSizeInBytes());
+               fprintf(fp, "%" OMR_PRIuPTR "\n", offset + TR::Compiler->om.objectHeaderSizeInBytes());
                }
             else
                {
@@ -880,7 +878,7 @@ void dumpClassStaticsForClass(::FILE *fp, J9Class *clazz, J9VMThread *vmThread)
          J9UTF8* nameUTF = J9ROMFIELDSHAPE_NAME(romFieldCursor);
          J9UTF8* sigUTF = J9ROMFIELDSHAPE_SIGNATURE(romFieldCursor);
 
-         fprintf(fp, "%u, %.*s, %.*s, %08x, ", clazz, J9UTF8_LENGTH(sigUTF), J9UTF8_DATA(sigUTF), J9UTF8_LENGTH(nameUTF), J9UTF8_DATA(nameUTF), romFieldCursor->modifiers);
+         fprintf(fp, "%" OMR_PRIuPTR ", %.*s, %.*s, %08x, ", (uintptr_t)clazz, J9UTF8_LENGTH(sigUTF), J9UTF8_DATA(sigUTF), J9UTF8_LENGTH(nameUTF), J9UTF8_DATA(nameUTF), romFieldCursor->modifiers);
 
          void *address = javaVM->internalVMFunctions->staticFieldAddress(vmThread, clazz, J9UTF8_DATA(nameUTF), J9UTF8_LENGTH(nameUTF), J9UTF8_DATA(sigUTF), J9UTF8_LENGTH(sigUTF), NULL, NULL, J9_LOOK_NO_JAVA, NULL);
 
@@ -952,7 +950,7 @@ void dumpAllClasses(J9VMThread *vmThread)
       J9UTF8 * clazzUTRF8 = J9ROMCLASS_CLASSNAME(clazz->romClass);
 
       // print the class address
-      fprintf(fp, "%u, ", clazz);
+      fprintf(fp, "%" OMR_PRIuPTR ", ", (uintptr_t)clazz);
 
       J9ROMClass *romClass = clazz->romClass;
       // print the class name, for arrays get to the leaf array class and print that
@@ -1202,8 +1200,6 @@ void initializeJitRuntimeHelperTable(char isSMP)
    #define SET runtimeHelpers.setAddress
    #define SET_CONST runtimeHelpers.setConstant
 
-#if !defined(TR_CROSS_COMPILE_ONLY)
-
 #if defined(TR_HOST_POWER)
    PPCinitializeValueProfiler();
 #elif defined(TR_HOST_S390)
@@ -1304,8 +1300,6 @@ void initializeJitRuntimeHelperTable(char isSMP)
    SET(TR_S390induceRecompilation,              (void *)_induceRecompilation,       TR_Helper);
    SET_CONST(TR_S390induceRecompilation_unwrapper, (void *) induceRecompilation_unwrapper);
    SET_CONST(TR_S390CEnvironmentAddress,(void *)TOC_UNWRAP_ENV((void *)_jitProfileValue));
-
-#endif
 
 #endif
 
@@ -1419,7 +1413,7 @@ static void printMethodHandleArgs(j9object_t methodHandle, void **stack, J9VMThr
    if (stack[0] != methodHandle && TR::Options::isAnyVerboseOptionSet())
       {
       int i;
-      TR_VerboseLog::vlogAcquire();; // we want all the following output to appear together in the log
+      TR_VerboseLog::CriticalSection vlogLock; // we want all the following output to appear together in the log
       TR_VerboseLog::writeLine(TR_Vlog_FAILURE, "%p Pointer %p found on stack @ %p does not match MethodHandle %p", vmThread, stack[0], stack, methodHandle);
       TR_VerboseLog::writeLine(TR_Vlog_FAILURE, "%p   Nearby stack slots:", vmThread);
       for (i = -9; i <= 9; i++)
@@ -1434,7 +1428,6 @@ static void printMethodHandleArgs(j9object_t methodHandle, void **stack, J9VMThr
             tag = " <- stack address";
          TR_VerboseLog::writeLine(TR_Vlog_FAILURE, "%p     %p @ %+d: %p%s", vmThread, stack+i, i, slotValue, tag);
          }
-      TR_VerboseLog::vlogRelease();
       }
    TR_ASSERT(stack[0] == methodHandle, "Pointer %p on stack @ %p must match MethodHandle %p", stack[0], stack, methodHandle);
 
@@ -1447,7 +1440,7 @@ static void printMethodHandleArgs(j9object_t methodHandle, void **stack, J9VMThr
 
    if (vlogTag)
       {
-      TR_VerboseLog::vlogAcquire();
+      TR_VerboseLog::CriticalSection vlogLock;
 
       char *curArg;
       int numArgs = 0;
@@ -1483,6 +1476,7 @@ static void printMethodHandleArgs(j9object_t methodHandle, void **stack, J9VMThr
                   break;
                case 'L':
                case '[':
+               case 'Q':
                   TR_VerboseLog::writeLine(vlogTag, "%p     arg " POINTER_PRINTF_FORMAT " %.*s", vmThread, (void*)(*(intptr_t*)stack), nextArg-curArg, curArg);
                   stack -= 1;
                   break;
@@ -1493,8 +1487,6 @@ static void printMethodHandleArgs(j9object_t methodHandle, void **stack, J9VMThr
                }
             }
          }
-
-      TR_VerboseLog::vlogRelease();
       }
 
    }
@@ -1518,7 +1510,7 @@ uint8_t *compileMethodHandleThunk(j9object_t methodHandle, j9object_t arg, J9VMT
 
    if (verbose)
       {
-      TR_VerboseLog::vlogAcquire();
+      TR_VerboseLog::CriticalSection vlogLock;
       TR_VerboseLog::write(TR_Vlog_MH, "%p Starting compileMethodHandleThunk on MethodHandle %p", vmThread, methodHandle);
       if (arg)
          TR_VerboseLog::write(" arg %p", arg);
@@ -1530,7 +1522,6 @@ uint8_t *compileMethodHandleThunk(j9object_t methodHandle, j9object_t arg, J9VMT
             TR_VerboseLog::write(" %s", flagNames[i]);
          }
       TR_VerboseLog::writeLine("");
-      TR_VerboseLog::vlogRelease();
       }
    bool disabled = false;
 #if defined(J9VM_OPT_JITSERVER)
@@ -1798,4 +1789,3 @@ void methodHandleJ2I_unwrapper(void **argsPtr, void **resPtr)
    j9object_t   methodHandle = (j9object_t)argsPtr[0];
    methodHandleJ2I(methodHandle, stack, vmThread);
    }
-

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2017, 2019 IBM Corp. and others
+ * Copyright (c) 2017, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -43,6 +43,7 @@
 #include "StringTable.hpp"
 
 #include "OwnableSynchronizerObjectList.hpp"
+#include "ContinuationObjectList.hpp"
 #include "ReferenceObjectList.hpp"
 #include "UnfinalizedObjectList.hpp"
 
@@ -50,6 +51,7 @@ typedef struct MM_HeapRegionDescriptorStandardExtension {
 	uintptr_t _maxListIndex; /**< Max index for _*ObjectLists[index] */
 	MM_UnfinalizedObjectList *_unfinalizedObjectLists; /**< An array of lists of unfinalized objects in this region */
 	MM_OwnableSynchronizerObjectList *_ownableSynchronizerObjectLists; /**< An array of lists of ownable synchronizer objects in this region */
+	MM_ContinuationObjectList *_continuationObjectLists; /**< An array of lists of continuation objects in this region */
 	MM_ReferenceObjectList *_referenceObjectLists; /**< An array of lists of reference objects (i.e. weak/soft/phantom) in this region */
 } MM_HeapRegionDescriptorStandardExtension;
 
@@ -172,7 +174,7 @@ public:
 
 		if (extensions->isStandardGC()) {
 			uintptr_t listCount = extensions->gcThreadCount;
-			uintptr_t allocSize = sizeof(MM_HeapRegionDescriptorStandardExtension) + (listCount * (sizeof(MM_UnfinalizedObjectList) + sizeof(MM_OwnableSynchronizerObjectList) + sizeof(MM_ReferenceObjectList)));
+			uintptr_t allocSize = sizeof(MM_HeapRegionDescriptorStandardExtension) + (listCount * (sizeof(MM_UnfinalizedObjectList) + sizeof(MM_OwnableSynchronizerObjectList) + sizeof(MM_ContinuationObjectList) + sizeof(MM_ReferenceObjectList)));
 			MM_HeapRegionDescriptorStandardExtension *regionExtension = (MM_HeapRegionDescriptorStandardExtension *)env->getForge()->allocate(allocSize, MM_AllocationCategory::FIXED, J9_GET_CALLSITE());
 			if (NULL == regionExtension) {
 				return false;
@@ -181,7 +183,8 @@ public:
 			regionExtension->_maxListIndex = listCount;
 			regionExtension->_unfinalizedObjectLists = (MM_UnfinalizedObjectList *) ((uintptr_t)regionExtension + sizeof(MM_HeapRegionDescriptorStandardExtension));
 			regionExtension->_ownableSynchronizerObjectLists = (MM_OwnableSynchronizerObjectList *) (regionExtension->_unfinalizedObjectLists + listCount);
-			regionExtension->_referenceObjectLists = (MM_ReferenceObjectList *) (regionExtension->_ownableSynchronizerObjectLists + listCount);
+			regionExtension->_continuationObjectLists = (MM_ContinuationObjectList *) (regionExtension->_ownableSynchronizerObjectLists + listCount);
+			regionExtension->_referenceObjectLists = (MM_ReferenceObjectList *) (regionExtension->_continuationObjectLists + listCount);
 
 			for (uintptr_t list = 0; list < listCount; list++) {
 				new(&regionExtension->_unfinalizedObjectLists[list]) MM_UnfinalizedObjectList();
@@ -199,7 +202,13 @@ public:
 					extensions->getOwnableSynchronizerObjectLists()->setPreviousList(&regionExtension->_ownableSynchronizerObjectLists[list]);
 				}
 				extensions->setOwnableSynchronizerObjectLists(&regionExtension->_ownableSynchronizerObjectLists[list]);
-
+				new(&regionExtension->_continuationObjectLists[list]) MM_ContinuationObjectList();
+				regionExtension->_continuationObjectLists[list].setNextList(extensions->getContinuationObjectLists());
+				regionExtension->_continuationObjectLists[list].setPreviousList(NULL);
+				if (NULL != extensions->getContinuationObjectLists()) {
+					extensions->getContinuationObjectLists()->setPreviousList(&regionExtension->_continuationObjectLists[list]);
+				}
+				extensions->setContinuationObjectLists(&regionExtension->_continuationObjectLists[list]);
 				new(&regionExtension->_referenceObjectLists[list]) MM_ReferenceObjectList();
 			}
 
@@ -302,7 +311,7 @@ public:
 
 		extensions->accessBarrier->initializeForNewThread(env);
 
-		if (extensions->isConcurrentMarkEnabled()) {
+		if ((extensions->isConcurrentMarkEnabled()) && (!extensions->usingSATBBarrier())) {
 #if defined(OMR_GC_MODRON_CONCURRENT_MARK)
 			vmThread->cardTableVirtualStart = (U_8*)j9gc_incrementalUpdate_getCardTableVirtualStart(omrVM);
 			vmThread->cardTableShiftSize = j9gc_incrementalUpdate_getCardTableShiftValue(omrVM);

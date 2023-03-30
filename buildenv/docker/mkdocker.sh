@@ -2,7 +2,7 @@
 
 print_license() {
 cat <<- EOF
-# Copyright (c) 2019, 2020 IBM Corp. and others
+# Copyright (c) 2019, 2022 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -18,7 +18,7 @@ cat <<- EOF
 # OpenJDK Assembly Exception [2].
 #
 # [1] https://www.gnu.org/software/classpath/license.html
-# [2] http://openjdk.java.net/legal/assembly-exception.html
+# [2] https://openjdk.org/legal/assembly-exception.html
 #
 # SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 EOF
@@ -29,43 +29,56 @@ usage() {
   echo "Generate a Dockerfile for building OpenJ9"
   echo ""
   echo "Options:"
-  echo "  --help|-h      print this help, then exit"
-  echo "  --arch=...     specify the processor architecture (default: host architecture)"
-  echo "  --build        build the docker image (overrides '--print')"
-  echo "  --cuda         include CUDA header files"
-  echo "  --dist=...     specify the Linux distribution (e.g. centos, ubuntu)"
-  echo "  --print        write the Dockerfile to stdout (default; overrides '--build')"
-  echo "  --tag=...      specify a name for the docker image (may be repeated, default: none)"
-  echo "  --user=...     specify the user name (default: 'jenkins')"
-  echo "  --version=...  specify the distribution version (e.g. 6.9, 16.04)"
+  echo "  --help|-h             print this help, then exit"
+  echo "  --arch=...            specify the processor architecture (default: host architecture)"
+  echo "  --build[=engine]      build the image (overrides '--print'). Optionally specify the engine (default: docker, or podman, if found)"
+  echo "  --criu                include CRIU"
+  echo "  --cuda                include CUDA header files"
+  echo "  --dist=...            specify the Linux distribution (e.g. centos, ubuntu)"
+  echo "  --freemarker          include freemarker.jar"
+  echo "  --gitcache={yes|no}   generate the git cache (default: yes)"
+  echo "  --jdk=...             specify which JDKs can be built (default: all)"
+  echo "  --print               write the Dockerfile to stdout (default; overrides '--build')"
+  echo "  --tag=...             specify a name for the docker image (may be repeated, default: none)"
+  echo "  --user=...            specify the user name (default: 'jenkins')"
+  echo "  --version=...         specify the distribution version (e.g. 6, 18.04)"
   echo ""
   local arch="$(uname -m)"
   echo "Supported build patterns on this host ($arch):"
 if [ $arch = x86_64 ] ; then
-  echo "  bash mkdocker.sh --tag=openj9/cent69 --dist=centos --version=6.9 --build"
+  echo "  bash mkdocker.sh --tag=openj9/cent6 --dist=centos --version=6  --build"
 fi
 if [ $arch = x86_64 -o $arch = ppc64le ] ; then
-  echo "  bash mkdocker.sh --tag=openj9/cent7  --dist=centos --version=7   --build"
+  echo "  bash mkdocker.sh --tag=openj9/cent7 --dist=centos --version=7  --build"
 fi
-  echo "  bash mkdocker.sh --tag=openj9/ub16   --dist=ubuntu --version=16  --build"
-  echo "  bash mkdocker.sh --tag=openj9/ub18   --dist=ubuntu --version=18  --build"
-  echo "  bash mkdocker.sh --tag=openj9/ub20   --dist=ubuntu --version=20  --build"
+  echo "  bash mkdocker.sh --tag=openj9/ub16  --dist=ubuntu --version=16 --build"
+  echo "  bash mkdocker.sh --tag=openj9/ub18  --dist=ubuntu --version=18 --build"
+  echo "  bash mkdocker.sh --tag=openj9/ub20  --dist=ubuntu --version=20 --build"
   exit 1
 }
 
 # Global configuration variables.
 action=print
+all_versions=
 arch=
+criu=no
 cuda=no
 dist=unspecified
+engine=docker
+engine_specified=0
+freemarker=no
+gen_git_cache=yes
+jdk_versions=all
 tags=()
 user=jenkins
+userid=1000
 version=unspecified
 
 # Frequently used commands.
 wget_O="wget --progress=dot:mega -O"
 
 parse_options() {
+  local arg
   for arg in "$@" ; do
     case "$arg" in
       -h | --help)
@@ -77,11 +90,28 @@ parse_options() {
       --build)
         action=build
         ;;
+      --build=*)
+        action=build
+        engine="${arg#*=}"
+        engine_specified=1
+        ;;
+      --criu)
+        criu=3.17.1
+        ;;
       --cuda)
         cuda=9.0
         ;;
       --dist=*)
         dist="${arg#*=}"
+        ;;
+      --freemarker)
+        freemarker=yes
+        ;;
+      --gitcache=*)
+        gen_git_cache="${arg#*=}"
+        ;;
+      --jdk=*)
+        jdk_versions="${arg#*=}"
         ;;
       --print)
         action=print
@@ -101,6 +131,15 @@ parse_options() {
         ;;
     esac
   done
+
+  # If --build was specified without an engine, and `docker` isn't on $PATH,
+  # and `podman` is on $PATH, then assume they're okay to use `podman`.
+  if [ "${action}" = build ] \
+     && [ "${engine_specified}" -eq 0 ] \
+     && ! command -v "$engine" >/dev/null 2>&1 \
+     && command -v podman >/dev/null 2>&1 ; then
+    engine=podman
+  fi
 }
 
 validate_options() {
@@ -125,10 +164,14 @@ validate_options() {
         exit 1
       fi
       case $version in
-        6.9)
+        6)
           if [ $arch = ppc64le ] ; then
-            echo "CentOS version 6.9 is not supported on $arch" >&2
+            echo "CentOS version 6 is not supported on $arch" >&2
             exit 1
+          fi
+          if [ $arch = x86_64 ] ; then
+            # Certificates are old on CentOS:6 so we can't expect wget to check.
+            wget_O="wget --progress=dot:mega --no-check-certificate -O"
           fi
           ;;
         7)
@@ -170,6 +213,34 @@ validate_options() {
       ;;
   esac
 
+  # If CRIU is requested, validate the architecture.
+  if [ $criu != no ] ; then
+    case "$arch" in
+      x86_64)
+        if [ $dist = centos ] ; then
+          # overwrite CRIU version
+          criu=3.12
+          if [ $version = 6 ] ; then
+            echo "CRIU is not supported on CentOS version: '$version'" >&2
+            exit 1
+          fi
+        fi
+        ;;
+      s390x)
+        # overwrite CRIU version
+        criu=3.12
+        if [ $dist != ubuntu ] ; then
+          echo "CRIU is only supported on ubuntu for s390x" >&2
+          exit 1
+        fi
+        ;;
+      *)
+        echo "CRIU is not supported on architecture: '$arch'" >&2
+        exit 1
+        ;;
+    esac
+  fi
+
   # If CUDA is requested, validate the architecture.
   if [ $cuda != no ] ; then
     case "$arch" in
@@ -181,11 +252,35 @@ validate_options() {
         ;;
     esac
   fi
+
+  all_versions="8 11 17 18 19 next"
+  local -A known_version
+  local version
+  for version in $all_versions ; do
+    known_version[$version]=yes
+  done
+
+  if [ "$jdk_versions" = all ] ; then
+    jdk_versions="$all_versions"
+  fi
+
+  for version in ${jdk_versions} ; do
+    if [ "${known_version[$version]}" != yes ] ; then
+      echo "Unsupported JDK version: '$version'" >&2
+      exit 1
+    fi
+  done
+
+  if [ "${action}" = build ] && ! command -v "$engine" >/dev/null 2>&1 ; then
+    echo "Executable '$engine' could not be found. Update \$PATH or use another engine with '--build=engine'" >&2
+    exit 1
+  fi
 }
 
 build_cmd() {
   local cmd=build
   local file=$1
+  local tag
   for tag in ${tags[@]} ; do
     cmd="$cmd --tag $tag"
   done
@@ -193,6 +288,7 @@ build_cmd() {
 }
 
 preamble() {
+  local tag
   echo ""
   echo "# Generated by: mkdocker.sh $command_line"
   echo ""
@@ -219,14 +315,18 @@ if [ $cuda != no ] ; then
   echo "FROM nvidia/cuda:${cuda}-devel-ubuntu16.04 AS cuda-dev"
   echo ""
 fi
-  echo "FROM $dist:$version"
+  echo "FROM $dist:$version AS base"
 }
 
 install_centos_packages() {
-  echo "RUN yum -y update \\"
-if [ $version = 6.9 ] ; then
-  echo " && yum -y install https://\$(rpm -E '%{?centos:centos}%{!?centos:rhel}%{rhel}').iuscommunity.org/ius-release.rpm \\"
+if [ $version = 6 ] ; then
+  echo "RUN sed -i -e 's|mirrorlist|#mirrorlist|' \\"
+  echo "           -e 's|#baseurl=http://mirror.centos.org/centos/\$releasever|baseurl=https://vault.centos.org/6.10|' \\"
+  echo "           /etc/yum.repos.d/CentOS-Base.repo"
+  echo ""
 fi
+  echo "RUN yum -y update \\"
+  echo " && yum install -y epel-release \\"
   echo " && yum -y install \\"
   echo "    alsa-lib-devel \\"
   echo "    automake \\" # required to update make
@@ -276,8 +376,10 @@ fi
   echo "    perl-devel \\"
   echo "    perl-ExtUtils-MakeMaker \\" # required by git
   echo "    perl-GD \\"
+  echo "    perl-IPC-Cmd \\" # required for openssl v3 compiles
   echo "    perl-libwww-perl \\"
   echo "    perl-Time-HiRes \\"
+  echo "    systemtap-devel \\"
   echo "    texinfo \\" # required to update make
   echo "    unzip \\"
   echo "    vim \\"
@@ -286,12 +388,21 @@ fi
   echo "    xz \\"
   echo "    zip \\"
   echo "    zlib-devel \\" # required by git, python
+if [ $criu != no ] ; then
+  echo "    iproute \\"
+  echo "    libbsd \\"
+  echo "    libnet \\"
+  echo "    libnl3 \\"
+  echo "    protobuf-c \\"
+  echo "    protobuf-python \\"
+  echo "    python-ipaddress \\"
+fi
   echo " && yum clean all"
   echo ""
   local autoconf_version=2.69
   echo "# Install autoconf."
   echo "RUN cd /tmp \\"
-  echo " && $wget_O autoconf.tar.gz https://fossies.org/linux/misc/autoconf-$autoconf_version.tar.gz \\"
+  echo " && $wget_O autoconf.tar.gz https://ftp.gnu.org/gnu/autoconf/autoconf-$autoconf_version.tar.gz \\"
   echo " && tar -xzf autoconf.tar.gz \\"
   echo " && cd autoconf-$autoconf_version \\"
   echo " && ./configure --build=\$(rpm --eval %{_host}) \\"
@@ -326,7 +437,7 @@ fi
   echo "# Install git."
   echo "RUN cd /tmp \\"
   echo " && $wget_O git.tar.gz https://www.kernel.org/pub/software/scm/git/git-$git_version.tar.gz \\"
-  echo " && tar -xzf git.tar.gz \\"
+  echo " && tar -xzf git.tar.gz --no-same-owner \\"
   echo " && cd git-$git_version \\"
   echo " && make prefix=/usr/local all \\"
   echo " && make prefix=/usr/local install \\"
@@ -353,7 +464,9 @@ if [ $arch = x86_64 ] ; then
   echo " && $wget_O gettext.tar.gz http://ftp.gnu.org/gnu/gettext/gettext-$gettext_version.tar.gz \\"
   echo " && tar -xzf gettext.tar.gz \\"
   echo " && cd gettext-$gettext_version \\"
+if [ $version != 6 ] ; then
   echo " && ./autogen.sh --skip-gnulib \\"
+fi
   echo " && ./configure --disable-nls \\"
   echo " && make \\"
   echo " && make install \\"
@@ -453,11 +566,28 @@ if [ $version = 16.04 ] ; then
   echo "    realpath \\"
 fi
   echo "    ssh \\"
+  echo "    systemtap-sdt-dev \\"
   echo "    unzip \\"
   echo "    wget \\"
   echo "    xvfb \\"
   echo "    zip \\"
   echo "    zlib1g-dev \\"
+if [ $criu != no ] ; then
+if [ $version = 18.04 ] ; then
+  echo "    libcap2-bin \\"
+fi
+  echo "    libnet1 \\"
+  echo "    libnl-3-200 \\"
+if [ $version = 20.04 ] ; then
+  echo "    libnftables1 \\"
+fi
+  echo "    libprotobuf-c1 \\"
+if [ $version != 16.04 ] ; then
+  echo "    python3-protobuf \\"
+else
+  echo "    python-protobuf \\"
+fi
+fi
   echo " && rm -rf /var/lib/apt/lists/*"
 }
 
@@ -530,57 +660,145 @@ prepare_user() {
 create_user() {
   echo ""
   echo "# Add user home and copy authorized_keys and known_hosts."
-  echo "RUN useradd -ms /bin/bash $user \\"
+  echo "RUN useradd -ms /bin/bash --uid $userid $user \\"
   echo " && mkdir /home/$user/.ssh \\"
   echo " && chmod 700 /home/$user/.ssh"
   echo "COPY authorized_keys known_hosts /home/$user/.ssh/"
-  echo "RUN chown -R $user:$user /home/$user \\"
-  echo " && chmod 600 /home/$user/.ssh/authorized_keys /home/$user/.ssh/known_hosts"
+  echo "RUN chmod -R go= /home/$user/.ssh \\"
+  echo " && echo "ulimit -u 32000 -n 2048" >> /home/$user/.bashrc"
+}
+
+adjust_user_directory_perms() {
+  echo "RUN chown -R $user:$user /home/$user"
 }
 
 install_freemarker() {
   echo ""
   local freemarker_version=2.3.8
-  echo "# Download and extract freemarker.jar to /root/freemarker.jar."
-  echo "RUN mkdir -p /root \\"
-  echo " && cd /root \\"
+  echo "# Download and extract freemarker.jar to /home/$user/freemarker.jar."
+  echo "RUN cd /home/$user \\"
   echo " && $wget_O freemarker.tar.gz https://sourceforge.net/projects/freemarker/files/freemarker/$freemarker_version/freemarker-$freemarker_version.tar.gz/download \\"
-  echo " && tar -xzf freemarker.tar.gz freemarker-$freemarker_version/lib/freemarker.jar --strip=2 \\"
+  echo " && tar -xzf freemarker.tar.gz freemarker-$freemarker_version/lib/freemarker.jar --strip-components=2 \\"
   echo " && rm -f freemarker.tar.gz"
 }
 
 bootjdk_dirs() {
+  local version
   for version in $@ ; do
-    if [ $version = 8 ] ; then
-      echo /usr/lib/jvm/adoptojdk-java-80
-    else
-      echo /usr/lib/jvm/adoptojdk-java-$version
-    fi
+    echo /home/$user/bootjdks/jdk$version
   done
 }
 
 bootjdk_url() {
-  local version=$1
-  if [ $arch = x86_64 ] ; then
-    echo https://api.adoptopenjdk.net/v3/binary/latest/$version/ga/linux/x64/jdk/openj9/normal/adoptopenjdk
+  local jdk_arch=${arch/x86_64/x64}
+  local jdk_version=$1
+  if [ $jdk_version -lt 18 ] ; then
+    echo https://api.adoptopenjdk.net/v3/binary/latest/$jdk_version/ga/linux/$jdk_arch/jdk/openj9/normal/adoptopenjdk
   else
-    echo https://api.adoptopenjdk.net/v3/binary/latest/$version/ga/linux/$arch/jdk/openj9/normal/adoptopenjdk
+    echo https://api.adoptium.net/v3/binary/latest/$jdk_version/ga/linux/$jdk_arch/jdk/hotspot/normal/eclipse
   fi
 }
 
+bootjdk_version() {
+  local jdk_version=$1
+  case $jdk_version in
+    8 | 11 | 17)
+      echo $jdk_version
+      ;;
+    18)
+      echo "17"
+      ;;
+    19 | next)
+      echo "18"
+      ;;
+    *)
+      echo "Unsupported JDK version: '$jdk_version'" >&2
+      exit 1
+      ;;
+  esac
+}
+
 install_bootjdks() {
-  local versions="8 11 14"
+  local bootjdk_versions=
+  local version
+  local -A wanted
+  for version in $jdk_versions ; do
+    wanted[$(bootjdk_version $version)]=yes
+  done
+  for version in ${all_versions/next/} ; do
+    if [ "${wanted[$version]}" = yes ] ; then
+      bootjdk_versions="$bootjdk_versions $version"
+    fi
+  done
   echo ""
-  echo "# Download and install boot JDKs from AdoptOpenJDK."
+  echo "# Download and install boot JDKs."
   echo "RUN cd /tmp \\"
-for version in $versions ; do
+for version in $bootjdk_versions ; do
   echo " && $wget_O jdk$version.tar.gz $(bootjdk_url $version) \\"
 done
-  echo " && mkdir -p" $(bootjdk_dirs $versions) "\\"
-for version in $versions ; do
-  echo " && tar -xzf jdk$version.tar.gz --directory=$(bootjdk_dirs $version)/ --strip=1 \\"
+  echo " && mkdir -p" $(bootjdk_dirs $bootjdk_versions) "\\"
+for version in $bootjdk_versions ; do
+  echo " && tar -xzf jdk$version.tar.gz --directory=$(bootjdk_dirs $version)/ --strip-components=1 \\"
 done
   echo " && rm -f jdk*.tar.gz"
+}
+
+install_criu() {
+  echo ""
+  local criu_name=criu-${criu}
+  echo "# Install prerequisites for CRIU build."
+  echo "FROM base AS criu-builder"
+if [ $dist = centos ] ; then
+  echo "RUN yum -y install \\"
+  echo "    gnutls-devel \\"
+  echo "    iptables \\"
+  echo "    libbsd-devel \\"
+  echo "    libcap-devel \\"
+  echo "    libnet-devel \\"
+  echo "    libnl3-devel \\"
+  echo "    pkgconfig \\"
+  echo "    protobuf-c-devel \\"
+  echo "    protobuf-devel"
+else
+  echo "RUN apt-get update \\"
+  echo " && apt-get install -qq -y --no-install-recommends \\"
+  echo "    iptables \\"
+  echo "    libbsd-dev \\"
+  echo "    libcap-dev \\"
+  echo "    libnet1-dev \\"
+  echo "    libgnutls28-dev \\"
+  echo "    libgnutls30 \\"
+if [ $version = 20.04 ] ; then
+  echo "    libnftables-dev \\"
+fi
+  echo "    libnl-3-dev \\"
+  echo "    libprotobuf-c-dev \\"
+  echo "    libprotobuf-dev \\"
+if [ $version != 16.04 ] ; then
+  echo "    python3-distutils \\"
+fi
+  echo "    protobuf-c-compiler \\"
+  echo "    protobuf-compiler"
+fi
+  echo "# Build CRIU from source."
+  echo "RUN cd /tmp \\"
+  echo " && $wget_O criu.tar.gz https://github.com/checkpoint-restore/criu/archive/refs/tags/v${criu}.tar.gz \\"
+  echo " && tar -xzf criu.tar.gz \\"
+  echo " && mv $criu_name criu-build \\"
+  echo " && cd criu-build \\"
+  echo " && make \\"
+  echo " && make DESTDIR=/tmp/$criu_name install-lib install-criu \\"
+  echo " && cd .. \\"
+  echo " && rm -fr criu.tar.gz criu-build"
+  echo "# Install CRIU."
+  echo "FROM base"
+  echo "COPY --from=criu-builder /tmp/$criu_name/usr/local /usr/local"
+  echo "# Set CRIU capabilities."
+if [ $dist = centos ] ; then
+  echo "RUN setcap cap_chown,cap_dac_override,cap_dac_read_search,cap_fowner,cap_fsetid,cap_kill,cap_setgid,cap_setuid,cap_setpcap,cap_net_bind_service,cap_net_broadcast,cap_net_admin,cap_ipc_lock,cap_ipc_owner,cap_sys_module,cap_sys_rawio,cap_sys_chroot,cap_sys_ptrace,cap_sys_pacct,cap_sys_admin,cap_sys_resource,cap_sys_time,cap_lease,cap_audit_control,cap_setfcap,cap_syslog=eip /usr/local/sbin/criu"
+else
+  echo "RUN setcap cap_chown,cap_dac_override,cap_dac_read_search,cap_fowner,cap_fsetid,cap_kill,cap_setgid,cap_setuid,cap_setpcap,cap_net_admin,cap_sys_chroot,cap_sys_ptrace,cap_sys_admin,cap_sys_resource,cap_sys_time,cap_audit_control=eip /usr/local/sbin/criu"
+fi
 }
 
 install_cuda() {
@@ -594,6 +812,7 @@ install_cuda() {
 
 install_python() {
   local python_version=3.7.3
+  local python_short_version=${python_version%.*}
   echo ""
   echo "# Install python."
   echo "RUN cd /tmp \\"
@@ -605,12 +824,17 @@ install_python() {
   echo " && make install \\"
   echo " && cd .. \\"
   echo " && rm -rf python.tar.xz Python-$python_version"
+if [ $criu != no ] && [ $dist = ubuntu ]; then
+  echo ""
+  echo "# Set capabilities for python3."
+  echo "RUN setcap cap_sys_admin=eip /usr/local/bin/python$python_short_version"
+fi
 }
 
 adjust_ldconfig() {
   echo ""
   echo "# Run ldconfig to discover newly installed shared libraries."
-  echo "RUN for dir in lib lib64 ; do echo /usr/local/$dir ; done > /etc/ld.so.conf.d/usr-local.conf \\"
+  echo "RUN for dir in lib lib64 lib/x86_64-linux-gnu ; do echo /usr/local/\$dir ; done > /etc/ld.so.conf.d/usr-local.conf \\"
   echo " && ldconfig"
 }
 
@@ -623,7 +847,12 @@ add_git_remote() {
 
 create_git_cache() {
   local git_cache_dir=/home/$user/openjdk_cache
-  # The jdk15 remote is fetched first because that repository was subjected to
+  local version
+  local -A wanted
+  for version in $jdk_versions ; do
+    wanted[$version]=yes
+  done
+  # The jdk17 remote is fetched first because that repository was subjected to
   # 'git gc --aggressive --prune=all' before it was first published making it much
   # smaller than some other jdk repositories. There is a large degree of overlap
   # among the jdk repositories so a relatively small number of commits must be
@@ -633,15 +862,17 @@ create_git_cache() {
   echo "RUN mkdir $git_cache_dir \\"
   echo " && cd $git_cache_dir \\"
   echo " && git init --bare \\"
-  add_git_remote jdk8    https://github.com/ibmruntimes/openj9-openjdk-jdk8.git
-  add_git_remote jdk11   https://github.com/ibmruntimes/openj9-openjdk-jdk11.git
-  add_git_remote jdk14   https://github.com/ibmruntimes/openj9-openjdk-jdk14.git
-  add_git_remote jdk15   https://github.com/ibmruntimes/openj9-openjdk-jdk15.git
-  add_git_remote jdknext https://github.com/ibmruntimes/openj9-openjdk-jdk.git
-  add_git_remote omr     https://github.com/eclipse/openj9-omr.git
-  add_git_remote openj9  https://github.com/eclipse/openj9.git
+for version in $all_versions ; do
+  if [ "${wanted[$version]}" = yes ] ; then
+    add_git_remote jdk$version https://github.com/ibmruntimes/openj9-openjdk-jdk${version/next/}.git
+  fi
+done
+  add_git_remote omr     https://github.com/eclipse-openj9/openj9-omr.git
+  add_git_remote openj9  https://github.com/eclipse-openj9/openj9.git
   echo " && echo Fetching repository cache... \\"
-  echo " && git fetch jdk15 \\"
+if [ "${wanted[17]}" = yes ] ; then
+  echo " && git fetch jdk17 \\"
+fi
   echo " && git fetch --all \\"
   echo " && echo Shrinking repository cache... \\"
   echo " && git gc --aggressive --prune=all"
@@ -666,12 +897,16 @@ print_dockerfile() {
   print_license
   preamble
   install_packages
+if [ $criu != no ] ; then
+  install_criu
+fi
   create_user
 if [ $cuda != no ] ; then
   install_cuda
 fi
+if [ $freemarker = yes ] ; then
   install_freemarker
-
+fi
   install_compilers
 
   install_cmake
@@ -681,13 +916,16 @@ fi
   configure_ssh
 
   install_bootjdks
+if [ $gen_git_cache = yes ] ; then
   create_git_cache
+fi
+  adjust_user_directory_perms
 }
 
 main() {
   if [ $action = build ] ; then
     prepare_user
-    print_dockerfile | docker $(build_cmd -)
+    print_dockerfile | $engine $(build_cmd -)
   else
     print_dockerfile
   fi

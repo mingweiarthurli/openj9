@@ -1,6 +1,6 @@
 
 /*******************************************************************************
- * Copyright (c) 1991, 2014 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -43,6 +43,14 @@ typedef void J9MODRON_OSLOTITERATOR(J9JavaVM *javaVM, J9Object **objectIndirect,
  */
 class GC_VMThreadStackSlotIterator
 {
+private:
+	static void initializeStackWalkState(
+			J9StackWalkState *stackWalkState,
+			J9VMThread *vmThread,
+			void *userData,
+			J9MODRON_OSLOTITERATOR *oSlotIterator,
+			bool includeStackFrameClassReferences,
+			bool trackVisibleFrameDepth);
 public:
 	static void scanSlots(
 			J9VMThread *vmThread,
@@ -51,6 +59,25 @@ public:
 			J9MODRON_OSLOTITERATOR *oSlotIterator,
 			bool includeStackFrameClassReferences,
 			bool trackVisibleFrameDepth);
+
+	static void scanSlots(
+			J9VMThread *vmThread,
+			j9object_t continuationObjectPtr,
+			void *userData,
+			J9MODRON_OSLOTITERATOR *oSlotIterator,
+			bool includeStackFrameClassReferences,
+			bool trackVisibleFrameDepth,
+			bool syncWithContinuationMounting = false);
+
+#if JAVA_SPEC_VERSION >= 19
+	static void scanSlots(
+			J9VMThread *vmThread,
+			J9VMContinuation *continuation,
+			void *userData,
+			J9MODRON_OSLOTITERATOR *oSlotIterator,
+			bool includeStackFrameClassReferences,
+			bool trackVisibleFrameDepth);
+#endif /* JAVA_SPEC_VERSION >= 19 */
 };
 
 #endif /* VMTHREADSTACKSLOTITERATOR_HPP_ */

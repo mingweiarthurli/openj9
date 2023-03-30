@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2020 IBM Corp. and others
+ * Copyright (c) 2001, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -63,6 +63,7 @@ DECLARE_UTF8_ATTRIBUTE_NAME(RUNTIME_VISIBLE_TYPE_ANNOTATIONS, "RuntimeVisibleTyp
 DECLARE_UTF8_ATTRIBUTE_NAME(ANNOTATION_DEFAULT, "AnnotationDefault");
 DECLARE_UTF8_ATTRIBUTE_NAME(BOOTSTRAP_METHODS, "BootstrapMethods");
 DECLARE_UTF8_ATTRIBUTE_NAME(RECORD, "Record");
+DECLARE_UTF8_ATTRIBUTE_NAME(PERMITTED_SUBCLASSES, "PermittedSubclasses");
 #if JAVA_SPEC_VERSION >= 11
 DECLARE_UTF8_ATTRIBUTE_NAME(NEST_MEMBERS, "NestMembers");
 DECLARE_UTF8_ATTRIBUTE_NAME(NEST_HOST, "NestHost");
@@ -76,6 +77,12 @@ ClassFileWriter::analyzeROMClass()
 		_buildResult = OutOfMemory;
 		return;
 	}
+
+#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+	if (J9_ARE_ALL_BITS_SET(_romClass->optionalFlags, J9_ROMCLASS_OPTINFO_INJECTED_INTERFACE_INFO)) {
+		_numOfInjectedInterfaces = getNumberOfInjectedInterfaces(_romClass);
+	}
+#endif /* J9VM_OPT_VALHALLA_VALUE_TYPES */
 
 	/* Walk ROM class adding hashtable entries for all referenced UTF8s and NASs, with index=0 */
 	analyzeConstantPool();
@@ -93,6 +100,16 @@ ClassFileWriter::analyzeROMClass()
 		analyzeRecordAttribute();
 	}
 
+	if (J9ROMCLASS_IS_SEALED(_romClass)) {
+		addEntry((void*) &PERMITTED_SUBCLASSES, 0, CFR_CONSTANT_Utf8);
+
+		U_32 *permittedSubclassesCountPtr = getNumberOfPermittedSubclassesPtr(_romClass);
+		for (U_32 i = 0; i < *permittedSubclassesCountPtr; i++) {
+			J9UTF8* permittedSubclassNameUtf8 = permittedSubclassesNameAtIndex(permittedSubclassesCountPtr, i);
+			addEntry(permittedSubclassNameUtf8, 0, CFR_CONSTANT_Utf8);
+		}
+	}
+
 	J9EnclosingObject * enclosingObject = getEnclosingMethodForROMClass(_javaVM, NULL, _romClass);
 	J9UTF8 * genericSignature = getGenericSignatureForROMClass(_javaVM, NULL, _romClass);
 	J9UTF8 * sourceFileName = getSourceFileNameForROMClass(_javaVM, NULL, _romClass);
@@ -106,7 +123,10 @@ ClassFileWriter::analyzeROMClass()
 #endif /* JAVA_SPEC_VERSION >= 11 */
 
 	/* For a local class only InnerClasses.class[i].inner_name_index is preserved as simpleName in its J9ROMClass */
-	if ((0 != _romClass->innerClassCount) || J9_ARE_ANY_BITS_SET(_romClass->extraModifiers, J9AccClassInnerClass)) {
+	if ((0 != _romClass->innerClassCount)
+	|| (0 != _romClass->enclosedInnerClassCount)
+	|| J9_ARE_ANY_BITS_SET(_romClass->extraModifiers, J9AccClassInnerClass)
+	) {
 		addEntry((void *) &INNER_CLASSES, 0, CFR_CONSTANT_Utf8);
 
 		if (NULL != outerClassName) {
@@ -120,6 +140,11 @@ ClassFileWriter::analyzeROMClass()
 		J9SRP * innerClasses = (J9SRP *) J9ROMCLASS_INNERCLASSES(_romClass);
 		for (UDATA i = 0; i < _romClass->innerClassCount; i++, innerClasses++) {
 			J9UTF8 * className = NNSRP_PTR_GET(innerClasses, J9UTF8 *);
+			addClassEntry(className, 0);
+		}
+		J9SRP * enclosedInnerClasses = (J9SRP *) J9ROMCLASS_ENCLOSEDINNERCLASSES(_romClass);
+		for (UDATA i = 0; i < _romClass->enclosedInnerClassCount; i++, enclosedInnerClasses++) {
+			J9UTF8 * className = NNSRP_PTR_GET(enclosedInnerClasses, J9UTF8 *);
 			addClassEntry(className, 0);
 		}
 	}
@@ -330,6 +355,9 @@ ClassFileWriter::analyzeInterfaces()
 {
 	J9SRP * interfaceNames = J9ROMCLASS_INTERFACES(_romClass);
 	UDATA interfaceCount = _romClass->interfaceCount;
+#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+	interfaceCount -=  _numOfInjectedInterfaces;
+#endif /* J9VM_OPT_VALHALLA_VALUE_TYPES */
 	for (UDATA i = 0; i < interfaceCount; i++) {
 		J9UTF8 * interfaceName = NNSRP_GET(interfaceNames[i], J9UTF8*);
 		addClassEntry(interfaceName, 0);
@@ -454,7 +482,8 @@ ClassFileWriter::analyzeMethods()
 		if (J9ROMMETHOD_HAS_PARAMETER_ANNOTATIONS(method)) {
 			addEntry((void *) &RUNTIME_VISIBLE_PARAMETER_ANNOTATIONS, 0, CFR_CONSTANT_Utf8);
 		}
-		if (J9ROMMETHOD_HAS_METHOD_TYPE_ANNOTATIONS(getExtendedModifiersDataFromROMMethod(method))) {
+		U_32 extendedModifiers = getExtendedModifiersDataFromROMMethod(method);
+		if (J9ROMMETHOD_HAS_METHOD_TYPE_ANNOTATIONS(extendedModifiers) || J9ROMMETHOD_HAS_CODE_TYPE_ANNOTATIONS(extendedModifiers)) {
 			addEntry((void *) &RUNTIME_VISIBLE_TYPE_ANNOTATIONS, 0, CFR_CONSTANT_Utf8);
 		}
 		if (J9ROMMETHOD_HAS_DEFAULT_ANNOTATION(method)) {
@@ -718,8 +747,11 @@ ClassFileWriter::writeInterfaces()
 {
 	J9SRP * interfaceNames = J9ROMCLASS_INTERFACES(_romClass);
 	UDATA interfaceCount = _romClass->interfaceCount;
+#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+	interfaceCount -= _numOfInjectedInterfaces;
+#endif /* J9VM_OPT_VALHALLA_VALUE_TYPES */
 
-	writeU16(U_16(_romClass->interfaceCount));
+	writeU16(U_16(interfaceCount));
 	for (UDATA i = 0; i < interfaceCount; i++) {
 		J9UTF8 * interfaceName = NNSRP_GET(interfaceNames[i], J9UTF8 *);
 		writeU16(indexForClass(interfaceName));
@@ -930,7 +962,10 @@ ClassFileWriter::writeAttributes()
 	U_16 nestMemberCount = _romClass->nestMemberCount;
 #endif /* JAVA_SPEC_VERSION >= 11 */
 
-	if ((0 != _romClass->innerClassCount) || J9_ARE_ANY_BITS_SET(_romClass->extraModifiers, J9AccClassInnerClass)) {
+	if ((0 != _romClass->innerClassCount)
+	|| (0 != _romClass->enclosedInnerClassCount)
+	|| J9_ARE_ANY_BITS_SET(_romClass->extraModifiers, J9AccClassInnerClass)
+	) {
 		attributesCount += 1;
 	}
 	if (NULL != enclosingObject) {
@@ -957,6 +992,9 @@ ClassFileWriter::writeAttributes()
 	if (J9_ARE_ANY_BITS_SET(_romClass->extraModifiers, J9AccRecord)) {
 		attributesCount += 1;
 	}
+	if (J9ROMCLASS_IS_SEALED(_romClass)) {
+		attributesCount += 1;
+	}
 #if JAVA_SPEC_VERSION >= 11
 	/* Class can not have both a nest members and member of nest attribute */
 	if ((0 != _romClass->nestMemberCount) || (NULL != nestHost)) {
@@ -965,8 +1003,11 @@ ClassFileWriter::writeAttributes()
 #endif /* JAVA_SPEC_VERSION >= 11 */
 	writeU16(attributesCount);
 
-	if ((0 != _romClass->innerClassCount) || J9_ARE_ANY_BITS_SET(_romClass->extraModifiers, J9AccClassInnerClass)) {
-		U_16 innerClassesCount(_romClass->innerClassCount);
+	if ((0 != _romClass->innerClassCount)
+	|| (0 != _romClass->enclosedInnerClassCount)
+	|| J9_ARE_ANY_BITS_SET(_romClass->extraModifiers, J9AccClassInnerClass)
+	) {
+		U_16 innerClassesCount(_romClass->innerClassCount + _romClass->enclosedInnerClassCount);
 
 		if (J9_ARE_ANY_BITS_SET(_romClass->extraModifiers, J9AccClassInnerClass)) {
 			/* This is an inner class, so we have one extra inner class attribute to allocate/write */
@@ -991,6 +1032,22 @@ ClassFileWriter::writeAttributes()
 			writeU16(thisClassCPIndex);
 
 			/* NOTE: innerClassAccessFlags and innerNameIndex are not preserved in the ROM class - technically incorrect, but this should only matter to compilers */
+			writeU16(0); /* innerNameIndex */
+			writeU16(0); /* innerClassAccessFlags */
+		}
+
+		/* Write enclosed inner classes of this class */
+		J9SRP * enclosedInnerClasses = (J9SRP *) J9ROMCLASS_ENCLOSEDINNERCLASSES(_romClass);
+		/* Write the enclosed inner class entries for inner classes of this class */
+		for (UDATA i = 0; i < _romClass->enclosedInnerClassCount; i++, enclosedInnerClasses++) {
+			J9UTF8 * enclosedInnerClassName = NNSRP_PTR_GET(enclosedInnerClasses, J9UTF8 *);
+
+			writeU16(indexForClass(enclosedInnerClassName));
+			/* NOTE: outerClassInfoIndex (these inner class are not the declared classes of this class),
+			 * innerNameIndex and innerClassAccessFlags are not preserved in the ROM class
+			 * - technically incorrect, but this should only matter to compilers.
+			 */
+			writeU16(0); /* outerClassInfoIndex */
 			writeU16(0); /* innerNameIndex */
 			writeU16(0); /* innerClassAccessFlags */
 		}
@@ -1084,6 +1141,32 @@ ClassFileWriter::writeAttributes()
 	/* record attribute */
 	if (J9_ARE_ANY_BITS_SET(_romClass->extraModifiers, J9AccRecord)) {
 		writeRecordAttribute();
+	}
+
+	/* write PermittedSubclasses attribute */
+	if (J9ROMCLASS_IS_SEALED(_romClass)) {
+		U_32 *permittedSubclassesCountPtr = getNumberOfPermittedSubclassesPtr(_romClass);
+		writeAttributeHeader((J9UTF8 *) &PERMITTED_SUBCLASSES, sizeof(U_16) + (*permittedSubclassesCountPtr * sizeof(U_16)));
+
+		writeU16(*permittedSubclassesCountPtr);
+
+		for (U_32 i = 0; i < *permittedSubclassesCountPtr; i++) {
+			J9UTF8* permittedSubclassNameUtf8 = permittedSubclassesNameAtIndex(permittedSubclassesCountPtr, i);
+
+			/* CONSTANT_Class_info index should be written. Find class entry that references the subclass name in constant pool. */
+			J9HashTableState hashTableState;
+			HashTableEntry * entry = (HashTableEntry *) hashTableStartDo(_cpHashTable, &hashTableState);
+			while (NULL != entry) {
+				if (CFR_CONSTANT_Class == entry->cpType) {
+					J9UTF8* classNameCandidate = (J9UTF8*)entry->address;
+					if (J9UTF8_EQUALS(classNameCandidate, permittedSubclassNameUtf8)) {
+						writeU16(entry->cpIndex);
+						break;
+					}
+				}
+				entry = (HashTableEntry *) hashTableNextDo(&hashTableState);
+			}
+		}
 	}
 }
 
@@ -1918,7 +2001,7 @@ ClassFileWriter::writeTypeAnnotationsAttribute(U_32 *typeAnnotationsData)
 					U_16 tableLength = 0;
 					NEXT_U16(tableLength, data);
 					writeU16(tableLength);
-					for (U_32 ti=0; tableLength; ++ti) {
+					for (U_32 ti=0; ti < tableLength; ++ti) {
 						NEXT_U16(u16Data, data);
 						writeU16(u16Data); /* startPC */
 						NEXT_U16(u16Data, data);

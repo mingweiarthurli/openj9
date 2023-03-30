@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2020 IBM Corp. and others
+ * Copyright (c) 2001, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -95,6 +95,7 @@ static jvmtiTest jvmtiTestList[] =
 	{ "rc019a", rc019a, "com.ibm.jvmti.tests.redefineClasses.rc019a", "RedefineClasses" },
 	{ "rc019b", rc019b, "com.ibm.jvmti.tests.redefineClasses.rc019b", "RedefineClasses" },
 	{ "rc020", rc020, "com.ibm.jvmti.tests.redefineClasses.rc020", "RedefineClasses" },
+	{ "rc021", rc021, "com.ibm.jvmti.tests.redefineClasses.rc021", "RedefineClasses" },
 	{ "gtgc001", gtgc001, "com.ibm.jvmti.tests.getThreadGroupChildren.gtgc001", "GetThreadGroupChildren" },
 	{ "gtgc002", gtgc002, "com.ibm.jvmti.tests.getThreadGroupChildren.gtgc002", "3 bytes name buffer overflow" },
 	{ "gts001", gts001, "com.ibm.jvmti.tests.getThreadState.gts001", "GetThreadState" },
@@ -112,6 +113,8 @@ static jvmtiTest jvmtiTestList[] =
 	{ "vmd001",    vmd001,    "com.ibm.jvmti.tests.vmDump.vmd001",                            "VM Dump tests" },
 	{ "glc001",    glc001,    "com.ibm.jvmti.tests.getLoadedClasses.glc001",                  "Verify correct return of all relevant loaded classes" },
 	{ "rtc001",    rtc001,    "com.ibm.jvmti.tests.retransformClasses.rtc001",                "RetransformClasses on a class loaded by sun.misc.Unsafe" },
+	{ "rtc002",    rtc002,    "com.ibm.jvmti.tests.retransformClasses.rtc002",                "RetransformClasses on a class with Annotations" },
+	{ "rtc003",    rtc003,    "com.ibm.jvmti.tests.retransformClasses.rtc003",                "RetransformClasses on an interface class which is implemented" },
 	{ "att001",    att001,    "com.ibm.jvmti.tests.attachOptionsTest.att001",                 "sanity test for late attach" },
 	{ "log001",    log001,    "com.ibm.jvmti.tests.log.log001",                               "Log tests" },
 	{ "jlm001",    jlm001,    "com.ibm.jvmti.tests.javaLockMonitoring.jlm001",                "Java lock monitoring - JlmSet, JlmDump, and JlmDumpStats" },
@@ -138,6 +141,7 @@ static jvmtiTest jvmtiTestList[] =
 #endif /* JAVA_SPEC_VERSION >= 11 */
 	{ "gsp001", gsp001, "com.ibm.jvmti.tests.getSystemProperty.gsp001", "Ensure JVMTI GetSystemProperty can retrieve certain system properties at early phrase" },
 	{ "ee001", ee001, "com.ibm.jvmti.tests.eventException.ee001", "Ensure only single JVMTI Exception event gets generated with JNI frame before handler" },
+	{ "vmstart001", vmstart001, "com.ibm.jvmti.tests.eventVMStart.vmstart001", "EventVMStart - check for VMStart event with can_generate_early_vmstart (Java 11+)" },
 	{ NULL, NULL, NULL, NULL }
 };
 

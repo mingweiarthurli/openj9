@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -116,6 +116,8 @@ copySystemProperties(J9JavaVM* vm)
  * 		or
  * 	--<name> <value>
  *
+ * 	Note: the allocated memory of the return value needs to be freed after use.
+ *
  * @param [in] vm the J9JavaVM
  * @param [in] argIndex index of the option in the option list
  * @param [in] optionNameLen length of the option
@@ -152,6 +154,11 @@ getOptionArg(J9JavaVM *vm, IDATA argIndex, UDATA optionNameLen)
 	}
 
 _end:
+	if (NULL != optionArg) {
+		/* Convert the value string from the platform encoding to the modified UTF8 */
+		optionArg = (char *)getMUtf8String(vm, optionArg, strlen(optionArg));
+	}
+
 	return optionArg;
 }
 
@@ -179,23 +186,18 @@ _end:
 static UDATA
 addPropertyForOptionWithEqualsArg(J9JavaVM *vm, const char *optionName, UDATA optionNameLen, const char *propName)
 {
-	IDATA argIndex = -1;
 	UDATA rc = J9SYSPROP_ERROR_NONE;
+	IDATA argIndex = FIND_AND_CONSUME_ARG(STARTSWITH_MATCH, optionName, NULL);
 
-	argIndex = FIND_AND_CONSUME_ARG(STARTSWITH_MATCH, optionName, NULL);
 	if (argIndex >= 0) {
 		/* option name includes the '=' so go back one to get the option arg */
 		char *optionArg = getOptionArg(vm, argIndex, optionNameLen - 1);
 
 		if (NULL != optionArg) {
-			rc = addSystemProperty(vm, propName, optionArg, 0);
-			if (J9SYSPROP_ERROR_NONE != rc) {
-				goto _end;
-			}
+			rc = addSystemProperty(vm, propName, optionArg, J9SYSPROP_FLAG_VALUE_ALLOCATED);
 		}
 	}
 
-_end:
 	return rc;
 }
 
@@ -234,7 +236,7 @@ addPropertyForOptionWithPathArg(J9JavaVM *vm, const char *optionName, UDATA opti
 		char *optionArg = getOptionArg(vm, argIndex, optionNameLen);
 
 		if (NULL != optionArg) {
-			rc = addSystemProperty(vm, propName, optionArg, 0);
+			rc = addSystemProperty(vm, propName, optionArg, J9SYSPROP_FLAG_VALUE_ALLOCATED);
 			if (J9SYSPROP_ERROR_NONE != rc) {
 				goto _end;
 			}
@@ -291,6 +293,7 @@ addPropertyForOptionWithModuleListArg(J9JavaVM *vm, const char *optionName, IDAT
 					if (NULL != modulesList) {
 						strncpy(modulesList, optionArg, listSize + 1);
 					} else {
+						j9mem_free_memory(optionArg);
 						rc = J9SYSPROP_ERROR_OUT_OF_MEMORY;
 						goto _end;
 					}
@@ -303,12 +306,15 @@ addPropertyForOptionWithModuleListArg(J9JavaVM *vm, const char *optionName, IDAT
 						j9str_printf(PORTLIB, modulesList, listSize + 2, "%s,%s", prevList, optionArg);
 						j9mem_free_memory(prevList);
 					} else {
+						j9mem_free_memory(optionArg);
 						j9mem_free_memory(prevList);
 						rc = J9SYSPROP_ERROR_OUT_OF_MEMORY;
 						goto _end;
 					}
 				}
 				CONSUME_ARG(j9vm_args, argIndex);
+
+				j9mem_free_memory(optionArg);
 			} else {
 				j9nls_printf(PORTLIB, J9NLS_ERROR, J9NLS_VM_PROPERTY_MODULARITY_OPTION_REQUIRES_MODULES, optionName);
 				rc = J9SYSPROP_ERROR_ARG_MISSING;
@@ -337,6 +343,7 @@ _end:
  * --add-opens,
  * --add-reads,
  * --patch-module
+ * --enable-native-access --- JDK17+
  *
  * For every occurrence of the option, a new system property is created by appending index
  * to the base property name. The index corresponds to the number of times that option is used.
@@ -382,7 +389,7 @@ addPropertiesForOptionWithAssignArg(J9JavaVM *vm, const char *optionName, UDATA 
 					goto _end;
 				}
 				j9str_printf(PORTLIB, propName, propNameLen, "%s%zu", basePropName, index);
-				rc = addSystemProperty(vm, propName, optionArg, J9SYSPROP_FLAG_NAME_ALLOCATED);
+				rc = addSystemProperty(vm, propName, optionArg, J9SYSPROP_FLAG_NAME_ALLOCATED | J9SYSPROP_FLAG_VALUE_ALLOCATED );
 				if (J9SYSPROP_ERROR_NONE != rc) {
 					goto _end;
 				}
@@ -468,28 +475,24 @@ addModularitySystemProperties(J9JavaVM * vm)
 	} else {
 		/* check if SYSPROP_JDK_MODULE_PATCH has been set */
 		J9VMSystemProperty *property = NULL;
-		const char* propName = SYSPROP_JDK_MODULE_PATCH"0";
+		const char *propName = SYSPROP_JDK_MODULE_PATCH "0";
 
 		if (J9SYSPROP_ERROR_NOT_FOUND != getSystemProperty(vm, propName, &property)) {
 			vm->jclFlags |= J9_JCL_FLAG_JDK_MODULE_PATCH_PROP;
 		}
 	}
 
-	/* Find last --illegal-access */
-	rc = addPropertyForOptionWithEqualsArg(vm, VMOPT_ILLEGAL_ACCESS, LITERAL_STRLEN(VMOPT_ILLEGAL_ACCESS), SYSPROP_JDK_MODULE_ILLEGALACCESS);
+#if JAVA_SPEC_VERSION >= 17
+	/* Find all --enable-native-access options */
+	rc = addPropertiesForOptionWithAssignArg(vm, VMOPT_ENABLE_NATIVE_ACCESS, LITERAL_STRLEN(VMOPT_ENABLE_NATIVE_ACCESS),
+		SYSPROP_JDK_MODULE_ENABLENATIVEACCESS, LITERAL_STRLEN(SYSPROP_JDK_MODULE_ENABLENATIVEACCESS), NULL);
 	if (J9SYSPROP_ERROR_NONE != rc) {
 		goto _end;
-	} else {
-		/* check if SYSPROP_JDK_MODULE_ILLEGALACCESS has been set */
-		J9VMSystemProperty *property = NULL;
-
-		if (J9SYSPROP_ERROR_NOT_FOUND != getSystemProperty(vm, SYSPROP_JDK_MODULE_ILLEGALACCESS, &property)) {
-
-			if (0 == strcmp(property->value, "deny")) {
-				vm->runtimeFlags |= J9_RUNTIME_DENY_ILLEGAL_ACCESS;
-			}
-		}
 	}
+#endif /* JAVA_SPEC_VERSION >= 17 */
+
+	/* Find last --illegal-access */
+	rc = addPropertyForOptionWithEqualsArg(vm, VMOPT_ILLEGAL_ACCESS, LITERAL_STRLEN(VMOPT_ILLEGAL_ACCESS), SYSPROP_JDK_MODULE_ILLEGALACCESS);
 
 _end:
 	return rc;
@@ -540,7 +543,7 @@ initializeSystemProperties(J9JavaVM * vm)
 	J9VMSystemProperty *javaEndorsedDirsProperty = NULL;
 	jint i = 0;
 	JavaVMInitArgs *initArgs = NULL;
-	char *jclName = J9_DEFAULT_JCL_DLL_NAME;
+	char *jclName = J9_JAVA_SE_DLL_NAME;
 	UDATA j2seVersion = J2SE_VERSION(vm);
 	const char* propValue = NULL;
 	UDATA rc = J9SYSPROP_ERROR_NONE;
@@ -582,9 +585,7 @@ initializeSystemProperties(J9JavaVM * vm)
 	if (JAVA_SPEC_VERSION == 8) {
 		specificationVersion = "1.8";
 	} else {
-#define J9_STR_(x) #x
-#define J9_STR(x) J9_STR_(x)
-		specificationVersion = J9_STR(JAVA_SPEC_VERSION);
+		specificationVersion = JAVA_SPEC_VERSION_STRING;
 	}
 
 	/* Some properties (*.vm.*) are owned by the VM and need to be set early for all
@@ -626,6 +627,13 @@ initializeSystemProperties(J9JavaVM * vm)
 		goto fail;
 	}
 #endif /* JAVA_SPEC_VERSION < 12 */
+
+#if JAVA_SPEC_VERSION == 8
+	rc = addSystemProperty(vm, "java.specification.maintenance.version", "4", 0);
+	if (J9SYSPROP_ERROR_NONE != rc) {
+		goto fail;
+	}
+#endif /* JAVA_SPEC_VERSION == 8 */
 
 	rc = addSystemProperty(vm, "java.vm.vendor", JAVA_VM_VENDOR, 0);
 	if (J9SYSPROP_ERROR_NONE != rc) {
@@ -811,6 +819,7 @@ initializeSystemProperties(J9JavaVM * vm)
 		goto fail;
 	}
 
+#if JAVA_SPEC_VERSION < 18
 	propValue = j9sysinfo_get_OS_version();
 	if (NULL != propValue) {
 #if defined(WIN32)
@@ -818,10 +827,10 @@ initializeSystemProperties(J9JavaVM * vm)
 		 * The port library includes build information which derails the Java
 		 * code.  Chop off the version after the major/minor. */
 		char *cursor = strchr(propValue, ' ');
-		if (cursor != NULL) {
+		if (NULL != cursor) {
 			*cursor = '\0';
 		}
-#endif
+#endif /* defined(WIN32) */
 	} else {
 		propValue = "unknown";
 	}
@@ -829,6 +838,7 @@ initializeSystemProperties(J9JavaVM * vm)
 	if (J9SYSPROP_ERROR_NONE != rc) {
 		goto fail;
 	}
+#endif /* JAVA_SPEC_VERSION < 18 */
 
 	/* Create the -D properties. This may override any of the writeable properties above. 
 	    Should the command line override read-only props? */
@@ -965,6 +975,21 @@ initializeSystemProperties(J9JavaVM * vm)
 	if (J9SYSPROP_ERROR_NONE != rc) {
 		goto fail;
 	}
+
+#if defined(J9VM_OPT_OPENJDK_METHODHANDLE)
+	if (j2seVersion >= J2SE_V11) {
+		rc = addSystemProperty(vm, "java.lang.invoke.VarHandle.VAR_HANDLE_GUARDS", "false", J9SYSPROP_FLAG_WRITEABLE);
+		if (J9SYSPROP_ERROR_NONE != rc) {
+			goto fail;
+		}
+	}
+
+	/* TODO: https://github.com/eclipse-openj9/openj9/issues/12811 */
+	rc = addSystemProperty(vm, "openjdk.methodhandles", "true", J9SYSPROP_FLAG_WRITEABLE);
+	if (J9SYSPROP_ERROR_NONE != rc) {
+		goto fail;
+	}
+#endif /* defined(J9VM_OPT_OPENJDK_METHODHANDLE) */
 
 	/* If we get here all is good */
 	rc = J9SYSPROP_ERROR_NONE;

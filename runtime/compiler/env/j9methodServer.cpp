@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2020 IBM Corp. and others
+ * Copyright (c) 2018, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -50,14 +50,6 @@ romMethodAtClassIndex(J9ROMClass *romClass, uint64_t methodIndex)
    for (size_t i = methodIndex; i; --i)
       romMethod = nextROMMethod(romMethod);
    return romMethod;
-   }
-
-static J9UTF8 *str2utf8(const char *str, int32_t length, TR_Memory *trMemory, TR_AllocationKind allocKind)
-   {
-   J9UTF8 *utf8 = (J9UTF8 *) trMemory->allocateMemory(length+sizeof(J9UTF8), allocKind); // This allocates more memory than it needs.
-   J9UTF8_SET_LENGTH(utf8, length);
-   memcpy(J9UTF8_DATA(utf8), str, length);
-   return utf8;
    }
 
 TR_ResolvedJ9JITServerMethod::TR_ResolvedJ9JITServerMethod(TR_OpaqueMethodBlock * aMethod, TR_FrontEnd * fe, TR_Memory * trMemory, TR_ResolvedMethod * owningMethod, uint32_t vTableSlot)
@@ -154,7 +146,7 @@ TR_ResolvedJ9JITServerMethod::staticAttributes(TR::Compilation * comp, I_32 cpIn
    }
 
 TR_OpaqueClassBlock * 
-TR_ResolvedJ9JITServerMethod::definingClassFromCPFieldRef(TR::Compilation *comp, int32_t cpIndex, bool isStatic)
+TR_ResolvedJ9JITServerMethod::definingClassFromCPFieldRef(TR::Compilation *comp, int32_t cpIndex, bool isStatic, TR_OpaqueClassBlock **fromResolvedJ9Method)
    {
    TR::CompilationInfoPerThread *compInfoPT = _fe->_compInfoPT;
       {
@@ -162,7 +154,11 @@ TR_ResolvedJ9JITServerMethod::definingClassFromCPFieldRef(TR::Compilation *comp,
       auto &cache = getJ9ClassInfo(compInfoPT, _ramClass)._fieldOrStaticDefiningClassCache;
       auto it = cache.find(cpIndex);
       if (it != cache.end())
+         {
+         if (fromResolvedJ9Method != NULL)
+            *fromResolvedJ9Method = it->second;
          return it->second;
+         }
       }
    _stream->write(JITServer::MessageType::ResolvedMethod_definingClassFromCPFieldRef, _remoteMirror, cpIndex, isStatic);
    TR_OpaqueClassBlock *resolvedClass = std::get<0>(_stream->read<TR_OpaqueClassBlock *>());
@@ -173,7 +169,9 @@ TR_ResolvedJ9JITServerMethod::definingClassFromCPFieldRef(TR::Compilation *comp,
       auto &cache = getJ9ClassInfo(compInfoPT, _ramClass)._fieldOrStaticDefiningClassCache;
       cache.insert({cpIndex, resolvedClass});
       }
-   
+   if (fromResolvedJ9Method != NULL)
+      *fromResolvedJ9Method = resolvedClass;
+
    return resolvedClass;
    }
 
@@ -183,8 +181,17 @@ TR_ResolvedJ9JITServerMethod::getClassFromConstantPool(TR::Compilation * comp, u
    if (cpIndex == -1)
       return NULL;
 
-   TR::CompilationInfoPerThread *compInfoPT = _fe->_compInfoPT;
+   auto compInfoPT = (TR::CompilationInfoPerThreadRemote *) _fe->_compInfoPT;
+   bool doRuntimeResolve = compInfoPT->getClientData()->getRtResolve() && !comp->ilGenRequest().details().isMethodHandleThunk();
+   if (doRuntimeResolve &&
+       performTransformation(comp, "Setting as unresolved class from CP cpIndex=%d\n",cpIndex))
       {
+      return NULL;
+      }
+
+      {
+      // This persistent cache must only be checked when doRuntimeResolve is false,
+      // otherwise a non method handle thunk compilation can return cached value, instead of NULL.
       OMR::CriticalSection getRemoteROMClass(compInfoPT->getClientData()->getROMMapMonitor());
       auto &constantClassPoolCache = getJ9ClassInfo(compInfoPT, _ramClass)._constantClassPoolCache;
       auto it = constantClassPoolCache.find(cpIndex);
@@ -193,6 +200,7 @@ TR_ResolvedJ9JITServerMethod::getClassFromConstantPool(TR::Compilation * comp, u
       }
    _stream->write(JITServer::MessageType::ResolvedMethod_getClassFromConstantPool, _remoteMirror, cpIndex, returnClassForAOT);
    TR_OpaqueClassBlock *resolvedClass = std::get<0>(_stream->read<TR_OpaqueClassBlock *>());
+
    if (resolvedClass)
       {
       OMR::CriticalSection getRemoteROMClass(compInfoPT->getClientData()->getROMMapMonitor());
@@ -270,9 +278,10 @@ TR_ResolvedJ9JITServerMethod::getConstantDynamicTypeFromCP(I_32 cpIndex)
    TR_ASSERT_FATAL(cpIndex != -1, "ConstantDynamic cpIndex shouldn't be -1");
    _stream->write(JITServer::MessageType::ResolvedMethod_getConstantDynamicTypeFromCP, _remoteMirror, cpIndex);
 
-   const std::string &retConstantDynamicTypeStr = std::get<0>(_stream->read<std::string>());
-   TR_Memory *trMemory = ((TR::CompilationInfoPerThreadRemote *) _fe->_compInfoPT)->getCompilation()->trMemory();
-   J9UTF8 * constantDynamicType = str2utf8((char*)&retConstantDynamicTypeStr[0], (int32_t)retConstantDynamicTypeStr.length(), trMemory, heapAlloc);
+   auto recv = _stream->read<std::string>();
+   auto &retConstantDynamicTypeStr = std::get<0>(recv);
+   TR_Memory *trMemory = ((TR::CompilationInfoPerThreadRemote *)_fe->_compInfoPT)->getCompilation()->trMemory();
+   J9UTF8 *constantDynamicType = str2utf8(retConstantDynamicTypeStr.data(), retConstantDynamicTypeStr.length(), trMemory, heapAlloc);
    return constantDynamicType;
    }
 
@@ -318,46 +327,37 @@ TR_ResolvedJ9JITServerMethod::getResolvedPossiblyPrivateVirtualMethod(TR::Compil
 #else
    auto compInfoPT = (TR::CompilationInfoPerThreadRemote *) _fe->_compInfoPT;
    TR_ResolvedMethod *resolvedMethod = NULL;
-   if (compInfoPT->getCachedResolvedMethod(compInfoPT->getResolvedMethodKey(TR_ResolvedMethodType::VirtualFromCP, (TR_OpaqueClassBlock *) _ramClass, cpIndex), this,
-                                           &resolvedMethod, unresolvedInCP))
-      {
-      if (resolvedMethod == NULL)
-         {
-         TR::DebugCounter::incStaticDebugCounter(comp, "resources.resolvedMethods/virtual/null");
-         if (unresolvedInCP)
-            handleUnresolvedVirtualMethodInCP(cpIndex, unresolvedInCP);
-         }
-      else
-         {
-         if (((TR_ResolvedJ9Method*)resolvedMethod)->isVarHandleAccessMethod())
-            {
-            // VarHandle access methods are resolved to *_impl()V, restore their signatures to obtain function correctness in the Walker
-            J9ROMConstantPoolItem *cpItem = (J9ROMConstantPoolItem *)romLiterals();
-            J9ROMMethodRef *romMethodRef = (J9ROMMethodRef *)(cpItem + cpIndex);
-            int32_t signatureLength = 0;
-            char *signature = getROMString(signatureLength, romMethodRef,
-                                 {
-                                 offsetof(J9ROMMethodRef, nameAndSignature),
-                                 offsetof(J9ROMNameAndSignature, signature)
-                                 });
-
-            ((TR_ResolvedJ9Method *)resolvedMethod)->setSignature(signature, signatureLength, comp->trMemory());
-            }
-
-         TR::DebugCounter::incStaticDebugCounter(comp, "resources.resolvedMethods/virtual");
-         TR::DebugCounter::incStaticDebugCounter(comp, "resources.resolvedMethods/virtual:#bytes", sizeof(TR_ResolvedJ9Method));
-         }
-      return resolvedMethod;
-      }
 
    // See if the constant pool entry is already resolved or not
    if (unresolvedInCP)
        *unresolvedInCP = true;
 
-   if (!((_fe->_compInfoPT->getClientData()->getRtResolve()) &&
+   bool shouldCompileTimeResolve = shouldCompileTimeResolveMethod(cpIndex);
+
+   if (!((compInfoPT->getClientData()->getRtResolve()) &&
          !comp->ilGenRequest().details().isMethodHandleThunk() && // cmvc 195373
-         performTransformation(comp, "Setting as unresolved virtual call cpIndex=%d\n",cpIndex) ) || ignoreRtResolve)
+         performTransformation(comp, "Setting as unresolved virtual call cpIndex=%d\n",cpIndex) ) || ignoreRtResolve || shouldCompileTimeResolve)
       {
+      if (compInfoPT->getCachedResolvedMethod(
+            compInfoPT->getResolvedMethodKey(TR_ResolvedMethodType::VirtualFromCP, (TR_OpaqueClassBlock *) _ramClass, cpIndex),
+            this,
+            &resolvedMethod,
+            unresolvedInCP))
+         {
+         if (resolvedMethod == NULL)
+            {
+            TR::DebugCounter::incStaticDebugCounter(comp, "resources.resolvedMethods/virtual/null");
+            if (unresolvedInCP)
+               handleUnresolvedVirtualMethodInCP(cpIndex, unresolvedInCP);
+            }
+         else
+            {
+            TR::DebugCounter::incStaticDebugCounter(comp, "resources.resolvedMethods/virtual");
+            TR::DebugCounter::incStaticDebugCounter(comp, "resources.resolvedMethods/virtual:#bytes", sizeof(TR_ResolvedJ9Method));
+            }
+         return resolvedMethod;
+         }
+
       _stream->write(JITServer::MessageType::ResolvedMethod_getResolvedPossiblyPrivateVirtualMethodAndMirror, (TR_ResolvedMethod *) _remoteMirror, literals(), cpIndex);
       auto recv = _stream->read<J9Method *, UDATA, bool, TR_ResolvedJ9JITServerMethodInfo>();
       J9Method *ramMethod = std::get<0>(recv);
@@ -392,6 +392,8 @@ TR_ResolvedJ9JITServerMethod::getResolvedPossiblyPrivateVirtualMethod(TR::Compil
          }
       }
 
+   TR_ASSERT_FATAL(resolvedMethod || !shouldCompileTimeResolve, "Method has to be resolved in %s at cpIndex  %d", signature(comp->trMemory()), cpIndex);
+
    if (resolvedMethod == NULL)
       {
       TR::DebugCounter::incStaticDebugCounter(comp, "resources.resolvedMethods/virtual/null");
@@ -400,21 +402,6 @@ TR_ResolvedJ9JITServerMethod::getResolvedPossiblyPrivateVirtualMethod(TR::Compil
       }
    else
       {
-      if (((TR_ResolvedJ9Method*)resolvedMethod)->isVarHandleAccessMethod())
-         {
-         // VarHandle access methods are resolved to *_impl()V, restore their signatures to obtain function correctness in the Walker
-         J9ROMConstantPoolItem *cpItem = (J9ROMConstantPoolItem *)romLiterals();
-         J9ROMMethodRef *romMethodRef = (J9ROMMethodRef *)(cpItem + cpIndex);
-         int32_t signatureLength = 0;
-         char *signature = getROMString(signatureLength, romMethodRef,
-                              {
-                              offsetof(J9ROMMethodRef, nameAndSignature),
-                              offsetof(J9ROMNameAndSignature, signature)
-                              });
-
-         ((TR_ResolvedJ9Method *)resolvedMethod)->setSignature(signature, signatureLength, comp->trMemory());
-         }
-
       TR::DebugCounter::incStaticDebugCounter(comp, "resources.resolvedMethods/virtual");
       TR::DebugCounter::incStaticDebugCounter(comp, "resources.resolvedMethods/virtual:#bytes", sizeof(TR_ResolvedJ9Method));
       }
@@ -633,19 +620,7 @@ static bool doResolveAtRuntime(J9Method *method, I_32 cpIndex, TR::Compilation *
       return true;
    TR_J9VMBase *fej9 = (TR_J9VMBase *)(comp->fe());
    auto stream = fej9->_compInfoPT->getMethodBeingCompiled()->_stream;
-   if (method == fej9->_compInfoPT->getClientData()->getOrCacheVMInfo(stream)->_invokeWithArgumentsHelperMethod)
-      {
-      // invokeWithArgumentsHelper is a weirdo
-      if (fej9->isAOT_DEPRECATED_DO_NOT_USE())
-         {
-         comp->failCompilation<TR::CompilationException>("invokeWithArgumentsHelper");
-         }
-      else
-         {
-         return false; // It is incorrect to try to resolve this
-         }
-      }
-   else if (comp->ilGenRequest().details().isMethodHandleThunk()) // cmvc 195373
+   if (comp->ilGenRequest().details().isMethodHandleThunk()) // cmvc 195373
       {
       return false;
       }
@@ -785,20 +760,29 @@ TR_ResolvedJ9JITServerMethod::getResolvedSpecialMethod(TR::Compilation * comp, I
 TR_ResolvedMethod *
 TR_ResolvedJ9JITServerMethod::createResolvedMethodFromJ9Method( TR::Compilation *comp, int32_t cpIndex, uint32_t vTableSlot, J9Method *j9Method, bool * unresolvedInCP, TR_AOTInliningStats *aotStats)
    {
-   return new (comp->trHeapMemory()) TR_ResolvedJ9JITServerMethod((TR_OpaqueMethodBlock *) j9Method, _fe, comp->trMemory(), this, vTableSlot);
+   TR_ResolvedMethod *m = new (comp->trHeapMemory()) TR_ResolvedJ9JITServerMethod((TR_OpaqueMethodBlock *) j9Method, _fe, comp->trMemory(), this, vTableSlot);
+   if (((TR_ResolvedJ9Method*)m)->isSignaturePolymorphicMethod())
+      {
+      // Signature polymorphic method's signature varies at different call sites and will be different than its declared signature
+      int32_t signatureLength;
+      char   *signature = getMethodSignatureFromConstantPool(cpIndex, signatureLength);
+      ((TR_ResolvedJ9Method *)m)->setSignature(signature, signatureLength, comp->trMemory());
+      }
+   return m;
    }
 
 TR_ResolvedMethod *
 TR_ResolvedJ9JITServerMethod::createResolvedMethodFromJ9Method( TR::Compilation *comp, int32_t cpIndex, uint32_t vTableSlot, J9Method *j9Method, bool * unresolvedInCP, TR_AOTInliningStats *aotStats, const TR_ResolvedJ9JITServerMethodInfo &methodInfo)
    {
-   return new (comp->trHeapMemory()) TR_ResolvedJ9JITServerMethod((TR_OpaqueMethodBlock *) j9Method, _fe, comp->trMemory(), methodInfo, this, vTableSlot);
-   }
-
-uint32_t
-TR_ResolvedJ9JITServerMethod::classCPIndexOfMethod(uint32_t methodCPIndex)
-   {
-   _stream->write(JITServer::MessageType::ResolvedMethod_classCPIndexOfMethod, _remoteMirror, methodCPIndex);
-   return std::get<0>(_stream->read<uint32_t>());
+   TR_ResolvedMethod *m = new (comp->trHeapMemory()) TR_ResolvedJ9JITServerMethod((TR_OpaqueMethodBlock *) j9Method, _fe, comp->trMemory(), methodInfo, this, vTableSlot);
+   if (((TR_ResolvedJ9Method*)m)->isSignaturePolymorphicMethod())
+      {
+      // Signature polymorphic method's signature varies at different call sites and will be different than its declared signature
+      int32_t signatureLength;
+      char   *signature = getMethodSignatureFromConstantPool(cpIndex, signatureLength);
+      ((TR_ResolvedJ9Method *)m)->setSignature(signature, signatureLength, comp->trMemory());
+      }
+   return m;
    }
 
 void *
@@ -820,10 +804,11 @@ char *
 TR_ResolvedJ9JITServerMethod::localName(U_32 slotNumber, U_32 bcIndex, I_32 &len, TR_Memory *trMemory)
    {
    _stream->write(JITServer::MessageType::ResolvedMethod_localName, _remoteMirror, slotNumber, bcIndex);
-   const std::string nameString = std::get<0>(_stream->read<std::string>());
+   auto recv = _stream->read<std::string>();
+   auto &nameString = std::get<0>(recv);
    len = nameString.length();
-   char *out = (char*) trMemory->allocateHeapMemory(len);
-   memcpy(out, &nameString[0], len);
+   char *out = (char *)trMemory->allocateHeapMemory(len);
+   memcpy(out, nameString.data(), len);
    return out;
    }
 
@@ -1016,215 +1001,6 @@ TR_ResolvedJ9JITServerMethod::getResolvedVirtualMethod(TR::Compilation * comp, T
    return resolvedMethod;
    }
 
-char *
-TR_ResolvedJ9JITServerMethod::getRemoteROMString(int32_t &len, void *basePtr, std::initializer_list<size_t> offsets)
-   {
-   TR_ASSERT(offsets.size() <= 2, "Number of offsets is greater than 2");
-
-   auto offsetFirst = *offsets.begin();
-   auto offsetSecond = (offsets.size() == 2) ? *(offsets.begin() + 1) : 0;
-
-   TR_ASSERT(offsetFirst < (1 << 16) && offsetSecond < (1 << 16), "Offsets are larger than 16 bits");
-
-   // create a key for hashing into a table of strings
-   TR_RemoteROMStringKey key;
-   uint32_t offsetKey = (offsetFirst << 16) + offsetSecond;
-   key._basePtr = basePtr;
-   key._offsets = offsetKey;
-   
-   std::string *cachedStr = NULL;
-   bool isCached = false;
-   TR::CompilationInfoPerThread *threadCompInfo = _fe->_compInfoPT;
-   {
-      OMR::CriticalSection getRemoteROMClass(threadCompInfo->getClientData()->getROMMapMonitor()); 
-      auto &stringsCache = getJ9ClassInfo(threadCompInfo, _ramClass)._remoteROMStringsCache;
-      auto gotStr = stringsCache.find(key);
-      if (gotStr != stringsCache.end())
-         {
-         cachedStr = &(gotStr->second);
-         isCached = true;
-         }
-   }
-
-   // only make a query if a string hasn't been cached
-   if (!isCached)
-      {
-      size_t offsetFromROMClass = (uint8_t*) basePtr - (uint8_t*) romClassPtr();
-      std::string offsetsStr((char*) offsets.begin(), offsets.size() * sizeof(size_t));
-      
-      _stream->write(JITServer::MessageType::ResolvedMethod_getRemoteROMString, _remoteMirror, offsetFromROMClass, offsetsStr);
-         {
-         // reaquire the monitor
-         OMR::CriticalSection getRemoteROMClass(threadCompInfo->getClientData()->getROMMapMonitor()); 
-         auto &stringsCache = getJ9ClassInfo(threadCompInfo, _ramClass)._remoteROMStringsCache;
-         cachedStr = &(stringsCache.insert({key, std::get<0>(_stream->read<std::string>())}).first->second);
-         }
-      }
-
-   len = cachedStr->length();
-   return &(cachedStr->at(0));
-   }
-
-// Takes a pointer to some data which is placed statically relative to the rom class,
-// as well as a list of offsets to J9SRP fields. The first offset is applied before the first
-// SRP is followed.
-//
-// If at any point while following the chain of SRP pointers we land outside the ROM class,
-// then we fall back to getRemoteROMString which follows the same process on the client.
-//
-// This is a workaround because some data referenced in the ROM constant pool is located outside of
-// it, but we cannot easily determine if the reference is outside or not (or even if it is a reference!)
-// because the data is untyped.
-char *
-TR_ResolvedJ9JITServerMethod::getROMString(int32_t &len, void *basePtr, std::initializer_list<size_t> offsets)
-   {
-   uint8_t *ptr = (uint8_t*) basePtr;
-   const J9ROMClass * romClass = romClassPtr();
-   for (size_t offset : offsets)
-      {
-      ptr += offset;
-      if (!JITServerHelpers::isAddressInROMClass(ptr, romClass))
-         return getRemoteROMString(len, basePtr, offsets);
-      ptr = ptr + *(J9SRP*)ptr;
-      }
-   if (!JITServerHelpers::isAddressInROMClass(ptr, romClass))
-      return getRemoteROMString(len, basePtr, offsets);
-   char *data = utf8Data((J9UTF8*) ptr, len);
-   return data;
-   }
-
-char *
-TR_ResolvedJ9JITServerMethod::fieldOrStaticSignatureChars(I_32 cpIndex, int32_t & len)
-   {
-   if (cpIndex < 0)
-      return 0;
-
-   char *signature = getROMString(len, &romCPBase()[cpIndex],
-                           {
-                           offsetof(J9ROMFieldRef, nameAndSignature),
-                           offsetof(J9ROMNameAndSignature, signature)
-                           });
-   return signature;
-   }
-
-char *
-TR_ResolvedJ9JITServerMethod::getClassNameFromConstantPool(uint32_t cpIndex, uint32_t &length)
-   {
-   TR_ASSERT(cpIndex != -1, "cpIndex shouldn't be -1");
-
-   int32_t len;
-   char *name = getROMString(len, &romLiterals()[cpIndex],
-                           {
-                           offsetof(J9ROMClassRef, name),
-                           });
-   length = len; // this is what happends when you have no type conventions
-   return name;
-   }
-
-char *
-TR_ResolvedJ9JITServerMethod::classNameOfFieldOrStatic(I_32 cpIndex, int32_t & len)
-   {
-   if (cpIndex == -1)
-      return 0;
-
-   J9ROMFieldRef * ref = (J9ROMFieldRef *) (&romCPBase()[cpIndex]);
-   TR_ASSERT(JITServerHelpers::isAddressInROMClass(ref, romClassPtr()), "field ref must be in ROM class"); // for now. if this fails make it a remote call
-   char *name = getROMString(len, &romCPBase()[ref->classRefCPIndex],
-                           {
-                           offsetof(J9ROMClassRef, name),
-                           });
-   return name;
-   }
-
-char *
-TR_ResolvedJ9JITServerMethod::classSignatureOfFieldOrStatic(I_32 cpIndex, int32_t & len)
-   {
-   if (cpIndex == -1)
-      return 0;
-
-   char *signature = getROMString(len, &romCPBase()[cpIndex],
-                           {
-                           offsetof(J9ROMFieldRef, nameAndSignature),
-                           offsetof(J9ROMNameAndSignature, signature),
-                           });
-   return signature;
-   }
-
-char *
-TR_ResolvedJ9JITServerMethod::fieldOrStaticNameChars(I_32 cpIndex, int32_t & len)
-   {
-   if (cpIndex < 0)
-      return 0;
-
-   char *name = getROMString(len, &romCPBase()[cpIndex],
-                           {
-                           offsetof(J9ROMFieldRef, nameAndSignature),
-                           offsetof(J9ROMNameAndSignature, name)
-                           });
-   return name;
-   }
-
-char *
-TR_ResolvedJ9JITServerMethod::fieldOrStaticName(I_32 cpIndex, int32_t & len, TR_Memory * trMemory, TR_AllocationKind kind)
-   {
-   if (cpIndex == -1)
-      return "<internal name>";
-
-   J9ROMFieldRef * ref = (J9ROMFieldRef *) (&romCPBase()[cpIndex]);
-   J9ROMNameAndSignature * nameAndSignature = J9ROMFIELDREF_NAMEANDSIGNATURE(ref);
-   const J9ROMClass * romClass = romClassPtr();
-
-   if (JITServerHelpers::isAddressInROMClass(nameAndSignature, romClass))
-      {
-      J9UTF8 * declName = J9ROMCLASSREF_NAME((J9ROMClassRef *) (&romCPBase()[ref->classRefCPIndex]));
-      J9UTF8 * name = J9ROMNAMEANDSIGNATURE_NAME(nameAndSignature);
-      J9UTF8 * signature = J9ROMNAMEANDSIGNATURE_SIGNATURE(nameAndSignature);
-
-      if (JITServerHelpers::isAddressInROMClass(declName, romClass) &&
-          JITServerHelpers::isAddressInROMClass(name, romClass) &&
-          JITServerHelpers::isAddressInROMClass(signature, romClass))
-         {
-         len = J9UTF8_LENGTH(declName) + J9UTF8_LENGTH(name) + J9UTF8_LENGTH(signature) +3;
-         char * s = (char *)trMemory->allocateMemory(len, kind);
-         sprintf(s, "%.*s.%.*s %.*s",
-                 J9UTF8_LENGTH(declName), utf8Data(declName),
-                 J9UTF8_LENGTH(name), utf8Data(name),
-                 J9UTF8_LENGTH(signature), utf8Data(signature));
-         return s;
-         }
-      }
-
-   
-   std::string *cachedStr = NULL;
-   bool isCached = false;
-   TR::CompilationInfoPerThread *threadCompInfo = _fe->_compInfoPT;
-   {
-      OMR::CriticalSection getRemoteROMClass(threadCompInfo->getClientData()->getROMMapMonitor()); 
-      auto &stringsCache = getJ9ClassInfo(threadCompInfo, _ramClass)._fieldOrStaticNameCache;
-      auto gotStr = stringsCache.find(cpIndex);
-      if (gotStr != stringsCache.end())
-         {
-         cachedStr = &(gotStr->second);
-         isCached = true;
-         }
-   }
-
-   // only make a query if a string hasn't been cached
-   if (!isCached)
-      {
-      _stream->write(JITServer::MessageType::ResolvedMethod_fieldOrStaticName, _remoteMirror, cpIndex);
-         {
-         // reaquire the monitor
-         OMR::CriticalSection getRemoteROMClass(threadCompInfo->getClientData()->getROMMapMonitor()); 
-         auto &stringsCache = getJ9ClassInfo(threadCompInfo, _ramClass)._fieldOrStaticNameCache;
-         cachedStr = &(stringsCache.insert({cpIndex, std::get<0>(_stream->read<std::string>())}).first->second);
-         }
-      }
-
-   len = cachedStr->length();
-   return &(cachedStr->at(0));
-   }
-
 void *
 TR_ResolvedJ9JITServerMethod::stringConstant(I_32 cpIndex)
    {
@@ -1280,21 +1056,26 @@ TR_ResolvedJ9JITServerMethod::isSubjectToPhaseChange(TR::Compilation *comp)
    }
 
 TR_ResolvedMethod *
-TR_ResolvedJ9JITServerMethod::getResolvedHandleMethod(TR::Compilation * comp, I_32 cpIndex, bool * unresolvedInCP)
+TR_ResolvedJ9JITServerMethod::getResolvedHandleMethod(TR::Compilation *comp, I_32 cpIndex, bool *unresolvedInCP,
+                                                      bool *isInvokeCacheAppendixNull)
    {
    TR_ASSERT(cpIndex != -1, "cpIndex shouldn't be -1");
 #if TURN_OFF_INLINING
    return 0;
 #else
-
    _stream->write(JITServer::MessageType::ResolvedMethod_getResolvedHandleMethod, _remoteMirror, cpIndex);
-   auto recv = _stream->read<TR_OpaqueMethodBlock *, std::string, bool>();
-   auto dummyInvokeExact = std::get<0>(recv);
-   auto signature = std::get<1>(recv);
+   auto recv = _stream->read<TR_OpaqueMethodBlock *, TR_ResolvedJ9JITServerMethodInfo, std::string, bool, bool>();
+   auto ramMethod = std::get<0>(recv);
+   auto &methodInfo = std::get<1>(recv);
+   auto &signature = std::get<2>(recv);
    if (unresolvedInCP)
-      *unresolvedInCP = std::get<2>(recv);
+      *unresolvedInCP = std::get<3>(recv);
+   if (isInvokeCacheAppendixNull)
+      *isInvokeCacheAppendixNull = std::get<4>(recv);
 
-   return _fe->createResolvedMethodWithSignature(comp->trMemory(), dummyInvokeExact, NULL, &signature[0], signature.length(), this);
+   return static_cast<TR_J9ServerVM *>(_fe)->createResolvedMethodWithSignature(
+      comp->trMemory(), ramMethod, NULL, (char *)signature.data(), signature.length(), this, methodInfo
+   );
 #endif
    }
 
@@ -1326,6 +1107,7 @@ TR_ResolvedJ9JITServerMethod::callSiteTableEntryAddress(int32_t callSiteIndex)
    return std::get<0>(_stream->read<void*>());
    }
 
+#if defined(J9VM_OPT_METHOD_HANDLE)
 bool
 TR_ResolvedJ9JITServerMethod::isUnresolvedVarHandleMethodTypeTableEntry(int32_t cpIndex)
    {
@@ -1339,27 +1121,30 @@ TR_ResolvedJ9JITServerMethod::varHandleMethodTypeTableEntryAddress(int32_t cpInd
    _stream->write(JITServer::MessageType::ResolvedMethod_varHandleMethodTypeTableEntryAddress, _remoteMirror, cpIndex);
    return std::get<0>(_stream->read<void*>());
    }
+#endif /* defined(J9VM_OPT_METHOD_HANDLE) */
 
 TR_ResolvedMethod *
-TR_ResolvedJ9JITServerMethod::getResolvedDynamicMethod(TR::Compilation * comp, I_32 callSiteIndex, bool * unresolvedInCP)
+TR_ResolvedJ9JITServerMethod::getResolvedDynamicMethod(TR::Compilation *comp, I_32 callSiteIndex, bool *unresolvedInCP,
+                                                       bool *isInvokeCacheAppendixNull)
    {
    TR_ASSERT(callSiteIndex != -1, "callSiteIndex shouldn't be -1");
 
 #if TURN_OFF_INLINING
    return 0;
 #else
-
-   J9Class    *ramClass = constantPoolHdr();
-   J9ROMClass *romClass = romClassPtr();
-   _stream->write(JITServer::MessageType::ResolvedMethod_getResolvedDynamicMethod, callSiteIndex, ramClass);
-   auto recv = _stream->read<TR_OpaqueMethodBlock*, std::string, bool>();
-   TR_OpaqueMethodBlock *dummyInvokeExact = std::get<0>(recv);
-   std::string signature = std::get<1>(recv);
+   _stream->write(JITServer::MessageType::ResolvedMethod_getResolvedDynamicMethod, _remoteMirror, callSiteIndex);
+   auto recv = _stream->read<TR_OpaqueMethodBlock *, TR_ResolvedJ9JITServerMethodInfo, std::string, bool, bool>();
+   auto ramMethod = std::get<0>(recv);
+   auto &methodInfo = std::get<1>(recv);
+   auto &signature = std::get<2>(recv);
    if (unresolvedInCP)
-      *unresolvedInCP = std::get<2>(recv);
-   TR_ResolvedMethod *result = _fe->createResolvedMethodWithSignature(comp->trMemory(), dummyInvokeExact, NULL, &signature[0], signature.size(), this);
+      *unresolvedInCP = std::get<3>(recv);
+   if (isInvokeCacheAppendixNull)
+      *isInvokeCacheAppendixNull = std::get<4>(recv);
 
-   return result;
+   return static_cast<TR_J9ServerVM *>(_fe)->createResolvedMethodWithSignature(
+      comp->trMemory(), ramMethod, NULL, (char *)signature.data(), signature.size(), this, methodInfo
+   );
 #endif
    }
 
@@ -1594,13 +1379,6 @@ TR_ResolvedJ9JITServerMethod::createResolvedMethodFromJ9MethodMirror(TR_Resolved
       bool isSystemClassLoader = false;
       J9Method *j9method = (J9Method *) method;
 
-      if (comp->getOption(TR_DisableDFP) ||
-          (!(comp->target().cpu.supportsDecimalFloatingPoint()
-#ifdef TR_TARGET_S390
-          || comp->target().cpu.supportsFeature(OMR_FEATURE_S390_DFP)
-#endif
-            ) ||
-             !TR_J9MethodBase::isBigDecimalMethod(j9method)))
          {
          // Check if same classloader
          J9Class *j9clazz = (J9Class *) J9_CLASS_FROM_CP(((J9RAMConstantPoolItem *) J9_CP_FROM_METHOD(((J9Method *)j9method))));
@@ -1612,7 +1390,7 @@ TR_ResolvedJ9JITServerMethod::createResolvedMethodFromJ9MethodMirror(TR_Resolved
             isSystemClassLoader = ((void*)fej9->vmThread()->javaVM->systemClassLoader->classLoaderObject ==  (void*)fej9->getClassLoader(clazzOfInlinedMethod));
             }
 
-         if (fej9->sharedCache()->isPointerInSharedCache(J9_CLASS_FROM_METHOD(j9method)->romClass))
+         if (fej9->sharedCache()->isROMClassInSharedCache(J9_CLASS_FROM_METHOD(j9method)->romClass))
             {
             bool sameLoaders = false;
             TR_J9VMBase *fej9 = (TR_J9VMBase *)fe;
@@ -1670,6 +1448,9 @@ TR_ResolvedJ9JITServerMethod::packMethodInfo(TR_ResolvedJ9JITServerMethodInfo &m
    methodInfoStruct.virtualMethodIsOverridden = resolvedMethod->virtualMethodIsOverridden();
    methodInfoStruct.addressContainingIsOverriddenBit = resolvedMethod->addressContainingIsOverriddenBit();
    methodInfoStruct.classLoader = resolvedMethod->getClassLoader();
+   methodInfoStruct.isLambdaFormGeneratedMethod = static_cast<TR_J9VMBase *>(fe)->isLambdaFormGeneratedMethod(resolvedMethod);
+   methodInfoStruct.isForceInline = static_cast<TR_J9VMBase *>(fe)->isForceInline(resolvedMethod);
+   methodInfoStruct.isDontInline = static_cast<TR_J9VMBase *>(fe)->isDontInline(resolvedMethod);
 
    TR_PersistentJittedBodyInfo *bodyInfo = NULL;
    // Method may not have been compiled
@@ -1704,7 +1485,7 @@ TR_ResolvedJ9JITServerMethod::unpackMethodInfo(TR_OpaqueMethodBlock * aMethod, T
    _literals = methodInfoStruct.literals;
    _ramClass = methodInfoStruct.ramClass;
 
-   _romClass = threadCompInfo->getAndCacheRemoteROMClass(_ramClass, trMemory);
+   _romClass = threadCompInfo->getAndCacheRemoteROMClass(_ramClass);
    _romMethod = romMethodAtClassIndex(_romClass, methodInfoStruct.methodIndex);
    _romLiterals = (J9ROMConstantPoolItem *) ((UDATA) _romClass + sizeof(J9ROMClass));
 
@@ -1725,6 +1506,9 @@ TR_ResolvedJ9JITServerMethod::unpackMethodInfo(TR_OpaqueMethodBlock * aMethod, T
    _virtualMethodIsOverridden = methodInfoStruct.virtualMethodIsOverridden;
    _addressContainingIsOverriddenBit = methodInfoStruct.addressContainingIsOverriddenBit;
    _classLoader = methodInfoStruct.classLoader;
+   _isLambdaFormGeneratedMethod = methodInfoStruct.isLambdaFormGeneratedMethod;
+   _isForceInline = methodInfoStruct.isForceInline;
+   _isDontInline = methodInfoStruct.isDontInline;
 
    auto &bodyInfoStr = std::get<1>(methodInfo);
    auto &methodInfoStr = std::get<2>(methodInfo);
@@ -1864,7 +1648,7 @@ TR_ResolvedJ9JITServerMethod::cacheResolvedMethodsCallees(int32_t ttlForUnresolv
 
    // 2. Send a remote query to mirror all uncached resolved methods
    _stream->write(JITServer::MessageType::ResolvedMethod_getMultipleResolvedMethods, (TR_ResolvedJ9Method *) _remoteMirror, methodTypes, cpIndices);
-   auto recv = _stream->read<std::vector<J9Method *>, std::vector<uint32_t>, std::vector<TR_ResolvedJ9JITServerMethodInfo>>();
+   auto recv = _stream->read<std::vector<TR_OpaqueMethodBlock *>, std::vector<uint32_t>, std::vector<TR_ResolvedJ9JITServerMethodInfo>>();
 
    // 3. Cache all received resolved methods
    auto &ramMethods = std::get<0>(recv);
@@ -1883,10 +1667,11 @@ TR_ResolvedJ9JITServerMethod::cacheResolvedMethodsCallees(int32_t ttlForUnresolv
          {
          compInfoPT->cacheResolvedMethod(
             key,
-            (TR_OpaqueMethodBlock *) ramMethods[i],
+            ramMethods[i],
             vTableOffsets[i],
             methodInfos[i],
-            ttlForUnresolved);
+            ttlForUnresolved
+            );
          }
       }
    }
@@ -1954,6 +1739,68 @@ TR_ResolvedJ9JITServerMethod::cacheFields()
       }
    }
 
+int32_t
+TR_ResolvedJ9JITServerMethod::collectImplementorsCapped(
+   TR_OpaqueClassBlock *topClass,
+   int32_t maxCount,
+   int32_t cpIndexOrOffset,
+   TR_YesNoMaybe useGetResolvedInterfaceMethod,
+   TR_ResolvedMethod **implArray)
+   {
+   auto compInfoPT = static_cast<TR::CompilationInfoPerThreadRemote *>(_fe->_compInfoPT);
+   JITServer::ServerStream *stream = compInfoPT->getMethodBeingCompiled()->_stream;
+   stream->write(
+      JITServer::MessageType::ResolvedMethod_getResolvedImplementorMethods,
+      topClass,
+      maxCount,
+      cpIndexOrOffset,
+      _remoteMirror,
+      useGetResolvedInterfaceMethod);
+   auto recv = stream->read<std::vector<TR_ResolvedJ9JITServerMethodInfo>, std::vector<J9Method *>, int32_t>();
+   auto &methodInfos = std::get<0>(recv);
+   auto &ramMethods = std::get<1>(recv);
+
+   bool isInterface = TR::Compiler->cls.isInterfaceClass(compInfoPT->getCompilation(), topClass);
+
+   // refine if requested by a caller
+   if (useGetResolvedInterfaceMethod != TR_maybe)
+      isInterface = useGetResolvedInterfaceMethod == TR_yes ? true : false;
+   for (int32_t i = 0; i < methodInfos.size(); ++i)
+      {
+      TR_ResolvedMethodType type = isInterface ?
+         TR_ResolvedMethodType::Interface :
+         TR_ResolvedMethodType::VirtualFromOffset;
+
+      TR_ResolvedMethod *resolvedMethod;
+      TR_ResolvedMethodKey key =
+         compInfoPT->getResolvedMethodKey(
+            type,
+            reinterpret_cast<TR_OpaqueClassBlock *>(_ramClass),
+            cpIndexOrOffset,
+            reinterpret_cast<TR_OpaqueClassBlock *>(std::get<0>(methodInfos[i]).ramClass));
+
+      bool success;
+      if (!(success = compInfoPT->getCachedResolvedMethod(
+             key,
+             this,
+             &resolvedMethod)))
+         {
+         compInfoPT->cacheResolvedMethod(
+            key,
+            (TR_OpaqueMethodBlock *) ramMethods[i],
+            cpIndexOrOffset,
+            methodInfos[i],
+            0); // all received methods should be resolved
+         success = compInfoPT->getCachedResolvedMethod(key, this, &resolvedMethod);
+         }
+
+      TR_ASSERT_FATAL(success && resolvedMethod, "method must be cached and resolved");
+      implArray[i] = resolvedMethod;
+      }
+
+   return std::get<2>(recv);
+   }
+
 bool
 TR_ResolvedJ9JITServerMethod::validateMethodFieldAttributes(const TR_J9MethodFieldAttributes &attributes, bool isStatic, int32_t cpIndex, bool isStore, bool needAOTValidation)
    {
@@ -1991,6 +1838,33 @@ TR_ResolvedJ9JITServerMethod::archetypeArgPlaceholderSlot()
     * -1 :the placeholder is a 1-slot type (int)
     */
    return paramSlots;
+   }
+
+bool
+TR_ResolvedJ9JITServerMethod::isFieldQType(int32_t cpIndex)
+   {
+   if (!TR::Compiler->om.areValueTypesEnabled() ||
+      (-1 == cpIndex))
+      return false;
+
+   auto comp = _fe->_compInfoPT->getCompilation();
+   int32_t sigLen;
+   char *sig = fieldOrStaticSignatureChars(cpIndex, sigLen);
+   J9UTF8 *utfWrapper = str2utf8(sig, sigLen, comp->trMemory(), heapAlloc);
+
+   J9VMThread *vmThread = comp->j9VMThread();
+   return vmThread->javaVM->internalVMFunctions->isNameOrSignatureQtype(utfWrapper);
+   }
+
+bool
+TR_ResolvedJ9JITServerMethod::isFieldFlattened(TR::Compilation *comp, int32_t cpIndex, bool isStatic)
+   {
+   if (!TR::Compiler->om.areValueTypesEnabled() ||
+      (-1 == cpIndex))
+      return false;
+
+   _stream->write(JITServer::MessageType::ResolvedMethod_isFieldFlattened, _remoteMirror, cpIndex, isStatic);
+   return std::get<0>(_stream->read<bool>());
    }
 
 TR_ResolvedRelocatableJ9JITServerMethod::TR_ResolvedRelocatableJ9JITServerMethod(TR_OpaqueMethodBlock * aMethod, TR_FrontEnd * fe, TR_Memory * trMemory, TR_ResolvedMethod * owner, uint32_t vTableSlot)
@@ -2155,7 +2029,8 @@ TR_ResolvedRelocatableJ9JITServerMethod::storeValidationRecordIfNecessary(TR::Co
       }
 
    // all kinds of validations may need to rely on the entire class chain, so make sure we can build one first
-   void *classChain = fej9->sharedCache()->rememberClass(definingClass);
+   const AOTCacheClassChainRecord *classChainRecord = NULL;
+   void *classChain = fej9->sharedCache()->rememberClass(definingClass, &classChainRecord);
    if (!classChain)
       return false;
 
@@ -2200,7 +2075,10 @@ TR_ResolvedRelocatableJ9JITServerMethod::storeValidationRecordIfNecessary(TR::Co
       return true;
       }
 
-   TR::AOTClassInfo *classInfo = new (comp->trHeapMemory()) TR::AOTClassInfo(fej9, (TR_OpaqueClassBlock *)definingClass, (void *) classChain, (TR_OpaqueMethodBlock *)ramMethod, cpIndex, reloKind);
+   TR::AOTClassInfo *classInfo = new (comp->trHeapMemory()) TR::AOTClassInfo(
+      fej9, (TR_OpaqueClassBlock *)definingClass, (void *)classChain,
+      (TR_OpaqueMethodBlock *)ramMethod, cpIndex, reloKind, classChainRecord
+   );
    if (classInfo)
       {
       traceMsg(comp, "\tCreated new AOT class info %p\n", classInfo);
@@ -2291,6 +2169,13 @@ TR_ResolvedRelocatableJ9JITServerMethod::createResolvedMethodFromJ9Method(TR::Co
       }
 
 #endif
+   if (resolvedMethod && ((TR_ResolvedJ9Method*)resolvedMethod)->isSignaturePolymorphicMethod())
+      {
+      // Signature polymorphic method's signature varies at different call sites and will be different than its declared signature
+      int32_t signatureLength;
+      char   *signature = getMethodSignatureFromConstantPool(cpIndex, signatureLength);
+      ((TR_ResolvedJ9Method *)resolvedMethod)->setSignature(signature, signatureLength, comp->trMemory());
+      }
 
    return resolvedMethod;
    }
@@ -2305,6 +2190,14 @@ TR_ResolvedRelocatableJ9JITServerMethod::createResolvedMethodFromJ9Method( TR::C
    if (std::get<0>(methodInfo).remoteMirror)
       resolvedMethod = new (comp->trHeapMemory()) TR_ResolvedRelocatableJ9JITServerMethod((TR_OpaqueMethodBlock *) j9method, _fe, comp->trMemory(), methodInfo, this, vTableSlot);
 
+   if (resolvedMethod && ((TR_ResolvedJ9Method*)resolvedMethod)->isSignaturePolymorphicMethod())
+      {
+      // Signature polymorphic method's signature varies at different call sites and will be different than its declared signature
+      int32_t signatureLength;
+      char   *signature = getMethodSignatureFromConstantPool(cpIndex, signatureLength);
+      ((TR_ResolvedJ9Method *)resolvedMethod)->setSignature(signature, signatureLength, comp->trMemory());
+      }
+
    return resolvedMethod;
    }
 
@@ -2313,14 +2206,9 @@ TR_ResolvedRelocatableJ9JITServerMethod::getResolvedImproperInterfaceMethod(
    TR::Compilation * comp,
    I_32 cpIndex)
    {
-   if (comp->getOption(TR_UseSymbolValidationManager))
-      return TR_ResolvedJ9JITServerMethod::getResolvedImproperInterfaceMethod(comp, cpIndex);
-
-   // For now leave private and Object invokeinterface unresolved in AOT. If we
-   // resolve it, we may forceUnresolvedDispatch in codegen, in which case the
-   // generated code would attempt to resolve the wrong kind of constant pool
-   // entry.
-   return NULL;
+   return aotMaskResolvedImproperInterfaceMethod(
+      comp,
+      TR_ResolvedJ9JITServerMethod::getResolvedImproperInterfaceMethod(comp, cpIndex));
    }
 
 void *
@@ -2352,9 +2240,11 @@ TR_ResolvedRelocatableJ9JITServerMethod::startAddressForInterpreterOfJittedMetho
    }
 
 TR_OpaqueClassBlock * 
-TR_ResolvedRelocatableJ9JITServerMethod::definingClassFromCPFieldRef(TR::Compilation *comp, int32_t cpIndex, bool isStatic)
+TR_ResolvedRelocatableJ9JITServerMethod::definingClassFromCPFieldRef(TR::Compilation *comp, int32_t cpIndex, bool isStatic, TR_OpaqueClassBlock **fromResolvedJ9Method)
    {
    TR_OpaqueClassBlock *resolvedClass = TR_ResolvedJ9JITServerMethod::definingClassFromCPFieldRef(comp, cpIndex, isStatic);
+   if (fromResolvedJ9Method != NULL)
+      *fromResolvedJ9Method = resolvedClass;
    if (resolvedClass)
       {
       bool valid = false;
@@ -2484,13 +2374,7 @@ TR_ResolvedRelocatableJ9JITServerMethod::getResolvedPossiblyPrivateVirtualMethod
          ignoreRtResolve,
          unresolvedInCP);
 
-   if (comp->getOption(TR_UseSymbolValidationManager))
-      return method;
-
-   // For now leave private invokevirtual unresolved in AOT. If we resolve it,
-   // we may forceUnresolvedDispatch in codegen, in which case the generated
-   // code would attempt to resolve the wrong kind of constant pool entry.
-   return (method == NULL || method->isPrivate()) ? NULL : method;
+   return aotMaskResolvedPossiblyPrivateVirtualMethod(comp, method);
    }
 
 bool
@@ -2776,11 +2660,10 @@ TR_J9ServerMethod::TR_J9ServerMethod(TR_FrontEnd * fe, TR_Memory * trMemory, J9C
       cache.insert({cpIndex, {classNameStr, methodNameStr, methodSignatureStr}});
       }
 
-   _className = str2utf8((char*)&classNameStr[0], classNameStr.length(), trMemory, heapAlloc);
-   _name = str2utf8((char*)&methodNameStr[0], methodNameStr.length(), trMemory, heapAlloc);
-   _signature = str2utf8((char*)&methodSignatureStr[0], methodSignatureStr.length(), trMemory, heapAlloc);
+   _className = str2utf8(classNameStr.data(), classNameStr.length(), trMemory, heapAlloc);
+   _name = str2utf8(methodNameStr.data(), methodNameStr.length(), trMemory, heapAlloc);
+   _signature = str2utf8(methodSignatureStr.data(), methodSignatureStr.length(), trMemory, heapAlloc);
 
    parseSignature(trMemory);
    _fullSignature = NULL;
    }
-

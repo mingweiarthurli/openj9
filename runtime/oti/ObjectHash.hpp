@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -25,13 +25,13 @@
 
 #include "j9cfg.h"
 
-#if defined(J9_OVERRIDE_COMPRESS_OBJECT_REFERENCES)
-#if J9_OVERRIDE_COMPRESS_OBJECT_REFERENCES
+#if defined(OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES)
+#if OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES
 #define VM_ObjectHash VM_ObjectHashCompressed
-#else /* J9_OVERRIDE_COMPRESS_OBJECT_REFERENCES */
+#else /* OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES */
 #define VM_ObjectHash VM_ObjectHashFull
-#endif /* J9_OVERRIDE_COMPRESS_OBJECT_REFERENCES */
-#endif /* J9_OVERRIDE_COMPRESS_OBJECT_REFERENCES */
+#endif /* OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES */
+#endif /* OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES */
 
 #include "j9.h"
 #include "j9accessbarrier.h"
@@ -249,7 +249,7 @@ public:
 							offset = ROUND_UP_TO_POWEROF2((offset << (romClass->arrayShape & 0x0000FFFF)) + sizeof(J9IndexableObjectContiguousFull), sizeof(I_32));
 							hashValue = *(I_32*)((UDATA)objectPointer + offset);
 						} else {
-							if (0 == ((J9IndexableObjectDiscontiguous*)objectPointer)->size) {
+							if (0 == ((J9IndexableObjectDiscontiguousFull*)objectPointer)->size) {
 								/* Zero-sized array */
 								hashValue = *(I_32*)((J9IndexableObjectDiscontiguousFull*)objectPointer + 1);
 							} else {

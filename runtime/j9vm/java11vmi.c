@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2015, 2020 IBM Corp. and others
+ * Copyright (c) 2015, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -34,6 +34,8 @@
 #include "util_api.h"
 #include "j9vmnls.h"
 #include "j9version.h"
+
+#if JAVA_SPEC_VERSION >= 11
 
 #define J9TIME_NANOSECONDS_PER_SECOND         ((jlong) 1000000000)
 /* Need to do a |currentSecondsTime - secondsOffset| < (2^32) check to ensure that the
@@ -86,12 +88,9 @@ static BOOLEAN isModuleNameGood(j9object_t moduleName);
 static UDATA allowReadAccessToModule(J9VMThread * currentThread, J9Module * fromModule, J9Module * toModule);
 static void trcModulesAddReadsModule(J9VMThread *currentThread, jobject toModule, J9Module *j9FromMod, J9Module *j9ToMod);
 
-
-#if !defined(CALL_BUNDLED_FUNCTIONS_DIRECTLY)
 /* These come from jvm.c */
 extern IDATA (*f_monitorEnter)(omrthread_monitor_t monitor);
 extern IDATA (*f_monitorExit)(omrthread_monitor_t monitor);
-#endif /* !defined(CALL_BUNDLED_FUNCTIONS_DIRECTLY) */
 
 static UDATA
 hashTableAtPut(J9HashTable * table, void * value, BOOLEAN collisionIsFailure)
@@ -212,7 +211,7 @@ createPackage(J9VMThread * currentThread, J9Module * fromModule, const char *pac
 		}
 	}
 
-	/* if we failed to create the package */	
+	/* if we failed to create the package */
 	if (NULL == retval) {
 		if (NULL != j9package) {
 			freePackage(currentThread, j9package);
@@ -398,12 +397,12 @@ addMulPackageDefinitions(J9VMThread * currentThread, J9Module * fromModule, cons
 				}
 			}
 
-			/* Remove from the hash table the entries that made through. Note that the last entry (the one we are 
+			/* Remove from the hash table the entries that made through. Note that the last entry (the one we are
 			 * processing right now) was the one that failed so we don't need to worry about that one.
 			 */
 			if (ERRCODE_SUCCESS != retval) {
 				if (i > 0) {
-					--i; 
+					--i;
 					removeMulPackageDefinitions(currentThread, fromModule, packages, i);
 				}
 			}
@@ -463,8 +462,8 @@ areNoPackagesDefined(J9VMThread * currentThread, J9ClassLoader * classLoader, co
 	J9InternalVMFunctions const * const vmFuncs = vm->internalVMFunctions;
 
 	 /*
-	 * This check will be ignored for calls to this method that occur before java.base is defined. 
-	 * Classes are loaded before java.base is created that are added to the classHashTable. 
+	 * This check will be ignored for calls to this method that occur before java.base is defined.
+	 * Classes are loaded before java.base is created that are added to the classHashTable.
 	 * These classes will eventually be fixed up to be part of java.base, but should not be considered duplicate packages
 	 * before that happens.
 	 */
@@ -510,7 +509,7 @@ exportPackageToAll(J9VMThread * currentThread, J9Module * fromModule, const char
 	UDATA retval = ERRCODE_GENERAL_FAILURE;
 	J9Package * const j9package = getPackageDefinition(currentThread, fromModule, package, &retval);
 	if (NULL != j9package) {
-		j9package->exportToAll = TRUE;
+		j9package->exportToAll = 1;
 		if (TrcEnabled_Trc_MODULE_addModuleExportsToAll) {
 			trcModulesAddModuleExportsToAll(currentThread, fromModule, package);
 		}
@@ -541,7 +540,7 @@ exportPackageToAllUnamed(J9VMThread * currentThread, J9Module * fromModule, cons
 	UDATA retval = ERRCODE_GENERAL_FAILURE;
 	J9Package * const j9package = getPackageDefinition(currentThread, fromModule, package, &retval);
 	if (NULL != j9package) {
-		j9package->exportToAllUnnamed = TRUE;
+		j9package->exportToAllUnnamed = 1;
 		if (TrcEnabled_Trc_MODULE_addModuleExportsToAllUnnamed) {
 			trcModulesAddModuleExportsToAllUnnamed(currentThread, fromModule, package);
 		}
@@ -707,7 +706,7 @@ allowReadAccessToModule(J9VMThread * currentThread, J9Module * fromModule, J9Mod
 /**
  * Define a module containing the specified packages. It will create the module record in the  ClassLoader's module hash table and
  * create package records in the class loader's package hash table if necessary.
- *  
+ *
  * @throws NullPointerExceptions a if module is null.
  * @throws IllegalArgumentExceptions if
  *     - Class loader already has a module with that name
@@ -742,11 +741,7 @@ JVM_DefineModule(JNIEnv * env, jobject module, jboolean isOpen, jstring version,
 #endif /* JAVA_SPEC_VERSION >= 15 */
 
 	vmFuncs->internalEnterVMFromJNI(currentThread);
-#if defined(CALL_BUNDLED_FUNCTIONS_DIRECTLY)
-	omrthread_monitor_enter(vm->classLoaderModuleAndLocationMutex);
-#else
 	f_monitorEnter(vm->classLoaderModuleAndLocationMutex);
-#endif /* defined(CALL_BUNDLED_FUNCTIONS_DIRECTLY) */
 
 #if JAVA_SPEC_VERSION >= 15
 	if (NULL != packageArray) {
@@ -797,17 +792,13 @@ JVM_DefineModule(JNIEnv * env, jobject module, jboolean isOpen, jstring version,
 			jsize pkgIndex = 0;
 			for (pkgIndex = 0; pkgIndex < numPackages; pkgIndex++) {
 				const char *packageName = packages[pkgIndex];
-#define JAVADOT "java."
-#define JAVASLASH "java/"
-				if ((0 == strcmp(packageName, "java")) 
-					|| (0 == strncmp(packageName, JAVADOT, sizeof(JAVADOT) - 1))
-					|| (0 == strncmp(packageName, JAVASLASH, sizeof(JAVASLASH) - 1))
-				) {
-					vmFuncs->setCurrentExceptionNLS(currentThread, J9VMCONSTANTPOOL_JAVALANGILLEGALARGUMENTEXCEPTION, J9NLS_VM_ONLY_BOOT_PLATFORM_CLASSLOADER_DEFINE_PKG_JAVA);
-					goto done;
+				if (0 == strncmp(packageName, "java", 4)) {
+					char nextCh = packageName[4];
+					if (('\0' == nextCh) || ('.' == nextCh) || ('/' == nextCh)) {
+						vmFuncs->setCurrentExceptionNLS(currentThread, J9VMCONSTANTPOOL_JAVALANGILLEGALARGUMENTEXCEPTION, J9NLS_VM_ONLY_BOOT_PLATFORM_CLASSLOADER_DEFINE_PKG_JAVA);
+						goto done;
+					}
 				}
-#undef JAVASLASH
-#undef JAVADOT
 			}
 		}
 
@@ -846,10 +837,10 @@ JVM_DefineModule(JNIEnv * env, jobject module, jboolean isOpen, jstring version,
 									vmFuncs->setNativeOutOfMemoryError(currentThread, 0, 0);
 								} else {
 									const char* moduleName = "openj9.sharedclasses";
-	
+
 									if (0 == strcmp(nameUTF, moduleName)) {
 										J9VMDllLoadInfo *entry = FIND_DLL_TABLE_ENTRY(J9_SHARED_DLL_NAME);
-	
+
 										if ((NULL == entry)
 											|| (J9_ARE_ALL_BITS_SET(entry->loadFlags, FAILED_TO_LOAD))
 										) {
@@ -862,9 +853,9 @@ JVM_DefineModule(JNIEnv * env, jobject module, jboolean isOpen, jstring version,
 							/* first module; must be "java.base" */
 							J9ClassWalkState classWalkState;
 							J9Class* clazz = NULL;
-	
+
 							Assert_SC_true(0 == strcmp(nameUTF, JAVA_BASE_MODULE));
-	
+
 							clazz = vmFuncs->allClassesStartDo(&classWalkState, vm, vm->systemClassLoader);
 							while (NULL != clazz) {
 								Assert_SC_true(clazz->module == vm->javaBaseModule);
@@ -888,9 +879,10 @@ JVM_DefineModule(JNIEnv * env, jobject module, jboolean isOpen, jstring version,
 							}
 
 							vm->runtimeFlags |= J9_RUNTIME_JAVA_BASE_MODULE_CREATED;
-							TRIGGER_J9HOOK_JAVA_BASE_LOADED(vm->hookInterface, currentThread);
 							Trc_MODULE_defineModule(currentThread, "java.base", j9mod);
 						}
+
+						TRIGGER_J9HOOK_VM_MODULE_LOAD(vm->hookInterface, currentThread, j9mod);
 					} else {
 						throwExceptionHelper(currentThread, rc);
 					}
@@ -914,22 +906,18 @@ done:
 			const char* packageName = packages[pkgIndex];
 			j9mem_free_memory((void *)packageName);
 		}
-		j9mem_free_memory((void *)packages);		
+		j9mem_free_memory((void *)packages);
 	}
 #endif /* JAVA_SPEC_VERSION >= 15 */
 
-#if defined(CALL_BUNDLED_FUNCTIONS_DIRECTLY)
-	omrthread_monitor_exit(vm->classLoaderModuleAndLocationMutex);
-#else
 	f_monitorExit(vm->classLoaderModuleAndLocationMutex);
-#endif /* defined(CALL_BUNDLED_FUNCTIONS_DIRECTLY) */
 	vmFuncs->internalExitVMToJNI(currentThread);
 
 	return module;
 }
 
 /**
- * Qualified export of package in fromModule to toModule. 
+ * Qualified export of package in fromModule to toModule.
  *
  * @todo the null toModule case is not outlined in the spec but the spec does not specify what to do in this case
  * @throws NullPointerExceptions a if toModule is null.
@@ -957,12 +945,8 @@ JVM_AddModuleExports(JNIEnv * env, jobject fromModule, const char *package, jobj
 #endif /* JAVA_SPEC_VERSION >= 15 */
 
 	vmFuncs->internalEnterVMFromJNI(currentThread);
-#if defined(CALL_BUNDLED_FUNCTIONS_DIRECTLY)
-	omrthread_monitor_enter(vm->classLoaderModuleAndLocationMutex);
-#else
 	f_monitorEnter(vm->classLoaderModuleAndLocationMutex);
-#endif /* defined(CALL_BUNDLED_FUNCTIONS_DIRECTLY) */
-	
+
 #if JAVA_SPEC_VERSION >= 15
 	if (NULL != packageObj) {
 		j9object_t stringObject = J9_JNI_UNWRAP_REFERENCE(packageObj);
@@ -1005,17 +989,13 @@ done:
 	}
 #endif /* JAVA_SPEC_VERSION >= 15 */
 
-#if defined(CALL_BUNDLED_FUNCTIONS_DIRECTLY)
-	omrthread_monitor_exit(vm->classLoaderModuleAndLocationMutex);
-#else
 	f_monitorExit(vm->classLoaderModuleAndLocationMutex);
-#endif /* defined(CALL_BUNDLED_FUNCTIONS_DIRECTLY) */
 	vmFuncs->internalExitVMToJNI(currentThread);
 }
 
 /**
  * Unqualified export of package in fromModule
- *      
+ *
  * @throws IllegalArgumentExceptions if
  * 1) Module fromModule does not exist
  * 2) Package is not syntactically correct
@@ -1039,11 +1019,7 @@ JVM_AddModuleExportsToAll(JNIEnv * env, jobject fromModule, const char *package)
 #endif /* JAVA_SPEC_VERSION >= 15 */
 
 	vmFuncs->internalEnterVMFromJNI(currentThread);
-#if defined(CALL_BUNDLED_FUNCTIONS_DIRECTLY)
-	omrthread_monitor_enter(vm->classLoaderModuleAndLocationMutex);
-#else
 	f_monitorEnter(vm->classLoaderModuleAndLocationMutex);
-#endif /* defined(CALL_BUNDLED_FUNCTIONS_DIRECTLY) */
 
 #if JAVA_SPEC_VERSION >= 15
 	if (NULL != packageObj) {
@@ -1081,11 +1057,7 @@ done:
 	}
 #endif /* JAVA_SPEC_VERSION >= 15 */
 
-#if defined(CALL_BUNDLED_FUNCTIONS_DIRECTLY)
-	omrthread_monitor_exit(vm->classLoaderModuleAndLocationMutex);
-#else
 	f_monitorExit(vm->classLoaderModuleAndLocationMutex);
-#endif /* defined(CALL_BUNDLED_FUNCTIONS_DIRECTLY) */
 	vmFuncs->internalExitVMToJNI(currentThread);
 }
 
@@ -1100,16 +1072,25 @@ trcModulesAddReadsModule(J9VMThread *currentThread, jobject toModule, J9Module *
 		currentThread, j9FromMod->moduleName, J9_STR_NULL_TERMINATE_RESULT, "", 0, fromModuleNameBuf, J9VM_PACKAGE_NAME_BUFFER_LENGTH, NULL);
 	char *toModuleNameUTF = NULL;
 
-	if (NULL != toModule) {
-		toModuleNameUTF = vmFuncs->copyStringToUTF8WithMemAlloc(
-			currentThread, j9ToMod->moduleName, J9_STR_NULL_TERMINATE_RESULT, "", 0, toModuleNameBuf, J9VM_PACKAGE_NAME_BUFFER_LENGTH, NULL);
+	if (NULL != j9ToMod) {
+		if (NULL != j9ToMod->moduleName) {
+			toModuleNameUTF = vmFuncs->copyStringToUTF8WithMemAlloc(
+				currentThread, j9ToMod->moduleName, J9_STR_NULL_TERMINATE_RESULT, "", 0, toModuleNameBuf, J9VM_PACKAGE_NAME_BUFFER_LENGTH, NULL);
+		} else {
+#define UNNAMED_MODULE "unnamed "
+			PORT_ACCESS_FROM_VMC(currentThread);
+			Assert_SC_true(J9VM_PACKAGE_NAME_BUFFER_LENGTH >= sizeof(UNNAMED_MODULE));
+			memcpy(toModuleNameBuf, UNNAMED_MODULE, sizeof(UNNAMED_MODULE));
+			toModuleNameUTF = toModuleNameBuf;
+#undef UNNAMED_MODULE
+		}
 	} else {
-#define LOOSE_MODULE   "loose "
+#define LOOSE_MODULE "loose "
 		PORT_ACCESS_FROM_VMC(currentThread);
-		Assert_SC_true(J9VM_PACKAGE_NAME_BUFFER_LENGTH > sizeof(LOOSE_MODULE));
+		Assert_SC_true(J9VM_PACKAGE_NAME_BUFFER_LENGTH >= sizeof(LOOSE_MODULE));
 		memcpy(toModuleNameBuf, LOOSE_MODULE, sizeof(LOOSE_MODULE));
 		toModuleNameUTF = toModuleNameBuf;
-#undef	LOOSE_MODULE
+#undef LOOSE_MODULE
 	}
 	if ((NULL != fromModuleNameUTF) && (NULL != toModuleNameUTF)) {
 		Trc_MODULE_addReadsModule(currentThread, fromModuleNameUTF, j9FromMod, toModuleNameUTF, toModule);
@@ -1138,11 +1119,7 @@ JVM_AddReadsModule(JNIEnv * env, jobject fromModule, jobject toModule)
 		J9InternalVMFunctions const * const vmFuncs = vm->internalVMFunctions;
 
 		vmFuncs->internalEnterVMFromJNI(currentThread);
-#if defined(CALL_BUNDLED_FUNCTIONS_DIRECTLY)
-		omrthread_monitor_enter(vm->classLoaderModuleAndLocationMutex);
-#else
 		f_monitorEnter(vm->classLoaderModuleAndLocationMutex);
-#endif /* defined(CALL_BUNDLED_FUNCTIONS_DIRECTLY) */
 		{
 			UDATA rc = ERRCODE_GENERAL_FAILURE;
 
@@ -1162,22 +1139,18 @@ JVM_AddReadsModule(JNIEnv * env, jobject fromModule, jobject toModule)
 				}
 			}
 		}
-#if defined(CALL_BUNDLED_FUNCTIONS_DIRECTLY)
-		omrthread_monitor_exit(vm->classLoaderModuleAndLocationMutex);
-#else
 		f_monitorExit(vm->classLoaderModuleAndLocationMutex);
-#endif /* defined(CALL_BUNDLED_FUNCTIONS_DIRECTLY) */
 		vmFuncs->internalExitVMToJNI(currentThread);
 	}
 }
 
 /**
  * @return TRUE if:
- * 1. askModule can read srcModule or 
- * 2. if both are the same module or 
- * 3. if askModule is loose and srcModule is null. 
+ * 1. askModule can read srcModule or
+ * 2. if both are the same module or
+ * 3. if askModule is loose and srcModule is null.
  * FALSE otherwise
- *   
+ *
  * @throws IllegalArgumentExceptions if
  * 1) either askModule or srcModule is not a java.lang.reflect.Module
  */
@@ -1193,11 +1166,7 @@ JVM_CanReadModule(JNIEnv * env, jobject askModule, jobject srcModule)
 		canRead = TRUE;
 	} else {
 		vmFuncs->internalEnterVMFromJNI(currentThread);
-#if defined(CALL_BUNDLED_FUNCTIONS_DIRECTLY)
-		omrthread_monitor_enter(vm->classLoaderModuleAndLocationMutex);
-#else
 		f_monitorEnter(vm->classLoaderModuleAndLocationMutex);
-#endif /* defined(CALL_BUNDLED_FUNCTIONS_DIRECTLY) */
 		{
 			UDATA rc = ERRCODE_GENERAL_FAILURE;
 
@@ -1210,11 +1179,7 @@ JVM_CanReadModule(JNIEnv * env, jobject askModule, jobject srcModule)
 				throwExceptionHelper(currentThread, rc);
 			}
 		}
-#if defined(CALL_BUNDLED_FUNCTIONS_DIRECTLY)
-		omrthread_monitor_exit(vm->classLoaderModuleAndLocationMutex);
-#else
 		f_monitorExit(vm->classLoaderModuleAndLocationMutex);
-#endif /* defined(CALL_BUNDLED_FUNCTIONS_DIRECTLY) */
 		vmFuncs->internalExitVMToJNI(currentThread);
 	}
 
@@ -1253,11 +1218,7 @@ JVM_AddModulePackage(JNIEnv * env, jobject module, const char *package)
 	J9InternalVMFunctions const * const vmFuncs = vm->internalVMFunctions;
 
 	vmFuncs->internalEnterVMFromJNI(currentThread);
-#if defined(CALL_BUNDLED_FUNCTIONS_DIRECTLY)
-	omrthread_monitor_enter(vm->classLoaderModuleAndLocationMutex);
-#else
 	f_monitorEnter(vm->classLoaderModuleAndLocationMutex);
-#endif /* defined(CALL_BUNDLED_FUNCTIONS_DIRECTLY) */
 	{
 		J9Module * const j9mod = getJ9Module(currentThread, module);
 		UDATA rc = addPackageDefinition(currentThread, j9mod, package);
@@ -1269,19 +1230,15 @@ JVM_AddModulePackage(JNIEnv * env, jobject module, const char *package)
 			}
 		}
 	}
-#if defined(CALL_BUNDLED_FUNCTIONS_DIRECTLY)
-	omrthread_monitor_exit(vm->classLoaderModuleAndLocationMutex);
-#else
 	f_monitorExit(vm->classLoaderModuleAndLocationMutex);
-#endif /* defined(CALL_BUNDLED_FUNCTIONS_DIRECTLY) */
 	vmFuncs->internalExitVMToJNI(currentThread);
 }
 
 /**
- * Marks the specified package as exported to all unnamed modules. 
+ * Marks the specified package as exported to all unnamed modules.
  *
  * @throws NullPointerExceptions if either module or package is null.
- * @throws IllegalArgumentExceptions if 
+ * @throws IllegalArgumentExceptions if
  * 1) module or package is bad or
  * 2) module is unnamed or
  * 3) package is not in module
@@ -1303,13 +1260,8 @@ JVM_AddModuleExportsToAllUnnamed(JNIEnv * env, jobject fromModule, const char *p
 #endif /* JAVA_SPEC_VERSION >= 15 */
 
 	vmFuncs->internalEnterVMFromJNI(currentThread);
-#if defined(CALL_BUNDLED_FUNCTIONS_DIRECTLY)
-	omrthread_monitor_enter(vm->classLoaderModuleAndLocationMutex);
-#else
 	f_monitorEnter(vm->classLoaderModuleAndLocationMutex);
-#endif /* defined(CALL_BUNDLED_FUNCTIONS_DIRECTLY) */
 
-	
 #if JAVA_SPEC_VERSION >= 15
 	if (NULL != packageObj) {
 		j9object_t stringObject = J9_JNI_UNWRAP_REFERENCE(packageObj);
@@ -1346,46 +1298,47 @@ done:
 	}
 #endif /* JAVA_SPEC_VERSION >= 15 */
 
-#if defined(CALL_BUNDLED_FUNCTIONS_DIRECTLY)
-	omrthread_monitor_exit(vm->classLoaderModuleAndLocationMutex);
-#else
 	f_monitorExit(vm->classLoaderModuleAndLocationMutex);
-#endif /* defined(CALL_BUNDLED_FUNCTIONS_DIRECTLY) */
 	vmFuncs->internalExitVMToJNI(currentThread);
-
 }
 
 jstring JNICALL
-JVM_GetSimpleBinaryName(JNIEnv *env, jclass arg1) {
+JVM_GetSimpleBinaryName(JNIEnv *env, jclass arg1)
+{
 	assert(!"JVM_GetSimpleBinaryName unimplemented"); /* Jazz 108925: Revive J9JCL raw pConfig build */
 	return NULL;
 }
 
 void JNICALL
-JVM_SetMethodInfo(JNIEnv *env, jobject arg1) {
+JVM_SetMethodInfo(JNIEnv *env, jobject arg1)
+{
 	assert(!"JVM_SetMethodInfo unimplemented"); /* Jazz 108925: Revive J9JCL raw pConfig build */
 }
 
 jint JNICALL
-JVM_ConstantPoolGetNameAndTypeRefIndexAt(JNIEnv *env, jobject arg1, jobject arg2, jint arg3) {
+JVM_ConstantPoolGetNameAndTypeRefIndexAt(JNIEnv *env, jobject arg1, jobject arg2, jint arg3)
+{
 	assert(!"JVM_ConstantPoolGetNameAndTypeRefIndexAt unimplemented"); /* Jazz 108925: Revive J9JCL raw pConfig build */
-    return -1;
+	return -1;
 }
 
 jint JNICALL
-JVM_MoreStackWalk(JNIEnv *env, jobject arg1, jlong arg2, jlong arg3, jint arg4, jint arg5, jobjectArray arg6, jobjectArray arg7) {
+JVM_MoreStackWalk(JNIEnv *env, jobject arg1, jlong arg2, jlong arg3, jint arg4, jint arg5, jobjectArray arg6, jobjectArray arg7)
+{
 	assert(!"JVM_MoreStackWalk unimplemented"); /* Jazz 108925: Revive J9JCL raw pConfig build */
-    return -1;
+	return -1;
 }
 
 jint JNICALL
-JVM_ConstantPoolGetClassRefIndexAt(JNIEnv *env, jobject arg1, jlong arg2, jint arg3) {
+JVM_ConstantPoolGetClassRefIndexAt(JNIEnv *env, jobject arg1, jlong arg2, jint arg3)
+{
 	assert(!"JVM_ConstantPoolGetClassRefIndexAt unimplemented"); /* Jazz 108925: Revive J9JCL raw pConfig build */
-    return -1;
+	return -1;
 }
 
 jobjectArray JNICALL
-JVM_GetVmArguments(JNIEnv *env) {
+JVM_GetVmArguments(JNIEnv *env)
+{
 	J9VMThread* currentThread = (J9VMThread*)env;
 	J9JavaVM* vm = currentThread->javaVM;
 	J9InternalVMFunctions* internalFunctions = vm->internalVMFunctions;
@@ -1417,7 +1370,6 @@ JVM_GetVmArguments(JNIEnv *env) {
 				}
 			}
 		}
-
 	}
 	/* if code reaches here, something went wrong */
 	internalFunctions->setCurrentException(currentThread, J9VMCONSTANTPOOL_JAVALANGINTERNALERROR, NULL);
@@ -1428,46 +1380,56 @@ success:
 }
 
 void JNICALL
-JVM_FillStackFrames(JNIEnv *env, jclass arg1, jint arg2, jobjectArray arg3, jint arg4, jint arg5) {
+JVM_FillStackFrames(JNIEnv *env, jclass arg1, jint arg2, jobjectArray arg3, jint arg4, jint arg5)
+{
 	assert(!"JVM_FillStackFrames unimplemented"); /* Jazz 108925: Revive J9JCL raw pConfig build */
 }
 
 jclass JNICALL
-JVM_FindClassFromCaller(JNIEnv* env, const char* arg1, jboolean arg2, jobject arg3, jclass arg4) {
+JVM_FindClassFromCaller(JNIEnv* env, const char* arg1, jboolean arg2, jobject arg3, jclass arg4)
+{
 	assert(!"JVM_FindClassFromCaller unimplemented"); /* Jazz 108925: Revive J9JCL raw pConfig build */
-    return NULL;
+	return NULL;
 }
 
 jobjectArray JNICALL
-JVM_ConstantPoolGetNameAndTypeRefInfoAt(JNIEnv *env, jobject arg1, jobject arg2, jint arg3) {
-    assert(!"JVM_ConstantPoolGetNameAndTypeRefInfoAt unimplemented"); /* Jazz 108925: Revive J9JCL raw pConfig build */
-    return NULL;
+JVM_ConstantPoolGetNameAndTypeRefInfoAt(JNIEnv *env, jobject arg1, jobject arg2, jint arg3)
+{
+	assert(!"JVM_ConstantPoolGetNameAndTypeRefInfoAt unimplemented"); /* Jazz 108925: Revive J9JCL raw pConfig build */
+	return NULL;
 }
 
 jbyte JNICALL
-JVM_ConstantPoolGetTagAt(JNIEnv *env, jobject arg1, jobject arg2, jint arg3) {
-    assert(!"JVM_ConstantPoolGetTagAt unimplemented"); /* Jazz 108925: Revive J9JCL raw pConfig build */
-    return 0;
+JVM_ConstantPoolGetTagAt(JNIEnv *env, jobject arg1, jobject arg2, jint arg3)
+{
+	assert(!"JVM_ConstantPoolGetTagAt unimplemented"); /* Jazz 108925: Revive J9JCL raw pConfig build */
+	return 0;
 }
 
 jobject JNICALL
-JVM_CallStackWalk(JNIEnv *env, jobject arg1, jlong arg2, jint arg3, jint arg4, jint arg5, jobjectArray arg6, jobjectArray arg7) {
-    assert(!"JVM_CallStackWalk unimplemented"); /* Jazz 108925: Revive J9JCL raw pConfig build */
-    return NULL;
+JVM_CallStackWalk(JNIEnv *env, jobject arg1, jlong arg2, jint arg3, jint arg4, jint arg5, jobjectArray arg6, jobjectArray arg7)
+{
+	assert(!"JVM_CallStackWalk unimplemented"); /* Jazz 108925: Revive J9JCL raw pConfig build */
+	return NULL;
 }
 
 JNIEXPORT jobject JNICALL
-JVM_GetAndClearReferencePendingList(JNIEnv *env) {
+JVM_GetAndClearReferencePendingList(JNIEnv *env)
+{
 	assert(!"JVM_GetAndClearReferencePendingList unimplemented"); /* Jazz 108925: Revive J9JCL raw pConfig build */
 	return NULL;
 }
+
 JNIEXPORT jboolean JNICALL
-JVM_HasReferencePendingList(JNIEnv *env) {
+JVM_HasReferencePendingList(JNIEnv *env)
+{
 	assert(!"JVM_HasReferencePendingList unimplemented"); /* Jazz 108925: Revive J9JCL raw pConfig build */
 	return JNI_FALSE;
 }
+
 JNIEXPORT void JNICALL
-JVM_WaitForReferencePendingList(JNIEnv *env) {
+JVM_WaitForReferencePendingList(JNIEnv *env)
+{
 	assert(!"JVM_WaitForReferencePendingList unimplemented"); /* Jazz 108925: Revive J9JCL raw pConfig build */
 	return;
 }
@@ -1485,7 +1447,8 @@ JVM_WaitForReferencePendingList(JNIEnv *env) {
  * @throws NullPointerException if module is NULL
  */
 void JNICALL
-JVM_SetBootLoaderUnnamedModule(JNIEnv *env, jobject module) {
+JVM_SetBootLoaderUnnamedModule(JNIEnv *env, jobject module)
+{
 	J9VMThread * const currentThread = (J9VMThread*)env;
 	J9JavaVM * vm = currentThread->javaVM;
 	J9InternalVMFunctions const * const vmFuncs = vm->internalVMFunctions;
@@ -1524,125 +1487,26 @@ JVM_SetBootLoaderUnnamedModule(JNIEnv *env, jobject module) {
 void JNICALL
 JVM_ToStackTraceElement(JNIEnv* env, jobject arg1, jobject arg2)
 {
-    assert(!"JVM_ToStackTraceElement unimplemented");
+	assert(!"JVM_ToStackTraceElement unimplemented");
 }
 
 void JNICALL
 JVM_GetStackTraceElements(JNIEnv *env, jobject throwable, jobjectArray elements)
 {
-    assert(!"JVM_GetStackTraceElements unimplemented");
+	assert(!"JVM_GetStackTraceElements unimplemented");
 }
 
 void JNICALL
 JVM_InitStackTraceElementArray(JNIEnv *env, jobjectArray elements, jobject throwable)
 {
-    assert(!"JVM_InitStackTraceElementArray unimplemented");
+	assert(!"JVM_InitStackTraceElementArray unimplemented");
 }
 
- void JNICALL
+void JNICALL
 JVM_InitStackTraceElement(JNIEnv* env, jobject element, jobject stackFrameInfo)
- {
-     assert(!"JVM_InitStackTraceElement unimplemented");
- }
-
-
-/* JVM_GetModuleByPackageName is to be deleted for b156 */
-/**
- * Returns the j.l.r.Module object for this classLoader and package. If the classLoader
- * has not loaded any classes in the package, method returns NULL. The package should contain /'s,
- * not .'s, ex: java/lang, not java.lang. Throws NPE if package is null. throws
- * IllegalArgumentException, if loader is not null and a subtype of j.l.Classloader.
- *
- * @param [in] env pointer to JNIEnv
- * @param [in] classLoader ClassLoader object
- * @param [in] packageName name of package
- *
- * @return a module, NULL on failure
- */
-jobject JNICALL
-JVM_GetModuleByPackageName(JNIEnv *env, jobject classLoader, jstring packageName)
 {
-	J9VMThread * const currentThread = (J9VMThread*)env;
-	J9JavaVM * vm = currentThread->javaVM;
-	J9InternalVMFunctions const * const vmFuncs = vm->internalVMFunctions;
-	jobject module = NULL;
-
-	vmFuncs->internalEnterVMFromJNI(currentThread);
-#if defined(CALL_BUNDLED_FUNCTIONS_DIRECTLY)
-	omrthread_monitor_enter(vm->classLoaderModuleAndLocationMutex);
-#else
-	f_monitorEnter(vm->classLoaderModuleAndLocationMutex);
-#endif /* defined(CALL_BUNDLED_FUNCTIONS_DIRECTLY) */
-	if (NULL == packageName) {
-		vmFuncs->setCurrentExceptionUTF(currentThread, J9VMCONSTANTPOOL_JAVALANGNULLPOINTEREXCEPTION, "package name is null");
-	} else {
-		J9ClassLoader *thisVMClassLoader = NULL;
-		J9UTF8 *packageUTF8 = NULL;
-		UDATA packageLength = 0;
-		char buf[J9VM_PACKAGE_NAME_BUFFER_LENGTH];
-		j9object_t packageObj = J9_JNI_UNWRAP_REFERENCE(packageName);
-		j9object_t moduleObj = NULL;
-		J9Module *vmModule = NULL;
-		PORT_ACCESS_FROM_VMC(currentThread);
-
-		if (NULL == classLoader) {
-			thisVMClassLoader = vm->systemClassLoader;
-		} else {
-			j9object_t thisClassloader = NULL;
-			J9Class *thisClassLoaderClass = NULL;
-			J9Class *classLoaderClass = vmFuncs->internalFindKnownClass(currentThread,
-																		J9VMCONSTANTPOOL_JAVALANGCLASSLOADER,
-																		J9_FINDKNOWNCLASS_FLAG_INITIALIZE
-																	   );
-			thisClassloader = J9_JNI_UNWRAP_REFERENCE(classLoader);
-			thisClassLoaderClass = J9OBJECT_CLAZZ(currentThread, thisClassloader);
-
-			if (!isSameOrSuperClassOf(classLoaderClass, thisClassLoaderClass)) {
-				vmFuncs->setCurrentExceptionUTF(currentThread, J9VMCONSTANTPOOL_JAVALANGILLEGALARGUMENTEXCEPTION, "classLoader is not same or subclass of java/lang/ClassLoader");
-				goto exit;
-			}
-
-			thisVMClassLoader = J9VMJAVALANGCLASSLOADER_VMREF(currentThread, thisClassloader);
-		}
-
-		packageUTF8 = vmFuncs->copyStringToJ9UTF8WithMemAlloc(currentThread, packageObj, J9_STR_NULL_TERMINATE_RESULT, "", 0, buf, J9VM_PACKAGE_NAME_BUFFER_LENGTH);
-
-		if (NULL == packageUTF8) {
-			vmFuncs->setNativeOutOfMemoryError(currentThread, 0, 0);
-			goto exit;
-		}
-		
-		if (NULL != strchr((const char*)J9UTF8_DATA(packageUTF8), '.')) {
-			vmFuncs->setCurrentExceptionUTF(currentThread, J9VMCONSTANTPOOL_JAVALANGILLEGALARGUMENTEXCEPTION, "package name contains '.' instead of '/'");
-		} else {
-			if (vmFuncs->isAnyClassLoadedFromPackage(thisVMClassLoader, J9UTF8_DATA(packageUTF8), J9UTF8_LENGTH(packageUTF8))) {
-				vmModule = vmFuncs->findModuleForPackageUTF8(currentThread, thisVMClassLoader, packageUTF8);
-				if (NULL == vmModule) {
-					moduleObj = J9VMJAVALANGCLASSLOADER_UNNAMEDMODULE(currentThread, thisVMClassLoader->classLoaderObject);
-				} else {
-					moduleObj = vmModule->moduleObject;
-				}
-				module = vmFuncs->j9jni_createLocalRef((JNIEnv *) currentThread, moduleObj);
-				if (NULL == module) {
-					vmFuncs->setNativeOutOfMemoryError(currentThread, 0, 0);
-				}
-			}
-		}
-		if (packageUTF8 != (J9UTF8*)buf) {
-			j9mem_free_memory(packageUTF8);
-		}
-	}
-exit:
-#if defined(CALL_BUNDLED_FUNCTIONS_DIRECTLY)
-	omrthread_monitor_exit(vm->classLoaderModuleAndLocationMutex);
-#else
-	f_monitorExit(vm->classLoaderModuleAndLocationMutex);
-#endif /* defined(CALL_BUNDLED_FUNCTIONS_DIRECTLY) */
-	vmFuncs->internalExitVMToJNI(currentThread);
-
-	return module;
+	assert(!"JVM_InitStackTraceElement unimplemented");
 }
-
 
 /**
  * Return the clock time in nanoseconds at given offset
@@ -1676,11 +1540,10 @@ JVM_GetNanoTimeAdjustment(JNIEnv *env, jclass clazz, jlong offsetSeconds)
 			}
 		}
 	}
-	
+
 	return result;
 }
 
-#if JAVA_SPEC_VERSION >= 11
 JNIEXPORT jclass JNICALL
 JVM_GetNestHost(JNIEnv *env, jclass clz)
 {
@@ -1750,13 +1613,6 @@ done:
 #endif /* JAVA_SPEC_VERSION >= 11 */
 
 #if JAVA_SPEC_VERSION >= 15
-JNIEXPORT jlong JNICALL
-JVM_GetRandomSeedForCDSDump()
-{
-	/* OpenJ9 does not support -Xshare:dump, so we return zero unconditionally. */
-	return 0;
-}
-
 JNIEXPORT void JNICALL
 JVM_RegisterLambdaProxyClassForArchiving(JNIEnv *env, jclass arg1, jstring arg2, jobject arg3, jobject arg4, jobject arg5, jobject arg6, jclass arg7)
 {
@@ -1764,7 +1620,11 @@ JVM_RegisterLambdaProxyClassForArchiving(JNIEnv *env, jclass arg1, jstring arg2,
 }
 
 JNIEXPORT jclass JNICALL
-JVM_LookupLambdaProxyClassFromArchive(JNIEnv *env, jclass arg1, jstring arg2, jobject arg3, jobject arg4, jobject arg5, jobject arg6, jboolean arg7)
+JVM_LookupLambdaProxyClassFromArchive(JNIEnv *env, jclass arg1, jstring arg2, jobject arg3, jobject arg4, jobject arg5, jobject arg6
+#if JAVA_SPEC_VERSION == 15
+		, jboolean arg7
+#endif /* JAVA_SPEC_VERSION == 15 */
+		)
 {
 	assert(!"JVM_LookupLambdaProxyClassFromArchive unimplemented");
 	return NULL;
@@ -1776,11 +1636,32 @@ JVM_IsCDSDumpingEnabled(JNIEnv *env)
 	/* OpenJ9 does not support -Xshare:dump, so we return false unconditionally. */
 	return JNI_FALSE;
 }
+#endif /* JAVA_SPEC_VERSION >= 15 */
+
+#if JAVA_SPEC_VERSION >= 16
+
+JNIEXPORT jlong JNICALL
+JVM_GetRandomSeedForDumping()
+{
+	/* OpenJ9 does not support -Xshare:dump, so we return zero unconditionally. */
+	return 0;
+}
 
 JNIEXPORT jboolean JNICALL
-JVM_IsCDSSharingEnabled(JNIEnv *env)
+JVM_IsSharingEnabled(JNIEnv *env)
 {
-	/* OpenJ9 does not support -Xshare:dump, so we return false unconditionally. */
+	/* OpenJ9 does not support CDS, so we return false unconditionally. */
 	return JNI_FALSE;
 }
-#endif /* JAVA_SPEC_VERSION >= 15 */
+
+#endif /* JAVA_SPEC_VERSION >= 16 */
+
+JNIEXPORT jboolean JNICALL
+JVM_IsUseContainerSupport(JNIEnv *env)
+{
+	PORT_ACCESS_FROM_ENV(env);
+	OMRPORT_ACCESS_FROM_J9PORT(PORTLIB);
+	BOOLEAN inContainer = omrsysinfo_is_running_in_container();
+
+	return inContainer ? JNI_TRUE : JNI_FALSE;
+}

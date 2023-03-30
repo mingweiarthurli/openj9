@@ -1,6 +1,6 @@
 /*[INCLUDE-IF Sidecar18-SE]*/
 /*******************************************************************************
- * Copyright (c) 2019, 2019 IBM Corp. and others
+ * Copyright (c) 2019, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -170,13 +170,13 @@ public class ThreadInfoBase {
 		String ls = System.lineSeparator();
 		if (cachedToStringResult == null) {
 			StringBuilder result = new StringBuilder();
-/*[IF Java11]*/
+/*[IF JAVA_SPEC_VERSION >= 11]*/
 			result.append(String.format("\"%s\" prio=%d Id=%d %s", //$NON-NLS-1$
 					threadName, Integer.valueOf(priority), Long.valueOf(threadId), threadState));
-/*[ELSE]*/
+/*[ELSE] JAVA_SPEC_VERSION >= 11 */
 			result.append(String.format("\"%s\" Id=%d %s", //$NON-NLS-1$
 					threadName, Long.valueOf(threadId), threadState));
-/*[ENDIF]*/
+/*[ENDIF] JAVA_SPEC_VERSION >= 11 */
 			if (State.BLOCKED == threadState) {
 				result.append(String.format(" on %s owned by \"%s\" Id=%d", //$NON-NLS-1$
 						lockName, lockOwnerName, Long.valueOf(lockOwnerId)));

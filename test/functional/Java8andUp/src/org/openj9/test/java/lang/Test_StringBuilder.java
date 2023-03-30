@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1998, 2018 IBM Corp. and others
+ * Copyright (c) 1998, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -266,6 +266,49 @@ public class Test_StringBuilder {
 	}
 
 	/**
+	 * @tests java.lang.StringBuilder#offsetByCodePoints(int, int)
+	 */
+	@Test
+	public void test_offsetByCodePoints() {
+		StringBuilder s1 = new StringBuilder("A\ud800\udc00C");
+		AssertJUnit.assertEquals("wrong offset 0, 0", 0, s1.offsetByCodePoints(0, 0));
+		AssertJUnit.assertEquals("wrong offset 0, 1", 1, s1.offsetByCodePoints(0, 1));
+		AssertJUnit.assertEquals("wrong offset 0, 2", 3, s1.offsetByCodePoints(0, 2));
+		AssertJUnit.assertEquals("wrong offset 0, 3", 4, s1.offsetByCodePoints(0, 3));
+		AssertJUnit.assertEquals("wrong offset 1, 0", 1, s1.offsetByCodePoints(1, 0));
+		AssertJUnit.assertEquals("wrong offset 1, 1", 3, s1.offsetByCodePoints(1, 1));
+		AssertJUnit.assertEquals("wrong offset 1, 2", 4, s1.offsetByCodePoints(1, 2));
+		AssertJUnit.assertEquals("wrong offset 2, 0", 2, s1.offsetByCodePoints(2, 0));
+		AssertJUnit.assertEquals("wrong offset 2, 1", 3, s1.offsetByCodePoints(2, 1));
+		AssertJUnit.assertEquals("wrong offset 2, 2", 4, s1.offsetByCodePoints(2, 2));
+		AssertJUnit.assertEquals("wrong offset 3, 0", 3, s1.offsetByCodePoints(3, 0));
+		AssertJUnit.assertEquals("wrong offset 3, 1", 4, s1.offsetByCodePoints(3, 1));
+		AssertJUnit.assertEquals("wrong offset 4, 0", 4, s1.offsetByCodePoints(4, 0));
+
+		AssertJUnit.assertEquals("wrong offset 4, -1", 3, s1.offsetByCodePoints(4, -1));
+		AssertJUnit.assertEquals("wrong offset 4, -2", 1, s1.offsetByCodePoints(4, -2));
+		AssertJUnit.assertEquals("wrong offset 4, -3", 0, s1.offsetByCodePoints(4, -3));
+		AssertJUnit.assertEquals("wrong offset 3, -1", 1, s1.offsetByCodePoints(3, -1));
+		AssertJUnit.assertEquals("wrong offset 3, -2", 0, s1.offsetByCodePoints(3, -2));
+		AssertJUnit.assertEquals("wrong offset 2, -1", 1, s1.offsetByCodePoints(2, -1));
+		AssertJUnit.assertEquals("wrong offset 2, -2", 0, s1.offsetByCodePoints(2, -2));
+		AssertJUnit.assertEquals("wrong offset 1, -1", 0, s1.offsetByCodePoints(1, -1));
+
+		try {
+			s1.offsetByCodePoints(s1.length(), 1);
+			AssertJUnit.fail("returned index greater than length should fail");
+		} catch (IndexOutOfBoundsException e) {
+			// correct exception thrown
+		}
+		try {
+			s1.offsetByCodePoints(0, -1);
+			AssertJUnit.fail("returned index less than zero should fail");
+		} catch (IndexOutOfBoundsException e) {
+			// correct exception thrown
+		}
+	}
+
+	/**
 	 * @tests java.lang.StringBuilder#appendCodePoint(int)
 	 */
 	@Test
@@ -311,6 +354,29 @@ public class Test_StringBuilder {
 	}
 
 	/**
+	 * @tests java.lang.StringBuilder#deleteCharAt(int)
+	 */
+	@Test
+	public void test_deleteCharAt() {
+		testBuffer.deleteCharAt(0);
+		AssertJUnit.assertTrue("Deleted incorrect char", testBuffer.toString().equals("his is a test buffer"));
+		testBuffer.deleteCharAt(2);
+		AssertJUnit.assertTrue("Deleted incorrect char", testBuffer.toString().equals("hi is a test buffer"));
+		testBuffer.deleteCharAt(testBuffer.length() - 1);
+		AssertJUnit.assertTrue("Deleted incorrect char", testBuffer.toString().equals("hi is a test buffe"));
+		try {
+			testBuffer.deleteCharAt(-1);
+			AssertJUnit.fail("Index less than zero should have failed");
+		} catch (IndexOutOfBoundsException e) {
+		}
+		try {
+			testBuffer.deleteCharAt(testBuffer.length());
+			AssertJUnit.fail("Index >= buffer length should have failed");
+		} catch (IndexOutOfBoundsException e) {
+		}
+	}
+
+	/**
 	 * @tests java.lang.StringBuilder#setLength(int)
 	 */
 	@Test
@@ -345,7 +411,7 @@ public class Test_StringBuilder {
 	 */
 	@Test
 	public void test_setLength_replace() {
-		StringBuffer sb1 = new StringBuffer();
+		StringBuilder sb1 = new StringBuilder();
 		sb1.append("abcdefg");
 		sb1.replace(2, 5, "z");
 		sb1.setLength(7);

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -41,6 +41,7 @@
 #include "env/ClassTableCriticalSection.hpp"
 #include "env/VMAccessCriticalSection.hpp"
 #include "env/VMJ9.h"
+#include "env/VerboseLog.hpp"
 #include "il/MethodSymbol.hpp"
 #include "il/ResolvedMethodSymbol.hpp"
 #include "il/Symbol.hpp"
@@ -51,7 +52,8 @@
 #include "optimizer/PreExistence.hpp"
 #if defined(J9VM_OPT_JITSERVER)
 #include "env/j9methodServer.hpp"
-#endif
+#include "control/JITServerCompilationThread.hpp"
+#endif /* defined(J9VM_OPT_JITSERVER) */
 
 void
 TR_PreXRecompile::dumpInfo()
@@ -248,6 +250,16 @@ void TR_CHTable::cleanupNewlyExtendedInfo(TR::Compilation *comp)
       }
    }
 
+
+bool TR_CHTable::canSkipCommit(TR::Compilation *comp)
+   {
+   return comp->compileRelocatableCode() ||
+         (comp->getVirtualGuards().empty() &&
+          comp->getSideEffectGuardPatchSites()->empty() &&
+          !_preXMethods && !_classes && !_classesThatShouldNotBeNewlyExtended);
+   }
+
+
 // Returning false here will fail this compilation!
 //
 bool TR_CHTable::commit(TR::Compilation *comp)
@@ -257,15 +269,12 @@ bool TR_CHTable::commit(TR::Compilation *comp)
       {
       return true; // Handled in outOfProcessCompilationEnd instead
       }
-#endif
+#endif /* defined(J9VM_OPT_JITSERVER) */
+   if (canSkipCommit(comp))
+      return true;
 
-   TR::list<TR_VirtualGuard*> &vguards = comp->getVirtualGuards();
+   const TR::Compilation::GuardSet &vguards = comp->getVirtualGuards();
    TR::list<TR_VirtualGuardSite*> *sideEffectPatchSites = comp->getSideEffectGuardPatchSites();
-
-   if (comp->fej9()->isAOT_DEPRECATED_DO_NOT_USE())
-      return true;
-   if (vguards.empty() && sideEffectPatchSites->empty() && !_preXMethods && !_classes && !_classesThatShouldNotBeNewlyExtended)
-      return true;
 
    cleanupNewlyExtendedInfo(comp);
    if (comp->getFailCHTableCommit())
@@ -414,7 +423,8 @@ bool TR_CHTable::commit(TR::Compilation *comp)
    }
 
 void
-TR_CHTable::commitOSRVirtualGuards(TR::Compilation *comp, TR::list<TR_VirtualGuard*> &vguards)
+TR_CHTable::commitOSRVirtualGuards(
+   TR::Compilation *comp, const TR::Compilation::GuardSet &vguards)
    {
    // Count patch sites with OSR assumptions
    int osrSites = 0;
@@ -532,13 +542,13 @@ TR_CHTable::commitVirtualGuard(TR_VirtualGuard *info, List<TR_VirtualGuardSite> 
 
    if ((info->getKind() == TR_HCRGuard) || info->mergedWithHCRGuard())
       {
-      guardedClass = info->getThisClass();
+      TR_OpaqueClassBlock *hcrGuardedClass = info->getThisClass();
       ListIterator<TR_VirtualGuardSite> it(&sites);
       for (TR_VirtualGuardSite *site = it.getFirst(); site; site = it.getNext())
          {
          TR_ASSERT(site->getLocation(), "assertion failure");
          TR_PatchNOPedGuardSiteOnClassRedefinition
-            ::make(comp->fe(), comp->trPersistentMemory(), guardedClass, site->getLocation(), site->getDestination(), comp->getMetadataAssumptionList());
+            ::make(comp->fe(), comp->trPersistentMemory(), hcrGuardedClass, site->getLocation(), site->getDestination(), comp->getMetadataAssumptionList());
          comp->setHasClassRedefinitionAssumptions();
          }
       // if it's not real HCR guard then we need to register
@@ -577,11 +587,7 @@ TR_CHTable::commitVirtualGuard(TR_VirtualGuard *info, List<TR_VirtualGuardSite> 
             {
             TR_J9VMBase *fej9 = (TR_J9VMBase *)(comp->fe());
             TR::VMAccessCriticalSection invalidateMCSTargetGuards(fej9);
-            // TODO: Code duplication with TR_InlinerBase::findInlineTargets
-            currentIndex = TR::KnownObjectTable::UNKNOWN;
-            uintptr_t currentEpoch = fej9->getVolatileReferenceField(*mcsReferenceLocation, "epoch", "Ljava/lang/invoke/MethodHandle;");
-            if (currentEpoch)
-               currentIndex = knot->getOrCreateIndex(currentEpoch);
+            currentIndex = fej9->mutableCallSiteEpoch(comp, *mcsReferenceLocation);
             if (info->mutableCallSiteEpoch() == currentIndex)
                cookie = fej9->mutableCallSiteCookie(*mcsReferenceLocation, potentialCookie);
             else
@@ -616,12 +622,17 @@ TR_CHTable::commitVirtualGuard(TR_VirtualGuard *info, List<TR_VirtualGuardSite> 
       TR_ResolvedMethod *breakpointedMethod = comp->getInlinedResolvedMethod(info->getCalleeIndex());
       TR_OpaqueMethodBlock *method = breakpointedMethod->getPersistentIdentifier();
       if (comp->fej9()->isMethodBreakpointed(method))
-         nopAssumptionIsValid = false;
-      ListIterator<TR_VirtualGuardSite> it(&sites);
-      for (TR_VirtualGuardSite *site = it.getFirst(); site; site = it.getNext())
          {
-         TR_PatchNOPedGuardSiteOnMethodBreakPoint
-            ::make(comp->fe(), comp->trPersistentMemory(), method, site->getLocation(), site->getDestination(), comp->getMetadataAssumptionList());
+         nopAssumptionIsValid = false;
+         }
+      else
+         {
+         ListIterator<TR_VirtualGuardSite> it(&sites);
+         for (TR_VirtualGuardSite *site = it.getFirst(); site; site = it.getNext())
+            {
+            TR_PatchNOPedGuardSiteOnMethodBreakPoint
+               ::make(comp->fe(), comp->trPersistentMemory(), method, site->getLocation(), site->getDestination(), comp->getMetadataAssumptionList());
+            }
          }
       }
    else if (info->getKind() == TR_ArrayStoreCheckGuard)
@@ -796,7 +807,7 @@ TR_CHTable::computeDataForCHTableCommit(TR::Compilation *comp)
    cleanupNewlyExtendedInfo(comp);
 
    // collect virtual guard info
-   TR::list<TR_VirtualGuard*> &vguards = comp->getVirtualGuards();
+   const TR::Compilation::GuardSet &vguards = comp->getVirtualGuards();
    std::vector<VirtualGuardForCHTable> serialVGuards;
    serialVGuards.reserve(vguards.size());
 
@@ -862,7 +873,7 @@ TR_CHTable::computeDataForCHTableCommit(TR::Compilation *comp)
                           classesForStaticFinalFieldModification,
                           startPC);
    }
-#endif
+#endif /* defined(J9VM_OPT_JITSERVER) */
 
 // class used to collect all different implementations of a method
 class CollectImplementors : public TR_SubclassVisitor
@@ -886,8 +897,11 @@ public:
 
    virtual bool visitSubclass(TR_PersistentClassInfo *cl);
    int32_t getCount() const { return _count;}
+   bool isInterface();
 
 protected:
+   bool addImplementor(TR_ResolvedMethod *implementor);
+
    TR_OpaqueClassBlock * _topClassId;
    TR_ResolvedMethod **  _implArray;
    TR_ResolvedMethod *   _callerMethod;
@@ -900,24 +914,29 @@ protected:
    TR_YesNoMaybe         _useGetResolvedInterfaceMethod;
    };// end of class CollectImplementors
 
+bool
+CollectImplementors::isInterface()
+   {
+   bool useGetResolvedInterfaceMethod = _topClassIsInterface;
 
-bool CollectImplementors::visitSubclass(TR_PersistentClassInfo *cl)
+   // refine if requested by a caller
+   if (_useGetResolvedInterfaceMethod != TR_maybe)
+      useGetResolvedInterfaceMethod = _useGetResolvedInterfaceMethod == TR_yes ? true : false;
+   return useGetResolvedInterfaceMethod;
+   }
+
+bool
+CollectImplementors::visitSubclass(TR_PersistentClassInfo *cl)
    {
    TR_OpaqueClassBlock *classId = cl->getClassId();
    // verify that our subclass meets all conditions
-   if (!TR::Compiler->cls.isAbstractClass(comp(), classId) && !TR::Compiler->cls.isInterfaceClass(comp(), classId))
+   if (TR::Compiler->cls.isConcreteClass(comp(), classId))
       {
       int32_t length;
       char *clazzName = TR::Compiler->cls.classNameChars(comp(), classId, length);
       TR_ResolvedMethod *method;
 
-      bool useGetResolvedInterfaceMethod = _topClassIsInterface;
-
-      //refine if requested by a caller
-      if (_useGetResolvedInterfaceMethod != TR_maybe)
-         useGetResolvedInterfaceMethod = _useGetResolvedInterfaceMethod == TR_yes ? true : false;
-
-      if (useGetResolvedInterfaceMethod)
+      if (isInterface())
          {
          method = _callerMethod->getResolvedInterfaceMethod(comp(), classId, _slotOrIndex);
          }
@@ -934,18 +953,29 @@ bool CollectImplementors::visitSubclass(TR_PersistentClassInfo *cl)
          stopTheWalk();
          return false;
          }
-      // check to see if there are any duplicates
-      int32_t i;
-      for (i=0; i < _count; i++)
-         if (method->isSameMethod(_implArray[i]))
-            break;  // we already listed this method
-      if (i >= _count) // brand new implementer
-         {
-         _implArray[_count++] = method;
-         if (_count >= _maxCount)
-            stopTheWalk();
-         }
+
+      bool added = addImplementor(method);
+      if (added && _count >= _maxCount)
+         stopTheWalk();
       }
+   return true;
+   }
+
+bool
+CollectImplementors::addImplementor(TR_ResolvedMethod *implementor)
+   {
+   TR_ASSERT_FATAL(_count < _maxCount, "Max implementor count exceeded: _maxCount = %d, _count = %d", _maxCount, _count);
+
+   // cannot add an unresolved implementor
+   if (!implementor)
+      return false;
+   // check to see if there are any duplicates
+   int32_t i;
+   for (i = 0; i < _count; ++i)
+      if (implementor->isSameMethod(_implArray[i]))
+         return false;  // we already listed this method
+   // brand new implementor
+   _implArray[_count++] = implementor;
    return true;
    }
 
@@ -1015,6 +1045,18 @@ TR_ClassQueries::collectImplementorsCapped(TR_PersistentClassInfo *clazz,
    {
    if (comp->getOption(TR_DisableCHOpts))
       return maxCount+1; // fail the collection
+
+#if defined(J9VM_OPT_JITSERVER)
+   if (comp->isOutOfProcessCompilation())
+      {
+      return static_cast<TR_ResolvedJ9JITServerMethod *>(callerMethod)->collectImplementorsCapped(
+         clazz->getClassId(),
+         maxCount,
+         slotOrIndex,
+         useGetResolvedInterfaceMethod,
+         implArray);
+      }
+#endif
    CollectImplementors collector(comp, clazz->getClassId(), implArray, maxCount, callerMethod, slotOrIndex, useGetResolvedInterfaceMethod);
    collector.visitSubclass(clazz);
    collector.visit(clazz->getClassId(), locked);
@@ -1253,4 +1295,3 @@ TR_SubclassVisitor::visitSubclasses(TR_PersistentClassInfo * classInfo, TR_CHTab
       }
    --_depth;
    }
-

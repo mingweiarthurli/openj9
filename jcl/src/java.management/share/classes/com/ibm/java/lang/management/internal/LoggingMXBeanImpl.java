@@ -1,6 +1,6 @@
-/*[INCLUDE-IF Sidecar17]*/
+/*[INCLUDE-IF JAVA_SPEC_VERSION >= 8]*/
 /*******************************************************************************
- * Copyright (c) 2005, 2020 IBM Corp. and others
+ * Copyright (c) 2005, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -59,6 +59,9 @@ public final class LoggingMXBeanImpl
 
 	private static final LoggingMXBeanImpl instance = createInstance();
 
+	/*[IF JAVA_SPEC_VERSION >= 17]*/
+	@SuppressWarnings("removal")
+	/*[ENDIF] JAVA_SPEC_VERSION >= 17 */
 	private static LoggingMXBeanImpl createInstance() {
 		/*[IF Sidecar19-SE]*/
 		final Optional<Module> java_logging = ModuleLayer.boot().findModule("java.logging"); //$NON-NLS-1$
@@ -300,13 +303,19 @@ public final class LoggingMXBeanImpl
 			// a valid level name.
 /*[IF Sidecar19-SE]*/
 			try {
-				Object newLevel = level_parse.invoke(null, levelName);
+				Object newLevel = null;
+				if (levelName != null) {
+					newLevel = level_parse.invoke(null, levelName);
+				}
 				logger_setLevel.invoke(logger, newLevel);
 			} catch (Exception e) {
 				throw handleError(e);
 			}
 /*[ELSE]*/
-			Level newLevel = Level.parse(levelName);
+			Level newLevel = null;
+			if (levelName != null) {
+				newLevel = Level.parse(levelName);
+			}
 			logger.setLevel(newLevel);
 /*[ENDIF]*/
 		} else {

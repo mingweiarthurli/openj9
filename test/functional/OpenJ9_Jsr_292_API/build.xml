@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <!--
-   Copyright (c) 2017, 2019 IBM Corp. and others
+   Copyright (c) 2017, 2021 IBM Corp. and others
 
   This program and the accompanying materials are made available under
   the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@
   OpenJDK Assembly Exception [2].
 
   [1] https://www.gnu.org/software/classpath/license.html
-  [2] http://openjdk.java.net/legal/assembly-exception.html
+  [2] https://openjdk.org/legal/assembly-exception.html
 
   SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 -->
@@ -25,7 +25,6 @@
 	<description>
 		Build OpenJ9 JSR 292 API Tests 
 	</description>
-	<import file="${TEST_ROOT}/functional/build.xml"/>
 
 	<!-- set global properties for this build -->
 	<property name="DEST" value="${BUILD_ROOT}/functional/OpenJ9_Jsr_292_API" />
@@ -48,6 +47,8 @@
 	<property name="modulea_bin" location="./mods/mods.modulea"/>
 	<property name="moduleb_bin" location="./mods/mods.moduleb"/>
 	<property name="modulec_bin" location="./mods/mods.modulec"/>
+	<property name="LIB" value="asm_all,jcommander,testng"/>
+	<import file="${TEST_ROOT}/TKG/scripts/getDependencies.xml"/>
 	
 	<target name="init">
 		<mkdir dir="${DEST}"/>
@@ -127,7 +128,7 @@
 		</if>
 	</target>
 	
-	<target name="compile_tests" depends="init,compile_modulea,compile_moduleb,compile_modulec" description="compile the test source code" >
+	<target name="compile_tests" depends="init,compile_modulea,compile_moduleb,compile_modulec,getDependentLibs" description="compile the test source code" >
 		<echo>Compiling the test source code</echo>
 		<echo>Ant version is ${ant.version}</echo>
 		<echo>============COMPILER SETTINGS============</echo>
@@ -155,7 +156,7 @@
 		</if>
 	</target>
 
-	<target name="DEST" depends="compile_tests,dist_functional" description="generate the distribution" >
+	<target name="DEST" depends="compile_tests" description="generate the distribution" >
 		<copy todir="${DEST}">
 			<fileset dir="${src}/../" includes="*.mk,*.xml" />
 		</copy>

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -130,6 +130,7 @@ typedef jvmtiIterationControl J9MODRON_REFERENCE_CHAIN_WALKER_CALLBACK(J9Object 
 #define J9GC_ROOT_TYPE_STACK_SLOT 20
 #define J9GC_ROOT_TYPE_JVMTI_TAG_REF 21
 #define J9GC_ROOT_TYPE_OWNABLE_SYNCHRONIZER_OBJECT 22
+#define J9GC_ROOT_TYPE_CONTINUATION_OBJECT 23
 
 #define J9GC_REFERENCE_TYPE_UNKNOWN -1 /**< reference to an object that fell through a default state in an iterator */
 #define J9GC_REFERENCE_TYPE_FIELD -2	/**< field reference to an object */
@@ -145,6 +146,7 @@ typedef jvmtiIterationControl J9MODRON_REFERENCE_CHAIN_WALKER_CALLBACK(J9Object 
 #define J9GC_REFERENCE_TYPE_CLASS_ARRAY_CLASS -12 /**< reference to an array class' component type class */
 #define J9GC_REFERENCE_TYPE_CLASS_NAME_STRING -13 /**< reference to a class' name string */
 #define J9GC_REFERENCE_TYPE_CALL_SITE -14 /**< call site reference to an object */
+#define J9GC_REFERENCE_TYPE_CLASS_FCC -15 /**< reference to a class in flattened class cache */
 
 /**
  * #defines representing the results from j9gc_ext_check_is_valid_heap_object.
@@ -158,17 +160,6 @@ typedef jvmtiIterationControl J9MODRON_REFERENCE_CHAIN_WALKER_CALLBACK(J9Object 
 /**
  * @}
  */
-
-/**
- * #defines representing tags used in the Remembered Set
- * @ingroup GC_Include
- * @{
- */
-#define DEFERRED_RS_REMOVE_FLAG 			0x1	
-/**
- * @}
- */
-
 
 /**
  * @ingroup GC_Include

@@ -1,6 +1,6 @@
 
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -148,6 +148,30 @@ UDATA
 j9gc_software_read_barrier_enabled(J9JavaVM *javaVM)
 {
 	return MM_GCExtensions::getExtensions(javaVM)->isSoftwareRangeCheckReadBarrierEnabled() ? 1 : 0;
+}
+
+/**
+ * Query if hot reference field is reqired for scavenger dynamicBreadthFirstScanOrdering
+ *  @return true if scavenger dynamicBreadthFirstScanOrdering is enabled, 0 otherwise 
+ */
+BOOLEAN
+j9gc_hot_reference_field_required(J9JavaVM *javaVM)
+{
+#if defined(J9VM_GC_MODRON_SCAVENGER) || defined(OMR_GC_VLHGC)
+	return MM_GCExtensions::OMR_GC_SCAVENGER_SCANORDERING_DYNAMIC_BREADTH_FIRST == MM_GCExtensions::getExtensions(javaVM)->scavengerScanOrdering;
+#else /* J9VM_GC_MODRON_SCAVENGER || OMR_GC_VLHGC */
+	return FALSE;
+#endif /* defined(J9VM_GC_MODRON_SCAVENGER) || defined(OMR_GC_VLHGC) */
+}
+
+/**
+ * Query for the max hot field list length that a class is allowed to have.
+ * Valid if dynamicBreadthFirstScanOrdering is enabled.
+ */
+uint32_t
+j9gc_max_hot_field_list_length(J9JavaVM *javaVM)
+{
+	return MM_GCExtensions::getExtensions(javaVM)->maxHotFieldListLength;
 }
 
 /**

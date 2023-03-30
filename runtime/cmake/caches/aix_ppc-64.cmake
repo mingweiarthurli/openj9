@@ -15,7 +15,7 @@
 # OpenJDK Assembly Exception [2].
 #
 # [1] https://www.gnu.org/software/classpath/license.html
-# [2] http://openjdk.java.net/legal/assembly-exception.html
+# [2] https://openjdk.org/legal/assembly-exception.html
 #
 # SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 ################################################################################
@@ -27,6 +27,9 @@ set(J9VM_ENV_DLPAR ON CACHE BOOL "")
 set(J9VM_ENV_HAS_FPU ON CACHE BOOL "")
 set(J9VM_ENV_SHARED_LIBS_CALLEE_GLOBAL_TABLE_SETUP OFF CACHE BOOL "")
 set(J9VM_ENV_SHARED_LIBS_USE_GLOBAL_TABLE ON CACHE BOOL "")
+
+# Prevent CMake from automatically creating export lists for shared libraries
+set(CMAKE_XL_CreateExportList "" CACHE INTERNAL "")
 
 set(J9VM_GC_TLH_PREFETCH_FTA OFF CACHE BOOL "")
 set(J9VM_GC_SUBPOOLS_ALIAS ON CACHE BOOL "")

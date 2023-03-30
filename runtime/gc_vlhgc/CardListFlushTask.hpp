@@ -1,6 +1,6 @@
 
 /*******************************************************************************
- * Copyright (c) 1991, 2018 IBM Corp. and others
+ * Copyright (c) 1991, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -71,8 +71,8 @@ public:
 	virtual void setup(MM_EnvironmentBase *env);
 	virtual void cleanup(MM_EnvironmentBase *env);
 	
-	void masterSetup(MM_EnvironmentBase *env);
-	void masterCleanup(MM_EnvironmentBase *env);
+	void mainSetup(MM_EnvironmentBase *env);
+	void mainCleanup(MM_EnvironmentBase *env);
 
 	/**
 	 * Checks the state of the given card and updates its content based on what state it should transition the old one from, given that we want
@@ -85,11 +85,11 @@ public:
 
 #if defined(J9MODRON_TGC_PARALLEL_STATISTICS)
 	virtual void synchronizeGCThreads(MM_EnvironmentBase *env, const char *id);
-	virtual bool synchronizeGCThreadsAndReleaseMaster(MM_EnvironmentBase *env, const char *id);
+	virtual bool synchronizeGCThreadsAndReleaseMain(MM_EnvironmentBase *env, const char *id);
 	virtual bool synchronizeGCThreadsAndReleaseSingleThread(MM_EnvironmentBase *env, const char *id);
 #endif /* J9MODRON_TGC_PARALLEL_STATISTICS */
 
-	MM_CardListFlushTask(MM_EnvironmentBase *env, MM_Dispatcher *dispatcher, MM_HeapRegionManager *manager, MM_InterRegionRememberedSet *remset)
+	MM_CardListFlushTask(MM_EnvironmentBase *env, MM_ParallelDispatcher *dispatcher, MM_HeapRegionManager *manager, MM_InterRegionRememberedSet *remset)
 		: MM_ParallelTask(env, dispatcher)
 		, _regionManager(manager)
 		, _interRegionRememberedSet(remset)

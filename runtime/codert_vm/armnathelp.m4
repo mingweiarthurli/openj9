@@ -1,4 +1,4 @@
-dnl Copyright (c) 2017, 2020 IBM Corp. and others
+dnl Copyright (c) 2017, 2021 IBM Corp. and others
 dnl
 dnl This program and the accompanying materials are made available under
 dnl the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@ dnl Exception [1] and GNU General Public License, version 2 with the
 dnl OpenJDK Assembly Exception [2].
 dnl
 dnl [1] https://www.gnu.org/software/classpath/license.html
-dnl [2] http://openjdk.java.net/legal/assembly-exception.html
+dnl [2] https://openjdk.org/legal/assembly-exception.html
 dnl
 dnl SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 
@@ -288,14 +288,19 @@ SLOW_PATH_ONLY_HELPER_NO_RETURN_VALUE(jitReportInstanceFieldRead,2)
 SLOW_PATH_ONLY_HELPER_NO_RETURN_VALUE(jitReportInstanceFieldWrite,3)
 SLOW_PATH_ONLY_HELPER_NO_RETURN_VALUE(jitReportStaticFieldRead,1)
 SLOW_PATH_ONLY_HELPER_NO_RETURN_VALUE(jitReportStaticFieldWrite,2)
-FAST_PATH_ONLY_HELPER(jitAcmpHelper,2)
+FAST_PATH_ONLY_HELPER(jitAcmpeqHelper,2)
+FAST_PATH_ONLY_HELPER(jitAcmpneHelper,2)
 OLD_DUAL_MODE_HELPER(jitGetFlattenableField,2)
-OLD_DUAL_MODE_HELPER_NO_RETURN_VALUE(jitWithFlattenableField,3)
+OLD_DUAL_MODE_HELPER(jitCloneValueType, 1)
+OLD_DUAL_MODE_HELPER(jitWithFlattenableField,3)
 OLD_DUAL_MODE_HELPER_NO_RETURN_VALUE(jitPutFlattenableField,3)
 OLD_DUAL_MODE_HELPER(jitGetFlattenableStaticField,2)
 OLD_DUAL_MODE_HELPER_NO_RETURN_VALUE(jitPutFlattenableStaticField,3)
 OLD_DUAL_MODE_HELPER(jitLoadFlattenableArrayElement,2)
 OLD_DUAL_MODE_HELPER_NO_RETURN_VALUE(jitStoreFlattenableArrayElement,3)
+SLOW_PATH_ONLY_HELPER_NO_RETURN_VALUE(jitResolveFlattenableField,3)
+FAST_PATH_ONLY_HELPER(jitLookupDynamicInterfaceMethod,3)
+OLD_DUAL_MODE_HELPER(jitLookupDynamicPublicInterfaceMethod,3)
 
 dnl Trap handlers
 
@@ -389,7 +394,6 @@ UNUSED(jitNewObjectNoTenantInit)
 UNUSED(jitPostJNICallOffloadCheck)
 UNUSED(jitPreJNICallOffloadCheck)
 UNUSED(jitFindFieldSignatureClass)
-UNUSED(icallVMprJavaSendInvokeWithArgumentsHelperL)
 UNUSED(j2iInvokeWithArguments)
 
 dnl Switch from the C stack to the java stack and jump via tempSlot

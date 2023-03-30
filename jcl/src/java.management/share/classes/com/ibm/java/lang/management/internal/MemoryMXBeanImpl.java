@@ -1,6 +1,6 @@
-/*[INCLUDE-IF Sidecar17]*/
+/*[INCLUDE-IF JAVA_SPEC_VERSION >= 8]*/
 /*******************************************************************************
- * Copyright (c) 2005, 2019 IBM Corp. and others
+ * Copyright (c) 2005, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -432,6 +432,9 @@ public class MemoryMXBeanImpl extends LazyDelegatingNotifier implements MemoryMX
 	 * {@inheritDoc}
 	 */
 	@Override
+	/*[IF JAVA_SPEC_VERSION >= 18] */
+	@SuppressWarnings("deprecation")
+	/*[ENDIF] JAVA_SPEC_VERSION >= 18 */
 	public int getObjectPendingFinalizationCount() {
 		return this.getObjectPendingFinalizationCountImpl();
 	}
@@ -464,6 +467,7 @@ public class MemoryMXBeanImpl extends LazyDelegatingNotifier implements MemoryMX
 	 */
 	@Override
 	public void setVerbose(boolean value) {
+		@SuppressWarnings("removal")
 		SecurityManager security = System.getSecurityManager();
 		if (security != null) {
 			security.checkPermission(ManagementPermissionHelper.MPCONTROL);
@@ -522,6 +526,7 @@ public class MemoryMXBeanImpl extends LazyDelegatingNotifier implements MemoryMX
 		if (size < this.getMinHeapSize() || size > this.getMaxHeapSizeLimit()) {
 			throw new IllegalArgumentException();
 		}
+		@SuppressWarnings("removal")
 		SecurityManager security = System.getSecurityManager();
 		if (security != null) {
 			security.checkPermission(ManagementPermissionHelper.MPCONTROL);
@@ -657,6 +662,7 @@ public class MemoryMXBeanImpl extends LazyDelegatingNotifier implements MemoryMX
 		if (value < 0) {
 			throw new IllegalArgumentException();
 		}
+		@SuppressWarnings("removal")
 		SecurityManager security = System.getSecurityManager();
 		if (security != null) {
 			security.checkPermission(ManagementPermissionHelper.MPCONTROL);
@@ -671,6 +677,7 @@ public class MemoryMXBeanImpl extends LazyDelegatingNotifier implements MemoryMX
 		if (value < 0) {
 			throw new IllegalArgumentException();
 		}
+		@SuppressWarnings("removal")
 		SecurityManager security = System.getSecurityManager();
 		if (security != null) {
 			security.checkPermission(ManagementPermissionHelper.MPCONTROL);
@@ -685,6 +692,7 @@ public class MemoryMXBeanImpl extends LazyDelegatingNotifier implements MemoryMX
 		if (value < 0) {
 			throw new IllegalArgumentException();
 		}
+		@SuppressWarnings("removal")
 		SecurityManager security = System.getSecurityManager();
 		if (security != null) {
 			security.checkPermission(ManagementPermissionHelper.MPCONTROL);
@@ -699,6 +707,7 @@ public class MemoryMXBeanImpl extends LazyDelegatingNotifier implements MemoryMX
 		if (value < 0) {
 			throw new IllegalArgumentException();
 		}
+		@SuppressWarnings("removal")
 		SecurityManager security = System.getSecurityManager();
 		if (security != null) {
 			security.checkPermission(ManagementPermissionHelper.MPCONTROL);
@@ -713,6 +722,7 @@ public class MemoryMXBeanImpl extends LazyDelegatingNotifier implements MemoryMX
 		if (value < 0) {
 			throw new IllegalArgumentException();
 		}
+		@SuppressWarnings("removal")
 		SecurityManager security = System.getSecurityManager();
 		if (security != null) {
 			security.checkPermission(ManagementPermissionHelper.MPCONTROL);
@@ -777,33 +787,61 @@ public class MemoryMXBeanImpl extends LazyDelegatingNotifier implements MemoryMX
 	private native String getGCModeImpl();
 
 	/**
-	 * Returns the amount of CPU time spent in the GC by the master thread, in milliseconds.
+	 * Returns the amount of CPU time spent in the GC by the main thread, in milliseconds.
 	 *
 	 * @return CPU time used in milliseconds
-	 * @see #getGCMasterThreadCpuUsed()
+	 * @see #getGCMainThreadCpuUsed()
 	 */
-	private native long getGCMasterThreadCpuUsedImpl();
+	private native long getGCMainThreadCpuUsedImpl();
+
+/*[IF JAVA_SPEC_VERSION < 16]*/
+	/**
+	 * {@inheritDoc}
+	 */
+	/*[IF JAVA_SPEC_VERSION >= 11]*/
+	@Deprecated(forRemoval=true, since="15")
+	/*[ELSE] JAVA_SPEC_VERSION >= 11 */
+	@Deprecated
+	/*[ENDIF] JAVA_SPEC_VERSION >= 11 */
+	public long getGCMasterThreadCpuUsed() {
+		return getGCMainThreadCpuUsedImpl();
+	}
+/*[ENDIF] JAVA_SPEC_VERSION < 16 */
 
 	/**
 	 * {@inheritDoc}
 	 */
-	public long getGCMasterThreadCpuUsed() {
-		return getGCMasterThreadCpuUsedImpl();
+	public long getGCMainThreadCpuUsed() {
+		return getGCMainThreadCpuUsedImpl();
 	}
 
 	/**
-	 * Returns the amount of CPU time spent in the GC by all slave threads, in milliseconds.
+	 * Returns the amount of CPU time spent in the GC by all worker threads, in milliseconds.
 	 *
 	 * @return CPU time used in milliseconds
-	 * @see #getGCSlaveThreadsCpuUsed()
+	 * @see #getGCWorkerThreadsCpuUsed()
 	 */
-	private native long getGCSlaveThreadsCpuUsedImpl();
+	private native long getGCWorkerThreadsCpuUsedImpl();
+
+/*[IF JAVA_SPEC_VERSION < 16]*/
+	/**
+	 * {@inheritDoc}
+	 */
+	/*[IF JAVA_SPEC_VERSION >= 11]*/
+	@Deprecated(forRemoval=true, since="15")
+	/*[ELSE] JAVA_SPEC_VERSION >= 11 */
+	@Deprecated
+	/*[ENDIF] JAVA_SPEC_VERSION >= 11 */
+	public long getGCSlaveThreadsCpuUsed() {
+		return getGCWorkerThreadsCpuUsedImpl();
+	}
+/*[ENDIF] JAVA_SPEC_VERSION < 16 */
 
 	/**
 	 * {@inheritDoc}
 	 */
-	public long getGCSlaveThreadsCpuUsed() {
-		return getGCSlaveThreadsCpuUsedImpl();
+	public long getGCWorkerThreadsCpuUsed() {
+		return getGCWorkerThreadsCpuUsedImpl();
 	}
 
 	/**
@@ -822,7 +860,7 @@ public class MemoryMXBeanImpl extends LazyDelegatingNotifier implements MemoryMX
 	}
 
 	/**
-	 * Returns the number of GC slave threads that participated in the most recent collection.
+	 * Returns the number of GC worker threads that participated in the most recent collection.
 	 *
 	 * @return number of active GC worker threads
 	 * @see #getCurrentGCThreads()

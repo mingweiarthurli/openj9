@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -58,8 +58,6 @@ class JNILinkage : public PrivateLinkage
    int32_t computeMemoryArgSize(TR::Node *callNode, int32_t first, int32_t last, bool passThread = true);
    int32_t buildArgs(TR::Node *callNode, TR::RegisterDependencyConditions *deps, bool passThread = true, bool passReceiver = true);
    TR::Register *buildVolatileAndReturnDependencies(TR::Node *callNode, TR::RegisterDependencyConditions *deps, bool omitDedicatedFrameRegister);
-   void switchToMachineCStack(TR::Node *callNode);
-   void switchToJavaStack(TR::Node *callNode);
    void cleanupReturnValue(TR::Node *callNode, TR::Register *linkageReturnReg, TR::Register *targetReg);
 
    TR::Register *buildDirectDispatch(TR::Node *callNode, bool spillFPRegs);

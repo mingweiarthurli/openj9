@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -25,6 +25,10 @@
 #include <string.h>
 
 #ifdef WINDOWS
+// Undefine the winsockapi because winsock2 defines it. Removes warnings.
+#if defined(_WINSOCKAPI_) && !defined(_WINSOCK2API_)
+#undef _WINSOCKAPI_
+#endif
 #include <winsock2.h>
 #include <process.h>
 #else
@@ -61,6 +65,7 @@
 #include "runtime/codertinit.hpp"
 #include "runtime/IProfiler.hpp"
 #include "runtime/HWProfiler.hpp"
+#include "runtime/RelocationRuntime.hpp"
 #include "env/PersistentInfo.hpp"
 #include "env/ClassLoaderTable.hpp"
 #include "env/J2IThunk.hpp"
@@ -68,6 +73,7 @@
 #include "env/CompilerEnv.hpp"
 #include "env/jittypes.h"
 #include "env/ClassTableCriticalSection.hpp"
+#include "env/VerboseLog.hpp"
 
 #include "ilgen/IlGeneratorMethodDetails_inlines.hpp"
 
@@ -103,7 +109,6 @@
 #include "vmaccess.h"
 #include "jvminit.h"
 #include "j9port.h"
-#include "ras/DebugExt.hpp"
 #include "env/exports.h"
 #if defined(J9VM_OPT_JITSERVER)
 #include "env/JITServerPersistentCHTable.hpp"
@@ -111,16 +116,16 @@
 #include "net/ClientStream.hpp"
 #include "net/LoadSSLLibs.hpp"
 #include "runtime/JITClientSession.hpp"
-#include "runtime/Listener.hpp"
-#include "runtime/JITServerStatisticsThread.hpp"
+#include "runtime/JITServerAOTCache.hpp"
+#include "runtime/JITServerAOTDeserializer.hpp"
 #include "runtime/JITServerIProfiler.hpp"
-#endif
+#include "runtime/JITServerSharedROMClassCache.hpp"
+#include "runtime/JITServerStatisticsThread.hpp"
+#include "runtime/Listener.hpp"
+#include "runtime/MetricsServer.hpp"
+#endif /* defined(J9VM_OPT_JITSERVER) */
 
 extern "C" int32_t encodeCount(int32_t count);
-
-#if defined(TR_HOST_POWER)
-extern TR_Processor portLibCall_getProcessorType();
-#endif
 
 extern "C" {
 struct J9RASdumpContext;
@@ -151,67 +156,61 @@ TR::Monitor *vpMonitor = 0;
 
 
 char *compilationErrorNames[]={
-   "compilationOK",                  // 0
-   "compilationFailure",             // 1
-   "compilationRestrictionILNodes",  // 2
-   "compilationRestrictionRecDepth", // 3
-   "compilationRestrictedMethod",    // 4
-   "compilationExcessiveComplexity", // 5
-   "compilationNotNeeded",           // 6
-   "compilationSuspended",           // 7
-   "compilationExcessiveSize",       // 8
-   "compilationInterrupted",         // 9
-   "compilationMetaDataFailure",     //10
-   "compilationInProgress",          //11
-   "compilationCHTableCommitFailure",//12
-   "compilationMaxCallerIndexExceeded",//13
-   "compilationKilledByClassReplacement",//14
-   "compilationHeapLimitExceeded",   //15
-   "compilationNeededAtHigherLevel", //16
-   "compilationAotValidateFieldFailure", //17
-   "compilationAotStaticFieldReloFailure", //18
-   "compilationAotClassReloFailure", //19
-   "compilationAotThunkReloFailure", //20
-   "compilationAotTrampolineReloFailure", //21
-   "compilationAotPicTrampolineReloFailure", //22
-   "compilationAotCacheFullReloFailure", //23
-   "compilationAotUnknownReloTypeFailure", //24
-   "compilationCodeReservationFailure", //25
-   "compilationAotHasInvokehandle", //26
-   "compilationTrampolineFailure", //27
-   "compilationRecoverableTrampolineFailure", // 28
-   "compilationIlGenFailure", // 29
-   "compilationIllegalCodeCacheSwitch", // 30
-   "compilationNullSubstituteCodeCache", // 31
-   "compilationCodeMemoryExhausted", // 32
-   "compilationGCRPatchFailure", // 33
-   "compilationAotValidateMethodExitFailure", // 34
-   "compilationAotValidateMethodEnterFailure", // 35
-   "compilationAotArrayClassReloFailure", // 36
-   "compilationLambdaEnforceScorching", // 37
-   "compilationInternalPointerExceedLimit", // 38
-   "compilationAotRelocationInterrupted", // 39
-   "compilationAotClassChainPersistenceFailure", // 40
-   "compilationLowPhysicalMemory", // 41
-   "compilationDataCacheError", // 42
-   "compilationCodeCacheError", // 43
-   "compilationRecoverableCodeCacheError", // 44
-   "compilationAotHasInvokeVarHandle", //45
-   "compilationAotValidateStringCompressionFailure", // 46
-   "compilationFSDHasInvokeHandle", //47
-   "compilationVirtualAddressExhaustion", //48
-   "compilationEnforceProfiling", //49
-   "compilationSymbolValidationManagerFailure", //50
-   "compilationAOTNoSupportForAOTFailure", //51
-   "compilationAOTValidateTMFailure", //52
-   "compilationILGenUnsupportedValueTypeOperationFailure", //53
-   "compilationAOTRelocationRecordGenerationFailure", //54
+   "compilationOK",                                        // 0
+   "compilationFailure",                                   // 1
+   "compilationRestrictionILNodes",                        // 2
+   "compilationRestrictionRecDepth",                       // 3
+   "compilationRestrictedMethod",                          // 4
+   "compilationExcessiveComplexity",                       // 5
+   "compilationNotNeeded",                                 // 6
+   "compilationSuspended",                                 // 7
+   "compilationExcessiveSize",                             // 8
+   "compilationInterrupted",                               // 9
+   "compilationMetaDataFailure",                           // 10
+   "compilationInProgress",                                // 11
+   "compilationCHTableCommitFailure",                      // 12
+   "compilationMaxCallerIndexExceeded",                    // 13
+   "compilationKilledByClassReplacement",                  // 14
+   "compilationHeapLimitExceeded",                         // 15
+   "compilationNeededAtHigherLevel",                       // 16
+   "compilationAotTrampolineReloFailure",                  // 17
+   "compilationAotPicTrampolineReloFailure",               // 18
+   "compilationAotCacheFullReloFailure",                   // 19
+   "compilationCodeReservationFailure",                    // 20
+   "compilationAotHasInvokehandle",                        // 21
+   "compilationTrampolineFailure",                         // 22
+   "compilationRecoverableTrampolineFailure",              // 23
+   "compilationILGenFailure",                              // 24
+   "compilationIllegalCodeCacheSwitch",                    // 25
+   "compilationNullSubstituteCodeCache",                   // 26
+   "compilationCodeMemoryExhausted",                       // 27
+   "compilationGCRPatchFailure",                           // 28
+   "compilationLambdaEnforceScorching",                    // 29
+   "compilationInternalPointerExceedLimit",                // 30
+   "compilationAotRelocationInterrupted",                  // 31
+   "compilationAotClassChainPersistenceFailure",           // 32
+   "compilationLowPhysicalMemory",                         // 33
+   "compilationDataCacheError",                            // 34
+   "compilationCodeCacheError",                            // 35
+   "compilationRecoverableCodeCacheError",                 // 36
+   "compilationAotHasInvokeVarHandle",                     // 37
+   "compilationFSDHasInvokeHandle",                        // 38
+   "compilationVirtualAddressExhaustion",                  // 39
+   "compilationEnforceProfiling",                          // 40
+   "compilationSymbolValidationManagerFailure",            // 41
+   "compilationAOTNoSupportForAOTFailure",                 // 42
+   "compilationILGenUnsupportedValueTypeOperationFailure", // 43
+   "compilationAOTRelocationRecordGenerationFailure",      // 44
+   "compilationAotPatchedCPConstant",                      // 45
+   "compilationAotHasInvokeSpecialInterface",              // 46
+   "compilationRelocationFailure",                         // 47
 #if defined(J9VM_OPT_JITSERVER)
-   "compilationStreamFailure", //55
-   "compilationStreamLostMessage", // 56
-   "compilationStreamMessageTypeMismatch", // 57
-   "compilationStreamVersionIncompatible", // 58
-   "compilationStreamInterrupted", // 59
+   "compilationStreamFailure",                             // compilationFirstJITServerFailure     = 48
+   "compilationStreamLostMessage",                         // compilationFirstJITServerFailure + 1 = 49
+   "compilationStreamMessageTypeMismatch",                 // compilationFirstJITServerFailure + 2 = 50
+   "compilationStreamVersionIncompatible",                 // compilationFirstJITServerFailure + 3 = 51
+   "compilationStreamInterrupted",                         // compilationFirstJITServerFailure + 4 = 52
+   "aotCacheDeserializationFailure",                       // compilationFirstJITServerFailure + 5 = 53
 #endif /* defined(J9VM_OPT_JITSERVER) */
    "compilationMaxError"
 };
@@ -243,8 +242,6 @@ extern "C" void promoteGPUCompile(J9VMThread *vmThread);
 extern "C" int32_t setUpHooks(J9JavaVM * javaVM, J9JITConfig * jitConfig, TR_FrontEnd * vm);
 extern "C" int32_t startJITServer(J9JITConfig *jitConfig);
 extern "C" int32_t waitJITServerTermination(J9JITConfig *jitConfig);
-
-char *AOTcgDiagOn="1";
 
 
 
@@ -644,6 +641,11 @@ jitExclusiveVMShutdownPending(J9VMThread * vmThread)
          {
          listener->stop();
          }
+      MetricsServer *metricsServer = ((TR_JitPrivateConfig*)(javaVM->jitConfig->privateConfig))->metricsServer;
+      if (metricsServer)
+         {
+         metricsServer->stop();
+         }
       }
 #endif /* defined(J9VM_OPT_JITSERVER) */
 
@@ -933,20 +935,19 @@ compileClasses(J9VMThread * vmThread, const char * pattern)
 
    if (patternLength >= PATTERN_BUFFER_LENGTH)
       {
-      patternString = (char*)j9mem_allocate_memory((patternLength+1)*sizeof(char), J9MEM_CATEGORY_JIT);
+      patternString = (char*)j9mem_allocate_memory(patternLength + 1, J9MEM_CATEGORY_JIT);
       if (!patternString)
          return false;
       freePatternString = true;
       }
    #undef PATTERN_BUFFER_LENGTH
 
-   strncpy(patternString, (char*)pattern, patternLength);
+   memcpy(patternString, (char *)pattern, patternLength + 1);
 
    /* Slashify the className */
    for (int32_t i = 0; i < patternLength; ++i)
       if (patternString[i] == '.')
          patternString[i] = '/';
-   patternString[patternLength]='\0';
 
    bool threadHadNoVMAccess = (!(vmThread->publicFlags & J9_PUBLIC_FLAGS_VM_ACCESS));
    if (threadHadNoVMAccess)
@@ -1207,6 +1208,17 @@ onLoadInternal(
 #endif
 #endif
 
+
+#if defined(J9VM_OPT_JITSERVER)
+   if (javaVM->internalVMFunctions->isJITServerEnabled(javaVM))
+      {
+      // Use smaller caches on the server because
+      // just one method's data is going to be stored there at a time
+      jitConfig->codeCacheKB = 1024;
+      jitConfig->dataCacheKB = 1024;
+      }
+#endif
+
    if (fe->isAOT_DEPRECATED_DO_NOT_USE())
       {
       jitConfig->codeCacheTotalKB = 128 * 1024; // default limit on amount of code that can be generated (128MB)
@@ -1306,8 +1318,14 @@ onLoadInternal(
       return -1;
       }
 
+   // Enable perfTool
+   if (TR::Options::_perfToolEnabled == TR_yes)
+      TR::Options::getCmdLineOptions()->setOption(TR_PerfTool);
+
    // Now that the options have been processed we can initialize the RuntimeAssumptionTables
    // If we cannot allocate various runtime assumption hash tables, fail the JVM
+
+   fe->initializeSystemProperties();
 
    // Allocate trampolines for z/OS 64-bit
 #if defined(J9ZOS390)
@@ -1402,6 +1420,9 @@ onLoadInternal(
    codeCacheConfig._maxNumberOfCodeCaches = maxNumberOfCodeCaches;
    codeCacheConfig._canChangeNumCodeCaches = (TR::Options::getCmdLineOptions()->getNumCodeCachesToCreateAtStartup() <= 0);
 
+   UDATA totalCacheBytes = codeCacheConfig._codeCacheTotalKB << 10;
+   codeCacheConfig._highCodeCacheOccupancyThresholdInBytes = TR::Options::_highCodeCacheOccupancyPercentage * (totalCacheBytes / 100);
+
    static char * segmentCarving = feGetEnv("TR_CodeCacheConsolidation");
    bool useConsolidatedCodeCache = segmentCarving != NULL ||
                                    TR::Options::getCmdLineOptions()->getOption(TR_EnableCodeCacheConsolidation);
@@ -1460,13 +1481,11 @@ onLoadInternal(
       }
    if (!TR_DataCacheManager::initialize(jitConfig))
       {
-      printf("{JIT: fatal error, failed to allocate %lu Kb data cache}\n", jitConfig->dataCacheKB);
+      printf("{JIT: fatal error, failed to allocate %" OMR_PRIuPTR " Kb data cache}\n", jitConfig->dataCacheKB);
       return -1;
       }
 
    jitConfig->thunkLookUpNameAndSig = &j9ThunkLookupNameAndSig;
-
-   fe->initializeSystemProperties();
 
    TR::CompilationInfo * compInfo = TR::CompilationInfo::get();
 
@@ -1491,66 +1510,74 @@ onLoadInternal(
    else
       compInfo->getCpuUtil()->updateCpuUtil(jitConfig);
 
-#ifdef TR_TARGET_S390
    // Need to let VM know that we will be using a machines vector facility (so it can save/restore preserved regs),
    // early in JIT startup to prevent subtle FP bugs
+#ifdef TR_TARGET_S390
    if (TR::Compiler->target.cpu.supportsFeature(OMR_FEATURE_S390_VECTOR_FACILITY) && !TR::Options::getCmdLineOptions()->getOption(TR_DisableSIMD))
+      {
+      javaVM->extendedRuntimeFlags |= J9_EXTENDED_RUNTIME_USE_VECTOR_REGISTERS;
+      }
+#elif defined(TR_TARGET_POWER) && defined(TR_TARGET_64BIT)
+   if(TR::Compiler->target.cpu.isAtLeast(OMR_PROCESSOR_PPC_P8) && TR::Compiler->target.cpu.supportsFeature(OMR_FEATURE_PPC_HAS_VSX) && !TR::Options::getCmdLineOptions()->getOption(TR_DisableSIMD))
       {
       javaVM->extendedRuntimeFlags |= J9_EXTENDED_RUNTIME_USE_VECTOR_REGISTERS;
       }
 #endif
 
-   // create comp threads if compiling on separate thread
-   if (compInfo->useSeparateCompilationThread())
+   // Address the case where the number of compilation threads is higher than the
+   // maximum number of code caches
+   if (TR::Options::_numUsableCompilationThreads > maxNumberOfCodeCaches)
       {
-      // Address the case where the number of compilation threads is higher than the
-      // maximum number of code caches
-      if (TR::Options::_numUsableCompilationThreads > maxNumberOfCodeCaches)
-         TR::Options::_numUsableCompilationThreads =  maxNumberOfCodeCaches;
-
-      compInfo->updateNumUsableCompThreads(TR::Options::_numUsableCompilationThreads);
-
-      if (!compInfo->allocateCompilationThreads(TR::Options::_numUsableCompilationThreads))
+#if defined(J9VM_OPT_JITSERVER)
+      if (persistentMemory->getPersistentInfo()->getRemoteCompilationMode() == JITServer::SERVER)
          {
-         fprintf(stderr, "onLoadInternal: Failed to set up %d compilation threads\n", TR::Options::_numUsableCompilationThreads);
+         fprintf(stderr,
+            "Requested number of compilation threads is larger than the maximum number of code caches: %d > %d.\n"
+            "Use the -Xcodecachetotal option to increase the maximum total size of the code cache.",
+            TR::Options::_numUsableCompilationThreads, maxNumberOfCodeCaches
+         );
          return -1;
          }
+#endif /* defined(J9VM_OPT_JITSERVER) */
+      TR::Options::_numUsableCompilationThreads = maxNumberOfCodeCaches;
+      }
 
-      // create regular compilation threads
-      int32_t highestThreadID = 0;
-      for (; highestThreadID < TR::Options::_numUsableCompilationThreads; highestThreadID++)
-         {
-         if (compInfo->startCompilationThread(-1, highestThreadID, /* isDiagnosticThread */ false) != 0)
-            {
-            // Failed to start compilation thread.
-            Trc_JIT_startCompThreadFailed(curThread);
-            return -1;
-            }
-         }
+   compInfo->updateNumUsableCompThreads(TR::Options::_numUsableCompilationThreads);
 
-      // If more than one diagnostic compilation thread is created, MAX_DIAGNOSTIC_COMP_THREADS needs to be updated
-      // create diagnostic compilation thread
-      if (compInfo->startCompilationThread(-1, highestThreadID, /* isDiagnosticThread */ true) != 0)
+   if (!compInfo->allocateCompilationThreads(TR::Options::_numUsableCompilationThreads))
+      {
+      fprintf(stderr, "onLoadInternal: Failed to set up %d compilation threads\n", TR::Options::_numUsableCompilationThreads);
+      return -1;
+      }
+
+   // create regular compilation threads
+   int32_t highestThreadID = 0;
+   for (; highestThreadID < TR::Options::_numUsableCompilationThreads; highestThreadID++)
+      {
+      if (compInfo->startCompilationThread(-1, highestThreadID, /* isDiagnosticThread */ false) != 0)
          {
          // Failed to start compilation thread.
          Trc_JIT_startCompThreadFailed(curThread);
-         highestThreadID++;
-         return -1;
-         }
-
-      // Create the monitor used for log handling in presence of multiple compilation threads
-      // TODO: postpone this when we know that a log is actually used
-      if (!compInfo->createLogMonitor())
-         {
-         fprintf(stderr, "cannot create log monitor\n");
          return -1;
          }
       }
-   else
+
+   // If more than one diagnostic compilation thread is created, MAX_DIAGNOSTIC_COMP_THREADS needs to be updated
+   // create diagnostic compilation thread
+   if (compInfo->startCompilationThread(-1, highestThreadID, /* isDiagnosticThread */ true) != 0)
       {
-      // Compilation on application thread
-      if (!compInfo->initializeCompilationOnApplicationThread())
-         return -1; // failure
+      // Failed to start compilation thread.
+      Trc_JIT_startCompThreadFailed(curThread);
+      highestThreadID++;
+      return -1;
+      }
+
+   // Create the monitor used for log handling in presence of multiple compilation threads
+   // TODO: postpone this when we know that a log is actually used
+   if (!compInfo->createLogMonitor())
+      {
+      fprintf(stderr, "cannot create log monitor\n");
+      return -1;
       }
 
    if (!fe->isAOT_DEPRECATED_DO_NOT_USE() && !(jitConfig->runtimeFlags & J9JIT_TOSS_CODE))
@@ -1646,30 +1673,56 @@ onLoadInternal(
          persistentMemory->getPersistentInfo()->setRuntimeInstrumentationRecompilationEnabled(true);
       }
 
-   TR_PersistentCHTable *chtable;
 #if defined(J9VM_OPT_JITSERVER)
-   if (persistentMemory->getPersistentInfo()->getRemoteCompilationMode() == JITServer::SERVER)
-      {
-      chtable = new (PERSISTENT_NEW) JITServerPersistentCHTable(persistentMemory);
-      }
-   else if (persistentMemory->getPersistentInfo()->getRemoteCompilationMode() == JITServer::CLIENT)
-      {
-      chtable = new (PERSISTENT_NEW) JITClientPersistentCHTable(persistentMemory);
-      }
-   else
+   // server-side CH table is initialized per-client
+   if (persistentMemory->getPersistentInfo()->getRemoteCompilationMode() != JITServer::SERVER)
 #endif
       {
-      chtable = new (PERSISTENT_NEW) TR_PersistentCHTable(persistentMemory);
+      TR_PersistentCHTable *chtable;
+#if defined(J9VM_OPT_JITSERVER)
+      if (persistentMemory->getPersistentInfo()->getRemoteCompilationMode() == JITServer::CLIENT)
+         {
+         chtable = new (PERSISTENT_NEW) JITClientPersistentCHTable(persistentMemory);
+         }
+      else
+#endif
+         {
+         chtable = new (PERSISTENT_NEW) TR_PersistentCHTable(persistentMemory);
+         }
+      if (chtable == NULL)
+         return -1;
+      persistentMemory->getPersistentInfo()->setPersistentCHTable(chtable);
       }
-   if (chtable == NULL)
-      return -1;
-   persistentMemory->getPersistentInfo()->setPersistentCHTable(chtable);
 
 #if defined(J9VM_OPT_JITSERVER)
-   if (JITServer::CommunicationStream::useSSL())
+   if (compInfo->useSSL())
       {
       if (!JITServer::loadLibsslAndFindSymbols())
          return -1;
+      }
+   else
+      {
+      bool shareROMClasses = TR::Options::_shareROMClasses &&
+                             (compInfo->getPersistentInfo()->getRemoteCompilationMode() == JITServer::SERVER);
+      bool useAOTCache = compInfo->getPersistentInfo()->getJITServerUseAOTCache();
+
+      // ROMClass sharing and AOT cache use a hash implementation from SSL.
+      // Disable them (with an error message to vlog) if we can't load the library.
+      if ((shareROMClasses || useAOTCache) && !JITServer::loadLibsslAndFindSymbols())
+         {
+         TR::Options::_shareROMClasses = false;
+         compInfo->getPersistentInfo()->setJITServerUseAOTCache(false);
+
+         if (TR::Options::getVerboseOption(TR_VerboseJITServer))
+            {
+            if (shareROMClasses)
+               TR_VerboseLog::writeLineLocked(TR_Vlog_JITServer,
+                                              "ERROR: Failed to load SSL library, disabling ROMClass sharing");
+            if (useAOTCache)
+               TR_VerboseLog::writeLineLocked(TR_Vlog_JITServer,
+                                              "ERROR: Failed to load SSL library, disabling AOT cache");
+            }
+         }
       }
 
    if (compInfo->getPersistentInfo()->getRemoteCompilationMode() == JITServer::SERVER)
@@ -1686,6 +1739,19 @@ onLoadInternal(
          j9tty_printf(PORTLIB, "JITServer Listener not allocated, abort.\n");
          return -1;
          }
+
+      // If we are allowed to use a metrics port, allocate the MetricsServer now
+      if (compInfo->getPersistentInfo()->getJITServerMetricsPort() != 0)
+         {
+         ((TR_JitPrivateConfig*)(jitConfig->privateConfig))->metricsServer = MetricsServer::allocate();
+         if (!((TR_JitPrivateConfig*)(jitConfig->privateConfig))->metricsServer)
+            {
+            // warn that MetricsServer was not allocated
+            j9tty_printf(PORTLIB, "JITServer MetricsServer not allocated, abort.\n");
+            return -1;
+            }
+         }
+
       if (jitConfig->samplingFrequency != 0)
          {
          ((TR_JitPrivateConfig*)(jitConfig->privateConfig))->statisticsThreadObject = JITServerStatisticsThread::allocate();
@@ -1700,6 +1766,25 @@ onLoadInternal(
          {
          ((TR_JitPrivateConfig*)(jitConfig->privateConfig))->statisticsThreadObject = NULL;
          }
+
+      //NOTE: This must be done only after the SSL library has been successfully loaded
+      if (TR::Options::_shareROMClasses)
+         {
+         size_t numPartitions = std::max(1, TR::Options::_sharedROMClassCacheNumPartitions);
+         auto cache = new (PERSISTENT_NEW) JITServerSharedROMClassCache(numPartitions);
+         if (!cache)
+            return -1;
+         compInfo->setJITServerSharedROMClassCache(cache);
+         }
+
+      //NOTE: This must be done only after the SSL library has been successfully loaded
+      if (compInfo->getPersistentInfo()->getJITServerUseAOTCache())
+         {
+         auto aotCacheMap = new (PERSISTENT_NEW) JITServerAOTCacheMap();
+         if (!aotCacheMap)
+            return -1;
+         compInfo->setJITServerAOTCacheMap(aotCacheMap);
+         }
       }
    else if (compInfo->getPersistentInfo()->getRemoteCompilationMode() == JITServer::CLIENT)
       {
@@ -1713,7 +1798,7 @@ onLoadInternal(
          PersistentUnorderedMap<TR_OpaqueClassBlock*, uint8_t>::allocator_type(TR::Compiler->persistentAllocator())));
 
       // Try to initialize SSL
-      if (JITServer::ClientStream::static_init(compInfo->getPersistentInfo()) != 0)
+      if (JITServer::ClientStream::static_init(compInfo) != 0)
          return -1;
 
       JITServer::CommunicationStream::initConfigurationFlags();
@@ -1731,16 +1816,9 @@ onLoadInternal(
       }
 #endif
 
-#if defined(TR_HOST_ARM64)
-   // ArrayCopy transformations are not available in AArch64 yet.
-   // OpenJ9 issue #6438 tracks the work to enable.
-   //
-   TR::Options::getCmdLineOptions()->setOption(TR_DisableArrayCopyOpts);
-#endif
-
-#ifdef J9VM_RAS_DUMP_AGENTS
    jitConfig->runJitdump = runJitdump;
-#endif
+
+   jitConfig->printAOTHeaderProcessorFeatures = printAOTHeaderProcessorFeatures;
 
    if (!TR::Compiler->target.cpu.isI386())
       {
@@ -1829,6 +1907,12 @@ aboutToBootstrap(J9JavaVM * javaVM, J9JITConfig * jitConfig)
       return -1;
       }
 
+   if (!TR::Options::getCmdLineOptions()->allowRecompilation() || !TR::Options::getAOTCmdLineOptions()->allowRecompilation())
+      {
+      TR::Options::getCmdLineOptions()->setOption(TR_DisableCHOpts);
+      TR::Options::getAOTCmdLineOptions()->setOption(TR_DisableCHOpts);
+      }
+
    // Get local var names if available (ie. classfile was compiled with -g).
    // We just check getDebug() for lack of a reliable way to check whether there are any methods being logged.
    //
@@ -1849,10 +1933,10 @@ aboutToBootstrap(J9JavaVM * javaVM, J9JITConfig * jitConfig)
    if (vm->isAOT_DEPRECATED_DO_NOT_USE() || (jitConfig->runtimeFlags & J9JIT_TOSS_CODE))
       return 0;
 
-
+   TR::PersistentInfo *persistentInfo = compInfo->getPersistentInfo();
 #if defined(J9VM_OPT_JITSERVER)
-   if (compInfo->getPersistentInfo()->getRemoteCompilationMode() != JITServer::SERVER)
-#endif
+   if (persistentInfo->getRemoteCompilationMode() != JITServer::SERVER)
+#endif /* defined(J9VM_OPT_JITSERVER) */
       {
       /* jit specific helpers */
       initializeJitRuntimeHelperTable(TR::Compiler->target.isSMP());
@@ -1861,8 +1945,8 @@ aboutToBootstrap(J9JavaVM * javaVM, J9JITConfig * jitConfig)
 #if defined(TR_TARGET_POWER)
    if (TR::Compiler->target.cpu.isPower())
       {
-      void  * tocBase = ppcPicTrampInit(vm, compInfo->getPersistentInfo());
-      if ( tocBase == reinterpret_cast<void *>(0x1) )
+      void *tocBase = ppcPicTrampInit(vm, persistentInfo);
+      if (tocBase == reinterpret_cast<void *>(0x1))
          {
          printf("<JIT: Cannot allocate TableOfConstants\n");
          return -1; // fail the JVM
@@ -1881,9 +1965,9 @@ aboutToBootstrap(J9JavaVM * javaVM, J9JITConfig * jitConfig)
       bool validateSCC = true;
 
 #if defined(J9VM_OPT_JITSERVER)
-      if (compInfo->getPersistentInfo()->getRemoteCompilationMode() == JITServer::SERVER)
+      if (persistentInfo->getRemoteCompilationMode() == JITServer::SERVER)
          validateSCC = false;
-#endif
+#endif /* defined(J9VM_OPT_JITSERVER) */
 
       if (validateSCC)
          {
@@ -1914,7 +1998,8 @@ aboutToBootstrap(J9JavaVM * javaVM, J9JITConfig * jitConfig)
             }
          else
             {
-            TR::Compiler->relocatableTarget.cpu = TR::CPU(compInfo->reloRuntime()->getProcessorDescriptionFromSCC(fe, curThread));
+            TR::Compiler->relocatableTarget.cpu = TR::CPU::customize(compInfo->reloRuntime()->getProcessorDescriptionFromSCC(curThread));
+            jitConfig->relocatableTargetProcessor = TR::Compiler->relocatableTarget.cpu.getProcessorDescription();
             }
          }
 
@@ -1923,27 +2008,65 @@ aboutToBootstrap(J9JavaVM * javaVM, J9JITConfig * jitConfig)
          javaVM->sharedClassConfig->runtimeFlags &= ~J9SHR_RUNTIMEFLAG_ENABLE_AOT;
          TR_J9SharedCache::setSharedCacheDisabledReason(TR_J9SharedCache::AOT_DISABLED);
 #if defined(J9VM_OPT_JITSERVER)
-         if (compInfo->getPersistentInfo()->getRemoteCompilationMode() == JITServer::SERVER)
+         if (persistentInfo->getRemoteCompilationMode() == JITServer::SERVER)
             {
             fprintf(stderr, "Error: -Xaot:nostore option is not compatible with JITServer mode.");
             return -1;
             }
-#endif
+#endif /* defined(J9VM_OPT_JITSERVER) */
          }
       else if ((javaVM->sharedClassConfig->runtimeFlags & J9SHR_RUNTIMEFLAG_ENABLE_AOT) == 0)
          {
          TR::Options::getAOTCmdLineOptions()->setOption(TR_NoStoreAOT);
          TR_J9SharedCache::setSharedCacheDisabledReason(TR_J9SharedCache::AOT_DISABLED);
 #if defined(J9VM_OPT_JITSERVER)
-         if (compInfo->getPersistentInfo()->getRemoteCompilationMode() == JITServer::SERVER)
+         if (persistentInfo->getRemoteCompilationMode() == JITServer::SERVER)
             {
             fprintf(stderr, "Error: -Xnoaot option must not be specified for JITServer.");
             return -1;
             }
-#endif
+#endif /* defined(J9VM_OPT_JITSERVER) */
+         }
+
+      if (javaVM->sharedClassConfig->runtimeFlags & J9SHR_RUNTIMEFLAG_ENABLE_READONLY)
+         {
+         TR::Options::getAOTCmdLineOptions()->setOption(TR_NoStoreAOT);
+         TR_J9SharedCache::setSharedCacheDisabledReason(TR_J9SharedCache::AOT_DISABLED);
          }
       }
-#endif
+#endif /* defined(J9VM_OPT_SHARED_CLASSES) */
+
+#if defined(J9VM_OPT_JITSERVER)
+   // Create AOT deserializer at the client if using JITServer with AOT cache
+   if ((persistentInfo->getRemoteCompilationMode() == JITServer::CLIENT) && persistentInfo->getJITServerUseAOTCache())
+      {
+      if (TR::Options::sharedClassCache())
+         {
+         auto deserializer = new (PERSISTENT_NEW) JITServerAOTDeserializer(persistentInfo->getPersistentClassLoaderTable());
+         if (!deserializer)
+            return -1;
+         compInfo->setJITServerAOTDeserializer(deserializer);
+         }
+      else
+         {
+         fprintf(stderr, "Disabling JITServer AOT cache since AOT compilation is disabled\n");
+         persistentInfo->setJITServerUseAOTCache(false);
+         }
+      }
+#endif /* defined(J9VM_OPT_JITSERVER) */
+
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+   /* If the JVM is in CRIU mode and checkpointing is allowed, then the JIT should be
+    * limited to the same processor features as those used in Portable AOT mode. This
+    * is because, the restore run may not be on the same machine as the one that created
+    * the snapshot; thus the JIT code must be portable.
+    */
+   if (javaVM->internalVMFunctions->isCheckpointAllowed(curThread))
+      {
+      TR::Compiler->target.cpu = TR::CPU::detectRelocatable(TR::Compiler->omrPortLib);
+      jitConfig->targetProcessor = TR::Compiler->target.cpu.getProcessorDescription();
+      }
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
 
    #if defined(TR_TARGET_S390)
       uintptr_t * tocBase = (uintptr_t *)jitConfig->pseudoTOC;
@@ -1964,7 +2087,7 @@ aboutToBootstrap(J9JavaVM * javaVM, J9JITConfig * jitConfig)
 
    // For RI enabled we may want to start as off and only enable when there is
    // compilation pressure
-   if (compInfo->getPersistentInfo()->isRuntimeInstrumentationEnabled() &&
+   if (persistentInfo->isRuntimeInstrumentationEnabled() &&
        TR::Options::getCmdLineOptions()->getOption(TR_UseRIOnlyForLargeQSZ))
       {
       TR_HWProfiler *hwProfiler = compInfo->getHWProfiler();
@@ -1973,143 +2096,8 @@ aboutToBootstrap(J9JavaVM * javaVM, J9JITConfig * jitConfig)
 
    UT_MODULE_LOADED(J9_UTINTERFACE_FROM_VM(javaVM));
    Trc_JIT_VMInitStages_Event1(curThread);
-
+   Trc_JIT_portableSharedCache_enabled_or_disabled(curThread, J9_ARE_ANY_BITS_SET(javaVM->extendedRuntimeFlags2, J9_EXTENDED_RUNTIME2_ENABLE_PORTABLE_SHARED_CACHE) ? 1 : 0);
    return 0;
-   }
-
-
-// -----------------------------------------------------------------------------
-// Debugger extensions
-// -----------------------------------------------------------------------------
-
-extern "C" {
-
-   static TR_DebugExt *trDebugExt = 0;
-   static J9VMThread *mainThread = 0;
-   J9PortLibrary *portLibrary = 0;
-   void (*dbgjit_Printf)(const char *s, ...) = 0;
-
-   typedef struct DebugExtParameters
-      {
-      DebugExtParameters(
-            const char *name,
-            void *addr,
-            UDATA argCount,
-            const char* args
-         )  :
-         _name(name),
-         _addr(addr),
-         _argCount(argCount),
-         _args(args)
-         {}
-
-      const char *_name;
-      void *_addr;
-      UDATA _argCount;
-      const char* _args;
-      } DebugExtParameters;
-
-}; // extern "C"
-
-static UDATA
-blankDebugExtSignalHandler(struct J9PortLibrary *portLibrary, U_32 gpType, void *gpInfo, void *arg)
-   {
-   dbgjit_Printf("\n\n\n");
-   dbgjit_Printf("**** Debug Ext Signal Handler: trprint most likely tried to dereference a remote pointer (VFT or otherwise).\n");
-   dbgjit_Printf("**** Debug Ext Signal Handler: returning control back to trprint\n");
-   dbgjit_Printf("\n\n\n");
-   return J9PORT_SIG_EXCEPTION_RETURN;
-   }
-
-extern "C" TR_DebugExt *
-j9jit_createDebugExt(
-   J9JavaVM *localVM,
-   J9PortLibrary *dbgPortLib,
-   TR_Printf_t dbgPrintf,
-   void (*dbgReadMemory)(UDATA remoteAddr, void *localPtr, UDATA size, UDATA *bytesRead),
-   UDATA (*dbgGetExpression)(const char* args),
-   TR_Malloc_t dbgMalloc,
-   TR_Free_t dbgFree)
-   {
-   portLibrary = dbgPortLib;
-   if (localVM && localVM->portLibrary != portLibrary)
-      dbgPrintf("*** JIT Warning: port library mismatch!\n");
-   if (localVM)
-      mainThread = localVM->mainThread;
-
-   TR_InternalFunctions *jitFunctions = new (dbgMalloc) TR_InternalFunctionsExt(NULL, NULL, dbgPrintf, dbgMalloc, dbgFree);
-   TR_DebugExt *debugExt = new (dbgMalloc) TR_DebugExt(jitFunctions, dbgPortLib, localVM, dbgPrintf, dbgReadMemory, dbgMalloc, dbgFree, dbgGetExpression);
-   return debugExt;
-   }
-
-
-extern "C" void JNICALL
-dbgjit_TrInitialize(J9JavaVM *localVM,
-                    J9PortLibrary *dbgPortLib,
-                    void (*dbgPrintf)(const char *s, ...),
-                    void (*dbgReadMemory)(UDATA remoteAddr, void *localPtr, UDATA size, UDATA *bytesRead),
-                    UDATA (*dbgGetExpression)(const char* args),
-                    void* (*dbgMalloc)(UDATA size, void *originalAddress),
-                    void* (*dbgMallocAndRead)(UDATA size, void *remoteAddress),
-                    void (*dbgFree)(void * addr),
-                    void* (*dbgFindPatternInRange)(U_8* pattern, UDATA patternLength, UDATA patternAlignment,
-                    U_8* startSearchFrom, UDATA bytesToSearch, UDATA* bytesSearched))
-   {
-   if (trDebugExt)
-      dbgPrintf("\n JIT Warning: duplicate initialization!\n");
-   if (!localVM)
-      dbgPrintf("\n JIT Warning: initializing without JavaVM - !setvm is not called!\n");
-   dbgjit_Printf = dbgPrintf;
-   trDebugExt = j9jit_createDebugExt(localVM, dbgPortLib, dbgPrintf, dbgReadMemory, dbgGetExpression, dbgMalloc, dbgFree); /* safe upcast */
-   return;
-   }
-
-
-static UDATA
-dbgjit_TrPrintProtected(J9PortLibrary *portLib, void * opaqueParameters)
-   {
-   DebugExtParameters *p = static_cast<DebugExtParameters *>(opaqueParameters);
-   const char *name = p->_name;
-   void *addr = p->_addr;
-   UDATA argCount = p->_argCount;
-   const char *args = p->_args;
-
-   trDebugExt->dxTrPrint(name, addr, argCount, args);
-   return 0;
-   }
-
-
-extern "C" void JNICALL
-dbgjit_TrPrint(const char *name, void *addr, UDATA argCount, const char* args)
-   {
-   PORT_ACCESS_FROM_PORT(portLibrary);
-
-   DebugExtParameters p(
-      name,
-      addr,
-      argCount,
-      args);
-
-   UDATA result = 0;
-
-#if defined(J9VM_PORT_SIGNAL_SUPPORT)
-   U_32 flags = J9PORT_SIG_FLAG_MAY_RETURN |
-                J9PORT_SIG_FLAG_SIGSEGV | J9PORT_SIG_FLAG_SIGFPE |
-                J9PORT_SIG_FLAG_SIGILL  | J9PORT_SIG_FLAG_SIGBUS;
-
-   if (j9sig_can_protect(flags))
-      {
-      UDATA protectedResult;
-
-      protectedResult = j9sig_protect((j9sig_protected_fn)dbgjit_TrPrintProtected, static_cast<void *>(&p),
-                                         (j9sig_handler_fn)blankDebugExtSignalHandler, mainThread,
-                                         flags, &result);
-      }
-   else
-#endif
-      result = dbgjit_TrPrintProtected(portLibrary, &p);
-
-   return;
    }
 
 

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2017 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -100,6 +100,13 @@ void JNICALL Java_j9vm_test_jnichk_ConcurrentGlobalReferenceModification_test(JN
 
 jboolean JNICALL Java_j9vm_test_jnichk_CriticalAlwaysCopy_testArray(JNIEnv* env, jclass clazz, jobjectArray array);
 jboolean JNICALL Java_j9vm_test_jnichk_CriticalAlwaysCopy_testString(JNIEnv* env, jclass clazz, jstring str);
+
+void JNICALL Java_j9vm_test_jnichk_PassingFieldID_testToReflectedFieldExpectedStaticGotNonStatic(JNIEnv * env, jobject recv);
+void JNICALL Java_j9vm_test_jnichk_PassingFieldID_testToReflectedFieldExpectedNonStaticGotStatic(JNIEnv * env, jobject recv);
+void JNICALL Java_j9vm_test_jnichk_PassingFieldID_testGetCharFieldPassedStaticID(JNIEnv * env, jobject recv);
+void JNICALL Java_j9vm_test_jnichk_PassingFieldID_testGetStaticCharFieldPassedNonStaticID(JNIEnv * env, jobject recv);
+void JNICALL Java_j9vm_test_jnichk_PassingFieldID_testSetObjectFieldPassedStaticID(JNIEnv * env, jobject recv);
+void JNICALL Java_j9vm_test_jnichk_PassingFieldID_testSetStaticObjectFieldPassedNonStaticID(JNIEnv * env, jobject recv);
 
 /* ---------------- montest.c ---------------- */
 
@@ -1736,6 +1743,15 @@ Java_jit_test_vich_JNIObjectArray_getObjectArrayElement(JNIEnv *env, jobject obj
 /* ---------------- jnitest.c ---------------- */
 
 /**
+ * @brief Invoke LockSupport.park().
+ * @param env
+ * @param cls
+ * @return JNI_TRUE if LockSupport.park() is invoked; otherwise, JNI_FALSE.
+ */
+jboolean JNICALL
+Java_org_openj9_test_jep425_VirtualThreadTests_lockSupportPark(JNIEnv *env, jclass cls);
+
+/**
 * @brief
 * @param env
 * @param rcv
@@ -2061,7 +2077,6 @@ Java_j9vm_test_thread_NativeHelpers_abort(JNIEnv *env, jclass cls, jobject threa
 */
 void JNICALL 
 Java_j9vm_test_thread_NativeHelpers_priorityInterrupt(JNIEnv *env, jclass cls, jobject thread);
-
 
 /* ---------------- jniReturnInvalidReference.c ---------------- */
 jobject JNICALL 

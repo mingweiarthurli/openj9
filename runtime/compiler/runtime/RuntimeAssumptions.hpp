@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -71,16 +71,13 @@ class TR_PersistentClassInfo : public TR_Link0<TR_PersistentClassInfo>
    public:
    TR_PERSISTENT_ALLOC(TR_Memory::PersistentInfo);
    TR_PersistentClassInfo(TR_OpaqueClassBlock *id) :
-      _classId(id), _fieldInfo(0),
-      _prexAssumptions(0), _timeStamp(0),
-      _nameLength(-1), _ccvResult(notYetValidated)
-    {
-    uintptr_t classPointerValue = (uintptr_t) id;
-
-    // Bit is switched on to mark it as uninitialized
-    //
-    _classId = (TR_OpaqueClassBlock *) ((classPointerValue | 1));
-    }
+      _classId((TR_OpaqueClassBlock *)((uintptr_t)id | 1)),// Bit is switched on to mark it as uninitialized
+      _fieldInfo(0),
+      _prexAssumptions(0),
+      _timeStamp(0),
+      _shouldNotBeNewlyExtended(0),
+      _flags(0),
+      _ccvResult(notYetValidated) { }
 
    TR_OpaqueClassBlock *getClassId() { return (TR_OpaqueClassBlock *) (((uintptr_t) _classId) & ~(uintptr_t)1); }
    bool isInitialized(bool validate = true);
@@ -121,7 +118,7 @@ class TR_PersistentClassInfo : public TR_Link0<TR_PersistentClassInfo>
    int32_t getSubClassesCount() { return _subClasses.getSize(); }
 
    virtual TR_SubClass *addSubClass(TR_PersistentClassInfo *subClass);
-   virtual void removeSubClasses();
+   virtual void removeSubClasses(TR_PersistentMemory *persistentMemory = ::trPersistentMemory);
    virtual void removeASubClass(TR_PersistentClassInfo *subClass);
    virtual void removeUnloadedSubClasses();
    virtual void setUnloaded(){_visitedStatus |= 0x2;}
@@ -139,11 +136,11 @@ class TR_PersistentClassInfo : public TR_Link0<TR_PersistentClassInfo>
    bool isReservable()                            { return _flags.testAny(_isReservable); }
 
    virtual void setShouldNotBeNewlyExtended(int32_t ID);
-   virtual void resetShouldNotBeNewlyExtended(int32_t ID){ _shouldNotBeNewlyExtended.reset(1 << ID); }
-   virtual void clearShouldNotBeNewlyExtended()          { _shouldNotBeNewlyExtended.clear(); }
-   bool shouldNotBeNewlyExtended()               { return _shouldNotBeNewlyExtended.testAny(0xff); }
-   bool shouldNotBeNewlyExtended(int32_t ID)     { return _shouldNotBeNewlyExtended.testAny(1 << ID); }
-   flags8_t getShouldNotBeNewlyExtendedMask() const { return _shouldNotBeNewlyExtended; }
+   virtual void resetShouldNotBeNewlyExtended(int32_t ID)   { _shouldNotBeNewlyExtended.reset(1 << ID); }
+   virtual void clearShouldNotBeNewlyExtended()             { _shouldNotBeNewlyExtended.clear(); }
+   bool shouldNotBeNewlyExtended()                   { return _shouldNotBeNewlyExtended.testAny(0xffff); }
+   bool shouldNotBeNewlyExtended(int32_t ID)         { return _shouldNotBeNewlyExtended.testAny(1 << ID); }
+   flags16_t getShouldNotBeNewlyExtendedMask() const { return _shouldNotBeNewlyExtended; }
 
    virtual void setHasRecognizedAnnotations(bool v = true){ _flags.set(_containsRecognizedAnnotations, v); }
    bool hasRecognizedAnnotations()                { return _flags.testAny(_containsRecognizedAnnotations); }
@@ -156,9 +153,6 @@ class TR_PersistentClassInfo : public TR_Link0<TR_PersistentClassInfo>
    // HCR
    virtual void setClassHasBeenRedefined(bool v = true)  { _flags.set(_classHasBeenRedefined, v); }
    bool classHasBeenRedefined()                  { return _flags.testAny(_classHasBeenRedefined); }
-
-   int32_t getNameLength()                       { return _nameLength; }
-   virtual void setNameLength(int32_t length)            { _nameLength = length; }
 
    void setCCVResult(CCVResult result) { _ccvResult = result; }
    CCVResult getCCVResult() const { return _ccvResult; }
@@ -183,20 +177,19 @@ class TR_PersistentClassInfo : public TR_Link0<TR_PersistentClassInfo>
    friend class FlatPersistentClassInfo;
 #endif
 
-   TR_OpaqueClassBlock               *_classId;
-   TR_LinkHead0<TR_SubClass>          _subClasses;
+   TR_OpaqueClassBlock      *_classId;
+   TR_LinkHead0<TR_SubClass> _subClasses;
 
    union
       {
       uintptr_t _visitedStatus;
       TR_PersistentClassInfoForFields *_fieldInfo;
       };
-   int16_t                             _prexAssumptions;
-   uint16_t                            _timeStamp;
-   int32_t                             _nameLength;
-   flags8_t                            _flags;
-   flags8_t                            _shouldNotBeNewlyExtended; // one bit for each possible compilation thread
-   CCVResult                           _ccvResult;
+   int16_t   _prexAssumptions;
+   uint16_t  _timeStamp;
+   flags16_t _shouldNotBeNewlyExtended; // one bit for each possible compilation thread
+   flags8_t  _flags;
+   CCVResult _ccvResult;
    };
 
 class TR_AddressRange
@@ -251,7 +244,7 @@ class TR_AddressSet
       {}
 
 #if defined(J9VM_OPT_JITSERVER)
-   void destroy();
+   void destroy(TR_PersistentMemory *persistentMemory);
    void getRanges(std::vector<TR_AddressRange> &ranges); // copies the address ranges stored in the current object into a vector
    void setRanges(const std::vector<TR_AddressRange> &ranges); // loads the address ranges from the vector given as parameter
    int32_t getNumberOfRanges() const { return _numAddressRanges; }

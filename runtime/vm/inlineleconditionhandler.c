@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2019 IBM Corp. and others
+ * Copyright (c) 2001, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -56,7 +56,7 @@ _ENTRY globalLeConditionHandlerENTRY = { (_POINTER)&j9vm_inline_le_condition_han
  *
  * @param[in]	_FEEDBACK *fc 		condition token representing the condition for which this handler was invoked
  * 										- forwarded to the omrsig_le_condition_handler.
- * @param[in]	_INT4 *token 		points to a J9VMThread*. Needed to obtain the portlibrary and by the the OMRZOSLEConditionHandlerRecord.
+ * @param[in]	_INT4 *token 		points to a J9VMThread*. Needed to obtain the portlibrary and by the OMRZOSLEConditionHandlerRecord.
  * @param[out]	_INT4 *leResult		tells the OS what to do when the condition handler returns.
  * 										- forwarded to the omrsig_le_condition_handler
  * @param[out]	_FEEDBACK *newfc	forwarded to the omrsig_le_condition_handler

@@ -1,5 +1,5 @@
 *
-* Copyright (c) 1991, 2017 IBM Corp. and others
+* Copyright (c) 1991, 2021 IBM Corp. and others
 *
 * This program and the accompanying materials are made
 * available under the terms of the Eclipse Public License 2.0
@@ -16,7 +16,7 @@
 * OpenJDK Assembly Exception [2].
 *
 * [1] https://www.gnu.org/software/classpath/license.html
-* [2] http://openjdk.java.net/legal/assembly-exception.html
+* [2] https://openjdk.org/legal/assembly-exception.html
 *
 * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR
 * GPL-2.0 WITH Classpath-exception-2.0 OR
@@ -31,7 +31,7 @@ R3       EQU   3      Output: 1 if guarded stor supported, 0 otherwise
 R6       EQU   6      Base register
 *
 * SYSPARM is set in makefile,  CFLAGS+= -Wa,SYSPARM\(BIT64\)
-* to get 64 bit bit prolog and epilog.  Delete SYSPARM from makefile
+* to get 64 bit prolog and epilog.  Delete SYSPARM from makefile
 * to get 31 bit version of xplink enabled prolog and epilog.
          AIF  ('&SYSPARM' EQ 'BIT64').JMP1
 GSSTCB EDCXPRLG BASEREG=6,DSASIZE=0

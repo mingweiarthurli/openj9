@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -50,14 +50,6 @@
 #define J9DYNAMIC_ONUNLOAD              "JNI_OnUnload"
 
 static void cleanPackage(J9Package *package);
-
-UDATA
-initializePackageID(J9ClassLoader *classLoader, J9ROMClass *romClass, J9VMThread *vmThread, IDATA entryIndex, I_32 locationType)
-{
-	UDATA id = hashPkgTableIDFor(vmThread, classLoader, romClass, entryIndex, locationType);
-
-	return id;
-}
 
 #define CLASS_PROPAGATION_TABLE_SIZE 3
 
@@ -231,11 +223,49 @@ freeClassLoader(J9ClassLoader *classLoader, J9JavaVM *javaVM, J9VMThread *vmThre
 	RELEASE_CLASS_LOADER_BLOCKS_MUTEX(javaVM);
 #endif
 
-	/* free the class path entries allocated ofr system and non-system class loaders */
-	if (NULL != classLoader->classPathEntries) {
-		if (javaVM->systemClassLoader == classLoader) {
-			freeClassLoaderEntries(vmThread, classLoader->classPathEntries, classLoader->classPathEntryCount);
-		} else {
+	/* Free the hot field pool and clean up global hot field class info pool if scavenger dynamicBreadthFirstScanOrdering is enabled */
+	if (javaVM->memoryManagerFunctions->j9gc_hot_reference_field_required(javaVM)) {
+		if (NULL != classLoader->hotFieldPool) {
+			if (NULL != javaVM->hotFieldClassInfoPool && J9_ARE_NO_BITS_SET(classLoader->flags, J9CLASSLOADER_ANON_CLASS_LOADER)) {
+				pool_state hotFieldClassInfoPoolState;
+				J9ClassHotFieldsInfo *hotFieldClassInfoTemp;
+				omrthread_monitor_enter(classLoader->hotFieldPoolMutex);
+				omrthread_monitor_enter(javaVM->hotFieldClassInfoPoolMutex);
+				hotFieldClassInfoTemp = (struct J9ClassHotFieldsInfo*)pool_startDo(javaVM->hotFieldClassInfoPool, &hotFieldClassInfoPoolState);
+				while (NULL != hotFieldClassInfoTemp) {
+					if (hotFieldClassInfoTemp->classLoader == classLoader) {
+						pool_removeElement(javaVM->hotFieldClassInfoPool, hotFieldClassInfoTemp);
+					}
+					hotFieldClassInfoTemp = (struct J9ClassHotFieldsInfo*)pool_nextDo(&hotFieldClassInfoPoolState);
+				}
+				omrthread_monitor_exit(javaVM->hotFieldClassInfoPoolMutex);
+				omrthread_monitor_exit(classLoader->hotFieldPoolMutex);
+			}
+			pool_kill(classLoader->hotFieldPool);
+			classLoader->hotFieldPool = NULL;
+		}
+
+		/* destroy the classloader hot field pool monitor if it exists */
+		if (NULL != classLoader->hotFieldPoolMutex) {
+			omrthread_monitor_destroy(classLoader->hotFieldPoolMutex);
+			classLoader->hotFieldPoolMutex = NULL;
+		}
+	}
+	
+	/* free the class path entries allocated for system and non-system class loaders */
+	if (javaVM->systemClassLoader == classLoader) {
+		if (NULL != classLoader->classPathEntries) {
+			freeClassLoaderEntries(vmThread, classLoader->classPathEntries, classLoader->classPathEntryCount, classLoader->initClassPathEntryCount);
+			j9mem_free_memory(classLoader->classPathEntries);
+			classLoader->classPathEntryCount = 0;
+			classLoader->classPathEntries = NULL;
+		}
+		if (NULL != classLoader->cpEntriesMutex) {
+			omrthread_rwmutex_destroy(classLoader->cpEntriesMutex);
+			classLoader->cpEntriesMutex = NULL;
+		}
+	} else {
+		if (NULL != classLoader->classPathEntries) {
 			freeSharedCacheCLEntries(vmThread, classLoader);
 		}
 	}
@@ -358,7 +388,10 @@ freeClassLoader(J9ClassLoader *classLoader, J9JavaVM *javaVM, J9VMThread *vmThre
 
 		J9ModuleExtraInfo *moduleExtraInfoPtr = (J9ModuleExtraInfo *)hashTableStartDo(classLoader->moduleExtraInfoHashTable, &moduleExtraInfoWalkState);
 		while (NULL != moduleExtraInfoPtr) {
-			freeClassLoaderEntries(vmThread, moduleExtraInfoPtr->patchPathEntries, moduleExtraInfoPtr->patchPathCount);
+			freeClassLoaderEntries(vmThread, moduleExtraInfoPtr->patchPathEntries, moduleExtraInfoPtr->patchPathCount, moduleExtraInfoPtr->patchPathCount);
+			j9mem_free_memory(moduleExtraInfoPtr->patchPathEntries);
+			moduleExtraInfoPtr->patchPathEntries = NULL;
+			moduleExtraInfoPtr->patchPathCount = 0;
 			if (NULL != moduleExtraInfoPtr->jrtURL) {
 				j9mem_free_memory(moduleExtraInfoPtr->jrtURL);
 			}

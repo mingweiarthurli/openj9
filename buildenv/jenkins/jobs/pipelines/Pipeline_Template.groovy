@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2019, 2020 IBM Corp. and others
+ * Copyright (c) 2019, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -36,10 +36,11 @@ if (!binding.hasVariable('VENDOR_REPO_DEFAULT')) VENDOR_REPO_DEFAULT = ''
 if (!binding.hasVariable('VENDOR_BRANCH_DEFAULT')) VENDOR_BRANCH_DEFAULT = ''
 if (!binding.hasVariable('VENDOR_CREDENTIALS_ID_DEFAULT')) VENDOR_CREDENTIALS_ID_DEFAULT = ''
 if (!binding.hasVariable('DISCARDER_NUM_BUILDS')) DISCARDER_NUM_BUILDS = '1'
-if (!binding.hasVariable('SCM_REPO')) SCM_REPO = 'https://github.com/eclipse/openj9.git'
+if (!binding.hasVariable('SCM_REPO')) SCM_REPO = 'https://github.com/eclipse-openj9/openj9.git'
 if (SCM_BRANCH ==~ /origin\/pr\/[0-9]+\/merge/) {
     SCM_BRANCH = 'master'
 }
+if (!binding.hasVariable('USER_CREDENTIALS_ID')) USER_CREDENTIALS_ID = ''
 
 pipelineScript = 'buildenv/jenkins/jobs/pipelines/Pipeline-Initialize.groovy'
 
@@ -50,6 +51,9 @@ pipelineJob("$JOB_NAME") {
             scm {
                 git {
                     remote {
+                        if (USER_CREDENTIALS_ID) {
+                            credentials(USER_CREDENTIALS_ID)
+                        }
                         url(SCM_REPO)
                     }
                     branch(SCM_BRANCH)
@@ -102,6 +106,7 @@ pipelineJob("$JOB_NAME") {
         stringParam('SCM_BRANCH', SCM_BRANCH)
         stringParam('SCM_REFSPEC')
         booleanParam('ARCHIVE_JAVADOC', false)
+        booleanParam('CODE_COVERAGE', false)
 
         if (jobType == 'pipeline') {
             stringParam('TESTS_TARGETS')
@@ -112,9 +117,11 @@ pipelineJob("$JOB_NAME") {
             stringParam('RESTART_TIMEOUT_UNITS')
             choiceParam('AUTOMATIC_GENERATION', ['true', 'false'])
             choiceParam('JOB_TYPE', ['pipeline'])
+            booleanParam('USE_TESTENV_PROPERTIES', false)
         } else if (jobType == 'build') {
             stringParam('NODE')
             choiceParam('JOB_TYPE', ['build'])
+            stringParam('FAIL_PATTERN')
         }
     }
 }

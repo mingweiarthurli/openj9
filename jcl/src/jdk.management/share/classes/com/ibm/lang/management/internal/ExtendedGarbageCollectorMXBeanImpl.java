@@ -1,6 +1,6 @@
-/*[INCLUDE-IF Sidecar17]*/
+/*[INCLUDE-IF JAVA_SPEC_VERSION >= 8]*/
 /*******************************************************************************
- * Copyright (c) 2016, 2019 IBM Corp. and others
+ * Copyright (c) 2016, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -87,8 +87,15 @@ public final class ExtendedGarbageCollectorMXBeanImpl
 		for (MemoryPoolMXBean bean : memoryPoolList) {
 			poolNames[idx++] = bean.getName();
 		}
-		Map<String, MemoryUsage> usageBeforeGc = new HashMap<>(poolNames.length);
-		Map<String, MemoryUsage> usageAfterGc = new HashMap<>(poolNames.length);
+		int poolNamesLength = poolNames.length;
+		/*[IF JAVA_SPEC_VERSION >= 19]
+		Map<String, MemoryUsage> usageBeforeGc = HashMap.newHashMap(poolNamesLength);
+		Map<String, MemoryUsage> usageAfterGc = HashMap.newHashMap(poolNamesLength);
+		/*[ELSE] JAVA_SPEC_VERSION >= 19 */
+		// HashMap.DEFAULT_LOAD_FACTOR is 0.75
+		Map<String, MemoryUsage> usageBeforeGc = new HashMap<>(poolNamesLength * 4 / 3);
+		Map<String, MemoryUsage> usageAfterGc = new HashMap<>(poolNamesLength * 4 / 3);
+		/*[ENDIF] JAVA_SPEC_VERSION >= 19 */
 		for (int count = 0; count < poolNames.length; ++count) {
 			usageBeforeGc.put(poolNames[count], new MemoryUsage(initialSize[count], preUsed[count], preCommitted[count], preMax[count]));
 			usageAfterGc.put(poolNames[count], new MemoryUsage(initialSize[count], postUsed[count], postCommitted[count], postMax[count]));

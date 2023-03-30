@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -31,7 +31,7 @@
 #include "VMThreadListIterator.hpp"
 
 static void printRootScannerStats(OMR_VMThread *omrVMThread);
-static void tgcHookGCEnd(J9HookInterface** hook, UDATA eventNumber, void* eventData, void* userData);
+static void tgcHookGCEnd(J9HookInterface** hook, uintptr_t eventNumber, void* eventData, void* userData);
 
 /**
  * XML attribute names corresponding to entities in the root scanner enumeration.
@@ -49,6 +49,7 @@ const static char *attributeNames[] = {
 	"finalizableobjects", /* RootScannerEntity_FinalizableObjects */
 	"unfinalizedobjects", /* RootScannerEntity_UnfinalizedObjects */
 	"ownablesynchronizerobjects", /* RootScannerEntity_OwnableSynchronizerObjects */
+	"continuationobjects", /* RootScannerEntity_ContinuationObjects */
 	"stringtable", /* RootScannerEntity_StringTable */
 	"jniglobalrefs", /* RootScannerEntity_JNIGlobalReferences */
 	"jniweakglobalrefs", /* RootScannerEntity_JNIWeakGlobalReferences */
@@ -69,6 +70,7 @@ const static char *attributeNames[] = {
 	"phantomrefscomplete", /* RootScannerEntity_PhantomReferenceObjectsComplete */
 	"unfinalizedobjectscomplete", /* RootScannerEntity_UnfinalizedObjectsComplete */
 	"ownablesynchronizerobjectscomplete", /* RootScannerEntity_OwnableSynchronizerObjectsComplete */
+	"continuationobjectscomplete", /* RootScannerEntity_ContinuationObjectsComplete */
 	"monitorlookupcaches", /* RootScannerEntity_MonitorLookupCaches */
 	"monitorlookupcachescomplete", /* RootScannerEntity_MonitorLookupCachesComplete */
 	"monitorreferenceobjectscomplete", /* RootScannerEntity_MonitorReferenceObjectsComplete */
@@ -104,7 +106,8 @@ printRootScannerStats(OMR_VMThread *omrVMThread)
 	
 	/* print only if at least one thread reported stats on at least one of its roots */
 	if (extensions->rootScannerStatsUsed) {
-		j9str_ftime(timestamp, sizeof(timestamp), "%b %d %H:%M:%S %Y", j9time_current_time_millis());
+		OMRPORT_ACCESS_FROM_J9PORT(PORTLIB);
+		omrstr_ftime_ex(timestamp, sizeof(timestamp), "%b %d %H:%M:%S %Y", j9time_current_time_millis(), OMRSTR_FTIME_FLAG_LOCAL);
 		tgcExtensions->printf("<scan timestamp=\"%s\">\n", timestamp);
 
 		GC_VMThreadListIterator threadIterator(currentThread);
@@ -112,12 +115,12 @@ printRootScannerStats(OMR_VMThread *omrVMThread)
 			MM_EnvironmentBase* env = MM_EnvironmentBase::getEnvironment(thread->omrVMThread);
 	
 			/* print stats for this thread only if it reported stats on at least one of its roots */
-			if (((GC_SLAVE_THREAD == env->getThreadType()) || (thread == currentThread)) && env->_rootScannerStats._statsUsed) {
-				tgcExtensions->printf("\t<thread id=\"%zu\"", env->getSlaveID());
+			if (((GC_WORKER_THREAD == env->getThreadType()) || (thread == currentThread)) && env->_rootScannerStats._statsUsed) {
+				tgcExtensions->printf("\t<thread id=\"%zu\"", env->getWorkerID());
 
 				/* Scan collected entity data and print attribute/value pairs for entities that have
 				 * collected data.  Skip RootScannerEntity_None, located at index 0. */
-				for (UDATA entityIndex = 1; entityIndex < RootScannerEntity_Count; entityIndex++) {
+				for (uintptr_t entityIndex = 1; entityIndex < RootScannerEntity_Count; entityIndex++) {
 					if (0 != env->_rootScannerStats._entityScanTime[entityIndex]) {
 						U_64 scanTime = j9time_hires_delta(0, env->_rootScannerStats._entityScanTime[entityIndex], J9PORT_TIME_DELTA_IN_MICROSECONDS);
 
@@ -147,7 +150,7 @@ printRootScannerStats(OMR_VMThread *omrVMThread)
 
 		/* Print totals for each root scanner entity */
 		tgcExtensions->printf("\t<total");
-		for (UDATA entityIndex = 1; entityIndex < RootScannerEntity_Count; entityIndex++) {
+		for (uintptr_t entityIndex = 1; entityIndex < RootScannerEntity_Count; entityIndex++) {
 			if (0 != entityScanTimeTotal[entityIndex]) {
 				U_64 scanTime = j9time_hires_delta(0, entityScanTimeTotal[entityIndex], J9PORT_TIME_DELTA_IN_MICROSECONDS);
 
@@ -164,7 +167,7 @@ printRootScannerStats(OMR_VMThread *omrVMThread)
 }
 
 static void
-tgcHookGCEnd(J9HookInterface** hook, UDATA eventNumber, void* eventData, void* userData)
+tgcHookGCEnd(J9HookInterface** hook, uintptr_t eventNumber, void* eventData, void* userData)
 {
 	MM_GCCycleEndEvent* event = (MM_GCCycleEndEvent*) eventData;
 	

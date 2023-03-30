@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2009, 2020 IBM Corp. and others
+ * Copyright (c) 2009, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -25,6 +25,7 @@
 
 /* @ddr_namespace: default */
 #include "j9cfg.h"
+#include "j9.h"
 
 #define _J9ROMCLASS_J9MODIFIER_IS_SET(romClass,j9Modifiers) \
 				J9_ARE_ALL_BITS_SET((romClass)->extraModifiers, j9Modifiers)
@@ -51,8 +52,14 @@
 #define J9ROMCLASS_IS_SYNTHETIC(romClass)		_J9ROMCLASS_SUNMODIFIER_IS_SET((romClass), J9AccSynthetic)
 #define J9ROMCLASS_IS_ARRAY(romClass)			_J9ROMCLASS_SUNMODIFIER_IS_SET((romClass), J9AccClassArray)
 #define J9ROMCLASS_IS_PRIMITIVE_TYPE(romClass)	_J9ROMCLASS_SUNMODIFIER_IS_SET((romClass), J9AccClassInternalPrimitiveType)
+#define J9ROMCLASS_HAS_IDENTITY(romClass)			_J9ROMCLASS_SUNMODIFIER_IS_SET((romClass), J9AccClassHasIdentity)
+
 #define J9ROMCLASS_IS_INTERMEDIATE_DATA_A_CLASSFILE(romClass)		_J9ROMCLASS_J9MODIFIER_IS_SET((romClass), J9AccClassIntermediateDataIsClassfile)
 #define J9ROMCLASS_IS_UNSAFE(romClass)			_J9ROMCLASS_J9MODIFIER_IS_SET((romClass), J9AccClassUnsafe)
+#define J9ROMCLASS_IS_HIDDEN(romClass)			_J9ROMCLASS_J9MODIFIER_IS_SET((romClass), J9AccClassHidden)
+#define J9ROMCLASS_IS_ANON_OR_HIDDEN(romClass)			_J9ROMCLASS_J9MODIFIER_IS_ANY_SET((romClass), J9AccClassAnonClass | J9AccClassHidden)
+#define J9ROMCLASS_IS_OPTIONNESTMATE_SET(romClass)		_J9ROMCLASS_J9MODIFIER_IS_SET((romClass), J9AccClassHiddenOptionNestmate)
+#define J9ROMCLASS_IS_OPTIONSTRONG_SET(romClass)		_J9ROMCLASS_J9MODIFIER_IS_SET((romClass), J9AccClassHiddenOptionStrong)
 #define J9ROMCLASS_HAS_VERIFY_DATA(romClass)	_J9ROMCLASS_J9MODIFIER_IS_SET((romClass), J9AccClassHasVerifyData)
 #define J9ROMCLASS_HAS_MODIFIED_BYTECODES(romClass)	_J9ROMCLASS_J9MODIFIER_IS_SET((romClass), J9AccClassBytecodesModified)
 #define J9ROMCLASS_HAS_EMPTY_FINALIZE(romClass)	_J9ROMCLASS_J9MODIFIER_IS_SET((romClass), J9AccClassHasEmptyFinalize)
@@ -65,8 +72,9 @@
 #define J9ROMCLASS_IS_CLONEABLE(romClass)		_J9ROMCLASS_J9MODIFIER_IS_SET((romClass), J9AccClassCloneable)
 #define J9ROMCLASS_ANNOTATION_REFERS_DOUBLE_SLOT_ENTRY(romClass)	_J9ROMCLASS_J9MODIFIER_IS_SET((romClass), J9AccClassAnnnotionRefersDoubleSlotEntry)
 #define J9ROMCLASS_IS_UNMODIFIABLE(romClass)	_J9ROMCLASS_J9MODIFIER_IS_SET((romClass), J9AccClassIsUnmodifiable)
-#define J9ROMCLASS_IS_RECORD(romClass)			_J9ROMCLASS_J9MODIFIER_IS_SET((romClass), J9AccRecord)
+#define J9ROMCLASS_IS_RECORD(romClass)			(_J9ROMCLASS_J9MODIFIER_IS_SET((romClass), J9AccRecord) && J9ROMCLASS_IS_FINAL(romClass) && !J9ROMCLASS_IS_ABSTRACT(romClass))
 #define J9ROMCLASS_IS_SEALED(romClass)			_J9ROMCLASS_J9MODIFIER_IS_SET((romClass), J9AccSealed)
+#define J9ROMCLASS_IS_VALUEBASED(romClass)			_J9ROMCLASS_J9MODIFIER_IS_SET((romClass), J9AccClassIsValueBased)
 
 /* 
  * Note that resolvefield ignores this flag if the cache line size cannot be determined.
@@ -76,9 +84,16 @@
 #define J9ROMCLASS_IS_CONTENDED(romClass)	_J9ROMCLASS_J9MODIFIER_IS_SET((romClass), J9AccClassIsContended)
 
 #ifdef J9VM_OPT_VALHALLA_VALUE_TYPES
-/* Will need to modify this if ValObject/RefObject proposal goes through */
+/*
+ * TODO: Will need to modify this if ValObject/RefObject proposal goes through.
+ * Some exiting places using J9ROMCLASS_IS_VALUE() may need to check J9ROMCLASS_IS_PRIMITIVE_VALUE_TYPE().
+ */
 #define J9ROMCLASS_IS_VALUE(romClass)	_J9ROMCLASS_SUNMODIFIER_IS_SET((romClass), J9AccValueType)
-#endif/* #ifdef J9VM_OPT_VALHALLA_VALUE_TYPES */
+#define J9ROMCLASS_IS_PRIMITIVE_VALUE_TYPE(romClass)	_J9ROMCLASS_SUNMODIFIER_IS_SET((romClass), J9AccPrimitiveValueType)
+#else /* #ifdef J9VM_OPT_VALHALLA_VALUE_TYPES */
+#define J9ROMCLASS_IS_VALUE(romClass)	FALSE
+#define J9ROMCLASS_IS_PRIMITIVE_VALUE_TYPE(romClass)	FALSE
+#endif /* #ifdef J9VM_OPT_VALHALLA_VALUE_TYPES */
 
 #define J9ROMMETHOD_IS_GETTER(romMethod)				_J9ROMMETHOD_J9MODIFIER_IS_SET((romMethod), J9AccGetterMethod)
 #define J9ROMMETHOD_IS_FORWARDER(romMethod)				_J9ROMMETHOD_J9MODIFIER_IS_SET((romMethod), J9AccForwarderMethod)
@@ -94,10 +109,28 @@
 #define J9ROMMETHOD_HAS_METHOD_PARAMETERS(romMethod)	_J9ROMMETHOD_J9MODIFIER_IS_SET((romMethod), J9AccMethodHasMethodParameters)
 #define J9ROMMETHOD_HAS_CODE_TYPE_ANNOTATIONS(extendedModifiers)	J9_ARE_ALL_BITS_SET(extendedModifiers, CFR_METHOD_EXT_HAS_CODE_TYPE_ANNOTATIONS)
 #define J9ROMMETHOD_HAS_METHOD_TYPE_ANNOTATIONS(extendedModifiers)	J9_ARE_ALL_BITS_SET(extendedModifiers, CFR_METHOD_EXT_HAS_METHOD_TYPE_ANNOTATIONS)
+#if JAVA_SPEC_VERSION >= 16
+#define J9ROMMETHOD_HAS_SCOPED_ANNOTATION(extendedModifiers)		J9_ARE_ALL_BITS_SET(extendedModifiers, CFR_METHOD_EXT_HAS_SCOPED_ANNOTATION)
+#endif /* JAVA_SPEC_VERSION >= 16*/
+#define J9ROMMETHOD_HAS_NOT_CHECKPOINT_SAFE_ANNOTATION(extendedModifiers)	J9_ARE_ALL_BITS_SET(extendedModifiers, CFR_METHOD_EXT_NOT_CHECKPOINT_SAFE_ANNOTATION)
 #define J9ROMMETHOD_HAS_DEFAULT_ANNOTATION(romMethod)	_J9ROMMETHOD_J9MODIFIER_IS_SET((romMethod), J9AccMethodHasDefaultAnnotation)
 #define J9ROMMETHOD_HAS_EXTENDED_MODIFIERS(romMethod)	_J9ROMMETHOD_J9MODIFIER_IS_SET((romMethod), J9AccMethodHasExtendedModifiers)
 #define J9ROMMETHOD_IS_OBJECT_CONSTRUCTOR(romMethod)	_J9ROMMETHOD_J9MODIFIER_IS_SET((romMethod), J9AccMethodObjectConstructor)
 #define J9ROMMETHOD_IS_CALLER_SENSITIVE(romMethod)	_J9ROMMETHOD_J9MODIFIER_IS_SET((romMethod), J9AccMethodCallerSensitive)
+#define J9ROMMETHOD_IS_STATIC(romMethod)	_J9ROMMETHOD_J9MODIFIER_IS_SET((romMethod), J9AccStatic)
+
+#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+#if defined(J9VM_OPT_VALHALLA_NEW_FACTORY_METHOD)
+#define J9ROMMETHOD_IS_UNNAMED_FACTORY(romMethod) \
+	(J9ROMMETHOD_IS_STATIC((romMethod)) \
+	&& (J9UTF8_LITERAL_EQUALS(J9UTF8_DATA(J9ROMMETHOD_NAME((romMethod))), J9UTF8_LENGTH(J9ROMMETHOD_NAME((romMethod))), "<new>")))
+#else /* #if defined(J9VM_OPT_VALHALLA_NEW_FACTORY_METHOD) */
+/* Currently value type's constructor is static <init>, it will be changed to static <new>. The check for <init> can be removed once OpenJDK is updated on this. */
+#define J9ROMMETHOD_IS_UNNAMED_FACTORY(romMethod) \
+	(J9ROMMETHOD_IS_STATIC((romMethod)) \
+	&& (J9UTF8_LITERAL_EQUALS(J9UTF8_DATA(J9ROMMETHOD_NAME((romMethod))), J9UTF8_LENGTH(J9ROMMETHOD_NAME((romMethod))), "<init>")))
+#endif /* #if defined(J9VM_OPT_VALHALLA_NEW_FACTORY_METHOD) */
+#endif /* J9VM_OPT_VALHALLA_VALUE_TYPES */
 
 #define J9ROMFIELD_IS_CONTENDED(romField)	J9_ARE_ALL_BITS_SET((romField)->modifiers, J9FieldFlagIsContended)
 

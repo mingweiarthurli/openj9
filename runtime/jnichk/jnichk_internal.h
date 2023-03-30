@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -64,7 +64,10 @@
 
 #define JNIC_JMETHODID 'm'
 #define JNIC_JFIELDID 'n'
+#define JNIC_JFIELDINSTANCEID 'e'
+#define JNIC_JFIELDSTATICID 'o'
 #define JNIC_VALIST 'v'
+#define JNIC_JVALUE 'x'
 #define JNIC_JSIZE 'q'
 #define JNIC_POINTER 'p'
 #define JNIC_STRING '$'
@@ -91,7 +94,9 @@
 #define JNIC_NONNULLOBJECT '0'
 #define JNIC_WEAKREF 'w'
 #define JNIC_GLOBALREF '*'
-#define JNIC_LOCALREF '?'		
+#define JNIC_LOCALREF '?'
+#define JNIC_CLASSLOADER 'k'
+#define JNIC_CLASSTHROWABLE 'r'
 
 /* Global Ref tracking hash table entry */
 typedef struct JNICHK_GREF_HASHENTRY {
@@ -497,6 +502,19 @@ void jniCheckStringUTFRange(JNIEnv* env, const char* function, jstring string, j
 * @return void
 */
 void jniCheckSubclass(JNIEnv* env, const char* function, IDATA argNum, jobject aJobject, const char* type);
+
+
+/**
+* @brief
+* @param env
+* @param function
+* @param argNum
+* @param aJobject
+* @param type1
+* @param type2
+* @return void
+*/
+void jniCheckSubclass2(JNIEnv* env, const char* function, IDATA argNum, jobject aJobject, const char* type1, const char* type2);
 
 
 /**

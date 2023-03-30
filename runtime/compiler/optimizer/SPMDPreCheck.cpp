@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -26,6 +26,8 @@
 #include "il/Node.hpp"
 #include "il/Node_inlines.hpp"
 #include "codegen/CodeGenerator.hpp"
+
+#define VECTOR_LENGTH TR::VectorLength128
 
 bool SPMDPreCheck::isSPMDCandidate(TR::Compilation *comp, TR_RegionStructure *loop)
    {
@@ -58,6 +60,9 @@ bool SPMDPreCheck::isSPMDCandidate(TR::Compilation *comp, TR_RegionStructure *lo
             case TR::compressedRefs:
                if (node->getFirstChild()->getOpCode().isLoad())
                    continue;
+
+            default:
+               break;
             }
 
           // explicitly allowed families of opcodes
@@ -67,20 +72,20 @@ bool SPMDPreCheck::isSPMDCandidate(TR::Compilation *comp, TR_RegionStructure *lo
 
           if (opcode.isStore())
              {
-             TR::ILOpCodes vectorOp = TR::ILOpCode::convertScalarToVector(opcode.getOpCodeValue());
+             TR::ILOpCodes vectorOp = TR::ILOpCode::convertScalarToVector(opcode.getOpCodeValue(), VECTOR_LENGTH);
              if (vectorOp == TR::BadILOp)
                 {
                 if (trace)
                   traceMsg(comp, "SPMD PRE-CHECK FAILURE: store op code %s does not have a vector equivalent - skipping consideration of loop %d\n", comp->getDebug()->getName(opcode.getOpCodeValue()), loop->getNumber());
                 return false;
                 }
-             if (!comp->cg()->getSupportsOpCodeForAutoSIMD(vectorOp, node->getDataType()))
+             if (!comp->cg()->getSupportsOpCodeForAutoSIMD(vectorOp))
                 {
                 if (trace)
                   traceMsg(comp, "SPMD PRE-CHECK FAILURE: vector op code %s is not supported on the current platform - skipping consideration of loop %d\n", comp->getDebug()->getName(vectorOp), loop->getNumber());
                 return false;
                 }
-           
+
              continue;
              }
 

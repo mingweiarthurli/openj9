@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2014, 2019 IBM Corp. and others
+ * Copyright (c) 2014, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -134,12 +134,12 @@ rasTriggerMethod(J9VMThread *thr, J9Method *method, I_32 entry, const TriggerPha
 
 	dbg_err_printf(1, PORTLIB, "<RAS> Trigger hit for method %s: %.*s.%.*s%.*s\n",
 					entry ? "entry" : "return",
-					J9ROMCLASS_CLASSNAME(J9_CLASS_FROM_METHOD(method)->romClass)->length,
-					J9ROMCLASS_CLASSNAME(J9_CLASS_FROM_METHOD(method)->romClass)->data,
-					J9ROMMETHOD_NAME(J9_ROM_METHOD_FROM_RAM_METHOD(method))->length,
-					J9ROMMETHOD_NAME(J9_ROM_METHOD_FROM_RAM_METHOD(method))->data,
-					J9ROMMETHOD_SIGNATURE(J9_ROM_METHOD_FROM_RAM_METHOD(method))->length,
-					J9ROMMETHOD_SIGNATURE(J9_ROM_METHOD_FROM_RAM_METHOD(method))->data);
+					J9UTF8_LENGTH(J9ROMCLASS_CLASSNAME(J9_CLASS_FROM_METHOD(method)->romClass)),
+					J9UTF8_DATA(J9ROMCLASS_CLASSNAME(J9_CLASS_FROM_METHOD(method)->romClass)),
+					J9UTF8_LENGTH(J9ROMMETHOD_NAME(J9_ROM_METHOD_FROM_RAM_METHOD(method))),
+					J9UTF8_DATA(J9ROMMETHOD_NAME(J9_ROM_METHOD_FROM_RAM_METHOD(method))),
+					J9UTF8_LENGTH(J9ROMMETHOD_SIGNATURE(J9_ROM_METHOD_FROM_RAM_METHOD(method))),
+					J9UTF8_DATA(J9ROMMETHOD_SIGNATURE(J9_ROM_METHOD_FROM_RAM_METHOD(method))));
 
 	/*
 	 * Go through each of the rules seeing if this method is one of theirs
@@ -187,15 +187,10 @@ rasTriggerMethod(J9VMThread *thr, J9Method *method, I_32 entry, const TriggerPha
 							}
 						} while(compareAndSwapU32((U_32*)&rule->match,(U_32)oldMatch,(U_32)(oldMatch-1)) != oldMatch);
 
-						if (oldMatch != 0) {
-							const struct RasTriggerAction *action;
+						if (0 != oldMatch) {
+							const struct RasTriggerAction *action = (0 != entry) ? rule->entryAction : rule->exitAction;
 
-							if (entry) {
-								action = rule->entryAction;
-							} else {
-								action = rule->exitAction;
-							}
-							if (action) {
+							if (NULL != action) {
 								action->fn(thr->omrVMThread);
 							}
 						}
@@ -886,14 +881,15 @@ err:
 void
 doTriggerActionJstacktrace(OMR_VMThread *omrThr)
 {
-	J9VMThread *thr = (J9VMThread*)omrThr->_language_vmthread;
+	J9VMThread *thr = (J9VMThread *)omrThr->_language_vmthread;
 	J9JavaVM *vm = thr->javaVM;
 	J9StackWalkState stackWalkState;
 	IDATA framesRemaining = RAS_GLOBAL(stackdepth);
+	UtThreadData **uttd = UT_THREAD_FROM_OMRVM_THREAD(omrThr);
 
 	Trc_JavaStackStart(thr);
 
-	if (!thr->threadObject) {
+	if (NULL == thr->threadObject) {
 		Trc_MethodStackFrame(thr, "(thread has no thread object)");
 		return;
 	}
@@ -902,7 +898,12 @@ doTriggerActionJstacktrace(OMR_VMThread *omrThr)
 	stackWalkState.flags = J9_STACKWALK_ITERATE_FRAMES | J9_STACKWALK_INCLUDE_NATIVES | J9_STACKWALK_VISIBLE_ONLY | J9_STACKWALK_RECORD_BYTECODE_PC_OFFSET;
 	stackWalkState.skipCount = 0;
 	stackWalkState.userData1 = NULL;
-	stackWalkState.userData2 = (void *) framesRemaining;
+	stackWalkState.userData2 = (void *)framesRemaining;
+	/*
+	 * Save the current output mask so it can be restored in traceFrameCallBack()
+	 * to avoid interactions with tracepoints in walkStackFrames().
+	 */
+	stackWalkState.userData3 = (void *)(UDATA)(((NULL != uttd) && (NULL != *uttd)) ? (*uttd)->currentOutputMask : 0);
 	stackWalkState.frameWalkFunction = traceFrameCallBack;
 
 	vm->walkStackFrames(thr, &stackWalkState);
@@ -919,28 +920,29 @@ traceFrameCallBack(J9VMThread *vmThread, J9StackWalkState *state)
 	IDATA framesRemaining = (IDATA) state->userData2;
 	J9Method *method = state->method;
 	J9JavaVM *vm = vmThread->javaVM;
-	J9ROMMethod *romMethod;
-	J9Class *methodClass;
-	J9UTF8 *methodName;
+	J9ROMMethod *romMethod = NULL;
+	J9Class *methodClass = NULL;
+	J9UTF8 *methodName = NULL;
 	J9UTF8 *sourceFile = NULL;
-	J9UTF8 *className;
+	J9UTF8 *className = NULL;
 	UDATA offsetPC = 0;
 	UDATA lineNumber = -1;
 	StackFrameMethodType frameType = INTERPRETED_METHOD;
 	const unsigned int stackCompressionLevel = ((RasGlobalStorage *)vmThread->javaVM->j9rasGlobalStorage)->stackCompressionLevel;
-	StackTraceFormattingFunction stackTraceFormatter;
+	StackTraceFormattingFunction stackTraceFormatter = NULL;
 	UDATA frameCount = (UDATA)state->userData1 + 1;
+	UtThreadData **uttd = UT_THREAD_FROM_OMRVM_THREAD(vmThread->omrVMThread);
 
-	if (framesRemaining == 0) {
+	if (0 == framesRemaining) {
 		return J9_STACKWALK_STOP_ITERATING;
 	}
 
 	stackTraceFormatter = stackTraceFormattingFunctions[stackCompressionLevel];
 
 	/* Store frame count in userData1 - used for next call to traceFrameCallBack and to signal that we found a frame */
-	state->userData1 = (void*) frameCount;
+	state->userData1 = (void *)frameCount;
 
-	if (!method) {
+	if (NULL == method) {
 		Trc_MissingJavaStackFrame(vmThread);
 		goto out;
 	}
@@ -968,6 +970,14 @@ traceFrameCallBack(J9VMThread *vmThread, J9StackWalkState *state)
 			frameType = COMPILED_METHOD;
 		}
 #endif
+	}
+
+	/*
+	 * Restore the current output mask, captured in doTriggerActionJstacktrace(),
+	 * in case it has been disturbed by tracepoints within walkStackFrames().
+	 */
+	if ((NULL != uttd) && (NULL != *uttd)) {
+		(*uttd)->currentOutputMask = (unsigned char)(UDATA)(state->userData3);
 	}
 
 	stackTraceFormatter(vmThread,

@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2017, 2020 IBM Corp. and others
+# Copyright (c) 2017, 2022 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,13 +15,20 @@
 # OpenJDK Assembly Exception [2].
 #
 # [1] https://www.gnu.org/software/classpath/license.html
-# [2] http://openjdk.java.net/legal/assembly-exception.html
+# [2] https://openjdk.org/legal/assembly-exception.html
 #
 # SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 ################################################################################
 
 set(OMR_ENHANCED_WARNINGS OFF)
 set(OMR_WARNINGS_AS_ERRORS OFF)
+
+# Work around a bug in MASM for VS2013
+if(OMR_TOOLCONFIG STREQUAL "msvc")
+	omr_remove_flags(CMAKE_ASM_MASM_FLAGS /W3)
+	omr_append_flags(CMAKE_ASM_MASM_FLAGS /W2)
+endif()
+
 
 j9vm_add_library(ffi STATIC
 	closures.c
@@ -30,6 +37,7 @@ j9vm_add_library(ffi STATIC
 	prep_cif.c
 	raw_api.c
 	types.c
+	tramp.c
 )
 
 # We need this because ffi_common.h is in 'include' in the top directory.
@@ -40,7 +48,7 @@ target_include_directories(ffi PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 #platform specific stuff hacked in
 if(OMR_ARCH_X86)
-	if(NOT OMR_ENV_DATA64)
+	if(NOT (OMR_ENV_DATA64 OR OMR_OS_WINDOWS))
 		message(SEND_ERROR "Only x86-64 is currently supported")
 	endif()
 
@@ -50,40 +58,58 @@ if(OMR_ARCH_X86)
 	elseif(OMR_OS_OSX)
 		target_include_directories(ffi PUBLIC preconf/oa)
 	elseif(OMR_OS_WINDOWS)
-		target_include_directories(ffi PUBLIC preconf/wa)
+		if(OMR_ENV_DATA64)
+			target_include_directories(ffi PUBLIC preconf/wa)
+		else()
+			target_include_directories(ffi PUBLIC preconf/wi)
+		endif()
 	else()
 		message(SEND_ERROR "Unsupported OS")
 	endif()
 
-	target_sources(ffi
-		PRIVATE
-		x86/ffi.c
-		x86/ffi64.c
-	)
-
-	if(OMR_OS_WINDOWS)
-		# We are assuming we are using an MSVC toolchain
-		add_custom_command(
-			OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/win64.asm
-			COMMAND ${CMAKE_C_COMPILER} -nologo -EP -P  -I ${CMAKE_CURRENT_SOURCE_DIR}/preconf/wa -I ${CMAKE_CURRENT_SOURCE_DIR}/x86 -Fiwin64.asm  ${CMAKE_CURRENT_SOURCE_DIR}/x86/win64.S
-			DEPENDS x86/win64.S
-		)
-		target_sources(ffi PRIVATE win64.asm)
-		set_source_files_properties(win64.asm PROPERTIES LANGUAGE ASM_MASM)
+	if(OMR_ENV_DATA64)
+		target_sources(ffi PRIVATE x86/ffiw64.c)
 	else()
-		target_sources(ffi PRIVATE x86/sysv.S)
+		target_sources(ffi PRIVATE x86/ffi.c)
 	endif()
 
-	if(OMR_HOST_OS STREQUAL "linux")
+	if(OMR_OS_LINUX OR OMR_OS_OSX)
+		target_sources(ffi
+			PRIVATE
+			x86/ffi64.c
+		)
 		target_sources(ffi
 			PRIVATE
 			x86/unix64.S
 		)
-	elseif(OMR_HOST_OS STREQUAL "osx")
-		target_sources(ffi
-			PRIVATE
-			x86/darwin64.s
+		if(OMR_ENV_DATA64)
+			target_sources(ffi
+				PRIVATE
+				x86/win64.S
+			)
+		endif()
+	endif()
+
+	if(OMR_OS_WINDOWS)
+
+		if(OMR_ENV_DATA64)
+			set(source_name win64_intel)
+			set(preconf_dir ${CMAKE_CURRENT_SOURCE_DIR}/preconf/wa)
+		else()
+			set(source_name win32)
+			set(preconf_dir ${CMAKE_CURRENT_SOURCE_DIR}/preconf/wi)
+		endif()
+
+		# We are assuming we are using an MSVC toolchain
+		add_custom_command(
+			OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${source_name}.asm
+			COMMAND ${CMAKE_C_COMPILER} -nologo -EP -P  -I ${preconf_dir} -I ${j9vm_SOURCE_DIR}/include -I ${CMAKE_CURRENT_SOURCE_DIR}/x86 -Fi${source_name}.asm  ${CMAKE_CURRENT_SOURCE_DIR}/x86/${source_name}.S
+			DEPENDS x86/${source_name}.S
 		)
+		target_sources(ffi PRIVATE ${source_name}.asm)
+		set_source_files_properties(${source_name}.asm PROPERTIES LANGUAGE ASM_MASM)
+	else()
+		target_sources(ffi PRIVATE x86/sysv.S)
 	endif()
 elseif(OMR_ARCH_POWER)
 	if(CMAKE_CXX_COMPILER_ID STREQUAL "XL")
@@ -183,7 +209,7 @@ elseif(OMR_ARCH_ARM AND OMR_OS_LINUX)
 			arm/sysv.S
 			arm/trampoline.S
 	)
-elseif(OMR_ARCH_AARCH64 AND OMR_OS_LINUX)
+elseif(OMR_ARCH_AARCH64 AND (OMR_OS_LINUX OR OMR_OS_OSX))
 	target_include_directories(ffi
 		PUBLIC
 			aarch64
@@ -195,6 +221,18 @@ elseif(OMR_ARCH_AARCH64 AND OMR_OS_LINUX)
 			aarch64/sysv.S
 	)
 
+elseif(OMR_ARCH_RISCV AND OMR_OS_LINUX)
+	target_include_directories(ffi PUBLIC riscv)
+	if(OMR_ENV_DATA64)
+		target_include_directories(ffi PUBLIC preconf/rv64)
+	else()
+		message(SEND_ERROR "Unsupported platform")
+	endif()
+	target_sources(ffi
+		PRIVATE
+			riscv/ffi.c
+			riscv/sysv.S
+	)
 else()
 	message(SEND_ERROR "Unsupported platform")
 endif()

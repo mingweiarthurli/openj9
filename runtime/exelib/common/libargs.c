@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -320,6 +320,8 @@ vmOptionsTableAddOptionWithCopy(void **vmOptionsTable, char *optionString, void 
 	#define JVM_ARCH_DIR "amd64"
   #elif defined(J9ARM)
 	#define JVM_ARCH_DIR "arm"
+  #elif defined(J9AARCH64)
+	#define JVM_ARCH_DIR "aarch64"
   #elif defined(J9X86)
 	#define JVM_ARCH_DIR "i386"
   #elif defined(S39064) || defined(J9ZOS39064)

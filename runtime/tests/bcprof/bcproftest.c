@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2017 IBM Corp. and others
+ * Copyright (c) 1991, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -153,7 +153,7 @@ parseBuffer(J9VMThread* vmThread, const U_8* dataStart, UDATA size)
 				if (TEST_verbose) {
 					J9ROMClass* romClass = receiverClass->romClass;
 					J9UTF8* name = J9ROMCLASS_CLASSNAME(romClass);
-					j9tty_printf(PORTLIB, "pc=%p (cast bc=%d) operand=%.*s(%p)\n", pc, *pc, (UDATA)name->length, name->data, receiverClass);
+					j9tty_printf(PORTLIB, "pc=%p (cast bc=%d) operand=%.*s(%p)\n", pc, *pc, (UDATA)J9UTF8_LENGTH(name), J9UTF8_DATA(name), receiverClass);
 				}
 				break;
 			case JBinvokevirtual:
@@ -164,7 +164,7 @@ parseBuffer(J9VMThread* vmThread, const U_8* dataStart, UDATA size)
 				if (TEST_verbose) {
 					J9ROMClass* romClass = receiverClass->romClass;
 					J9UTF8* name = J9ROMCLASS_CLASSNAME(romClass);
-					j9tty_printf(PORTLIB, "pc=%p (invoke bc=%d) operand=%.*s(%p)\n", pc, *pc, (UDATA)name->length, name->data, receiverClass);
+					j9tty_printf(PORTLIB, "pc=%p (invoke bc=%d) operand=%.*s(%p)\n", pc, *pc, (UDATA)J9UTF8_LENGTH(name), J9UTF8_DATA(name), receiverClass);
 				}
 				break;
 			case JBlookupswitch:

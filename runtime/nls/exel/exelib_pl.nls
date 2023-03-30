@@ -15,7 +15,7 @@
 # OpenJDK Assembly Exception [2].
 #
 # [1] https://www.gnu.org/software/classpath/license.html
-# [2] http://openjdk.java.net/legal/assembly-exception.html
+# [2] https://openjdk.org/legal/assembly-exception.html
 #
 # SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 #
@@ -964,3 +964,18 @@ J9NLS_EXELIB_INTERNAL_HELP_XXDISABLEUSEGCSTARTUPHINTS.explanation=NOTAG
 J9NLS_EXELIB_INTERNAL_HELP_XXDISABLEUSEGCSTARTUPHINTS.system_action=
 J9NLS_EXELIB_INTERNAL_HELP_XXDISABLEUSEGCSTARTUPHINTS.user_response=
 # END NON-TRANSLATABLE
+
+J9NLS_EXELIB_INTERNAL_HELP_XXPORTABLESHAREDCACHE=\  -XX:+PortableSharedCache   W\u0142\u0105cza funkcj\u0119 pr\u00f3buj\u0105c\u0105 zmaksymalizowa\u0107 przeno\u015bno\u015b\u0107 wsp\u00f3\u0142u\u017cytkowanej pami\u0119ci podr\u0119cznej mi\u0119dzy komputerami
+# START NON-TRANSLATABLE
+J9NLS_EXELIB_INTERNAL_HELP_XXPORTABLESHAREDCACHE.explanation=NOTAG
+J9NLS_EXELIB_INTERNAL_HELP_XXPORTABLESHAREDCACHE.system_action=
+J9NLS_EXELIB_INTERNAL_HELP_XXPORTABLESHAREDCACHE.user_response=
+# END NON-TRANSLATABLE
+
+J9NLS_EXELIB_INTERNAL_HELP_XXNOPORTABLESHAREDCACHE=\  -XX:-PortableShareCache   Wy\u0142\u0105cza funkcj\u0119 pr\u00f3buj\u0105c\u0105 zmaksymalizowa\u0107 przeno\u015bno\u015b\u0107 wsp\u00f3\u0142u\u017cytkowanej pami\u0119ci podr\u0119cznej mi\u0119dzy komputerami
+J9NLS_EXELIB_INTERNAL_HELP_XXNOPORTABLESHAREDCACHE.explanation=NOTAG
+J9NLS_EXELIB_INTERNAL_HELP_XXNOPORTABLESHAREDCACHE.system_action=
+J9NLS_EXELIB_INTERNAL_HELP_XXNOPORTABLESHAREDCACHE.user_response=
+# END NON-TRANSLATABLE
+
+

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2018 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -30,13 +30,20 @@
 typedef struct RasDumpGlobalStorage {
 	void* dumpLabelTokens;
 	omrthread_monitor_t dumpLabelTokensMutex;
-	
+
 	UDATA allocationRangeMin;
 	UDATA allocationRangeMax;
-	
-	UDATA noProtect; /* If set, do not take dumps under their own signal handler */
-	UDATA noFailover; /* If set, do not failover to /tmp etc if unable to write dump */
+
+	U_32 noProtect; /* If set, do not take dumps under their own signal handler */
+	U_32 noFailover; /* If set, do not failover to /tmp etc if unable to write dump */
+
+	U_32 showNativeSymbols; /* How to handle resolving native stack symbols. */
 } RasDumpGlobalStorage;
+
+/* Values for RasDumpGlobalStorage.showNativeSymbols. */
+#define J9RAS_JAVADUMP_SHOW_NATIVE_STACK_SYMBOLS_NONE  0
+#define J9RAS_JAVADUMP_SHOW_NATIVE_STACK_SYMBOLS_BASIC 1
+#define J9RAS_JAVADUMP_SHOW_NATIVE_STACK_SYMBOLS_ALL   2
 
 struct J9RASdumpAgent; /* Forward struct declaration */
 struct J9RASdumpContext; /* Forward struct declaration */
@@ -61,33 +68,7 @@ typedef struct J9RASdumpAgent {
 	char* subFilter;
 } J9RASdumpAgent;
 
-#define J9RAS_DUMP_ON_VM_STARTUP_BIT  0
-#define J9RAS_DUMP_ON_VM_SHUTDOWN_BIT  1
-#define J9RAS_DUMP_ON_CLASS_LOAD_BIT  2
-#define J9RAS_DUMP_ON_CLASS_UNLOAD_BIT  3
-#define J9RAS_DUMP_ON_EXCEPTION_THROW_BIT  4
-#define J9RAS_DUMP_ON_EXCEPTION_CATCH_BIT  5
-#define J9RAS_DUMP_ON_BREAKPOINT_BIT  6
-#define J9RAS_DUMP_ON_DEBUG_FRAME_POP_BIT  7
-#define J9RAS_DUMP_ON_THREAD_START_BIT  8
-#define J9RAS_DUMP_ON_THREAD_BLOCKED_BIT  9
-#define J9RAS_DUMP_ON_THREAD_END_BIT  10
-#define J9RAS_DUMP_ON_HEAP_EXPAND_BIT  11
-#define J9RAS_DUMP_ON_GLOBAL_GC_BIT  12
-#define J9RAS_DUMP_ON_GP_FAULT_BIT  13
-#define J9RAS_DUMP_ON_USER_SIGNAL_BIT  14
-#define J9RAS_DUMP_ON_EXCEPTION_DESCRIBE_BIT  15
-#define J9RAS_DUMP_ON_SLOW_EXCLUSIVE_ENTER_BIT  16
-#define J9RAS_DUMP_ON_ABORT_SIGNAL_BIT  17
-#define J9RAS_DUMP_ON_EXCEPTION_SYSTHROW_BIT  18
-#define J9RAS_DUMP_ON_TRACE_ASSERT_BIT  19
-#define J9RAS_DUMP_ON_USER_REQUEST_BIT  20
-#define J9RAS_DUMP_ON_OBJECT_ALLOCATION_BIT  21
-#define J9RAS_DUMP_ON_CORRUPT_CACHE_BIT  22
-#define J9RAS_DUMP_ON_EXCESSIVE_GC_BIT  23
-#define J9RAS_DUMP_HOOK_TABLE_SIZE  24  /* 1+ the last _BIT */
-
-/* bit flags corresponding to the _BIT values above. Definitions must be simple so that DDR can process them. */
+/* Dump flags. Definitions must be simple so that DDR can process them. */
 #define J9RAS_DUMP_ON_VM_STARTUP  1
 #define J9RAS_DUMP_ON_VM_SHUTDOWN  2
 #define J9RAS_DUMP_ON_CLASS_LOAD  4
@@ -112,17 +93,17 @@ typedef struct J9RASdumpAgent {
 #define J9RAS_DUMP_ON_OBJECT_ALLOCATION  0x200000
 #define J9RAS_DUMP_ON_CORRUPT_CACHE  0x400000
 #define J9RAS_DUMP_ON_EXCESSIVE_GC 0x800000
-#define J9RAS_DUMP_ON_ANY 0x0FFFFFF /* mask of all bit flags above */
+#define J9RAS_DUMP_ON_USER2_SIGNAL  0x1000000
+#define J9RAS_DUMP_ON_ANY 0x1FFFFFF /* mask of all bit flags above */
 
 /* ...additional VM requests... */
-#define J9RAS_DUMP_DO_EXCLUSIVE_VM_ACCESS  1
-#define J9RAS_DUMP_DO_COMPACT_HEAP  2
-#define J9RAS_DUMP_DO_PREPARE_HEAP_FOR_WALK  4
-#define J9RAS_DUMP_DO_SUSPEND_OTHER_DUMPS  8
-#define J9RAS_DUMP_DO_HALT_ALL_THREADS  16
-#define J9RAS_DUMP_DO_ATTACH_THREAD  32
-#define J9RAS_DUMP_DO_MULTIPLE_HEAPS  64
-#define J9RAS_DUMP_DO_PREEMPT_THREADS  0x80
+#define J9RAS_DUMP_DO_EXCLUSIVE_VM_ACCESS  0x01
+#define J9RAS_DUMP_DO_COMPACT_HEAP  0x02
+#define J9RAS_DUMP_DO_PREPARE_HEAP_FOR_WALK  0x04
+#define J9RAS_DUMP_DO_SUSPEND_OTHER_DUMPS  0x08
+#define J9RAS_DUMP_DO_ATTACH_THREAD  0x10
+#define J9RAS_DUMP_DO_MULTIPLE_HEAPS  0x020
+#define J9RAS_DUMP_DO_PREEMPT_THREADS  0x40
 
 typedef struct J9RASdumpContext {
 	struct J9JavaVM* javaVM;

@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -50,7 +50,7 @@ uint8_t *TR::PPCDepImmSymInstruction::generateBinaryEncoding()
       TR::ResolvedMethodSymbol *sym = getSymbolReference()->getSymbol()->getResolvedMethodSymbol();
       TR_ResolvedMethod *resolvedMethod = sym == NULL ? NULL : sym->getResolvedMethod();
       TR::LabelSymbol *label = getSymbolReference()->getSymbol()->getLabelSymbol();
-      bool callToSelf = resolvedMethod != NULL && resolvedMethod->isSameMethod(comp->getCurrentMethod()) && !comp->isDLT();
+      bool callToSelf = comp->isRecursiveMethodTarget(resolvedMethod);
 
       if (cg()->hasCodeCacheSwitched())
          {
@@ -94,9 +94,8 @@ uint8_t *TR::PPCDepImmSymInstruction::generateBinaryEncoding()
 
       if (callToSelf)
          {
-         uint8_t *jitTojitStart = cg()->getCodeStart();
-         jitTojitStart += ((*(int32_t *)(jitTojitStart - 4)) >> 16) & 0x0000ffff;
-         *(int32_t *)cursor |= (jitTojitStart - cursor) & 0x03fffffc;
+         intptr_t jitToJitStart = cg()->getLinkage()->entryPointFromCompiledMethod();
+         *(int32_t *)cursor |= (reinterpret_cast<uint8_t *>(jitToJitStart) - cursor) & 0x03fffffc;
          }
       else if (label != NULL)
          {

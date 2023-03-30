@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -128,12 +128,9 @@ MM_RememberedSetCardBucket::addToNewBuffer(MM_EnvironmentVLHGC *env, UDATA card)
 bool
 MM_RememberedSetCardBucket::isRemembered(MM_EnvironmentVLHGC *env, UDATA card)
 {
-	UDATA bufferCount = 0;
 	MM_CardBufferControlBlock *currentCardBufferControlBlock = _cardBufferControlBlockHead;
 	bool const compressed = env->compressObjectReferences();
 	while (NULL != currentCardBufferControlBlock) {
-		bufferCount += 1;
-
 		MM_RememberedSetCard *bufferCardList = currentCardBufferControlBlock->_card;
 
 		/* find top index for this buffer */

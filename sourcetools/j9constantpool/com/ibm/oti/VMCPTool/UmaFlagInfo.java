@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2017, 2017 IBM Corp. and others
+ * Copyright (c) 2017, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -24,17 +24,16 @@ package com.ibm.oti.VMCPTool;
 import java.util.HashSet;
 import java.util.Set;
 
-
 import com.ibm.j9tools.om.BuildSpec;
 import com.ibm.j9tools.om.ConfigDirectory;
 import com.ibm.j9tools.om.Flag;
 import com.ibm.j9tools.om.FlagDefinitions;
 import com.ibm.j9tools.om.ObjectFactory;
 
-class UmaFlagInfo  implements IFlagInfo {
+class UmaFlagInfo implements IFlagInfo {
 
-	private BuildSpec buildSpec;
-	private FlagDefinitions flagDefs;
+	private final BuildSpec buildSpec;
+	private final FlagDefinitions flagDefs;
 
 	public UmaFlagInfo(String configDirectory, String buildSpecId) throws Throwable {
 		ObjectFactory factory = new ObjectFactory(new ConfigDirectory(configDirectory));
@@ -44,19 +43,19 @@ class UmaFlagInfo  implements IFlagInfo {
 	}
 
 	public Set<String> getAllSetFlags() {
-		HashSet<String> allSetFlags = new HashSet<String>();
-		for ( String flagId : buildSpec.getFlags().keySet() ) {
-			if ( isFlagSet(flagId) ) { 
+		HashSet<String> allSetFlags = new HashSet<>();
+		for (String flagId : buildSpec.getFlags().keySet()) {
+			if (isFlagSet(flagId)) {
 				allSetFlags.add(flagId);
 			}
 		}
-		
+
 		return allSetFlags;
 	}
 
 	public boolean isFlagValid(String flag) {
 		flag = Util.transformFlag(flag);
-		if (flagDefs.getFlagDefinition(flag) == null ) {
+		if (flagDefs.getFlagDefinition(flag) == null) {
 			return false;
 		}
 		return true;
@@ -64,12 +63,13 @@ class UmaFlagInfo  implements IFlagInfo {
 
 	private boolean isFlagSet(String flagId) {
 		flagId = Util.transformFlag(flagId);
-		if ( isFlagValid(flagId) ) {
+		if (isFlagValid(flagId)) {
 			Flag flag = buildSpec.getFlags().get(flagId);
-			if ( flag != null ) {
+			if (flag != null) {
 				return flag.getState();
 			}
 		}
 		return false;
 	}
+
 }

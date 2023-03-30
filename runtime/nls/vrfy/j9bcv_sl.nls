@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2000, 2019 IBM Corp. and others
+# Copyright (c) 2000, 2021 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
 # OpenJDK Assembly Exception [2].
 #
 # [1] https://www.gnu.org/software/classpath/license.html
-# [2] http://openjdk.java.net/legal/assembly-exception.html
+# [2] https://openjdk.org/legal/assembly-exception.html
 #
 # SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 #
@@ -87,7 +87,7 @@ J9NLS_BCV_ERROR_TEMPLATE_NO_PC.user_response=
 
 # END NON-TRANSLATABLE
 
-J9NLS_BCV_ERR_BYTECODES_INVALID=zaporedje bitne kode ni veljavno
+J9NLS_BCV_ERR_BYTECODES_INVALID=zaporedje bajtne kode ni veljavno
 # START NON-TRANSLATABLE
 J9NLS_BCV_ERR_BYTECODES_INVALID.explanation=An undefined bytecode was encountered in the classfile
 J9NLS_BCV_ERR_BYTECODES_INVALID.system_action=The JVM will throw a VerifyError
@@ -183,7 +183,7 @@ J9NLS_BCV_ERR_CLASSLOADING_CONSTRAINT.user_response=Adjust the class loading pro
 
 # END NON-TRANSLATABLE
 
-J9NLS_BCV_ERR_RETURN_INCOMPATIBLE=vrnjena bitna koda ni zdru\u017eljiva z vrnitvenim tipom
+J9NLS_BCV_ERR_RETURN_INCOMPATIBLE=vrnjena bajtna koda ni zdru\u017eljiva z vrnitvenim tipom
 # START NON-TRANSLATABLE
 J9NLS_BCV_ERR_RETURN_INCOMPATIBLE.explanation=None
 J9NLS_BCV_ERR_RETURN_INCOMPATIBLE.system_action=THIS MESSAGE IS RESERVED FOR FUTURE USE
@@ -199,7 +199,7 @@ J9NLS_BCV_ERR_MULTIPLE_RET.user_response=Contact the provider of the classfile f
 
 # END NON-TRANSLATABLE
 
-J9NLS_BCV_ERR_SHIFT_NOT_INTEGER=parameter bitne kode shift ni celo \u0161tevilo
+J9NLS_BCV_ERR_SHIFT_NOT_INTEGER=parameter bajtne kode shift ni celo \u0161tevilo
 # START NON-TRANSLATABLE
 J9NLS_BCV_ERR_SHIFT_NOT_INTEGER.explanation=None
 J9NLS_BCV_ERR_SHIFT_NOT_INTEGER.system_action=THIS MESSAGE IS RESERVED FOR FUTURE USE
@@ -383,7 +383,7 @@ J9NLS_BCV_ERR_BAD_INVOKESPECIAL.user_response=Contact the provider of the classf
 
 # END NON-TRANSLATABLE
 
-J9NLS_BCV_ERR_BC_UNKNOWN=neznana bitna koda
+J9NLS_BCV_ERR_BC_UNKNOWN=neznana bajtna koda
 # START NON-TRANSLATABLE
 J9NLS_BCV_ERR_BC_UNKNOWN.explanation=An undefined bytecode was encountered in the classfile.
 J9NLS_BCV_ERR_BC_UNKNOWN.system_action=The JVM will throw a verification or classloading related exception such as java.lang.VerifyError.
@@ -428,5 +428,13 @@ J9NLS_BCV_ERROR_TEMPLATE_TYPE_MISMATCH.sample_input_15=([Ljava/lang/String;)V
 J9NLS_BCV_ERROR_TEMPLATE_TYPE_MISMATCH.explanation=NOTAG
 J9NLS_BCV_ERROR_TEMPLATE_TYPE_MISMATCH.system_action=
 J9NLS_BCV_ERROR_TEMPLATE_TYPE_MISMATCH.user_response=
+
+# END NON-TRANSLATABLE
+
+J9NLS_BCV_ERR_BC_NEW_ARRAY=nova bajtna koda ne mora izdelovati matrik
+# START NON-TRANSLATABLE
+J9NLS_BCV_ERR_BC_NEW_ARRAY.explanation=Verification failed due to an incorrect 'new' bytecode
+J9NLS_BCV_ERR_BC_NEW_ARRAY.system_action=The JVM will throw a verification or classloading related exception such as java.lang.VerifyError.
+J9NLS_BCV_ERR_BC_NEW_ARRAY.user_response=Contact the provider of the classfile for a corrected version.
 
 # END NON-TRANSLATABLE

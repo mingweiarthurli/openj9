@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
 <!--
-  Copyright (c) 2016, 2020 IBM Corp. and others
+  Copyright (c) 2016, 2022 IBM Corp. and others
 
   This program and the accompanying materials are made available under
   the terms of the Eclipse Public License 2.0 which accompanies this
@@ -17,7 +17,7 @@
   OpenJDK Assembly Exception [2].
 
   [1] https://www.gnu.org/software/classpath/license.html
-  [2] http://openjdk.java.net/legal/assembly-exception.html
+  [2] https://openjdk.org/legal/assembly-exception.html
 
   SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 -->
@@ -247,8 +247,6 @@
 	</test>
 	<test name="JCL_TEST_Java-Security">
 		<classes>
-			<class name="org.openj9.test.java.security.Test_AccessController"/>
-			<class name="org.openj9.test.java.security.Test_AccessControlContext"/>
 			<class name="org.openj9.test.java.security.Test_MHLoaderConstraints"/>
 			<class name="org.openj9.test.java.security.DigestLoop"/>
 			<class name="org.openj9.test.java.security.OpenSSLInvalidCBCKeySizeTest"/>
@@ -258,7 +256,6 @@
 	<test name="JCL_TEST_IBM-VM">
 		<classes>
 			<class name="org.openj9.test.vm.Test_MsgHelp"/>
-			<class name="org.openj9.test.vm.Test_VM"/>
 		</classes>
 	</test>
 	<test name="JCL_TEST_JITHelpers">
@@ -481,6 +478,16 @@
 	<test name="LoadClassWithUTF8PkgNameTest">
 		<classes>
 			<class name="org.openj9.test.utf8ClassPkgName.LoadClassWithUTF8PkgNameTest"/>
+		</classes>
+	</test>
+	<test name="RuntimeAnnotationTests">
+		<classes>
+			<class name="org.openj9.test.annotation.ContainsRuntimeAnnotationTest"/>
+		</classes>
+	</test>
+	<test name="ConstantPoolTests">
+		<classes>
+			<class name="org.openj9.test.constantpool.ClassInitTest"/>
 		</classes>
 	</test>
 </suite>

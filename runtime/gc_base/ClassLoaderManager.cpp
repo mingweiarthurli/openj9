@@ -1,6 +1,6 @@
 
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -312,6 +312,13 @@ MM_ClassLoaderManager::cleanUpClassLoadersStart(MM_EnvironmentBase *env, J9Class
 	
 	Trc_MM_cleanUpClassLoadersStart_Entry(env->getLanguageVMThread());
 	
+	/*
+	 * Verify that boolean array class has been marked. Assertion is done to ensure correctness
+	 * of an optimization in ClassIteratorClassSlots that only checks booleanArrayClass Interfaces
+	 * since all array claseses share the same ITable.
+	 */
+	Assert_MM_true(markMap->isBitSet(_javaVM->booleanArrayClass->classObject));
+
 	/*
 	 * Walk anonymous classes and set unmarked as dying
 	 *

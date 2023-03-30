@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -60,14 +60,6 @@ J9::VMEnv::maxHeapSizeInBytes()
    J9MemoryManagerFunctions * mmf = jvm->memoryManagerFunctions;
    return (int64_t) mmf->j9gc_get_maximum_heap_size(jvm);
    }
-
-
-UDATA
-J9::VMEnv::heapBaseAddress()
-   {
-   return 0;
-   }
-
 
 bool
 J9::VMEnv::hasAccess(OMR_VMThread *omrVMThread)
@@ -220,7 +212,7 @@ acquireVMaccessIfNeededInner(J9VMThread *vmThread, TR_YesNoMaybe isCompThread)
     * At shutdown time the compilation thread executes Java code and it may receive a sample (see D174900)
     * Only abort the compilation if we're explicitly prepared to handle it.
     */
-   if (compInfoPT->compilationCanBeInterrupted() && compInfoPT->compilationShouldBeInterrupted())
+   if (compInfoPT->compilationShouldBeInterrupted())
       {
       TR_ASSERT(compInfoPT->compilationShouldBeInterrupted() != GC_COMP_INTERRUPT, "GC should not have cut in _compInfoPT=%p\n", compInfoPT);
 
@@ -245,10 +237,9 @@ J9::VMEnv::acquireVMAccessIfNeeded(TR_J9VMBase *fej9)
    // This interface should be deprecated when the FrontEnd is redesigned and
    // eliminated.  The trouble with the CompilerEnv interface is that it doesn't
    // yet understand compilation contexts (i.e., a 'regular' compile, an AOT
-   // compile, a FrontEnd cooked up for a debugger extension, etc.).  While
-   // this can be sorted out, the safest thing to do until that happens is to
-   // simply call the equivalent J9 FrontEnd virtual function to ensure the
-   // correct call is being made.
+   // compile, etc.). While this can be sorted out, the safest thing to do until
+   // that happens is to simply call the equivalent J9 FrontEnd virtual function to
+   // ensure the correct call is being made.
    //
    //   return acquireVMaccessIfNeededInner(fej9->vmThread(), fej9->vmThreadIsCompilationThread());
 
@@ -442,7 +433,7 @@ J9::VMEnv::OSRFrameSizeInBytes(TR::Compilation *comp, TR_OpaqueMethodBlock* meth
 bool
 J9::VMEnv::ensureOSRBufferSize(TR::Compilation *comp, uintptr_t osrFrameSizeInBytes, uintptr_t osrScratchBufferSizeInBytes, uintptr_t osrStackFrameSizeInBytes)
    {
-   return comp->fej9()->ensureOSRBufferSize(osrFrameSizeInBytes, osrScratchBufferSizeInBytes, osrStackFrameSizeInBytes);
+   return comp->fej9()->ensureOSRBufferSize(comp, osrFrameSizeInBytes, osrScratchBufferSizeInBytes, osrStackFrameSizeInBytes);
    }
 
 uintptr_t
@@ -507,4 +498,22 @@ J9::VMEnv::getInterpreterVTableOffset()
       }
 #endif /* defined(J9VM_OPT_JITSERVER) */
    return sizeof(J9Class);
+   }
+
+bool
+J9::VMEnv::isVMInStartupPhase(J9JITConfig *jitConfig)
+   {
+#if defined(J9VM_OPT_JITSERVER)
+   if (auto stream = TR::CompilationInfo::getStream())
+      {
+      return TR::compInfoPT->getClientData()->isInStartupPhase();
+      }
+#endif /* defined(J9VM_OPT_JITSERVER) */
+   return jitConfig->javaVM->phase != J9VM_PHASE_NOT_STARTUP;
+   }
+
+bool
+J9::VMEnv::isVMInStartupPhase(TR::Compilation *comp)
+   {
+   return self()->isVMInStartupPhase(comp->fej9()->getJ9JITConfig());
    }

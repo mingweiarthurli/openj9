@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -132,11 +132,11 @@ J9::MethodSymbol::isPureFunction()
 
 /**
  * Returns true if the function call will not yield to OSR point.
- * 
+ *
  * An example of kind of function which can go in the list would be recognized calls with
- * NOP calls or the one that are guaranteed to be inlined by codegenerator. 
+ * NOP calls or the one that are guaranteed to be inlined by codegenerator.
  */
-bool 
+bool
 J9::MethodSymbol::functionCallDoesNotYieldOSR()
    {
    switch(self()->getRecognizedMethod())
@@ -145,7 +145,7 @@ J9::MethodSymbol::functionCallDoesNotYieldOSR()
       case TR::java_nio_Bits_keepAlive:
          return true;
       default:
-         return OMR::MethodSymbolConnector::functionCallDoesNotYieldOSR(); 
+         return OMR::MethodSymbolConnector::functionCallDoesNotYieldOSR();
       }
    return false;
    }
@@ -161,6 +161,7 @@ static TR::RecognizedMethod canSkipNullChecks[] =
    TR::java_util_ArrayList_add,
    TR::java_util_ArrayList_ensureCapacity,
    TR::java_util_ArrayList_get,
+#if JAVA_SPEC_VERSION < 17
    TR::java_lang_String_trim,
    TR::java_lang_String_replace,
    TR::java_lang_String_charAt,
@@ -177,10 +178,19 @@ static TR::RecognizedMethod canSkipNullChecks[] =
    TR::java_lang_String_equalsIgnoreCase,
    TR::java_lang_String_indexOf_fast,
    TR::java_lang_String_isCompressed,
+   TR::java_lang_String_coder,
+   TR::java_lang_String_isLatin1,
+   TR::java_lang_String_init_int_String_int_String_String,
+   TR::java_lang_String_init_int_int_char_boolean,
+   TR::java_lang_String_split_str_int,
+#endif
    TR::java_lang_StringBuffer_capacityInternal,
    TR::java_lang_StringBuffer_lengthInternalUnsynchronized,
    TR::java_lang_StringBuilder_capacityInternal,
    TR::java_lang_StringBuilder_lengthInternal,
+   TR::java_lang_StringUTF16_charAt,
+   TR::java_lang_StringUTF16_checkIndex,
+   TR::java_lang_StringUTF16_length,
    TR::java_util_Hashtable_clone,
    TR::java_util_Hashtable_contains,
    TR::java_util_HashtableHashEnumerator_hasMoreElements,
@@ -191,12 +201,15 @@ static TR::RecognizedMethod canSkipNullChecks[] =
    TR::java_math_BigDecimal_longString1C,
    TR::java_math_BigDecimal_longString2,
    TR::java_util_EnumMap__nec_,
-   TR::java_util_TreeMapUnboundedValueIterator_next,
-   TR::java_util_TreeMapSubMap_setFirstKey,
-   TR::java_util_TreeMapSubMap_setLastKey,
-   TR::java_lang_String_init_int_String_int_String_String,
-   TR::java_lang_String_init_int_int_char_boolean,
-   TR::java_lang_String_split_str_int,
+   TR::java_nio_Bits_getCharB,
+   TR::java_nio_Bits_getCharL,
+   TR::java_nio_Bits_getShortB,
+   TR::java_nio_Bits_getShortL,
+   TR::java_nio_Bits_getIntB,
+   TR::java_nio_Bits_getIntL,
+   TR::java_nio_Bits_getLongB,
+   TR::java_nio_Bits_getLongL,
+   TR::java_nio_HeapByteBuffer__get,
    TR::java_nio_HeapByteBuffer_put,
    TR::unknownMethod
    };
@@ -225,6 +238,7 @@ static TR::RecognizedMethod canSkipBoundChecks[] =
    //TR::java_util_ArrayList_remove,
    //TR::java_util_ArrayList_ensureCapacity,
    //TR::java_util_ArrayList_get,
+   TR::java_lang_Character_toLowerCase,
    TR::java_lang_invoke_FilterArgumentsHandle_invokeExact,
    TR::java_lang_invoke_CollectHandle_invokeExact,
    TR::java_lang_String_trim,
@@ -251,6 +265,10 @@ static TR::RecognizedMethod canSkipBoundChecks[] =
    TR::java_lang_String_hashCodeImplDecompressed,
    TR::java_lang_String_unsafeCharAt,
    TR::java_lang_String_split_str_int,
+   TR::java_lang_String_startsWith,
+   TR::java_lang_StringUTF16_compareCodePointCI,
+   TR::java_lang_StringUTF16_compareToCIImpl,
+   TR::java_lang_StringUTF16_compareValues,
    TR::java_util_Hashtable_get,
    TR::java_util_Hashtable_put,
    TR::java_util_Hashtable_clone,
@@ -262,24 +280,29 @@ static TR::RecognizedMethod canSkipBoundChecks[] =
    TR::java_util_HashtableHashEnumerator_nextElement,
    TR::java_util_HashMap_getNode,
    TR::java_util_HashMap_resize,
-   TR::java_util_HashMapHashIterator_nextNode,
-   TR::java_util_HashMapHashIterator_init,
+   //TR::java_util_HashMapHashIterator_nextNode,  /* Unsafe if the Iterator is being incorrectly used (concurrent execution) */
+   TR::java_util_HashMapHashIterator_init,        /* Safe because the object is only visible by one thread when init() is executing */
    TR::java_util_EnumMap_put,
    TR::java_util_EnumMap_typeCheck,
    TR::java_util_EnumMap__init_,
    TR::java_util_EnumMap__nec_,
    TR::java_util_TreeMap_all,
-   TR::java_util_TreeMap_rbInsert,
    TR::java_math_BigDecimal_longString1C,
    TR::java_math_BigDecimal_longString2,
-   TR::java_util_TreeMapUnboundedValueIterator_next,
-   TR::java_util_TreeMapSubMap_setFirstKey,
-   TR::java_util_TreeMapSubMap_setLastKey,
    TR::java_util_HashMap_get,
    TR::java_util_HashMap_findNonNullKeyEntry,
    TR::java_util_HashMap_putImpl,
    TR::java_lang_String_init_int_String_int_String_String,
    TR::java_lang_String_init_int_int_char_boolean,
+   TR::java_nio_Bits_getCharB,
+   TR::java_nio_Bits_getCharL,
+   TR::java_nio_Bits_getShortB,
+   TR::java_nio_Bits_getShortL,
+   TR::java_nio_Bits_getIntB,
+   TR::java_nio_Bits_getIntL,
+   TR::java_nio_Bits_getLongB,
+   TR::java_nio_Bits_getLongL,
+   TR::java_nio_HeapByteBuffer__get,
    TR::java_nio_HeapByteBuffer_put,
    TR::unknownMethod
    };
@@ -386,10 +409,6 @@ static TR::RecognizedMethod canSkipArrayStoreChecks[] =
    TR::java_util_Vector_addElement,
    TR::java_util_Vector_contains,
    TR::java_util_Vector_subList,
-   TR::java_util_TreeMap_rbInsert,
-   TR::java_util_TreeMapUnboundedValueIterator_next,
-   TR::java_util_TreeMapSubMap_setLastKey,
-   TR::java_util_TreeMapSubMap_setFirstKey,
    TR::java_util_concurrent_ConcurrentHashMap_addCount,
    TR::java_util_concurrent_ConcurrentHashMap_tryPresize,
    TR::java_util_concurrent_ConcurrentHashMap_transfer,
@@ -437,6 +456,7 @@ static TR::RecognizedMethod canSkipChecksOnArrayCopies[] =
    // NOTE!! add methods whose checks can be skipped by sov library to the beginning of the list (see stopMethod below)
    //TR::java_util_ArrayList_ensureCapacity,
    //TR::java_util_ArrayList_remove,   /* ArrayList is NOT synchronized and therefore it's unsafe to remove checks! */
+   TR::java_lang_Character_toLowerCase,
    TR::java_lang_String_concat,
    TR::java_lang_String_replace,
    TR::java_lang_String_toLowerCase,
@@ -495,6 +515,7 @@ J9::MethodSymbol::safeToSkipChecksOnArrayCopies()
 //
 static TR::RecognizedMethod canSkipZeroInitializationOnNewarrays[] =
    {
+   TR::java_lang_Character_toLowerCase,
    TR::java_lang_String_init,
    TR::java_lang_String_init_int_int_char_boolean,
    TR::java_lang_String_concat,

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2020 IBM Corp. and others
+ * Copyright (c) 2001, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -52,6 +52,8 @@ public:
 		_clazz(NULL),
 		_className(NULL),
 		_classNameLength(0),
+		_hostPackageName(NULL),
+		_hostPackageLength(0),
 		_intermediateClassData(NULL),
 		_intermediateClassDataLength(0),
 		_classLoader(NULL),
@@ -89,6 +91,8 @@ public:
 		_clazz(NULL),
 		_className(NULL),
 		_classNameLength(0),
+		_hostPackageName(NULL),
+		_hostPackageLength(0),
 		_intermediateClassData(NULL),
 		_intermediateClassDataLength(0),
 		_classLoader(NULL),
@@ -115,8 +119,8 @@ public:
 
 	ROMClassCreationContext(
 			J9PortLibrary *portLibrary, J9JavaVM *javaVM, U_8 *classFileBytes, UDATA classFileSize, UDATA bctFlags, UDATA bcuFlags, UDATA findClassFlags, AllocationStrategy *allocationStrategy,
-			U_8 *className, UDATA classNameLength, U_8 *intermediateClassData, U_32 intermediateClassDataLength, J9ROMClass *romClass, J9Class *clazz, J9ClassLoader *classLoader, bool classFileBytesReplaced,
-			bool creatingIntermediateROMClass, J9TranslationLocalBuffer *localBuffer) :
+			U_8 *className, UDATA classNameLength, U_8 *hostPackageName, UDATA hostPackageLength, U_8 *intermediateClassData, U_32 intermediateClassDataLength, J9ROMClass *romClass, J9Class *clazz, 
+			J9ClassLoader *classLoader, bool classFileBytesReplaced, bool creatingIntermediateROMClass, J9TranslationLocalBuffer *localBuffer) :
 		_portLibrary(portLibrary),
 		_javaVM(javaVM),
 		_classFileBytes(classFileBytes),
@@ -129,6 +133,8 @@ public:
 		_clazz(clazz),
 		_className(className),
 		_classNameLength(classNameLength),
+		_hostPackageName(hostPackageName),
+		_hostPackageLength(hostPackageLength),
 		_intermediateClassData(intermediateClassData),
 		_intermediateClassDataLength(intermediateClassDataLength),
 		_classLoader(classLoader),
@@ -178,6 +184,8 @@ public:
 	UDATA findClassFlags() const {return _findClassFlags; }
 	U_8* className() const {return _className; }
 	UDATA classNameLength() const {return _classNameLength; }
+	U_8* hostPackageName() const {return _hostPackageName; }
+	UDATA hostPackageLength() const {return _hostPackageLength; }
 	U_32 bctFlags() const { return (U_32) _bctFlags; } /* Only use this for j9bcutil_readClassFileBytes */
 	AllocationStrategy *allocationStrategy() const { return _allocationStrategy; }
 	bool classFileBytesReplaced() const { return _classFileBytesReplaced; }
@@ -227,11 +235,17 @@ public:
 	bool isClassUnsafe() const { return J9_FINDCLASS_FLAG_UNSAFE == (_findClassFlags & J9_FINDCLASS_FLAG_UNSAFE); }
 	bool isClassAnon() const { return J9_FINDCLASS_FLAG_ANON == (_findClassFlags & J9_FINDCLASS_FLAG_ANON); }
 	bool alwaysSplitBytecodes() const { return J9_ARE_ANY_BITS_SET(_bctFlags, BCT_AlwaysSplitBytecodes); }
+	bool isClassHidden() const { return J9_FINDCLASS_FLAG_HIDDEN == (_findClassFlags & J9_FINDCLASS_FLAG_HIDDEN);}
+	bool isHiddenClassOptNestmateSet() const { return J9_FINDCLASS_FLAG_CLASS_OPTION_NESTMATE == (_findClassFlags & J9_FINDCLASS_FLAG_CLASS_OPTION_NESTMATE);}
+	bool isHiddenClassOptStrongSet() const { return J9_FINDCLASS_FLAG_CLASS_OPTION_STRONG == (_findClassFlags & J9_FINDCLASS_FLAG_CLASS_OPTION_STRONG);}
+	bool isDoNotShareClassFlagSet() const {return J9_ARE_ALL_BITS_SET(_findClassFlags, J9_FINDCLASS_FLAG_DO_NOT_SHARE);}
 
 	bool isClassUnmodifiable() const {
 		bool unmodifiable = false;
 		if (NULL != _javaVM) {
-			if ((J2SE_VERSION(_javaVM) >= J2SE_V11) && isClassAnon()) {
+			if ((J2SE_VERSION(_javaVM) >= J2SE_V11) 
+				&& (isClassAnon() || isClassHidden())
+			) {
 				unmodifiable = true;
 			} else if (NULL == J9VMJAVALANGOBJECT_OR_NULL(_javaVM)) {
 				/* Object is currently only allowed to be redefined in fast HCR */
@@ -275,16 +289,20 @@ public:
 	bool isROMClassShareable() const {
 		/*
 		 * Any of the following conditions prevent the sharing of a ROMClass:
+		 *  - J9_FINDCLASS_FLAG_DO_NOT_SHARE is set for this class
 		 *  - classloader is not shared classes enabled
 		 *  - cache is full
 		 *  - the class is unsafe and isUnsafeClassSharingEnabled returns false (see the function isUnsafeClassShareable() for more details)
+		 *  - the class is a hidden class and isHiddenClassSharingEnabled() returns false (Java 15 and up, see the function isHiddenClassSharingEnabled() for more details)
 		 *  - shared cache is BCI enabled and class is modified by BCI agent
 		 *  - shared cache is BCI enabled and ROMClass being store is intermediate ROMClass
 		 *  - the class is loaded from a patch path
 		 */
 		if (isSharedClassesEnabled()
+			&& !isDoNotShareClassFlagSet()
 			&& isClassLoaderSharedClassesEnabled()
 			&& (!isClassUnsafe() || isUnsafeClassSharingEnabled())
+			&& (!isClassHidden() || isHiddenClassSharingEnabled())
 			&& !(isSharedClassesBCIEnabled()
 			&& (classFileBytesReplaced() || isCreatingIntermediateROMClass()))
 			&& (LOAD_LOCATION_PATCH_PATH != loadLocation())
@@ -321,6 +339,20 @@ public:
 			isEnabled = true;
 		}
 		return isEnabled;
+	}
+	
+	bool isHiddenClassSharingEnabled() const {
+		/*
+		 * In java 15 and up, hidden class is introduced to replace unsafe anonymous class, so use existing CML options
+		 * -XX:[+/-]ShareAnonymousClasses to control the class sharing behaviour of hidden classes.
+		 * The command line option -XX:[+/-]ShareUnsafeClasses, combined with -XX:[+/-]ShareAnonymousClasses will have 4 different behaviours:
+		 * 1. -XX:+ShareAnonymousClasses -XX:+ShareUnsafeClasses, this will share all hidden classes
+		 * 2. -XX:+ShareAnonymousClasses -XX:-ShareUnsafeClasses, this will only share hidden classes and not other unsafe classes
+		 * 3. -XX:-ShareAnonymousClasses -XX:+ShareUnsafeClasses, this will only share unsafe classes that are not hidden classes
+		 * 4. -XX:-ShareAnonymousClasses -XX:-ShareUnsafeClasses, this will share neither.
+		 * The current default behavior is the 1st option.
+		 */
+		return J9_ARE_ALL_BITS_SET(_javaVM->sharedClassConfig->runtimeFlags, J9SHR_RUNTIMEFLAG_ENABLE_SHAREANONYMOUSCLASSES);
 	}
 
 	/*
@@ -370,7 +402,36 @@ public:
 	{
 		if (!isRedefining() && !isRetransforming()) {
 			if (NULL != _className) {
-				if ((0 == J9UTF8_DATA_EQUALS(_className, _classNameLength, className, classNameLength))) {
+				U_16 classNameLenToCompare0 = (U_16)_classNameLength;
+				U_16 classNameLenToCompare1 = classNameLength;
+				BOOLEAN misMatch = FALSE;
+				if (isClassHidden()) {
+					if (isROMClassShareable()) {
+						U_8* lambdaClass0 = (U_8*)getLastDollarSignOfLambdaClassName((const char*)_className, _classNameLength);
+						U_8* lambdaClass1 = (U_8*)getLastDollarSignOfLambdaClassName((const char*)className, classNameLength);
+						if ((NULL != lambdaClass0) 
+							&& (NULL != lambdaClass1)
+						) {
+							/**
+							 * Lambda class has class name: HostClassName$$Lambda$<IndexNumber>/0x0000000000000000. 
+							 * Do not need to compare the IndexNumber as it can be different from run to run.
+							 */
+							classNameLenToCompare0 = (U_16)(lambdaClass0 - _className + 1);
+							classNameLenToCompare1 = (U_16)(lambdaClass1 - className + 1);
+						} else if ((NULL == lambdaClass0) && (NULL == lambdaClass1)) {
+							/* for hidden class className has ROM address appended at the end, _className does not have that */
+							classNameLenToCompare1 = (U_16)_classNameLength;
+						} else {
+							misMatch = TRUE;
+						}
+					} else {
+						/* for hidden class className has ROM address appended at the end, _className does not have that */
+						classNameLenToCompare1 = (U_16)_classNameLength;
+					}
+				}
+				if (misMatch
+				|| !J9UTF8_DATA_EQUALS(_className, classNameLenToCompare0, className, classNameLenToCompare1)
+				) {
 #define J9WRONGNAME " (wrong name: "
 					PORT_ACCESS_FROM_PORT(_portLibrary);
 					UDATA errorStringSize = _classNameLength + sizeof(J9WRONGNAME) + 1 + classNameLength;
@@ -386,20 +447,35 @@ public:
 						current += _classNameLength;
 						*current++ = (U_8) ')';
 						*current = (U_8) '\0';
-
 					}
 					recordCFRError(errorUTF);
 					return ClassNameMismatch;
 #undef J9WRONGNAME
 				}
-			} else if (shouldCheckPackageName()  /* classname is null */
-					&& (0 == strncmp((char *) className, "java/", 5))
-					&& (!isClassAnon())) {
-				/*
-				 * Non-bootstrap classloaders may not load nto the "java" package.
-				 * if classname is not null, the JCL or JNI has already checked it
-				 */
-				return IllegalPackageName;
+			} else { /* classname is null */
+				/* If a name was not provided with the load data, now is our first chance to check for a duplicate definition */
+				if ((NULL != _javaVM) && (NULL != J9_VM_FUNCTION_VIA_JAVAVM(_javaVM, hashClassTableAt)(_classLoader, className, classNameLength))) {
+					PORT_ACCESS_FROM_PORT(_portLibrary);
+					U_8 *errorUTF = (U_8 *) j9mem_allocate_memory(classNameLength + 1, J9MEM_CATEGORY_CLASSES);
+					if (NULL != errorUTF) {
+						memcpy(errorUTF, className, classNameLength);
+						errorUTF[classNameLength] = '\0';
+					}
+					recordCFRError(errorUTF);
+					return DuplicateName;
+				}
+
+				if (shouldCheckPackageName()
+						&& (classNameLength >= 5)
+						&& (0 == memcmp(className, "java/", 5))
+						&& !isClassAnon()
+				) {
+					/*
+					* Non-bootstrap classloaders may not load nto the "java" package.
+					* if classname is not null, the JCL or JNI has already checked it
+					*/
+					return IllegalPackageName;
+				}
 			}
 
 		}
@@ -725,6 +801,8 @@ private:
 	J9Class *_clazz;
 	U_8 *_className;
 	UDATA _classNameLength;
+	U_8* _hostPackageName;
+	UDATA _hostPackageLength;
 	U_8 *_intermediateClassData;
 	U_32 _intermediateClassDataLength;
 	J9ClassLoader *_classLoader;

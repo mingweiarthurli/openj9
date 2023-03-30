@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -37,7 +37,7 @@
  * All minor versions append to the end of this table
  */
 
-static J9PortLibrary MasterPortLibraryTable = {
+static J9PortLibrary MainPortLibraryTable = {
 	{NULL}, /* omrPortLibrary */
 	{J9PORT_MAJOR_VERSION_NUMBER, J9PORT_MINOR_VERSION_NUMBER, 0, J9PORT_CAPABILITY_MASK}, /* portVersion */
 	NULL, /* portGlobals */
@@ -281,7 +281,7 @@ j9port_create_library(struct J9PortLibrary *portLibrary, struct J9PortLibraryVer
 
 	/* Null and initialize the table passed in */
 	memset(portLibrary, 0, size);
-	memcpy(portLibrary, &MasterPortLibraryTable, versionSize);
+	memcpy(portLibrary, &MainPortLibraryTable, versionSize);
 
 	/* Reset capabilities to be what is actually there, not what was requested */
 	portLibrary->portVersion.majorVersionNumber = version->majorVersionNumber;
@@ -351,11 +351,6 @@ j9port_startup_library(struct J9PortLibrary *portLibrary)
 		goto cleanup;
 	}
 	memset(portLibrary->portGlobals, 0, sizeof(J9PortLibraryGlobalData));
-
-	/* Check for omr port startup failure after allocating port globals. Globals must be allocated. */
-	if (0 != rc) {
-		goto cleanup;
-	}
 
 	rc = portLibrary->sysinfo_startup(portLibrary);
 	if (0 != rc) {
@@ -529,7 +524,7 @@ j9port_isFunctionOverridden(struct J9PortLibrary *portLibrary, uintptr_t offset)
 		return 0;
 	}
 
-	return *((uintptr_t*) &(((uint8_t*) portLibrary)[offset])) != *((uintptr_t*) &(((uint8_t*) &MasterPortLibraryTable)[offset]));
+	return *((uintptr_t*) &(((uint8_t*) portLibrary)[offset])) != *((uintptr_t*) &(((uint8_t*) &MainPortLibraryTable)[offset]));
 }
 /**
  * Allocate a port library.

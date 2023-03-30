@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -37,7 +37,6 @@
 #include "ClassHeapIterator.hpp"
 #include "ClassLoaderIterator.hpp"
 #include "Debug.hpp"
-#include "Dispatcher.hpp"
 #include "EnvironmentBase.hpp"
 #if defined(J9VM_GC_FINALIZATION)
 #include "FinalizeListManager.hpp"
@@ -58,6 +57,9 @@
 #include "ObjectHeapIteratorAddressOrderedList.hpp"
 #include "ObjectModel.hpp"
 #include "OwnableSynchronizerObjectList.hpp"
+#include "ContinuationObjectList.hpp"
+#include "VMHelpers.hpp"
+#include "ParallelDispatcher.hpp"
 #include "PointerArrayIterator.hpp"
 #include "SlotObject.hpp"
 #include "StringTable.hpp"
@@ -85,6 +87,7 @@ MM_RootScanner::scanModularityObjects(J9ClassLoader * classLoader)
 {
 	if (NULL != classLoader->moduleHashTable) {
 		J9HashTableState moduleWalkState;
+		J9JavaVM *javaVM = static_cast<J9JavaVM*>(_omrVM->_language_vm);
 		J9Module **modulePtr = (J9Module**)hashTableStartDo(classLoader->moduleHashTable, &moduleWalkState);
 		while (NULL != modulePtr) {
 			J9Module * const module = *modulePtr;
@@ -97,6 +100,10 @@ MM_RootScanner::scanModularityObjects(J9ClassLoader * classLoader)
 				doSlot(&module->version);
 			}
 			modulePtr = (J9Module**)hashTableNextDo(&moduleWalkState);
+		}
+
+		if (classLoader == javaVM->systemClassLoader) {
+			doSlot(&javaVM->unamedModuleForSystemLoader->moduleObject);
 		}
 	}
 }
@@ -158,8 +165,21 @@ MM_RootScanner::doOwnableSynchronizerObject(J9Object *objectPtr, MM_OwnableSynch
 	Assert_MM_unreachable();
 }
 
+void
+MM_RootScanner::doContinuationObject(J9Object *objectPtr, MM_ContinuationObjectList *list)
+{
+	Assert_MM_unreachable();
+}
+
+
 MM_RootScanner::CompletePhaseCode
 MM_RootScanner::scanOwnableSynchronizerObjectsComplete(MM_EnvironmentBase *env)
+{
+	return complete_phase_OK;
+}
+
+MM_RootScanner::CompletePhaseCode
+MM_RootScanner::scanContinuationObjectsComplete(MM_EnvironmentBase *env)
 {
 	return complete_phase_OK;
 }
@@ -245,9 +265,9 @@ MM_RootScanner::doStringCacheTableSlot(J9Object **slotPtr)
  * @todo Provide function documentation
  */
 void
-MM_RootScanner::doVMClassSlot(J9Class **slotPtr, GC_VMClassSlotIterator *vmClassSlotIterator)
+MM_RootScanner::doVMClassSlot(J9Class *classPtr)
 {
-	doClassSlot(slotPtr);
+	doClassSlot(classPtr);
 }
 
 /**
@@ -314,10 +334,10 @@ MM_RootScanner::scanVMClassSlots(MM_EnvironmentBase *env)
 		reportScanningStarted(RootScannerEntity_VMClassSlots);
 
 		GC_VMClassSlotIterator classSlotIterator(static_cast<J9JavaVM*>(_omrVM->_language_vm));
-		J9Class **slotPtr;
+		J9Class *classPtr;
 
-		while((slotPtr = classSlotIterator.nextSlot()) != NULL) {
-			doVMClassSlot(slotPtr, &classSlotIterator);
+		while (NULL != (classPtr = classSlotIterator.nextSlot())) {
+			doVMClassSlot(classPtr);
 		}
 
 		reportScanningEnded(RootScannerEntity_VMClassSlots);
@@ -329,7 +349,7 @@ MM_RootScanner::scanVMClassSlots(MM_EnvironmentBase *env)
  * This handler is called for every reference to a J9Class.
  */
 void
-MM_RootScanner::doClassSlot(J9Class** slotPtr)
+MM_RootScanner::doClassSlot(J9Class *classPtr)
 {
 	/* ignore class slots by default */
 }
@@ -516,7 +536,19 @@ MM_RootScanner::scanOneThread(MM_EnvironmentBase *env, J9VMThread* walkThread, v
 		doVMThreadSlot(slot, &vmThreadIterator);
 	}
 
-	GC_VMThreadStackSlotIterator::scanSlots((J9VMThread *)env->getOmrVMThread()->_language_vmthread, walkThread, localData, stackSlotIterator, isStackFrameClassWalkNeeded(), _trackVisibleStackFrameDepth);
+	J9VMThread *currentThread = (J9VMThread *)env->getOmrVMThread()->_language_vmthread;
+	/* In a case this thread is a carrier thread, and a virtual thread is mounted, we will scan virtual thread's stack.
+	 * If virtual thread is not mounted, or this is just a regular thread, this will scan its own stack. */
+	GC_VMThreadStackSlotIterator::scanSlots(currentThread, walkThread, localData, stackSlotIterator, isStackFrameClassWalkNeeded(), _trackVisibleStackFrameDepth);
+
+#if JAVA_SPEC_VERSION >= 19
+	if (NULL != walkThread->currentContinuation)
+	{
+		/* At this point we know that a virtual thread is mounted. We previously scanned its stack,
+		 * and now we will scan carrier's stack, that continuation struct is currently pointing to. */
+		GC_VMThreadStackSlotIterator::scanSlots(currentThread, walkThread->currentContinuation, localData, stackSlotIterator, isStackFrameClassWalkNeeded(), _trackVisibleStackFrameDepth);
+	}
+#endif /* JAVA_SPEC_VERSION >= 19 */
 	return false;
 }
 
@@ -608,7 +640,7 @@ MM_RootScanner::scanStringTable(MM_EnvironmentBase *env)
 	bool isMetronomeGC = _extensions->isMetronomeGC();
 
 	/* String Table */
-	for (UDATA tableIndex = 0; tableIndex < stringTable->getTableCount(); tableIndex++) {
+	for (uintptr_t tableIndex = 0; tableIndex < stringTable->getTableCount(); tableIndex++) {
 		if(_singleThread || J9MODRON_HANDLE_NEXT_WORK_UNIT(env)) {
 
 			if (isMetronomeGC) {
@@ -637,7 +669,7 @@ MM_RootScanner::scanStringTable(MM_EnvironmentBase *env)
 
 	if(_singleThread || J9MODRON_HANDLE_NEXT_WORK_UNIT(env)) {
 		j9object_t *stringCacheTable = stringTable->getStringInternCache();
-		UDATA cacheTableIndex = 0;
+		uintptr_t cacheTableIndex = 0;
 		for (; cacheTableIndex < MM_StringTable::getCacheSize(); cacheTableIndex++) {
 			doStringCacheTableSlot(&stringCacheTable[cacheTableIndex]);
 		}
@@ -731,6 +763,27 @@ MM_RootScanner::scanOwnableSynchronizerObjects(MM_EnvironmentBase *env)
 	reportScanningEnded(RootScannerEntity_OwnableSynchronizerObjects);
 }
 
+void
+MM_RootScanner::scanContinuationObjects(MM_EnvironmentBase *env)
+{
+	reportScanningStarted(RootScannerEntity_ContinuationObjects);
+
+	MM_ObjectAccessBarrier *barrier = _extensions->accessBarrier;
+	MM_ContinuationObjectList *continuationObjectList = _extensions->getContinuationObjectLists();
+	while(NULL != continuationObjectList) {
+		if (_singleThread || J9MODRON_HANDLE_NEXT_WORK_UNIT(env)) {
+			J9Object *objectPtr = continuationObjectList->getHeadOfList();
+			while (NULL != objectPtr) {
+				doContinuationObject(objectPtr, continuationObjectList);
+				objectPtr = barrier->getContinuationLink(objectPtr);
+			}
+		}
+		continuationObjectList = continuationObjectList->getNextList();
+	}
+
+	reportScanningEnded(RootScannerEntity_ContinuationObjects);
+}
+
 /**
  * Scan the per-thread object monitor lookup caches.
  * Note that this is not a root since the cache contains monitors from the global monitor table
@@ -745,7 +798,7 @@ MM_RootScanner::scanMonitorLookupCaches(MM_EnvironmentBase *env)
 	while (J9VMThread *walkThread = vmThreadListIterator.nextVMThread()) {
 		if (_singleThread || J9MODRON_HANDLE_NEXT_WORK_UNIT(env)) {
 			j9objectmonitor_t *objectMonitorLookupCache = walkThread->objectMonitorLookupCache;
-			UDATA cacheIndex = 0;
+			uintptr_t cacheIndex = 0;
 			for (; cacheIndex < J9VMTHREAD_OBJECT_MONITOR_CACHE_SIZE; cacheIndex++) {
 				doMonitorLookupCacheSlot(&objectMonitorLookupCache[cacheIndex]);
 			}
@@ -989,6 +1042,7 @@ MM_RootScanner::scanClearable(MM_EnvironmentBase *env)
 	}
 
 	scanOwnableSynchronizerObjects(env);
+	scanContinuationObjects(env);
 
 #if defined(J9VM_GC_MODRON_SCAVENGER)
 	/* Remembered set is clearable in a generational system -- if an object in old
@@ -1068,10 +1122,11 @@ MM_RootScanner::scanAllSlots(MM_EnvironmentBase *env)
 #endif /* J9VM_GC_ENABLE_DOUBLE_MAP */
 
 	scanOwnableSynchronizerObjects(env);
+	scanContinuationObjects(env);
 }
 
 bool
-MM_RootScanner::shouldYieldFromClassScan(UDATA timeSlackNanoSec)
+MM_RootScanner::shouldYieldFromClassScan(uintptr_t timeSlackNanoSec)
 {
 	return false;
 }

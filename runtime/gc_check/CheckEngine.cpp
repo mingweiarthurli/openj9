@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -45,13 +45,13 @@
 #include "CheckReporter.hpp"
 #include "CheckReporterTTY.hpp"
 #include "ClassModel.hpp"
+#include "ForwardedHeader.hpp"
 #include "GCExtensions.hpp"
 #include "HeapRegionDescriptor.hpp"
 #include "ModronTypes.hpp"
 #include "ObjectModel.hpp"
 #include "ObjectAccessBarrier.hpp"
 #include "ScanFormatter.hpp"
-#include "ScavengerForwardedHeader.hpp"
 #include "SublistPool.hpp"
 #include "SublistPuddle.hpp"
 
@@ -286,9 +286,9 @@ GC_CheckEngine::checkJ9ObjectPointer(J9JavaVM *javaVM, J9Object *objectPtr, J9Ob
 		if ((regionType & MEMORY_TYPE_NEW) || extensions->isVLHGC()) {
 			// TODO: ideally, we should only check this in the evacuate segment
 			// TODO: do some safety checks first -- is there enough room in the segment?
-			MM_ScavengerForwardedHeader scavengerForwardedHeader(objectPtr, extensions);
-			if (scavengerForwardedHeader.isForwardedPointer()) {
-				*newObjectPtr = scavengerForwardedHeader.getForwardedObject();
+			MM_ForwardedHeader forwardedHeader(objectPtr, extensions->compressObjectReferences());
+			if (forwardedHeader.isForwardedPointer()) {
+				*newObjectPtr = forwardedHeader.getForwardedObject();
 				
 				if (_cycle->getMiscFlags() & J9MODRON_GCCHK_VERBOSE) {
 					PORT_ACCESS_FROM_PORT(_portLibrary);
@@ -459,6 +459,15 @@ GC_CheckEngine::checkJ9Object(J9JavaVM *javaVM, J9Object* objectPtr, J9MM_Iterat
 			return ret;
 		}
 	}
+
+#if defined(J9VM_ENV_DATA64)
+	if (OMR_ARE_ANY_BITS_SET(_cycle->getMiscFlags(), J9MODRON_GCCHK_VALID_INDEXABLE_DATA_ADDRESS) && extensions->objectModel.isIndexable(objectPtr)) {
+		/* Check that the indexable object has the correct data address pointer */
+		if (!extensions->indexableObjectModel.isCorrectDataAddr((J9IndexableObject*)objectPtr)) {
+			return J9MODRON_GCCHK_RC_INVALID_INDEXABLE_DATA_ADDRESS;
+		}
+	}
+#endif /* (J9VM_ENV_DATA64) */
 
 	if (checkFlags & J9MODRON_GCCHK_VERIFY_RANGE) {
 		UDATA regionEnd = ((UDATA)regionDesc->regionStart) + regionDesc->regionSize;
@@ -762,44 +771,39 @@ GC_CheckEngine::checkClassHeap(J9JavaVM *javaVM, J9Class *clazz, J9MemorySegment
 	/*
 	 * Process class slots in the class
 	 */
-	GC_ClassIteratorClassSlots classIteratorClassSlots(clazz);
-	J9Class** classSlotPtr;
-	while((classSlotPtr = classIteratorClassSlots.nextSlot()) != NULL) {
+	GC_ClassIteratorClassSlots classIteratorClassSlots(javaVM, clazz);
+	J9Class *classPtr;
+	while (NULL != (classPtr = classIteratorClassSlots.nextSlot())) {
 		int state = classIteratorClassSlots.getState();
 		const char *elementName = "";
-		J9Class *clazzPtr = *classSlotPtr;
 
 		result = J9MODRON_GCCHK_RC_OK;
 
 		switch (state) {
 			case classiteratorclassslots_state_constant_pool:
-				/* may be NULL */
-				if (clazzPtr != NULL) {
-					result = checkJ9ClassPointer(javaVM, clazzPtr);
-				}
+				result = checkJ9ClassPointer(javaVM, classPtr);
 				elementName = "constant ";
 				break;
 			case classiteratorclassslots_state_superclasses:
-				/* must not be NULL */
-				result = checkJ9ClassPointer(javaVM, clazzPtr);
+				result = checkJ9ClassPointer(javaVM, classPtr);
 				elementName = "superclass ";
 				break;
 			case classiteratorclassslots_state_interfaces:
-				/* must not be NULL */
-				result = checkJ9ClassPointer(javaVM, clazzPtr);
+				result = checkJ9ClassPointer(javaVM, classPtr);
 				elementName = "interface ";
 				break;
 			case classiteratorclassslots_state_array_class_slots:
-				/* may be NULL */
-				if (clazzPtr != NULL) {
-					result = checkJ9ClassPointer(javaVM, clazzPtr);
-				}
+				result = checkJ9ClassPointer(javaVM, classPtr);
 				elementName = "array class ";
+				break;
+			case classiteratorclassslots_state_flattened_class_cache_slots:
+				result = checkJ9ClassPointer(javaVM, classPtr);
+				elementName = "flattened class cache ";
 				break;
 		}
 
 		if (J9MODRON_GCCHK_RC_OK != result) {
-			GC_CheckError error( clazz, classSlotPtr, _cycle, _currentCheck, elementName, result, _cycle->nextErrorCount());
+			GC_CheckError error(clazz, &classPtr, _cycle, _currentCheck, elementName, result, _cycle->nextErrorCount());
 			_reporter->report(&error);
 			return J9MODRON_SLOT_ITERATOR_OK;
 		}
@@ -873,7 +877,9 @@ GC_CheckEngine::checkClassStatics(J9JavaVM* vm, J9Class* clazz)
 				J9UTF8* sigUTF = J9ROMFIELDSHAPE_SIGNATURE(romFieldCursor);
 
 				/* interested in objects and all kinds of arrays */
-				if (('L' == J9UTF8_DATA(sigUTF)[0]) || ('[' == J9UTF8_DATA(sigUTF)[0])) {
+				if ((IS_REF_OR_VAL_SIGNATURE(J9UTF8_DATA(sigUTF)[0]))
+					|| ('[' == J9UTF8_DATA(sigUTF)[0])
+				) {
 					numberOfReferences += 1;
 
 					/* get address of next field */
@@ -1333,7 +1339,7 @@ void GC_CheckEngine::endCheckCycle(J9JavaVM *javaVM)
 }
 
 /**
- * Advance the the next stage of checking.
+ * Advance to the next stage of checking.
  * Sets the context for the next stage of checking.  Called every time verification
  * moves to a new structure.
  *

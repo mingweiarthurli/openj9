@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -135,7 +135,7 @@ setCurrentExceptionNLSWithArgs(J9VMThread * vmThread, U_32 nlsModule, U_32 nlsID
 	nlsMsgFormat = omrnls_lookup_message(J9NLS_DO_NOT_PRINT_MESSAGE_TAG | J9NLS_DO_NOT_APPEND_NEWLINE,
 			nlsModule,
 			nlsID,
-			"");
+			NULL);
 
 	va_start(stringArgList, exceptionIndex);
 	msgCharLength = j9str_vprintf(NULL, 0, nlsMsgFormat, stringArgList);
@@ -629,7 +629,7 @@ internalSetCurrentExceptionWithCause(J9VMThread *currentThread, UDATA exceptionN
 			/* The caller might have specified OOM exception type bits */
 			resourceTypes = exceptionNumber & J9_EX_OOM_TYPE_MASK;
 
-			/* No bits specified, we are dealing with with a regular Java Heap OOM */
+			/* No bits specified, we are dealing with a regular Java Heap OOM */
 			if (resourceTypes == 0) {
 				resourceTypes = J9_EX_OOM_JAVA_HEAP;  	
 			}
@@ -849,11 +849,6 @@ walkStackForExceptionThrow(J9VMThread * currentThread, j9object_t exception, UDA
 	return walkState->restartException;
 }
 
-
-
-
-
-
 void  
 setClassCastException(J9VMThread *currentThread, J9Class * instanceClass, J9Class * castClass)
 {
@@ -864,8 +859,14 @@ setClassCastException(J9VMThread *currentThread, J9Class * instanceClass, J9Clas
 	setCurrentException(currentThread, J9_EX_CTOR_CLASS_CLASS + J9VMCONSTANTPOOL_JAVALANGCLASSCASTEXCEPTION, (UDATA *) &detailMessage);
 }
 
-
-
+void
+setNegativeArraySizeException(J9VMThread *currentThread, I_32 size)
+{
+	PORT_ACCESS_FROM_VMC(currentThread);
+	char buffer[15];
+	j9str_printf(PORTLIB, buffer, sizeof(buffer), "%d", size);
+	setCurrentExceptionUTF(currentThread, J9VMCONSTANTPOOL_JAVALANGNEGATIVEARRAYSIZEEXCEPTION, buffer);
+}
 
 void  
 setClassLoadingConstraintError(J9VMThread * currentThread, J9ClassLoader * initiatingLoader, J9Class * existingClass)
@@ -1101,7 +1102,10 @@ setRecursiveBindError(J9VMThread * currentThread, J9Method * method)
 void  
 setNativeNotFoundError(J9VMThread * currentThread, J9Method * method)
 {
-	setCurrentException(currentThread, J9VMCONSTANTPOOL_JAVALANGUNSATISFIEDLINKERROR, (UDATA*)methodToString(currentThread, method));
+	j9object_t detailMessage = methodToString(currentThread, method);
+	if (NULL != detailMessage) {
+		setCurrentException(currentThread, J9VMCONSTANTPOOL_JAVALANGUNSATISFIEDLINKERROR, (UDATA*)detailMessage);
+	}
 }
 
 
@@ -1287,3 +1291,28 @@ setIllegalAccessErrorFinalFieldSet(J9VMThread *currentThread, UDATA isStatic, J9
 	setCurrentExceptionUTF(currentThread, J9VMCONSTANTPOOL_JAVALANGILLEGALACCESSERROR, msg);
 	j9mem_free_memory(msg);
 }
+
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+void
+setCRIUSingleThreadModeJVMCRIUException(J9VMThread *vmThread, U_32 moduleName, U_32 messageNumber)
+{
+	PORT_ACCESS_FROM_VMC(vmThread);
+	const char *msg = NULL;
+
+	/* If no custom NLS message was specified, use the generic one */
+	if ((0 == moduleName) && (0 == messageNumber)) {
+		moduleName = J9NLS_VM_CRIU_SINGLETHREADMODE_JVMCRIUEXCEPTION__MODULE;
+		messageNumber = J9NLS_VM_CRIU_SINGLETHREADMODE_JVMCRIUEXCEPTION__ID;
+	}
+	msg = OMRPORT_FROM_J9PORT(PORTLIB)->nls_lookup_message(OMRPORT_FROM_J9PORT(PORTLIB), J9NLS_DO_NOT_PRINT_MESSAGE_TAG | J9NLS_DO_NOT_APPEND_NEWLINE, moduleName, messageNumber, NULL);
+
+	/* set org.eclipse.openj9.criu.JVMCheckpointException or JVMRestoreException */
+	if (0 == vmThread->javaVM->checkpointState.checkpointRestoreTimeDelta) {
+		/* throw JVMCheckpointException at checkpoint */
+		setCurrentExceptionUTF(vmThread, J9VMCONSTANTPOOL_ORGECLIPSEOPENJ9CRIUJVMCHECKPOINTEXCEPTION, msg);
+	} else {
+		/* throw JVMRestoreException at restore */
+		setCurrentExceptionUTF(vmThread, J9VMCONSTANTPOOL_ORGECLIPSEOPENJ9CRIUJVMRESTOREEXCEPTION, msg);
+	}
+}
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */

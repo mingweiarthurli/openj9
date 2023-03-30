@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1998, 2020 IBM Corp. and others
+ * Copyright (c) 1998, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -171,6 +171,7 @@ extern "C" {
 #cmakedefine J9VM_INTERP_ROMABLE_AOT_SUPPORT
 #cmakedefine J9VM_INTERP_SIG_QUIT_THREAD
 #cmakedefine J9VM_INTERP_SIG_QUIT_THREAD_USES_SEMAPHORES
+#cmakedefine J9VM_INTERP_SIG_USR2
 #cmakedefine J9VM_INTERP_SMALL_MONITOR_SLOT
 #cmakedefine J9VM_INTERP_TRACING
 #cmakedefine J9VM_INTERP_TWO_PASS_EXCLUSIVE
@@ -207,6 +208,7 @@ extern "C" {
 #cmakedefine J9VM_MATH_DIRECT_HELPERS
 #cmakedefine J9VM_OPT_ANNOTATIONS
 #cmakedefine J9VM_OPT_BIG_INTEGER
+#cmakedefine J9VM_OPT_CRIU_SUPPORT
 #cmakedefine J9VM_OPT_CUDA
 #cmakedefine J9VM_OPT_DEBUG_INFO_SERVER
 #cmakedefine J9VM_OPT_DEBUG_JSR45_SUPPORT
@@ -223,6 +225,7 @@ extern "C" {
 #cmakedefine J9VM_OPT_JXE_LOAD_SUPPORT
 #cmakedefine J9VM_OPT_MEMORY_CHECK_SUPPORT
 #cmakedefine J9VM_OPT_METHOD_HANDLE
+#cmakedefine J9VM_OPT_METHOD_HANDLE_COMMON
 #cmakedefine J9VM_OPT_MODULE
 #cmakedefine J9VM_OPT_MULTI_VM
 #cmakedefine J9VM_OPT_NATIVE_CHARACTER_CONVERTER
@@ -231,6 +234,8 @@ extern "C" {
 #cmakedefine J9VM_OPT_NEW_ROM_CLASS_BUILDER
 #cmakedefine J9VM_OPT_NO_CLASSLOADERS
 #cmakedefine J9VM_OPT_NRR
+#cmakedefine J9VM_OPT_OPENJDK_METHODHANDLE
+#cmakedefine J9VM_OPT_OPENJDK_THREAD_SUPPORT
 #cmakedefine J9VM_OPT_PACKED
 #cmakedefine J9VM_OPT_PANAMA
 #cmakedefine J9VM_OPT_PHP_SUPPORT
@@ -259,9 +264,6 @@ extern "C" {
 #cmakedefine J9VM_PROF_COUNT_ARGS_TEMPS
 #cmakedefine J9VM_PROF_EVENT_REPORTING
 #cmakedefine J9VM_PROF_JVMTI
-#cmakedefine J9VM_RAS_DUMP_AGENTS
-#cmakedefine J9VM_RAS_EYECATCHERS
-#cmakedefine J9VM_RAS_FATAL_ASSERT
 #cmakedefine J9VM_SIZE_SMALL_CODE
 #cmakedefine J9VM_SIZE_SMALL_OS_STACK
 #cmakedefine J9VM_SIZE_SMALL_RAM
@@ -276,6 +278,7 @@ extern "C" {
 #cmakedefine J9VM_THR_LOCK_RESERVATION
 #cmakedefine J9VM_THR_PREEMPTIVE
 #cmakedefine J9VM_THR_SMART_DEFLATION
+#cmakedefine J9VM_ZOS_3164_INTEROPERABILITY
 
 /* CMake build only supports OMR DDR */
 #define J9VM_OPT_USE_OMR_DDR
@@ -285,7 +288,7 @@ extern "C" {
 #endif
 
 #ifdef __cplusplus
-}
+} /* extern "C" */
 #endif
 
 #endif /* J9CFG_H */

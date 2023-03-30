@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2018 IBM Corp. and others
+ * Copyright (c) 2018, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -39,6 +39,8 @@ class PutStaticTestHelper {
 			try {
 				Thread.sleep(1000000);
 			} catch(InterruptedException e) {
+				PutStaticDuringClinit.interrupted = true;
+				break;
 			}
 		}
 	}
@@ -48,10 +50,11 @@ public class PutStaticDuringClinit {
 	public static Object lock = new Object();
 	public static boolean runBlocker = false;
 	public static boolean threadsReady = false;
-	public static boolean passed = true;
+	public static volatile boolean passed = true;
+	public static volatile boolean interrupted = false;
 
 	public static void jitWrite(String x) {
-		// https://github.com/eclipse/openj9/pull/2794
+		// https://github.com/eclipse-openj9/openj9/pull/2794
 		// The write to the static field causes jitResolveClassFromStaticField to be called on
 		// certain GC policies. On older VMs, this caused the CP entry to be resolved, meaning
 		// the call to jitResolveStaticField succeeds without the class init check.
@@ -83,9 +86,11 @@ public class PutStaticDuringClinit {
 					lock.notifyAll();
 				}
 				jitWrite("whatever");
-				// <clinit> for PutStaticTestHelper never returns, so if execution reaches
-				// here, the VM has allowed an invalid putstatic.
-				passed = false;
+				if (!interrupted) {
+					// <clinit> for PutStaticTestHelper never returns, so if execution reaches
+					// here, the VM has allowed an invalid putstatic.
+					passed = false;
+				}
 			}
 		};
 		initializer.start();
@@ -105,8 +110,8 @@ public class PutStaticDuringClinit {
 		} catch (InterruptedException e) {
 			throw new RuntimeException(e);
 		}
-		initializer.stop();
-		blocker.stop();
+		initializer.interrupt();
+		blocker.interrupt();
 		try {
 			initializer.join(); 
 		} catch (InterruptedException e) {

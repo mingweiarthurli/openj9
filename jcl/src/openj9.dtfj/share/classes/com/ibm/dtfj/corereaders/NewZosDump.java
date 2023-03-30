@@ -1,6 +1,6 @@
 /*[INCLUDE-IF Sidecar18-SE]*/
 /*******************************************************************************
- * Copyright (c) 2004, 2018 IBM Corp. and others
+ * Copyright (c) 2004, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -715,7 +715,10 @@ public class NewZosDump implements ICoreFileReader {
 				builder.setExecutableUnavailable("unable to extract executable information");
 				//System.out.println("Bad EDB "+edb);
 			}
-			String commandLine = environment.getProperty("IBM_JAVA_COMMAND_LINE", "");
+			String commandLine = environment.getProperty("OPENJ9_JAVA_COMMAND_LINE", null);
+			if (commandLine == null) {
+				commandLine = environment.getProperty("IBM_JAVA_COMMAND_LINE", "");
+			}
 			//Use the EDB address for the process id, if available, otherwise use the Address space id.
 			String pid = edb != null ? format(edb.address()) : format(asid);
 			if (null != _j9rasReader) {

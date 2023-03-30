@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2019, 2020 IBM Corp. and others
+ * Copyright (c) 2019, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -28,14 +28,27 @@
 #include "codegen/CodeGenerator.hpp"
 #include "codegen/CodeGenerator_inlines.hpp"
 #include "codegen/GenerateInstructions.hpp"
+#include "compile/Compilation.hpp"
 #include "runtime/CodeCacheManager.hpp"
 
 extern void TEMPORARY_initJ9ARM64TreeEvaluatorTable(TR::CodeGenerator *cg);
 
-J9::ARM64::CodeGenerator::CodeGenerator() :
-      J9::CodeGenerator()
+J9::ARM64::CodeGenerator::CodeGenerator(TR::Compilation *comp) :
+      J9::CodeGenerator(comp)
    {
+   /**
+    * Do not add CodeGenerator initialization logic here.
+    * Use the \c initialize() method instead.
+    */
+   }
+
+void
+J9::ARM64::CodeGenerator::initialize()
+   {
+   self()->J9::CodeGenerator::initialize();
+
    TR::CodeGenerator *cg = self();
+   TR::Compilation *comp = cg->comp();
 
    cg->setAheadOfTimeCompile(new (cg->trHeapMemory()) TR::AheadOfTimeCompile(cg));
 
@@ -52,8 +65,17 @@ J9::ARM64::CodeGenerator::CodeGenerator() :
 
    cg->setSupportsInliningOfTypeCoersionMethods();
    cg->setSupportsDivCheck();
-   if (!comp()->getOption(TR_FullSpeedDebug))
+   if (!comp->getOption(TR_FullSpeedDebug))
       cg->setSupportsDirectJNICalls();
+
+   cg->setSupportsPrimitiveArrayCopy();
+   cg->setSupportsReferenceArrayCopy();
+
+   static char *disableMonitorCacheLookup = feGetEnv("TR_disableMonitorCacheLookup");
+   if (!disableMonitorCacheLookup)
+      {
+      comp->setOption(TR_EnableMonitorCacheLookup);
+      }
    }
 
 TR::Linkage *
@@ -159,9 +181,9 @@ J9::ARM64::CodeGenerator::generateSwitchToInterpreterPrePrologue(TR::Instruction
    TR::Register *lr = self()->machine()->getRealRegister(TR::RealRegister::x30); // link register
    TR::Register *xzr = self()->machine()->getRealRegister(TR::RealRegister::xzr); // zero register
    TR::ResolvedMethodSymbol *methodSymbol = comp->getJittedMethodSymbol();
-   TR::SymbolReference *revertToInterpreterSymRef = self()->symRefTab()->findOrCreateRuntimeHelper(TR_ARM64revertToInterpreterGlue, false, false, false);
+   TR::SymbolReference *revertToInterpreterSymRef = self()->symRefTab()->findOrCreateRuntimeHelper(TR_ARM64revertToInterpreterGlue);
    uintptr_t ramMethod = (uintptr_t)methodSymbol->getResolvedMethod()->resolvedMethodAddress();
-   TR::SymbolReference *helperSymRef = self()->symRefTab()->findOrCreateRuntimeHelper(TR_j2iTransition, false, false, false);
+   TR::SymbolReference *helperSymRef = self()->symRefTab()->findOrCreateRuntimeHelper(TR_j2iTransition);
    uintptr_t helperAddr = (uintptr_t)helperSymRef->getMethodAddress();
 
    // x8 must contain the saved LR; see Recompilation.s
@@ -182,4 +204,25 @@ J9::ARM64::CodeGenerator::generateSwitchToInterpreterPrePrologue(TR::Instruction
    cursor = generateImmInstruction(self(), TR::InstOpCode::dd, node, 0, cursor);
 
    return cursor;
+   }
+
+bool
+J9::ARM64::CodeGenerator::supportsInliningOfIsInstance()
+   {
+   return !self()->comp()->getOption(TR_DisableInlineIsInstance);
+   }
+
+bool
+J9::ARM64::CodeGenerator::suppressInliningOfRecognizedMethod(TR::RecognizedMethod method)
+   {
+   if (method == TR::java_lang_Math_min_F ||
+       method == TR::java_lang_Math_max_F ||
+       method == TR::java_lang_Math_fma_D ||
+       method == TR::java_lang_Math_fma_F ||
+       method == TR::java_lang_StrictMath_fma_D ||
+       method == TR::java_lang_StrictMath_fma_F)
+      {
+      return true;
+      }
+   return false;
    }

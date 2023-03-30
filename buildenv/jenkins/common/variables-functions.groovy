@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2020 IBM Corp. and others
+ * Copyright (c) 2018, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -29,7 +29,7 @@ class Buildspec {
 
     /*
      * Helper function to check if a variable is a map.
-     * This is needed because .isMap() is not on the default jenkins whitelist
+     * This is needed because .isMap() is not on the default jenkins allow list
      */
     private static boolean isMap(x) {
         switch (x) {
@@ -84,7 +84,7 @@ class Buildspec {
      * else:
      *    - <name>
      *  - <parent>.getScalarField()
-     * with the parents being evaluated in the the order they are listed in the yaml file
+     * with the parents being evaluated in the order they are listed in the yaml file
      */
     public getScalarField(name, sdk_ver) {
         def sdk_key = toKey(sdk_ver)
@@ -312,8 +312,8 @@ def set_repos_variables(BUILD_SPECS=null) {
         echo "Using OPENJDK_REPO = ${OPENJDK_REPO.toString()} OPENJDK_BRANCH = ${OPENJDK_BRANCH.toString()} OPENJDK_SHA = ${OPENJDK_SHA.toString()}"
 
         // default URL and branch for the OpenJ9 and OMR repositories (no entries in defaults.yml)
-        EXTENSIONS = ['OpenJ9': ['repo': 'https://github.com/eclipse/openj9.git',     'branch': 'master'],
-                      'OMR'   : ['repo': 'https://github.com/eclipse/openj9-omr.git', 'branch': 'openj9']]
+        EXTENSIONS = ['OpenJ9': ['repo': 'https://github.com/eclipse-openj9/openj9.git',     'branch': 'master'],
+                      'OMR'   : ['repo': 'https://github.com/eclipse-openj9/openj9-omr.git', 'branch': 'openj9']]
 
         // set OpenJ9 and OMR repos, branches and SHAs
         set_extensions_variables(EXTENSIONS)
@@ -349,9 +349,14 @@ def get_openjdk_info(SDK_VERSION, SPECS, MULTI_RELEASE) {
         def branch = default_openjdk_info.get('default').get('branch')
         def sha = ''
 
-        if (default_openjdk_info[build_spec]) {
-            repo = default_openjdk_info.get(build_spec).get('repoUrl')
-            branch = default_openjdk_info.get(build_spec).get('branch')
+        def shortBuildSpecName = build_spec
+        for (entry in default_openjdk_info.entrySet()) {
+            if ((entry.key != 'default') && entry.key.contains(build_spec)) {
+                repo = entry.value.get('repoUrl')
+                branch = entry.value.get('branch')
+                shortBuildSpecName = entry.key.get(0)
+                break
+            }
         }
 
         // check build parameters
@@ -371,19 +376,19 @@ def get_openjdk_info(SDK_VERSION, SPECS, MULTI_RELEASE) {
         }
 
         if (MULTI_RELEASE) {
-            if (params."${param_name}_REPO_${build_spec}") {
+            if (params."${param_name}_REPO_${shortBuildSpecName}") {
                 // got OPENJDK*_REPO_<spec> build parameter, overwrite repo
-                repo = params."${param_name}_REPO_${build_spec}"
+                repo = params."${param_name}_REPO_${shortBuildSpecName}"
             }
 
-            if (params."${param_name}_BRANCH_${build_spec}") {
+            if (params."${param_name}_BRANCH_${shortBuildSpecName}") {
                 // got OPENJDK*_BRANCH_<spec> build parameter, overwrite branch
-                branch = params."${param_name}_BRANCH_${build_spec}"
+                branch = params."${param_name}_BRANCH_${shortBuildSpecName}"
             }
 
-            if (params."${param_name}_SHA_${build_spec}") {
+            if (params."${param_name}_SHA_${shortBuildSpecName}") {
                 // got OPENJDK*_SHA_<spec> build parameter, overwrite sha
-                sha = params."${param_name}_SHA_${build_spec}"
+                sha = params."${param_name}_SHA_${shortBuildSpecName}"
             }
         }
 
@@ -531,6 +536,7 @@ def get_user_credentials_id(KEY) {
 def set_node(job_type) {
     // fetch labels for given platform/spec
     NODE = ''
+    DOCKER_IMAGE = buildspec_manager.getSpec(SPEC).getScalarField("node_labels.docker_image", SDK_VERSION) ?: ''
     for (key in ['NODE', 'LABEL']) {
         // check the build parameters
         if (params.containsKey(key)) {
@@ -545,7 +551,6 @@ def set_node(job_type) {
         if (!NODE) {
             error("Missing ${job_type} NODE!")
         }
-
     }
 }
 
@@ -573,12 +578,10 @@ def set_build_variables() {
     def buildspec = buildspec_manager.getSpec(SPEC)
 
     // fetch values per spec and Java version from the variables file
-    BOOT_JDK = buildspec.getScalarField("boot_jdk", SDK_VERSION)
-    FREEMARKER = buildspec.getScalarField("freemarker", SDK_VERSION)
-    OPENJDK_REFERENCE_REPO = buildspec.getScalarField("openjdk_reference_repo", SDK_VERSION)
     set_release()
     set_jdk_folder()
     set_build_extra_options()
+    set_sdk_impl()
 
     // set variables for the build environment configuration
     // check job parameters, if not provided default to variables file
@@ -613,21 +616,88 @@ def set_build_variables() {
     }
 
     echo "Using BUILD_ENV_CMD = ${BUILD_ENV_CMD}, BUILD_ENV_VARS_LIST = ${BUILD_ENV_VARS_LIST.toString()}"
+
+    if (VARIABLES.misc.custom_filename) {
+        customFile = load VARIABLES.misc.custom_filename
+    } else {
+        customFile = null
+    }
 }
 
 def set_sdk_variables() {
+    set_sdk_versions()
     DATESTAMP = get_date()
-    SDK_FILENAME = "OpenJ9-JDK${SDK_VERSION}-${SPEC}-${DATESTAMP}.tar.gz"
+    SDK_FILE_EXT = SPEC.contains('zos') ? '.pax' : '.tar.gz'
+    SDK_FILENAME = get_value(VARIABLES.misc.sdk_filename_template, BUILD_IDENTIFIER) ?: get_value(VARIABLES.misc.sdk_filename_template, 'default')
+    echo "SDK_FILENAME (before processing):'${SDK_FILENAME}'"
+    // If filename has unresolved variables at this point, use Groovy Template Binding engine to resolve them
+    if (SDK_FILENAME.contains('$')) {
+        set_sdk_impl()
+        // Add all variables that could be used in a template
+        def binding = ["SDK_IMPL":SDK_IMPL, "SPEC":SPEC, "SDK_VERSION":SDK_VERSION, "FULL_SDK_VERSION":FULL_SDK_VERSION, "JAVA_RELEASE":JAVA_RELEASE, "JAVA_SUB_RELEASE":JAVA_SUB_RELEASE, "DATESTAMP":DATESTAMP, "SDK_FILE_EXT":SDK_FILE_EXT]
+        def engine = new groovy.text.SimpleTemplateEngine()
+        SDK_FILENAME = engine.createTemplate(SDK_FILENAME).make(binding)
+    }
+    echo "SDK_FILENAME:'${SDK_FILENAME}'"
+
     TEST_FILENAME = "test-images.tar.gz"
+    CODE_COVERAGE_FILENAME = "code-coverage-files.tar.gz"
     JAVADOC_FILENAME = "OpenJ9-JDK${SDK_VERSION}-Javadoc-${SPEC}-${DATESTAMP}.tar.gz"
     JAVADOC_OPENJ9_ONLY_FILENAME = "OpenJ9-JDK${SDK_VERSION}-Javadoc-openj9-${SPEC}-${DATESTAMP}.tar.gz"
     DEBUG_IMAGE_FILENAME = "debug-image.tar.gz"
     echo "Using SDK_FILENAME = ${SDK_FILENAME}"
     echo "Using TEST_FILENAME = ${TEST_FILENAME}"
+    echo "Using CODE_COVERAGE_FILENAME = ${CODE_COVERAGE_FILENAME}"
     echo "Using JAVADOC_FILENAME = ${JAVADOC_FILENAME}"
     echo "Using JAVADOC_OPENJ9_ONLY_FILENAME = ${JAVADOC_OPENJ9_ONLY_FILENAME}"
     echo "Using DEBUG_IMAGE_FILENAME = ${DEBUG_IMAGE_FILENAME}"
-    DIAGNOSTICS_FILENAME = "${JOB_NAME}-${BUILD_NUMBER}-${DATESTAMP}-diagnostics.tar.gz"
+}
+
+def set_sdk_versions() {
+    /*
+     * Get full version from tag and replace + with _
+     * Eg. JDK8
+     * OPENJDK_TAG := jdk8u272-b08
+     * FULL_SDK_VERSION = jdk8u272-b08
+     * JAVA_RELEASE = 8
+     * JAVS_SUB_RELEASE = 8u272
+     *
+     * Eg. JDK11
+     * OPENJDK_TAG := jdk-11.0.8+10
+     * FULL_SDK_VERSION = jdk-11.0.8_10
+     * JAVA_RELEASE = 11.0
+     * JAVS_SUB_RELEASE = 11.0.8
+     *
+     * Eg. Initial feature release
+     * OPENJDK_TAG := jdk-15+36
+     * FULL_SDK_VERSION = jdk-15_36
+     * JAVA_RELEASE = 15.0
+     * JAVA_SUB_RELEASE = 15.0.0
+     */
+
+    FULL_SDK_VERSION = sh (
+        script: "sed -n -e 's/+/_/g; s/^OPENJDK_TAG := //p' < closed/openjdk-tag.gmk",
+        returnStdout: true
+    ).trim()
+    def subReleaseStartIndexChar = 'jdk-'
+    def subReleaseEndIndexChar = '_'
+    def releaseEndIndexChar = '.'
+    if (SDK_VERSION.equals('8')) {
+        subReleaseStartIndexChar = 'jdk'
+        subReleaseEndIndexChar = '-'
+        releaseEndIndexChar = 'u'
+    }
+    JAVA_SUB_RELEASE = FULL_SDK_VERSION.substring(FULL_SDK_VERSION.indexOf(subReleaseStartIndexChar) + subReleaseStartIndexChar.length(), FULL_SDK_VERSION.lastIndexOf(subReleaseEndIndexChar))
+
+    if (!JAVA_SUB_RELEASE.contains('.') && !SDK_VERSION.equals('8')) {
+        // Must be the initial
+        JAVA_SUB_RELEASE += ".0.0"
+    }
+    JAVA_RELEASE = JAVA_SUB_RELEASE.substring(0,JAVA_SUB_RELEASE.lastIndexOf(releaseEndIndexChar))
+
+    echo "FULL_SDK_VERSION:'${FULL_SDK_VERSION}'"
+    echo "JAVA_RELEASE:'${JAVA_RELEASE}'"
+    echo "JAVA_SUB_RELEASE:'${JAVA_SUB_RELEASE}'"
 }
 
 def get_date() {
@@ -664,6 +734,10 @@ def set_test_targets() {
     }
     echo "TESTS:'${TESTS}'"
 
+    set_sdk_impl()
+}
+
+def set_sdk_impl() {
     // Set SDK Implementation, default to OpenJ9
     SDK_IMPL = buildspec.getScalarField("sdk_impl", 'all') ?: 'openj9'
     SDK_IMPL_SHORT = buildspec.getScalarField("sdk_impl_short", 'all') ?: 'j9'
@@ -680,7 +754,7 @@ def set_test_misc() {
     if (!params.TEST_NODE) {
         // Only add extra test labels if the user has not specified a specific TEST_NODE
         TESTS.each { id, target ->
-            target['extraTestLabels'] = buildspec.getVectorField("extra_test_labels", target).join('&&') ?: ''
+            target['extraTestLabels'] = buildspec.getVectorField("extra_test_labels", SDK_VERSION).join('&&') ?: ''
         }
     } else {
         TESTS.each { id, target ->
@@ -718,34 +792,31 @@ def set_test_misc() {
 
 def set_slack_channel() {
     SLACK_CHANNEL = params.SLACK_CHANNEL
-    if (!SLACK_CHANNEL && (!params.PERSONAL_BUILD || params.PERSONAL_BUILD != 'true')) {
+    if (!SLACK_CHANNEL && !params.PERSONAL_BUILD.equalsIgnoreCase('true')) {
         SLACK_CHANNEL = VARIABLES.slack_channel
     }
 }
 
 def set_artifactory_config(id="Nightly") {
-    ARTIFACTORY_CONFIG = [:]
-    echo "Configure Artifactory..."
+    set_basic_artifactory_config(id)
 
     if (VARIABLES.artifactory.defaultGeo) {
-        // Allow default geo to be overridden with a param. Used by the Clenaup script to target a specific server.
-        ARTIFACTORY_CONFIG['defaultGeo'] = (params.ARTIFACTORY_GEO) ? params.ARTIFACTORY_GEO : VARIABLES.artifactory.defaultGeo
-        ARTIFACTORY_CONFIG['geos'] = VARIABLES.artifactory.server.keySet()
-        ARTIFACTORY_CONFIG['repo'] = VARIABLES.artifactory.repo
-        ARTIFACTORY_CONFIG['uploadDir'] = "${ARTIFACTORY_CONFIG['repo']}/${JOB_NAME}/${BUILD_ID}/"
-
-        for (geo in ARTIFACTORY_CONFIG['geos']) {
-            ARTIFACTORY_CONFIG[geo] = [:]
-            ARTIFACTORY_CONFIG[geo]['server'] = get_value(VARIABLES.artifactory.server, geo)
-            def numArtifacts = get_value(VARIABLES.artifactory.numArtifacts, geo)
-            if (!numArtifacts) {
-                numArtifacts = get_value(VARIABLES.build_discarder.logs, pipelineFunctions.convert_build_identifier(id))
-            }
-            ARTIFACTORY_CONFIG[geo]['numArtifacts'] = numArtifacts.toInteger()
-            ARTIFACTORY_CONFIG[geo]['daysToKeepArtifacts'] = get_value(VARIABLES.artifactory.daysToKeepArtifacts, geo).toInteger()
-            ARTIFACTORY_CONFIG[geo]['manualCleanup'] = get_value(VARIABLES.artifactory.manualCleanup, geo)
-            ARTIFACTORY_CONFIG[geo]['vpn'] = get_value(VARIABLES.artifactory.vpn, geo)
+        def repo = ARTIFACTORY_CONFIG['repo']
+        ARTIFACTORY_CONFIG['uploadDir'] = get_value(VARIABLES.artifactory.uploadDir, id) ?: get_value(VARIABLES.artifactory.uploadDir, 'default')
+        if (!ARTIFACTORY_CONFIG['uploadDir'].endsWith('/')) {
+            ARTIFACTORY_CONFIG['uploadDir'] += '/'
         }
+        // If uploadDir has unresolved variables at this point, use Groovy Template Binding engine to resolve them
+        if (ARTIFACTORY_CONFIG['uploadDir'].contains('$')) {
+            if (ARTIFACTORY_CONFIG['uploadDir'].contains('SDK_IMPL') && !binding.hasVariable('SDK_IMPL')) {
+                set_sdk_impl()
+            }
+            // Add all variables that could be used in a template
+            def binding = ["JOB_NAME":JOB_NAME, "BUILD_ID":BUILD_ID, "repo":repo, "SDK_IMPL":SDK_IMPL, "JAVA_RELEASE":JAVA_RELEASE, "JAVA_SUB_RELEASE":JAVA_SUB_RELEASE, "SPEC":SPEC, "DATESTAMP":DATESTAMP]
+            def engine = new groovy.text.SimpleTemplateEngine()
+            ARTIFACTORY_CONFIG['uploadDir'] = engine.createTemplate(ARTIFACTORY_CONFIG['uploadDir']).make(binding)
+        }
+
         ARTIFACTORY_CONFIG[VARIABLES.artifactory.defaultGeo]['uploadBool'] = true
 
         // Determine if we need to upload more than the default server
@@ -767,8 +838,33 @@ def set_artifactory_config(id="Nightly") {
                 }
             }
         }
-
         echo "ARTIFACTORY_CONFIG:'${ARTIFACTORY_CONFIG}'"
+    }
+}
+
+def set_basic_artifactory_config(id="Nightly") {
+    ARTIFACTORY_CONFIG = [:]
+    echo "Configure Artifactory..."
+
+    if (VARIABLES.artifactory.defaultGeo) {
+        // Allow default geo to be overridden with a param. Used by the Clenaup script to target a specific server.
+        ARTIFACTORY_CONFIG['defaultGeo'] = params.ARTIFACTORY_GEO ?: VARIABLES.artifactory.defaultGeo
+        ARTIFACTORY_CONFIG['geos'] = VARIABLES.artifactory.server.keySet()
+        ARTIFACTORY_CONFIG['repo'] = get_value(VARIABLES.artifactory.repo, id) ?: get_value(VARIABLES.artifactory.repo, 'default')
+
+        for (geo in ARTIFACTORY_CONFIG['geos']) {
+            ARTIFACTORY_CONFIG[geo] = [:]
+            ARTIFACTORY_CONFIG[geo]['server'] = get_value(VARIABLES.artifactory.server, geo)
+            def numArtifacts = get_value(VARIABLES.artifactory.numArtifacts, geo)
+            if (!numArtifacts) {
+                numArtifacts = get_value(VARIABLES.build_discarder.logs, pipelineFunctions.convert_build_identifier(id))
+            }
+            ARTIFACTORY_CONFIG[geo]['numArtifacts'] = numArtifacts.toInteger()
+            ARTIFACTORY_CONFIG[geo]['daysToKeepArtifacts'] = get_value(VARIABLES.artifactory.daysToKeepArtifacts, geo).toInteger()
+            ARTIFACTORY_CONFIG[geo]['manualCleanup'] = get_value(VARIABLES.artifactory.manualCleanup, geo)
+            ARTIFACTORY_CONFIG[geo]['vpn'] = get_value(VARIABLES.artifactory.vpn, geo)
+        }
+
         /*
         * Write out default server values to string variables.
         * The upstream job calls job.getBuildVariables() which only returns strings.
@@ -875,7 +971,7 @@ def set_build_identifier() {
         if (params.ghprbPullId && params.ghprbGhRepository) {
             // If Pull Request build
             BUILD_IDENTIFIER = params.ghprbGhRepository + '#' + params.ghprbPullId
-        } else if (PERSONAL_BUILD) {
+        } else if (PERSONAL_BUILD.equalsIgnoreCase('true')) {
             // If Personal build
             wrap([$class: 'BuildUser']) {
                 BUILD_IDENTIFIER = "${BUILD_USER_EMAIL}"
@@ -923,7 +1019,7 @@ def setup() {
             buildFile = pipelineFunctions
             SHAS = buildFile.get_shas(OPENJDK_REPO, OPENJDK_BRANCH, OPENJ9_REPO, OPENJ9_BRANCH, OMR_REPO, OMR_BRANCH, VENDOR_TEST_REPOS_MAP, VENDOR_TEST_BRANCHES_MAP, VENDOR_TEST_SHAS_MAP)
             BUILD_NAME = buildFile.get_build_job_name(SPEC, SDK_VERSION, BUILD_IDENTIFIER)
-            // Stash DSL file so we can quickly load it on master
+            // Stash DSL file so we can quickly load it on the Jenkins Manager node
             if (params.AUTOMATIC_GENERATION != 'false') {
                 stash includes: 'buildenv/jenkins/jobs/pipelines/Pipeline_Template.groovy', name: 'DSL'
             }
@@ -963,6 +1059,12 @@ def set_job_variables(job_type) {
     // Set ARCHIVE_JAVADOC flag
     ARCHIVE_JAVADOC = (params.ARCHIVE_JAVADOC) ? params.ARCHIVE_JAVADOC : false
     echo "Using ARCHIVE_JAVADOC = ${ARCHIVE_JAVADOC}"
+    // Set CODE_COVERAGE flag
+    CODE_COVERAGE = (params.CODE_COVERAGE) ? params.CODE_COVERAGE : false
+    echo "Using CODE_COVERAGE = ${CODE_COVERAGE}"
+
+    USE_TESTENV_PROPERTIES = params.USE_TESTENV_PROPERTIES ?: false
+    echo "Using USE_TESTENV_PROPERTIES = ${USE_TESTENV_PROPERTIES}"
 
     switch (job_type) {
         case "build":
@@ -970,7 +1072,6 @@ def set_job_variables(job_type) {
             set_node(job_type)
             // set variables for a build job
             set_build_variables()
-            set_sdk_variables()
             add_pr_to_description()
             break
         case "pipeline":
@@ -1024,7 +1125,7 @@ def validate_arguments(ARGS) {
 def printStackTrace(e) {
     def writer = new StringWriter()
     e.printStackTrace(new PrintWriter(writer))
-    echo e.toString()
+    echo writer.toString()
 }
 
 /*
@@ -1268,6 +1369,30 @@ def set_build_extra_options(build_specs=null) {
         if (!EXTRA_MAKE_OPTIONS) {
             EXTRA_MAKE_OPTIONS = buildspec.getVectorField("extra_make_options", SDK_VERSION).join(" ")
         }
+        if (params.CODE_COVERAGE) {
+           if (EXTRA_MAKE_OPTIONS.contains("EXTRA_CMAKE_ARGS=")) {
+                EXTRA_MAKE_OPTIONS = EXTRA_MAKE_OPTIONS.replaceAll(/(-DCODE_COVERAGE=).*?(\"|\s|$)/, '$1ON$2')
+                if (EXTRA_MAKE_OPTIONS.contains("EXTRA_CMAKE_ARGS=\"")) { // multiple arguments for EXTRA_CMAKE_ARGS="XX YY"
+                    extracted_extra_cmake_args = EXTRA_MAKE_OPTIONS.find(/EXTRA_CMAKE_ARGS=\".*?\"/)
+                    if(!extracted_extra_cmake_args.contains("-DCODE_COVERAGE=ON")) {
+                        EXTRA_MAKE_OPTIONS = EXTRA_MAKE_OPTIONS.replace("EXTRA_CMAKE_ARGS=\"", "EXTRA_CMAKE_ARGS=\"-DCODE_COVERAGE=ON ")
+                    }
+                } else { // only one argument for EXTRA_CMAKE_ARGS=-D
+                    if(!EXTRA_MAKE_OPTIONS.contains("EXTRA_CMAKE_ARGS=-DCODE_COVERAGE=ON")) {
+                        sub_options = EXTRA_MAKE_OPTIONS.split(" ")
+                        sub_options.eachWithIndex { sub_option, index ->
+                            if (sub_option.contains("EXTRA_CMAKE_ARGS=")) {
+                                sub_option = sub_option.replace("EXTRA_CMAKE_ARGS=", "EXTRA_CMAKE_ARGS=\"-DCODE_COVERAGE=ON ")
+                                sub_options[index] = sub_option + "\""
+                            }
+                        }
+                        EXTRA_MAKE_OPTIONS = sub_options.join(" ")
+                    }
+                }
+            } else {
+                EXTRA_MAKE_OPTIONS += " EXTRA_CMAKE_ARGS=-DCODE_COVERAGE=ON"
+            }
+        }
 
         OPENJDK_CLONE_DIR = params.OPENJDK_CLONE_DIR
         if (!OPENJDK_CLONE_DIR) {
@@ -1347,50 +1472,20 @@ def set_build_extra_options(build_specs=null) {
  * Set the Git repository URL and branch for the AdoptOpenJDK Testing material.
  */
 def set_adoptopenjdk_tests_repository(build_releases=null) {
-    ADOPTOPENJDK_MAP = [:]
+    // fetch from the variables file
+    def adoptOpenJdkByReleaseMap = VARIABLES.adoptopenjdk.default
 
-    if (build_releases) {
-        for (release in build_releases) {
-            // fetch from the variables file
-            def adoptOpenJdkByReleaseMap = [:]
-            if (get_value(VARIABLES.adoptopenjdk, release)) {
-                adoptOpenJdkByReleaseMap.putAll(get_value(VARIABLES.adoptopenjdk, release))
-            } else {
-                adoptOpenJdkByReleaseMap.putAll(VARIABLES.adoptopenjdk.default)
-            }
-
-            if (params."ADOPTOPENJDK${release}_REPO") {
-                // override repo with user value
-                adoptOpenJdkByReleaseMap['repoUrl'] = params."ADOPTOPENJDK${release}_REPO"
-            }
-
-            if (params."ADOPTOPENJDK${release}_BRANCH") {
-                // override branch with user value
-                adoptOpenJdkByReleaseMap['branch'] = params."ADOPTOPENJDK${release}_BRANCH"
-            }
-
-            if (adoptOpenJdkByReleaseMap) {
-                ADOPTOPENJDK_MAP.put(release, adoptOpenJdkByReleaseMap)
-            }
-        }
-
-        echo "ADOPTOPENJDK_MAP = ${ADOPTOPENJDK_MAP.toString()}"
-    } else {
-        // fetch from the variables file
-        def adoptOpenJdkByReleaseMap = VARIABLES.adoptopenjdk.default
-
-        ADOPTOPENJDK_REPO = params.ADOPTOPENJDK_REPO
-        if (!ADOPTOPENJDK_REPO && adoptOpenJdkByReleaseMap) {
-            ADOPTOPENJDK_REPO = adoptOpenJdkByReleaseMap.get('repoUrl')
-        }
-
-        ADOPTOPENJDK_BRANCH = params.ADOPTOPENJDK_BRANCH
-        if (!ADOPTOPENJDK_BRANCH && adoptOpenJdkByReleaseMap) {
-            ADOPTOPENJDK_BRANCH = adoptOpenJdkByReleaseMap.get('branch')
-        }
-
-        echo "Using ADOPTOPENJDK_REPO = ${ADOPTOPENJDK_REPO} ADOPTOPENJDK_BRANCH = ${ADOPTOPENJDK_BRANCH}"
+    ADOPTOPENJDK_REPO = params.ADOPTOPENJDK_REPO
+    if (!ADOPTOPENJDK_REPO && adoptOpenJdkByReleaseMap) {
+        ADOPTOPENJDK_REPO = adoptOpenJdkByReleaseMap.get('repoUrl')
     }
+
+    ADOPTOPENJDK_BRANCH = params.ADOPTOPENJDK_BRANCH
+    if (!ADOPTOPENJDK_BRANCH && adoptOpenJdkByReleaseMap) {
+        ADOPTOPENJDK_BRANCH = adoptOpenJdkByReleaseMap.get('branch')
+    }
+
+    echo "Using ADOPTOPENJDK_REPO = ${ADOPTOPENJDK_REPO} ADOPTOPENJDK_BRANCH = ${ADOPTOPENJDK_BRANCH}"
 }
 
 // Creates a job using the job DSL plugin on Jenkins
@@ -1428,11 +1523,120 @@ def create_job(JOB_NAME, SDK_VERSION, SPEC, downstreamJobType, id) {
     params.put('DISCARDER_NUM_BUILDS', DISCARDER_NUM_BUILDS)
     params.put('SCM_REPO', SCM_REPO)
     params.put('SCM_BRANCH', SCM_BRANCH)
+    if (USER_CREDENTIALS_ID) {
+        params.put('USER_CREDENTIALS_ID', USER_CREDENTIALS_ID)
+    }
 
     def templatePath = 'buildenv/jenkins/jobs/pipelines/Pipeline_Template.groovy'
     pipelineFunctions.retry_and_delay(
         { jobDsl targets: templatePath, ignoreExisting: false, additionalParameters: params },
         3, 120)
+}
+
+def set_build_variables_per_node() {
+    def bootJDKVersion = buildspec.getScalarField('boot_jdk.version', SDK_VERSION)
+    def bootJDKPath = buildspec.getScalarField('boot_jdk.location', SDK_VERSION)
+    BOOT_JDK = "${bootJDKPath}/jdk${bootJDKVersion}"
+    println("BOOT_JDK: ${BOOT_JDK}")
+    if (!check_path("${BOOT_JDK}/bin/java")) {
+        echo "BOOT_JDK: ${BOOT_JDK} does not exist! Attempt to download it..."
+        download_boot_jdk(bootJDKVersion, BOOT_JDK)
+    }
+
+    FREEMARKER = buildspec.getScalarField('freemarker', SDK_VERSION)
+    if (FREEMARKER) {
+        println("FREEMARKER: ${FREEMARKER}")
+        if (!check_path(FREEMARKER)) {
+            error("FREEMARKER: ${FREEMARKER} does not exist!")
+        }
+    }
+
+    OPENJDK_REFERENCE_REPO = buildspec.getScalarField("openjdk_reference_repo", SDK_VERSION)
+    println("OPENJDK_REFERENCE_REPO: ${OPENJDK_REFERENCE_REPO}")
+    if (!check_path(OPENJDK_REFERENCE_REPO)) {
+        println("The git cache OPENJDK_REFERENCE_REPO: ${buildspec.getScalarField('openjdk_reference_repo', SDK_VERSION)} does not exist on ${NODE_NAME}!")
+    }
+
+    if (SPEC.contains('win')) {
+        echo "Check for OpenSSL install..."
+        def match = (EXTRA_CONFIGURE_OPTIONS =~ /--with-openssl=(\S+)\b/)
+        if (!match.find()) {
+            echo "No '--with-openssl' option found."
+        } else {
+            def opensslLocation = match.group(1)
+            if (opensslLocation.equals('fetched') || opensslLocation.equals('system')) {
+                echo "Using ${opensslLocation} OpenSSL"
+            } else if (check_path("${opensslLocation}")) {
+                echo "OpenSSL found at ${opensslLocation}"
+            } else {
+                echo "Downloading OpenSSL..."
+                def opensslVersion = opensslLocation.substring(opensslLocation.lastIndexOf('/') + 1)
+                def opensslParentFolder = opensslLocation.substring(0, opensslLocation.lastIndexOf('/'))
+                dir('openssl') {
+                    sh """
+                        curl -Ok ${JENKINS_URL}userContent/${opensslVersion}.zip
+                        unzip ${opensslVersion}.zip
+                        rm ${opensslVersion}.zip
+                        mkdir -p ${opensslParentFolder}
+                        mv ${opensslVersion} ${opensslParentFolder}/
+                    """
+                }
+                cleanWs()
+            }
+        }
+    }
+
+    FAIL_PATTERN = params.FAIL_PATTERN ?: buildspec.getScalarField('fail_pattern', SDK_VERSION)
+}
+
+def check_path(inPath) {
+    if (!inPath) {
+        return false
+    }
+    return sh (script: "test -e ${inPath} && echo true || echo false", returnStdout: true).trim().toBoolean()
+}
+
+def download_boot_jdk(bootJDKVersion, bootJDK) {
+    def os = buildspec.getScalarField('boot_jdk', 'os')
+    def arch = buildspec.getScalarField('boot_jdk', 'arch')
+    def dirStrip = buildspec.getScalarField('boot_jdk.dir_strip', SDK_VERSION)
+    def sdkUrl = buildspec.getScalarField('boot_jdk.url', bootJDKVersion)
+
+    if (sdkUrl.contains('$')) {
+        // Add all variables that could be used in a template
+        def binding = ["os":os, "arch":arch, "bootJDKVersion":bootJDKVersion]
+        def engine = new groovy.text.SimpleTemplateEngine()
+        sdkUrl = engine.createTemplate(sdkUrl).make(binding)
+    }
+    /*
+     * Download bootjdk
+     * Windows are zips from Adopt. Unzip doesn't have strip dir so we have to manually move.
+     * Remaining platforms are tarballs.
+     * Mac has some extra dirs to strip off hence $dirStrip.
+     */
+    dir('bootjdk') {
+        sh """
+            curl -LJkO ${sdkUrl}
+            mkdir -p ${bootJDK}
+            sdkFile=`ls | grep semeru`
+            if [[ "\$sdkFile" == *zip ]]; then
+                unzip "\$sdkFile" -d .
+                sdkFolder=`ls -d */`
+                mv "\$sdkFolder"* ${bootJDK}/
+                rm -r "\$sdkFolder"
+            else
+                gzip -cd "\$sdkFile" | tar xof - -C ${bootJDK} --strip=${dirStrip}
+            fi
+            ${bootJDK}/bin/java -version
+        """
+    }
+    buildFile.cleanWorkspace(false)
+}
+
+def set_build_custom_options() {
+    if (customFile) {
+        customFile.set_extra_options()
+    }
 }
 
 return this

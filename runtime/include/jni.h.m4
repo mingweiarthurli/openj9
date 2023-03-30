@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -28,7 +28,7 @@
 #include <stdarg.h> /* For va_list */
 #include "jniport.h"
 
-#if defined JNI_JCL_H
+#if defined(JNI_JCL_H)
 #include "jni_jcl.h"
 #endif
 
@@ -53,8 +53,10 @@ extern "C" {
 #define JNI_VERSION_1_4 0x00010004
 #define JNI_VERSION_1_6 0x00010006
 #define JNI_VERSION_1_8 0x00010008
-ifelse(eval(JAVA_SPEC_VERSION >= 9), 1, `#define JNI_VERSION_9   0x00090000', `dnl')
+ifelse(eval(JAVA_SPEC_VERSION >=  9), 1, `#define JNI_VERSION_9   0x00090000', `dnl')
 ifelse(eval(JAVA_SPEC_VERSION >= 10), 1, `#define JNI_VERSION_10  0x000A0000', `dnl')
+ifelse(eval(JAVA_SPEC_VERSION >= 19), 1, `#define JNI_VERSION_19  0x00130000', `dnl')
+ifelse(eval(JAVA_SPEC_VERSION >= 20), 1, `#define JNI_VERSION_20  0x00140000', `dnl')
 
 #define JVMEXT_VERSION_1_1 0x7E010001
 
@@ -79,6 +81,23 @@ typedef double jdouble;
 typedef jint jsize;
 
 #ifdef __cplusplus
+ifdef(`J9_ZOS_3164_INTEROPERABILITY',`dnl
+typedef long long jobject;
+typedef long long jweak;
+typedef long long jclass;
+typedef long long jstring;
+typedef long long jthrowable;
+typedef long long jarray;
+typedef long long jobjectArray;
+typedef long long jbooleanArray;
+typedef long long jbyteArray;
+typedef long long jcharArray;
+typedef long long jshortArray;
+typedef long long jintArray;
+typedef long long jlongArray;
+typedef long long jfloatArray;
+typedef long long jdoubleArray;
+',`dnl
 class _jobject {};
 class _jweak : public _jobject {};
 class _jclass : public _jobject {};
@@ -109,9 +128,14 @@ typedef _jintArray * jintArray;
 typedef _jlongArray * jlongArray;
 typedef _jfloatArray * jfloatArray;
 typedef _jdoubleArray * jdoubleArray;
+')dnl
 #else
+ifdef(`J9_ZOS_3164_INTEROPERABILITY',`dnl
+typedef long long jobject;
+',`dnl
 struct _jobject;
 typedef struct _jobject * jobject;
+')dnl
 typedef jobject jweak;
 typedef jobject jclass;
 typedef jobject jstring;
@@ -128,10 +152,15 @@ typedef jarray jfloatArray;
 typedef jarray jdoubleArray;
 #endif
 
+ifdef(`J9_ZOS_3164_INTEROPERABILITY',`dnl
+typedef long long jfieldID;
+typedef long long jmethodID;
+',`dnl
 struct _jfieldID;
 typedef struct _jfieldID *jfieldID;
 struct _jmethodID;
 typedef struct _jmethodID *jmethodID;
+')dnl
 
 /* Used for CallXXXMethodA API */
 typedef union jvalue {
@@ -179,7 +208,7 @@ typedef struct JavaVMQuery JavaVMQuery;
 typedef struct GCStatus {
 	jint heap;
 	jint count;
-	jlong freestorage; 
+	jlong freestorage;
 	jlong totalstorage;
 } GCStatus;
 
@@ -188,7 +217,7 @@ struct JNIEnv_;
 struct JNIInvokeInterface_;
 struct JavaVM_;
 #ifdef __cplusplus
-typedef  JNIEnv_ JNIEnv;
+typedef JNIEnv_ JNIEnv;
 typedef JavaVM_ JavaVM;
 #else
 typedef const struct JNINativeInterface_ *JNIEnv;
@@ -430,7 +459,9 @@ struct JNINativeInterface_ {
 	jlong (JNICALL * GetDirectBufferCapacity)(JNIEnv *env, jobject buf);
 	jobjectRefType (JNICALL * GetObjectRefType)(JNIEnv* env, jobject obj);
 ifelse(eval(JAVA_SPEC_VERSION >= 9), 1, `	jobject (JNICALL * GetModule)(JNIEnv *env, jclass clazz);', `dnl')
+ifelse(eval(JAVA_SPEC_VERSION >= 19), 1, `	jboolean (JNICALL * IsVirtualThread)(JNIEnv *env, jobject obj);', `dnl')
 };
+
 struct JNIEnv_ {
 	const struct JNINativeInterface_ *functions;
 	void *reserved0;
@@ -468,10 +499,10 @@ struct JNIEnv_ {
 	jmethodID GetMethodID(jclass clazz, const char *name, const char *sig) { return functions->GetMethodID(this, clazz, name, sig); }
 	jobject CallObjectMethod(jobject obj, jmethodID methodID, ...) { jobject retval; va_list parms; va_start(parms, methodID); retval = functions->CallObjectMethodV(this, obj, methodID, parms); va_end(parms); return retval; }
 	jobject CallObjectMethodV(jobject obj, jmethodID methodID, va_list args) { return functions->CallObjectMethodV(this, obj, methodID, args); }
-	jobject CallObjectMethodA(jobject obj, jmethodID methodID, jvalue * args) { return functions->CallObjectMethodA(this, obj, methodID,  args); }
+	jobject CallObjectMethodA(jobject obj, jmethodID methodID, jvalue * args) { return functions->CallObjectMethodA(this, obj, methodID, args); }
 	jboolean CallBooleanMethod(jobject obj, jmethodID methodID, ...) { jboolean retval; va_list parms; va_start(parms, methodID); retval = functions->CallBooleanMethodV(this, obj, methodID, parms); va_end(parms); return retval; }
 	jboolean CallBooleanMethodV(jobject obj, jmethodID methodID, va_list args) { return functions->CallBooleanMethodV(this, obj, methodID, args); }
-	jboolean CallBooleanMethodA(jobject obj, jmethodID methodID, jvalue * args) { return functions->CallBooleanMethodA(this, obj, methodID,  args); }
+	jboolean CallBooleanMethodA(jobject obj, jmethodID methodID, jvalue * args) { return functions->CallBooleanMethodA(this, obj, methodID, args); }
 	jbyte CallByteMethod(jobject obj, jmethodID methodID, ...) { jbyte retval; va_list parms; va_start(parms, methodID); retval = functions->CallByteMethodV(this, obj, methodID, parms); va_end(parms); return retval; }
 	jbyte CallByteMethodV(jobject obj, jmethodID methodID, va_list args) { return functions->CallByteMethodV(this, obj, methodID, args); }
 	jbyte CallByteMethodA(jobject obj, jmethodID methodID, jvalue *args) { return functions->CallByteMethodA(this, obj, methodID, args); }
@@ -495,13 +526,13 @@ struct JNIEnv_ {
 	jdouble CallDoubleMethodA(jobject obj, jmethodID methodID, jvalue *args) { return functions->CallDoubleMethodA(this, obj, methodID, args); }
 	void CallVoidMethod(jobject obj, jmethodID methodID, ...) { va_list parms; va_start(parms, methodID); functions->CallVoidMethodV(this, obj, methodID, parms); va_end(parms); }
 	void CallVoidMethodV(jobject obj, jmethodID methodID, va_list args) { functions->CallVoidMethodV(this, obj, methodID, args); }
-	void CallVoidMethodA(jobject obj, jmethodID methodID, jvalue * args) { functions->CallVoidMethodA(this, obj, methodID,  args); }
+	void CallVoidMethodA(jobject obj, jmethodID methodID, jvalue * args) { functions->CallVoidMethodA(this, obj, methodID, args); }
 	jobject CallNonvirtualObjectMethod(jobject obj, jclass clazz, jmethodID methodID, ...) { jobject retval; va_list parms; va_start(parms, methodID); retval = functions->CallNonvirtualObjectMethodV(this, obj, clazz, methodID, parms); va_end(parms); return retval; }
 	jobject CallNonvirtualObjectMethodV(jobject obj, jclass clazz, jmethodID methodID, va_list args) { return functions->CallNonvirtualObjectMethodV(this, obj, clazz, methodID, args); }
-	jobject CallNonvirtualObjectMethodA(jobject obj, jclass clazz, jmethodID methodID, jvalue * args) { return functions->CallNonvirtualObjectMethodA(this, obj, clazz, methodID,  args); }
+	jobject CallNonvirtualObjectMethodA(jobject obj, jclass clazz, jmethodID methodID, jvalue * args) { return functions->CallNonvirtualObjectMethodA(this, obj, clazz, methodID, args); }
 	jboolean CallNonvirtualBooleanMethod(jobject obj, jclass clazz, jmethodID methodID, ...) { jboolean retval; va_list parms; va_start(parms, methodID); retval = functions->CallNonvirtualBooleanMethodV(this, obj, clazz, methodID, parms); va_end(parms); return retval; }
 	jboolean CallNonvirtualBooleanMethodV(jobject obj, jclass clazz, jmethodID methodID, va_list args) { return functions->CallNonvirtualBooleanMethodV(this, obj, clazz, methodID, args); }
-	jboolean CallNonvirtualBooleanMethodA(jobject obj, jclass clazz, jmethodID methodID, jvalue * args) { return functions->CallNonvirtualBooleanMethodA(this, obj, clazz, methodID,  args); }
+	jboolean CallNonvirtualBooleanMethodA(jobject obj, jclass clazz, jmethodID methodID, jvalue * args) { return functions->CallNonvirtualBooleanMethodA(this, obj, clazz, methodID, args); }
 	jbyte CallNonvirtualByteMethod(jobject obj, jclass clazz, jmethodID methodID, ...) { jbyte retval; va_list parms; va_start(parms, methodID); retval = functions->CallNonvirtualByteMethodV(this, obj, clazz, methodID, parms); va_end(parms); return retval; }
 	jbyte CallNonvirtualByteMethodV(jobject obj, jclass clazz, jmethodID methodID, va_list args) { return functions->CallNonvirtualByteMethodV(this, obj, clazz, methodID, args); }
 	jbyte CallNonvirtualByteMethodA(jobject obj, jclass clazz, jmethodID methodID, jvalue *args) { return functions->CallNonvirtualByteMethodA(this, obj, clazz, methodID, args); }
@@ -525,7 +556,7 @@ struct JNIEnv_ {
 	jdouble CallNonvirtualDoubleMethodA(jobject obj, jclass clazz, jmethodID methodID, jvalue *args) { return functions->CallNonvirtualDoubleMethodA(this, obj, clazz, methodID, args); }
 	void CallNonvirtualVoidMethod(jobject obj, jclass clazz, jmethodID methodID, ...) { va_list parms; va_start(parms, methodID); functions->CallNonvirtualVoidMethodV(this, obj, clazz, methodID, parms); va_end(parms); }
 	void CallNonvirtualVoidMethodV(jobject obj, jclass clazz, jmethodID methodID, va_list args) { functions->CallNonvirtualVoidMethodV(this, obj, clazz, methodID, args); }
-	void CallNonvirtualVoidMethodA(jobject obj, jclass clazz, jmethodID methodID, jvalue * args) { functions->CallNonvirtualVoidMethodA(this, obj, clazz, methodID,  args); }
+	void CallNonvirtualVoidMethodA(jobject obj, jclass clazz, jmethodID methodID, jvalue * args) { functions->CallNonvirtualVoidMethodA(this, obj, clazz, methodID, args); }
 	jfieldID GetFieldID(jclass clazz, const char *name, const char *sig) { return functions->GetFieldID(this, clazz, name, sig); }
 	jobject GetObjectField(jobject obj, jfieldID fieldID) { return functions->GetObjectField(this, obj, fieldID); }
 	jboolean GetBooleanField(jobject obj, jfieldID fieldID) { return functions->GetBooleanField(this, obj, fieldID); }
@@ -575,7 +606,7 @@ struct JNIEnv_ {
 	jdouble CallStaticDoubleMethodA(jclass clazz, jmethodID methodID, jvalue *args) { return functions->CallStaticDoubleMethodA(this, clazz, methodID, args); }
 	void CallStaticVoidMethod(jclass clazz, jmethodID methodID, ...) { va_list parms; va_start(parms, methodID); functions->CallStaticVoidMethodV(this, clazz, methodID, parms); va_end(parms); }
 	void CallStaticVoidMethodV(jclass clazz, jmethodID methodID, va_list args) { functions->CallStaticVoidMethodV(this, clazz, methodID, args); }
-	void CallStaticVoidMethodA(jclass clazz, jmethodID methodID, jvalue * args) { functions->CallStaticVoidMethodA(this, clazz, methodID,  args); }
+	void CallStaticVoidMethodA(jclass clazz, jmethodID methodID, jvalue * args) { functions->CallStaticVoidMethodA(this, clazz, methodID, args); }
 	jfieldID GetStaticFieldID(jclass clazz, const char *name, const char *sig) { return functions->GetStaticFieldID(this, clazz, name, sig); }
 	jobject GetStaticObjectField(jclass clazz, jfieldID fieldID) { return functions->GetStaticObjectField(this, clazz, fieldID); }
 	jboolean GetStaticBooleanField(jclass clazz, jfieldID fieldID) { return functions->GetStaticBooleanField(this, clazz, fieldID); }
@@ -666,22 +697,28 @@ struct JNIEnv_ {
 	jlong GetDirectBufferCapacity(jobject buf) { return functions->GetDirectBufferCapacity(this, buf); }
 	jobjectRefType GetObjectRefType(jobject obj) { return functions->GetObjectRefType(this, obj); }
 ifelse(eval(JAVA_SPEC_VERSION >= 9), 1, `	jobject GetModule(jclass clazz) { return functions->GetModule(this, clazz); }', `dnl')
+ifelse(eval(JAVA_SPEC_VERSION >= 19), 1, `	jboolean IsVirtualThread(JNIEnv *env, jobject obj) { return functions->IsVirtualThread(this, obj); }', `dnl')
 #endif
 };
 
 /* 1.1 Args */
 typedef struct JDK1_1InitArgs {
 	jint version;
+ifdef(`J9_ZOS_3164_INTEROPERABILITY',`	void *reservedPropertiesPadding;')
 	char **properties;
-	jint checkSource; 
+	jint checkSource;
 	jint nativeStackSize;
 	jint javaStackSize;
 	jint minHeapSize;
 	jint maxHeapSize;
 	jint verifyMode;
+ifdef(`J9_ZOS_3164_INTEROPERABILITY',`	void *reservedClasspathPadding;')
 	const char *classpath;
+ifdef(`J9_ZOS_3164_INTEROPERABILITY',`	void *reservedVfprintfHookPadding;')
 	jint (JNICALL * vfprintf)(FILE *fp, const char *format, va_list args);
+ifdef(`J9_ZOS_3164_INTEROPERABILITY',`	void *reservedExitHookPadding;')
 	void (JNICALL * exit)(jint code);
+ifdef(`J9_ZOS_3164_INTEROPERABILITY',`	void *reservedAbortHookPadding;')
 	void (JNICALL * abort)(void);
 	jint enableClassGC;
 	jint enableVerboseGC;
@@ -690,24 +727,31 @@ typedef struct JDK1_1InitArgs {
 	jint debugAgent;
 	jint debugPort;
 } JDK1_1InitArgs;
+
 typedef struct JDK1_1AttachArgs {
 	void * __padding; /* C compilers don't allow empty structures. */
 } JDK1_1AttachArgs;
 
 /* 1.2 args */
 typedef struct JavaVMOption {
+ifdef(`J9_ZOS_3164_INTEROPERABILITY',`	void *reservedOptionStringPadding;')
 	char *optionString;
+ifdef(`J9_ZOS_3164_INTEROPERABILITY',`	void *reservedExtraInfoPadding;')
 	void *extraInfo;
 } JavaVMOption;
+
 typedef struct JavaVMInitArgs {
 	jint version;
-
 	jint nOptions;
+ifdef(`J9_ZOS_3164_INTEROPERABILITY',`	void *reservedOptionsPadding;')
 	JavaVMOption *options;
 	jboolean ignoreUnrecognized;
+ifdef(`J9_ZOS_3164_INTEROPERABILITY',`	void *reservedAlignmentPadding;')
 } JavaVMInitArgs;
+
 typedef struct {
 	jint version;
+ifdef(`J9_ZOS_3164_INTEROPERABILITY',`	void *reservedNamePadding;')
 	char *name;
 	jobject group;
 } JavaVMAttachArgs;
@@ -722,6 +766,7 @@ struct JNIInvokeInterface_ {
 	jint (JNICALL * GetEnv)(JavaVM *vm, void **penv, jint version);
 	jint (JNICALL * AttachCurrentThreadAsDaemon)(JavaVM *vm, void **penv, void *args);
 };
+
 struct JavaVM_ {
 	const struct JNIInvokeInterface_ *functions;
 	void *reserved0;
@@ -736,6 +781,7 @@ struct JavaVM_ {
 #endif
 };
 
+ifdef(`J9_ZOS_3164_INTEROPERABILITY',`',`dnl
 struct JVMExtensionInterface_ {
 	char eyecatcher[4];
 	jint length;
@@ -744,7 +790,7 @@ struct JVMExtensionInterface_ {
 	JavaVM *vm;
 	jint (JNICALL * ResetJavaVM)(JavaVM *vm);
 	jint (JNICALL * QueryJavaVM)(JavaVM *vm, jint nQueries, JavaVMQuery *queries);
-	jint (JNICALL * QueryGCStatus)(JavaVM *vm, jint *nheaps, GCStatus *status, jint statusSize); 
+	jint (JNICALL * QueryGCStatus)(JavaVM *vm, jint *nheaps, GCStatus *status, jint statusSize);
 };
 
 struct JVMExt_ {
@@ -752,21 +798,22 @@ struct JVMExt_ {
 #ifdef __cplusplus
 	jint ResetJavaVM() {return functions->ResetJavaVM(functions->vm);}
 	jint QueryJavaVM(jint nQueries, JavaVMQuery *queries) { return functions->QueryJavaVM(functions->vm, nQueries, queries);}
-	jint QueryGCStatus(jint *nheaps, GCStatus *status, jint statusSize){ return functions->QueryGCStatus(functions->vm, nheaps, status, statusSize); }                                                 
+	jint QueryGCStatus(jint *nheaps, GCStatus *status, jint statusSize){ return functions->QueryGCStatus(functions->vm, nheaps, status, statusSize); }
 #endif
 };
 
 #ifdef __cplusplus
-typedef  JVMExt_ JVMExt;
+typedef JVMExt_ JVMExt;
 #else
 typedef const struct JVMExtensionInterface_ *JVMExt;
 #endif
+')dnl
 
 jint JNICALL JNI_GetDefaultJavaVMInitArgs(void *);
 jint JNICALL JNI_CreateJavaVM(JavaVM **, void **, void *);
 jint JNICALL JNI_GetCreatedJavaVMs(JavaVM **, jsize, jsize *);
-JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *, void *); 
-JNIEXPORT void JNICALL JNI_OnUnload(JavaVM *, void *); 
+JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *, void *);
+JNIEXPORT void JNICALL JNI_OnUnload(JavaVM *, void *);
 
 #ifdef __cplusplus
 }

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -65,9 +65,12 @@ static const J9JvmtiErrorMapping errorMap[] = {
 	{ "JVMTI_ERROR_NAMES_DONT_MATCH" , 69 },
 	{ "JVMTI_ERROR_UNSUPPORTED_REDEFINITION_CLASS_MODIFIERS_CHANGED" , 70 },
 	{ "JVMTI_ERROR_UNSUPPORTED_REDEFINITION_METHOD_MODIFIERS_CHANGED" , 71 },
-#if (JAVA_SPEC_VERSION >= 11)
+#if JAVA_SPEC_VERSION >= 11
 	{ "JVMTI_ERROR_UNSUPPORTED_REDEFINITION_CLASS_ATTRIBUTE_CHANGED" , 72 },
-#endif /* (JAVA_SPEC_VERSION >= 11) */
+#endif /* JAVA_SPEC_VERSION >= 11 */
+#if JAVA_SPEC_VERSION >= 19
+	{ "JVMTI_ERROR_UNSUPPORTED_OPERATION" , 73 },
+#endif /* JAVA_SPEC_VERSION >= 19 */
 	{ "JVMTI_ERROR_UNMODIFIABLE_CLASS" , 79 },
 	{ "JVMTI_ERROR_UNMODIFIABLE_MODULE" , 80 },
 	{ "JVMTI_ERROR_NOT_AVAILABLE" , 98 },
@@ -177,30 +180,19 @@ jvmtiError JNICALL
 jvmtiGetVersionNumber(jvmtiEnv* env,
 	jint* version_ptr)
 {
-#if JAVA_SPEC_VERSION >= 11
-	J9JavaVM * vm = JAVAVM_FROM_ENV(env);
-#endif /* JAVA_SPEC_VERSION >= 11 */
 	jvmtiError rc = JVMTI_ERROR_NONE;
-	jint rv_version = JVMTI_1_2_3_SPEC_VERSION;
 
 	Trc_JVMTI_jvmtiGetVersionNumber_Entry(env);
 
 	ENSURE_NON_NULL(version_ptr);
 
-#if JAVA_SPEC_VERSION >= 11
-#if JAVA_SPEC_VERSION >= 15
-	if (J2SE_VERSION(vm) >= J2SE_V15) {
-		rv_version = JVMTI_VERSION_15;
-	} else
-#endif /* JAVA_SPEC_VERSION >= 15 */
-	if (J2SE_VERSION(vm) >= J2SE_V11) {
-		rv_version = JVMTI_VERSION_11;
-	}
-#endif /* JAVA_SPEC_VERSION >= 11 */
-
 done:
 	if (NULL != version_ptr) {
-		*version_ptr = rv_version;
+#if JAVA_SPEC_VERSION >= 11
+		*version_ptr = JVMTI_VERSION;
+#else /* JAVA_SPEC_VERSION >= 11 */
+		*version_ptr = JVMTI_1_2_3_SPEC_VERSION;
+#endif /* JAVA_SPEC_VERSION >= 11 */
 	}
 	TRACE_JVMTI_RETURN(jvmtiGetVersionNumber);
 }

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2020 IBM Corp. and others
+ * Copyright (c) 2018, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -28,9 +28,9 @@ variableFile = ''
 buildFile = ''
 
 timestamps {
-    timeout(time: 20, unit: 'HOURS') {
-        node(SETUP_LABEL) {
-            try{
+    node(SETUP_LABEL) {
+        retry(3) {
+            try {
                 def gitConfig = scm.getUserRemoteConfigs().get(0)
                 def remoteConfigParameters = [url: params.SCM_REPO]
                 def scmBranch = params.SCM_BRANCH
@@ -58,11 +58,14 @@ timestamps {
 
                 variableFile = load 'buildenv/jenkins/common/variables-functions.groovy'
                 variableFile.setup()
+            } catch(e) {
+                sleep time: 60, unit: 'SECONDS'
+                throw e
             } finally {
                 // disableDeferredWipeout also requires deleteDirs. See https://issues.jenkins-ci.org/browse/JENKINS-54225
                 cleanWs notFailBuild: true, disableDeferredWipeout: true, deleteDirs: true
             }
         }
-        buildFile.build_all()
     }
+    buildFile.build_all()
 }

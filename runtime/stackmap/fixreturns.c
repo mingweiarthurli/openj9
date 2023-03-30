@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -117,7 +117,10 @@ getReturnBytecode(J9ROMClass * romClass, J9ROMMethod * romMethod, UDATA * return
 	}
 
 	/* Determine the correct return bytecode to insert */
-	if ((J9UTF8_DATA(name)[0] == '<') && (J9UTF8_DATA(name)[1] == 'i')) {
+	if ((J9UTF8_DATA(name)[0] == '<')
+		&& (J9UTF8_DATA(name)[1] == 'i')
+		&& !J9ROMCLASS_IS_VALUE(romClass)
+	) {
 		returnBytecode = JBreturnFromConstructor;
 	} else {
 		/* bool, byte, char, and short need special treatment since they need to be truncated before return */

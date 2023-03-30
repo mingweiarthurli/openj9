@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-Copyright (c) 2006, 2020 IBM Corp. and others
+Copyright (c) 2006, 2022 IBM Corp. and others
 
 This program and the accompanying materials are made available under
 the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@ Exception [1] and GNU General Public License, version 2 with the
 OpenJDK Assembly Exception [2].
 
 [1] https://www.gnu.org/software/classpath/license.html
-[2] http://openjdk.java.net/legal/assembly-exception.html
+[2] https://openjdk.org/legal/assembly-exception.html
 
 SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 -->
@@ -106,12 +106,18 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 		<flag id="module_util_core" value="true"/>
 		<flag id="module_verutil" value="true"/>
 		<flag id="module_vm" value="true"/>
+		<flag id="opt_criuSupport" value="false"/>
 		<flag id="opt_fragmentRamClasses" value="true"/>
 		<flag id="opt_inlineJsrs" value="true"/>
 		<flag id="opt_jitserver" value="false"/>
+		<flag id="opt_methodHandle" value="true"/>
+		<flag id="opt_methodHandleCommon" value="true"/>
 		<flag id="opt_module" value="true"/>
 		<flag id="opt_newObjectHash" value="true"/>
 		<flag id="opt_newRomClassBuilder" value="true"/>
+		<flag id="opt_openjdkFfi" value="true"/>
+		<flag id="opt_openjdkMethodhandle" value="false"/>
+		<flag id="opt_openjdkThreadSupport" value="false"/>
 		<flag id="opt_phpSupport" value="false"/>
 		<flag id="opt_romImageSupport" value="true"/>
 		<flag id="opt_useOmrDdr" value="false"/>

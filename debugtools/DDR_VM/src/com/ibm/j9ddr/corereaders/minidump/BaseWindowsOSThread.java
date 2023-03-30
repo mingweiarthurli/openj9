@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2009, 2014 IBM Corp. and others
+ * Copyright (c) 2009, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -91,7 +91,7 @@ public abstract class BaseWindowsOSThread implements IOSThread
 	private void walkStack32() throws CorruptDataException
 	{
 		// Windows stack frames can be read by following the ebp to the base of
-		//the stack: old ebp is at ebp(0) and and return address to parent context
+		//the stack: old ebp is at ebp(0) and return address to parent context
 		//is ebp(sizeof(void*))
 		// 1) find the ebp in the register file
 		long ebp = getBasePointer();

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2018 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -1203,11 +1203,9 @@ vaReportJ9VMCommandLineError(J9PortLibrary* portLibrary, const char* detailStr, 
 static void
 doTriggerActionJavadump(OMR_VMThread *thr)
 {
-#if defined(J9VM_RAS_DUMP_AGENTS)
 	J9JavaVM *vm = (J9JavaVM *)thr->_vm->_language_vm;
 
 	vm->j9rasDumpFunctions->triggerOneOffDump(vm, "java", DUMP_CALLER_NAME, NULL, 0);
-#endif
 }
 
 /**************************************************************************
@@ -1219,11 +1217,9 @@ doTriggerActionJavadump(OMR_VMThread *thr)
 static void
 doTriggerActionCoredump(OMR_VMThread *thr)
 {
-#if defined(J9VM_RAS_DUMP_AGENTS)
 	J9JavaVM *vm = (J9JavaVM *)thr->_vm->_language_vm;
 
 	vm->j9rasDumpFunctions->triggerOneOffDump(vm, "system", DUMP_CALLER_NAME, NULL, 0);
-#endif
 }
 
 /**************************************************************************
@@ -1242,12 +1238,10 @@ doTriggerActionCoredump(OMR_VMThread *thr)
 static void
 doTriggerActionAssertDumpEvent(OMR_VMThread *omrThr)
 {
-#if defined(J9VM_RAS_DUMP_AGENTS)
 	J9JavaVM *vm = (J9JavaVM *)omrThr->_vm->_language_vm;
 	J9VMThread *thr = (J9VMThread *)omrThr->_language_vmthread;
 
 	(vm)->j9rasDumpFunctions->triggerDumpAgents(vm, thr, J9RAS_DUMP_ON_TRACE_ASSERT, NULL);
-#endif
 }
 
 /**************************************************************************
@@ -1259,11 +1253,9 @@ doTriggerActionAssertDumpEvent(OMR_VMThread *omrThr)
 static void
 doTriggerActionHeapdump(OMR_VMThread *thr)
 {
-#if defined(J9VM_RAS_DUMP_AGENTS)
 	J9JavaVM *vm = (J9JavaVM *)thr->_vm->_language_vm;
 
 	vm->j9rasDumpFunctions->triggerOneOffDump(vm, "heap", DUMP_CALLER_NAME, NULL, 0);
-#endif
 }
 
 /**************************************************************************
@@ -1288,11 +1280,9 @@ doTriggerActionSnap(OMR_VMThread *thr)
 static void
 doTriggerActionCeedump(OMR_VMThread *thr)
 {
-#if defined(J9VM_RAS_DUMP_AGENTS)
 	J9JavaVM *vm = (J9JavaVM *)thr->_vm->_language_vm;
 
 	vm->j9rasDumpFunctions->triggerOneOffDump(vm, "ceedump", DUMP_CALLER_NAME, NULL, 0);
-#endif
 }
 
 static void
@@ -1307,8 +1297,14 @@ javaTrace(void *env, UtModuleInfo *modInfo, U_32 traceId, const char *spec, ...)
 	if( NULL == vmThr ) {
 		vmThr = globalVM->internalVMFunctions->currentVMThread(globalVM);
 	}
+	if (NULL != vmThr) {
+		if (J9_ARE_ANY_BITS_SET(vmThr->privateFlags2, J9_PRIVATE_FLAGS2_ASYNC_GET_CALL_TRACE)) {
+			goto done;
+		}
+	}
 	utThr = UT_THREAD_FROM_VM_THREAD(vmThr);
 	doTracePoint( utThr, modInfo, traceId, spec, var);
+done:
 	va_end(var);
 }
 

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -38,6 +38,7 @@
 #include "env/jittypes.h"
 #include "runtime/MethodMetaData.h"
 #include "env/VMJ9.h"
+#include "env/VerboseLog.hpp"
 #include "runtime/asmprotos.h"
 
 // To transfer control to VM during OSR
@@ -62,12 +63,13 @@ void _prepareForOSR(uintptr_t vmThreadArg, int32_t currentInlinedSiteIndex, int3
    if ((trace && (numSymsThatShareSlot > 0)) || details)
       {
       UDATA bytecodePCOffset = osrFrame->bytecodePCOffset;
-      TR_VerboseLog::writeLineLocked(TR_Vlog_OSR,
+
+      TR_VerboseLog::CriticalSection vlogLock;
+      TR_VerboseLog::writeLine(TR_Vlog_OSR,
          "%x prepareForOSR at %p (startPC %p +%d) at %d:%x numSharingSyms:%d totalSlots:%d vmThread=%p", (int)vmThreadArg,
          metaData->startPC+jitPCOffset, metaData->startPC, (int)jitPCOffset,
          currentInlinedSiteIndex, (int)bytecodePCOffset, numSymsThatShareSlot, totalNumSlots, vmThread);
 
-      TR_VerboseLog::vlogAcquire();
       TR_VerboseLog::writeLine(TR_Vlog_OSRD, "%X   Jitted body:    %.*s.%.*s%.*s", (int)vmThreadArg,
          J9UTF8_LENGTH(metaData->className),       J9UTF8_DATA(metaData->className),
          J9UTF8_LENGTH(metaData->methodName),      J9UTF8_DATA(metaData->methodName),
@@ -99,8 +101,6 @@ void _prepareForOSR(uintptr_t vmThreadArg, int32_t currentInlinedSiteIndex, int3
          for (i = osrFrame->numberOfLocals-1; i >= 0; --i)
             TR_VerboseLog::writeLine(TR_Vlog_OSRD, "%X       local %2d: %p", (int)vmThreadArg, i, arg0EA[-i]);
          }
-
-      TR_VerboseLog::vlogRelease();
       }
 
 
@@ -176,7 +176,7 @@ void _prepareForOSR(uintptr_t vmThreadArg, int32_t currentInlinedSiteIndex, int3
                uint8_t* dataAtScrBuffer = (uint8_t*)vmThread->osrScratchBuffer + scratchBufferOffset;
                if (details)
                   {
-                  TR_VerboseLog::vlogAcquire();
+                  TR_VerboseLog::CriticalSection vlogLock;
                   TR_VerboseLog::write(TR_Vlog_OSRD, "%X     Symbol #%d osrFrameDataOffset=%d scratchBufferOffset=%d size=%d data:", (int)vmThreadArg,
                      i, osrFrameDataOffset, scratchBufferOffset, symSize);
                   switch (symSize)
@@ -192,7 +192,6 @@ void _prepareForOSR(uintptr_t vmThreadArg, int32_t currentInlinedSiteIndex, int3
                         break;
                      }
                   TR_VerboseLog::writeLine("");
-                  TR_VerboseLog::vlogRelease();
                   }
                memcpy(
                   (uint8_t*)(osrFrame) + osrFrameDataOffset,

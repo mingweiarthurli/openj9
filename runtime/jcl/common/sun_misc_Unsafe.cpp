@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1998, 2020 IBM Corp. and others
+ * Copyright (c) 1998, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -49,6 +49,7 @@ Java_sun_misc_Unsafe_defineClass__Ljava_lang_String_2_3BIILjava_lang_ClassLoader
 	JNIEnv *env, jobject receiver, jstring className, jbyteArray classRep, jint offset, jint length, jobject classLoader, jobject protectionDomain)
 {
 	J9VMThread *currentThread = (J9VMThread *)env;
+	UDATA defineClassOptions = J9_FINDCLASS_FLAG_UNSAFE;
 
 	if (NULL == classLoader) {
 		J9JavaVM *vm = currentThread->javaVM;
@@ -62,15 +63,17 @@ Java_sun_misc_Unsafe_defineClass__Ljava_lang_String_2_3BIILjava_lang_ClassLoader
 		vmFuncs->internalExitVMToJNI(currentThread);
 	}
 
-	return defineClassCommon(env, classLoader, className, classRep, offset, length, protectionDomain, J9_FINDCLASS_FLAG_UNSAFE, NULL, NULL);
+	return defineClassCommon(env, classLoader, className, classRep, offset, length, protectionDomain, &defineClassOptions, NULL, NULL, FALSE);
 }
 
+#if JAVA_SPEC_VERSION < 17
 jclass JNICALL
 Java_sun_misc_Unsafe_defineAnonymousClass(JNIEnv *env, jobject receiver, jclass hostClass, jbyteArray bytecodes, jobjectArray constPatches)
 {
 	J9VMThread *currentThread = (J9VMThread *)env;
 	J9JavaVM *vm = currentThread->javaVM;
 	J9InternalVMFunctions *vmFuncs = vm->internalVMFunctions;
+	UDATA defineClassOptions = (J9_FINDCLASS_FLAG_UNSAFE | J9_FINDCLASS_FLAG_ANON);
 
 	vmFuncs->internalEnterVMFromJNI(currentThread);
 	if (NULL == bytecodes) {
@@ -115,19 +118,23 @@ Java_sun_misc_Unsafe_defineAnonymousClass(JNIEnv *env, jobject receiver, jclass 
 				return NULL;
 			}
 		}
+
+		/* initialize the indexMap to 0 to represent unmapped entry */
+		memset(cpPatchMap.indexMap, 0, cpPatchMap.size * sizeof(U_16));
 	}
+
+	jsize length = (jsize)J9INDEXABLEOBJECT_SIZE(currentThread, J9_JNI_UNWRAP_REFERENCE(bytecodes));
 
 	vmFuncs->internalExitVMToJNI(currentThread);
 
-	jsize length = env->GetArrayLength(bytecodes);
-
 	/* acquires access internally */
-	jclass anonClass = defineClassCommon(env, hostClassLoaderLocalRef, NULL,bytecodes, 0, length, protectionDomainLocalRef, J9_FINDCLASS_FLAG_UNSAFE | J9_FINDCLASS_FLAG_ANON, hostClazz, &cpPatchMap);
+	jclass anonClass = defineClassCommon(env, hostClassLoaderLocalRef, NULL, bytecodes, 0, length, protectionDomainLocalRef, &defineClassOptions, hostClazz, &cpPatchMap, FALSE);
 	if (env->ExceptionCheck()) {
-		return NULL;
+		anonClass = NULL;
+		goto exit;
 	} else if (NULL == anonClass) {
 		throwNewInternalError(env, NULL);
-		return NULL;
+		goto exit;
 	}
 
 	if (constPatches != NULL) {
@@ -140,37 +147,43 @@ Java_sun_misc_Unsafe_defineAnonymousClass(JNIEnv *env, jobject receiver, jclass 
 
 		/* Get J9 constantpool mapped item for patch item, only support patching STRING entries has been added */
 		for (U_16 i = 0; i < cpPatchMap.size; i++) {
-			j9object_t item = J9JAVAARRAYOFOBJECT_LOAD(currentThread, patchArray, i);
-			if (item != NULL) {
-				if (J9_CP_TYPE(cpShapeDescription, cpPatchMap.indexMap[i]) == J9CPTYPE_STRING) {
+			/* Check if a valid mapping exist for cp entry */
+			if (cpPatchMap.indexMap[i] != 0) {
+				j9object_t item = J9JAVAARRAYOFOBJECT_LOAD(currentThread, patchArray, i);
+				if (item != NULL) {
+					if (J9_CP_TYPE(cpShapeDescription, cpPatchMap.indexMap[i]) == J9CPTYPE_STRING) {
 
-					J9UTF8 *romString = J9ROMSTRINGREF_UTF8DATA((J9ROMStringRef *)&romCP[cpPatchMap.indexMap[i]]);
+						J9UTF8 *romString = J9ROMSTRINGREF_UTF8DATA((J9ROMStringRef *)&romCP[cpPatchMap.indexMap[i]]);
 
-					/* For each patch object, search the RAM constantpool for identical string entries */
-					for (U_16 j = 1; j < clazz->romClass->ramConstantPoolCount; j++) {
-						if ((J9_CP_TYPE(cpShapeDescription, j) == J9CPTYPE_STRING)
-							&& J9UTF8_EQUALS(romString, J9ROMSTRINGREF_UTF8DATA((J9ROMStringRef *)&romCP[j]))
-						) {
-							J9RAMStringRef *ramStringRef = ((J9RAMStringRef *)ramCP) + j;
-							J9STATIC_OBJECT_STORE(currentThread, clazz, &ramStringRef->stringObject, item);
+						/* For each patch object, search the RAM constantpool for identical string entries */
+						for (U_16 j = 1; j < clazz->romClass->ramConstantPoolCount; j++) {
+							if ((J9_CP_TYPE(cpShapeDescription, j) == J9CPTYPE_STRING)
+								&& J9UTF8_EQUALS(romString, J9ROMSTRINGREF_UTF8DATA((J9ROMStringRef *)&romCP[j]))
+							) {
+								J9RAMStringRef *ramStringRef = ((J9RAMStringRef *)ramCP) + j;
+								J9STATIC_OBJECT_STORE(currentThread, clazz, &ramStringRef->stringObject, item);
+							}
 						}
+					} else {
+						/* Only J9CPTYPE_STRING is patched, other CP types are not supported */
+						Assert_JCL_unreachable();
 					}
-				} else {
-					/* Only J9CPTYPE_STRING is patched, other CP types are not supported */
-					Assert_JCL_unreachable();
 				}
 			}
 		}
 
-		if (cpPatchMap.size > BUFFER_SIZE) {
-			j9mem_free_memory(cpPatchMap.indexMap);
-			cpPatchMap.indexMap = NULL;
-		}
 		vmFuncs->internalExitVMToJNI(currentThread);
+	}
+
+exit:
+	if (cpPatchMap.size > BUFFER_SIZE) {
+		j9mem_free_memory(cpPatchMap.indexMap);
+		cpPatchMap.indexMap = NULL;
 	}
 
 	return anonClass;
 }
+#endif /* JAVA_SPEC_VERSION < 17 */
 
 /**
  * Initialization function called during VM bootstrap (Unsafe.<clinit>).
@@ -254,24 +267,6 @@ jlong JNICALL
 Java_jdk_internal_misc_Unsafe_allocateDBBMemory(JNIEnv *env, jobject receiver, jlong size)
 {
 	return Java_sun_misc_Unsafe_allocateDBBMemory(env, receiver, size);
-}
-
-jlong JNICALL
-Java_sun_misc_Unsafe_allocateMemoryNoException(JNIEnv *env, jobject receiver, jlong size)
-{
-	J9VMThread *currentThread = (J9VMThread*)env;
-	J9JavaVM *vm = currentThread->javaVM;
-	J9InternalVMFunctions *vmFuncs = vm->internalVMFunctions;
-	jlong result = 0;
-	UDATA actualSize = (UDATA)size;
-	vmFuncs->internalEnterVMFromJNI(currentThread);
-	if ((size < 0) || (size != (jlong)actualSize)) {
-		vmFuncs->setCurrentExceptionUTF(currentThread, J9VMCONSTANTPOOL_JAVALANGILLEGALARGUMENTEXCEPTION, NULL);
-	} else {
-		result = (jlong)(UDATA)unsafeAllocateMemory(currentThread, actualSize, FALSE);
-	}
-	vmFuncs->internalExitVMToJNI(currentThread);
-	return result;
 }
 
 
@@ -366,7 +361,7 @@ Java_sun_misc_Unsafe_park(JNIEnv *env, jobject receiver, jboolean isAbsolute, jl
 	J9JavaVM *vm = currentThread->javaVM;
 	J9InternalVMFunctions *vmFuncs = vm->internalVMFunctions;
 	vmFuncs->internalEnterVMFromJNI(currentThread);
-	vmFuncs->threadParkImpl(currentThread, (IDATA)isAbsolute, (I_64)time);
+	vmFuncs->threadParkImpl(currentThread, isAbsolute ? TRUE : FALSE, (I_64)time);
 	vmFuncs->internalExitVMToJNI(currentThread);
 }
 
@@ -410,9 +405,16 @@ Java_sun_misc_Unsafe_monitorEnter(JNIEnv *env, jobject receiver, jobject obj)
 		vmFuncs->setCurrentExceptionUTF(currentThread, J9VMCONSTANTPOOL_JAVALANGNULLPOINTEREXCEPTION, NULL);
 	} else {
 		UDATA monresult = vmFuncs->objectMonitorEnter(currentThread, J9_JNI_UNWRAP_REFERENCE(obj));
-		if (0 == monresult) {
+		if (J9_OBJECT_MONITOR_ENTER_FAILED(monresult)) {
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+			if (J9_OBJECT_MONITOR_CRIU_SINGLE_THREAD_MODE_THROW == monresult) {
+				vmFuncs->setCRIUSingleThreadModeJVMCRIUException(currentThread, 0, 0);
+			} else
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
+			if (J9_OBJECT_MONITOR_OOM == monresult) {
 oom:
-			vmFuncs->setNativeOutOfMemoryError(currentThread, 0, 0);
+				vmFuncs->setNativeOutOfMemoryError(currentThread, 0, 0);
+			}
 		} else if (J9_UNEXPECTED(!VM_ObjectMonitor::recordJNIMonitorEnter(currentThread, (j9object_t)monresult))) {
 			vmFuncs->objectMonitorExit(currentThread, (j9object_t)monresult);
 			goto oom;
@@ -796,7 +798,7 @@ Java_sun_misc_Unsafe_getKlassPointer(JNIEnv *env, jobject receiver, jobject addr
 }
 
 jboolean JNICALL
-Java_jdk_internal_misc_Unsafe_shouldBeInitialized(JNIEnv *env, jobject receiver, jclass clazz)
+Java_sun_misc_Unsafe_shouldBeInitialized(JNIEnv *env, jobject receiver, jclass clazz)
 {
 	jboolean result = JNI_FALSE;
 
@@ -838,7 +840,11 @@ Java_jdk_internal_misc_Unsafe_objectFieldOffset1(JNIEnv *env, jobject receiver, 
 		if (NULL == romField) {
 			vmFuncs->setCurrentExceptionUTF(currentThread, J9VMCONSTANTPOOL_JAVALANGINTERNALERROR, NULL);
 		} else if (J9_ARE_ANY_BITS_SET(romField->modifiers, J9AccStatic)) {
-			vmFuncs->setCurrentExceptionUTF(currentThread, J9VMCONSTANTPOOL_JAVALANGILLEGALARGUMENTEXCEPTION, NULL);
+			offset = fieldID->offset | J9_SUN_STATIC_FIELD_OFFSET_TAG;
+
+			if (J9_ARE_ANY_BITS_SET(romField->modifiers, J9AccFinal)) {
+				offset |= J9_SUN_FINAL_FIELD_OFFSET_TAG;
+			}
 		} else {
 			offset = (jlong)fieldID->offset + J9VMTHREAD_OBJECT_HEADER_SIZE(currentThread);
 		}
@@ -953,11 +959,13 @@ registerJdkInternalMiscUnsafeNativesCommon(JNIEnv *env, jclass clazz) {
 			(char*)"(Ljava/lang/String;[BIILjava/lang/ClassLoader;Ljava/security/ProtectionDomain;)Ljava/lang/Class;",
 			(void*)&Java_sun_misc_Unsafe_defineClass__Ljava_lang_String_2_3BIILjava_lang_ClassLoader_2Ljava_security_ProtectionDomain_2
 		},
+#if JAVA_SPEC_VERSION < 17
 		{
 			(char*)"defineAnonymousClass0",
 			(char*)"(Ljava/lang/Class;[B[Ljava/lang/Object;)Ljava/lang/Class;",
 			(void*)&Java_sun_misc_Unsafe_defineAnonymousClass
 		},
+#endif /* JAVA_SPEC_VERSION < 17 */
 		{
 			(char*)"pageSize",
 			(char*)"()I",
@@ -971,7 +979,7 @@ registerJdkInternalMiscUnsafeNativesCommon(JNIEnv *env, jclass clazz) {
 		{
 			(char*)"shouldBeInitialized0",
 			(char*)"(Ljava/lang/Class;)Z",
-			(void*)&Java_jdk_internal_misc_Unsafe_shouldBeInitialized
+			(void*)&Java_sun_misc_Unsafe_shouldBeInitialized
 		},
 		{
 			(char*)"allocateMemory0",
@@ -1049,7 +1057,11 @@ registerJdkInternalMiscUnsafeNativesCommon(JNIEnv *env, jclass clazz) {
 			(void*)&Java_sun_misc_Unsafe_getUncompressedObject
 		},
 	};
-	env->RegisterNatives(clazz, natives, sizeof(natives)/sizeof(JNINativeMethod));
+	jint numNatives = sizeof(natives)/sizeof(JNINativeMethod);
+	env->RegisterNatives(clazz, natives, numNatives);
+#if defined(J9VM_OPT_JAVA_OFFLOAD_SUPPORT)
+	clearNonZAAPEligibleBit(env, clazz, natives, numNatives);
+#endif /* J9VM_OPT_JAVA_OFFLOAD_SUPPORT */
 }
 
 /* register jdk.internal.misc.Unsafe natives for Java 10 */
@@ -1063,7 +1075,11 @@ registerJdkInternalMiscUnsafeNativesJava10(JNIEnv *env, jclass clazz) {
 			(void*)&Java_jdk_internal_misc_Unsafe_objectFieldOffset1
 		}
 	};
-	env->RegisterNatives(clazz, natives, sizeof(natives)/sizeof(JNINativeMethod));
+	jint numNatives = sizeof(natives)/sizeof(JNINativeMethod);
+	env->RegisterNatives(clazz, natives, numNatives);
+#if defined(J9VM_OPT_JAVA_OFFLOAD_SUPPORT)
+	clearNonZAAPEligibleBit(env, clazz, natives, numNatives);
+#endif /* J9VM_OPT_JAVA_OFFLOAD_SUPPORT */
 }
 
 /* register jdk.internal.misc.Unsafe natives for Java 14 */
@@ -1082,21 +1098,23 @@ registerJdkInternalMiscUnsafeNativesJava14(JNIEnv *env, jclass clazz) {
 			(void*)&Java_jdk_internal_misc_Unsafe_isWritebackEnabled
 		}
 	};
-	env->RegisterNatives(clazz, natives, sizeof(natives)/sizeof(JNINativeMethod));
+	jint numNatives = sizeof(natives)/sizeof(JNINativeMethod);
+	env->RegisterNatives(clazz, natives, numNatives);
+#if defined(J9VM_OPT_JAVA_OFFLOAD_SUPPORT)
+	clearNonZAAPEligibleBit(env, clazz, natives, numNatives);
+#endif /* J9VM_OPT_JAVA_OFFLOAD_SUPPORT */
 }
 
 /* class jdk.internal.misc.Unsafe only presents in Java 9 and beyond */
 void JNICALL
 Java_jdk_internal_misc_Unsafe_registerNatives(JNIEnv *env, jclass clazz)
 {
-	J9VMThread *currentThread = (J9VMThread*)env;
-
 	Java_sun_misc_Unsafe_registerNatives(env, clazz);
 	registerJdkInternalMiscUnsafeNativesCommon(env, clazz);
-	if (J2SE_VERSION(currentThread->javaVM) >= J2SE_V11) {
+	if (JAVA_SPEC_VERSION >= 10) {
 		registerJdkInternalMiscUnsafeNativesJava10(env, clazz);
 	}
-	if (J2SE_VERSION(currentThread->javaVM) >= J2SE_V14) {
+	if (JAVA_SPEC_VERSION >= 14) {
 		registerJdkInternalMiscUnsafeNativesJava14(env, clazz);
 	}
 }
@@ -1115,7 +1133,9 @@ Java_jdk_internal_misc_Unsafe_registerNatives(JNIEnv *env, jclass clazz)
 jboolean
  memOverlapIsNone(j9object_t sourceObject, UDATA sourceOffset, j9object_t destObject, UDATA destOffset, UDATA actualCopySize) {
 	jboolean result = JNI_FALSE;
-	if ((sourceObject == NULL) && (destObject == NULL)) {
+	if (sourceObject != destObject) {
+		result = JNI_TRUE;
+	} else if ((sourceObject == NULL) && (destObject == NULL)) {
 		if (sourceOffset > (destOffset + actualCopySize)) {
 			result = JNI_TRUE;
 		} else if (destOffset > (sourceOffset + actualCopySize)) {

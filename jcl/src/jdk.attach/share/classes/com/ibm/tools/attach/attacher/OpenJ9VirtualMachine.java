@@ -1,6 +1,6 @@
-/*[INCLUDE-IF Sidecar18-SE]*/
+/*[INCLUDE-IF JAVA_SPEC_VERSION >= 8]*/
 /*******************************************************************************
- * Copyright (c) 2009, 2019 IBM Corp. and others
+ * Copyright (c) 2009, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -65,6 +65,9 @@ import com.sun.tools.attach.spi.AttachProvider;
  * Handles the initiator end of an attachment to a target VM
  * 
  */
+/*[IF JAVA_SPEC_VERSION >= 17]*/
+@SuppressWarnings("removal")
+/*[ENDIF] JAVA_SPEC_VERSION >= 17 */
 public final class OpenJ9VirtualMachine extends VirtualMachine implements Response {
 
 	/* 
@@ -152,7 +155,7 @@ public final class OpenJ9VirtualMachine extends VirtualMachine implements Respon
 		}
 		AttachNotSupportedException lastException = null;
 		/*[PR CMVC 182802 ]*/
-		int timeout = 500; /* start small in case there is a rogue process which is eating semaphores, grow big in case of system load. */
+		int timeout = 100; /* start small in case there is a rogue process which is eating semaphores, grow big in case of system load. */
 		while (timeout < MAXIMUM_ATTACH_TIMEOUT) {
 			lastException = null;
 			try {
@@ -165,9 +168,17 @@ public final class OpenJ9VirtualMachine extends VirtualMachine implements Respon
 			if (null == lastException) {
 				break;
 			}
+			try {
+				// give another attacher a chance to run
+				Thread.sleep(timeout);
+			} catch (InterruptedException e) {
+				// ignore
+			}
 		}
 		if (null != lastException) {
 			throw lastException;
+		} else {
+			IPC.logMessage("OpenJ9VirtualMachine.attachTargetImpl() finished"); //$NON-NLS-1$
 		}
 	}
 
@@ -338,7 +349,7 @@ public final class OpenJ9VirtualMachine extends VirtualMachine implements Respon
 					IPC.logMessage("lockAllAttachNotificationSyncFiles locking targetLocks[", vmdIndex, "] ", attachSyncFile); //$NON-NLS-1$ //$NON-NLS-2$
 					targetLocks[vmdIndex] = new FileLock(attachSyncFile, TargetDirectory.SYNC_FILE_PERMISSIONS);
 					try {
-						targetLocks[vmdIndex].lockFile(true);
+						targetLocks[vmdIndex].lockFile(true, "OpenJ9VirtualMachine.lockAllAttachNotificationSyncFiles"); //$NON-NLS-1$
 					} catch (IOException e) {
 						targetLocks[vmdIndex] = null;
 						IPC.logMessage("lockAllAttachNotificationSyncFiles locking targetLocks[", vmdIndex, "] ", "already locked"); //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
@@ -427,17 +438,27 @@ public final class OpenJ9VirtualMachine extends VirtualMachine implements Respon
 		synchronized (myIn) {
 			int numberOfTargets = 0;
 			try {
-				CommonDirectory.obtainAttachLock();
+				CommonDirectory.obtainAttachLock("OpenJ9VirtualMachine.tryAttachTarget(" + timeout + ")"); //$NON-NLS-1$ //$NON-NLS-2$
+				IPC.logMessage("OpenJ9VirtualMachine.tryAttachTarget() before listVirtualMachines"); //$NON-NLS-1$
 				List<VirtualMachineDescriptor> vmds = myProvider.listVirtualMachines();
 				if (null == vmds) {
+					IPC.logMessage("OpenJ9VirtualMachine.tryAttachTarget() myProvider.listVirtualMachines() returns null"); //$NON-NLS-1$
 					return;
+				} else {
+					IPC.logMessage("OpenJ9VirtualMachine.tryAttachTarget() myProvider.listVirtualMachines() returns"); //$NON-NLS-1$
 				}
 
 				targetServer = new ServerSocket(0); /* select a free port */
-				portNumber = Integer.valueOf(targetServer.getLocalPort());
+				int thePort = targetServer.getLocalPort();
+				if (thePort < 0) {
+					IPC.logMessage("OpenJ9VirtualMachine.tryAttachTarget() ServerSocket is not bound yet, port: ", thePort); //$NON-NLS-1$
+					return;
+				}
+				portNumber = Integer.valueOf(thePort);
 				String key = IPC.getRandomString();
 				replyFile = new Reply(portNumber, key, TargetDirectory.getTargetDirectoryPath(descriptor.id()), descriptor.getUid());
 				try {
+					IPC.logMessage("OpenJ9VirtualMachine.tryAttachTarget() before replyFile.writeReply()"); //$NON-NLS-1$
 					replyFile.writeReply();
 				} catch (IOException e) { /*
 										 * target shut down while we were trying
@@ -446,6 +467,7 @@ public final class OpenJ9VirtualMachine extends VirtualMachine implements Respon
 					/*[MSG "K0457", "Target no longer available"]*/
 					AttachNotSupportedException exc = new AttachNotSupportedException(getString("K0457")); //$NON-NLS-1$
 					exc.initCause(e);
+					IPC.logMessage("OpenJ9VirtualMachine.tryAttachTarget() Target no longer available."); //$NON-NLS-1$
 					throw exc;
 				}
 
@@ -458,7 +480,7 @@ public final class OpenJ9VirtualMachine extends VirtualMachine implements Respon
 					}
 					/* I am connecting to myself: bypass the notification and launch the attachment thread directly */
 					if (AttachHandler.isAttachApiInitialized()) {
-						AttachHandler.getMainHandler().connectToAttacher();
+						AttachHandler.getMainHandler().attachSelf(thePort, key);
 					} else {
 						/*[MSG "K0558", "Attach API initialization failed"]*/
 						throw new AttachNotSupportedException(getString("K0558")); //$NON-NLS-1$
@@ -466,7 +488,7 @@ public final class OpenJ9VirtualMachine extends VirtualMachine implements Respon
 				} else {
 					lockAllAttachNotificationSyncFiles(vmds);
 					numberOfTargets = CommonDirectory.countTargetDirectories();
-					int status = CommonDirectory.notifyVm(numberOfTargets, descriptor.isGlobalSemaphore());
+					int status = CommonDirectory.notifyVm(numberOfTargets, descriptor.isGlobalSemaphore(), "OpenJ9VirtualMachine.tryAttachTarget"); //$NON-NLS-1$
 					/*[MSG "K0532", "status={0}"]*/
 					if ((IPC.JNI_OK != status)
 							&& (CommonDirectory.J9PORT_INFO_SHSEM_OPENED_STALE != status)) {
@@ -510,7 +532,7 @@ public final class OpenJ9VirtualMachine extends VirtualMachine implements Respon
 
 					if (numberOfTargets > 2) {
 						try {
-							int delayTime = 100 * ((numberOfTargets > 10) ? 10
+							int delayTime = 50 * ((numberOfTargets > 10) ? 10
 									: numberOfTargets);
 							IPC.logMessage("attachTarget sleep for ", delayTime); //$NON-NLS-1$
 							Thread.sleep(delayTime);
@@ -519,7 +541,7 @@ public final class OpenJ9VirtualMachine extends VirtualMachine implements Respon
 						}
 					}
 				}
-				CommonDirectory.releaseAttachLock();
+				CommonDirectory.releaseAttachLock("OpenJ9VirtualMachine.tryAttachTarget(" + timeout + ")"); //$NON-NLS-1$ //$NON-NLS-2$
 			}
 		}
 	}
@@ -530,7 +552,7 @@ public final class OpenJ9VirtualMachine extends VirtualMachine implements Respon
 			for (int i = 0; i < targetLocks.length; ++i) {
 				IPC.logMessage("unlockAllAttachNotificationSyncFiles unlocking targetLocks[", i, "]"); //$NON-NLS-1$ //$NON-NLS-2$
 				if (null != targetLocks[i]) {
-					targetLocks[i].unlockFile();
+					targetLocks[i].unlockFile("OpenJ9VirtualMachine.unlockAllAttachNotificationSyncFiles"); //$NON-NLS-1$
 				}
 			}
 		}

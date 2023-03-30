@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -93,7 +93,8 @@ class OMR_EXTENSIBLE TreeEvaluator: public J9::TreeEvaluator
 
    /*
    * \brief
-   *     Generates the sequence to handle cases where the monitor object is value type
+   *     Generates the sequence to handle cases where the monitor object
+   *     is value type or value based class type
    *
    * \param node
    *     the monitor enter/exit node
@@ -102,17 +103,16 @@ class OMR_EXTENSIBLE TreeEvaluator: public J9::TreeEvaluator
    *     the label for OOL code calling VM monitor enter/exit helpers
    *
    * \details
-   *     Call the VM helper if it's detected at runtime that the monitor object is value type.
-   *     The VM helper throws appropriate IllegalMonitorStateException.
+   *     Call the VM helper if it's detected at runtime that the monitor object
+   *     is value type or value based class type.
+   *     The VM helper throws appropriate IllegalMonitorStateException for value type
+   *     and VirtualMachineError for value based class type.
    *
    * \note
    *     This method only handles the cases where, at compile time, it's unknown whether the
-   *     object is reference type or value type.
+   *     object is reference type or value type or value based class type.
    */
-   static void generateCheckForValueTypeMonitorEnterOrExit(TR::Node *node, TR::LabelSymbol *snippetLabel, TR::CodeGenerator *cg);
-   static void transactionalMemoryJITMonitorEntry(TR::Node *node, TR::CodeGenerator *cg, TR::LabelSymbol *startLabel, TR::LabelSymbol *snippetLabel, TR::LabelSymbol *JITMonitorEnterSnippetLabel, TR::Register *objectReg, int lwoffset);
-   static void generateValueTracingCode(TR::Node *node, TR::Register *vmThreadReg, TR::Register *scratchReg, TR::Register *valueRegHigh, TR::Register *valueRegLow, TR::CodeGenerator *cg);
-   static void generateValueTracingCode(TR::Node *node, TR::Register *vmThreadReg, TR::Register *scratchReg, TR::Register *valueReg, TR::CodeGenerator *cg);
+   static void generateCheckForValueMonitorEnterOrExit(TR::Node *node, int32_t classFlag, TR::LabelSymbol *snippetLabel, TR::CodeGenerator *cg);
    static bool monEntryExitHelper(bool entry, TR::Node* node, bool reservingLock, bool normalLockPreservingReservation, TR_RuntimeHelper &helper, TR::CodeGenerator* cg);
    static void VMarrayStoreCHKEvaluator(TR::Node *, TR::Node *, TR::Node *, TR_X86ScratchRegisterManager *, TR::LabelSymbol *, TR::Instruction *, TR::CodeGenerator *cg);
    static void VMwrtbarRealTimeWithoutStoreEvaluator(TR::Node *node, TR::MemoryReference *storeMRForRealTime, TR::Register *stoerAddressRegForRealTime, TR::Node *destOwningObject, TR::Node *sourceObject, TR::Register *srcReg, TR_X86ScratchRegisterManager *scratchRegisterManager, TR::CodeGenerator *cg);
@@ -150,8 +150,12 @@ class OMR_EXTENSIBLE TreeEvaluator: public J9::TreeEvaluator
    static TR::Register *fwrtbariEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *awrtbarEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *awrtbariEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *inlineStringLatin1Inflate(TR::Node *node, TR::CodeGenerator *cg);
    static TR::Register *generateConcurrentScavengeSequence(TR::Node *node, TR::CodeGenerator *cg);
-
+   static TR::Register *fpConvertToLong(TR::Node *node, TR::SymbolReference *helperSymRef, TR::CodeGenerator *cg);
+   static TR::Register *f2iEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *f2lEvaluator(TR::Node *node, TR::CodeGenerator *cg);
+   static TR::Register *d2lEvaluator(TR::Node *node, TR::CodeGenerator *cg);
    class CaseConversionManager;
    static TR::Register *stringCaseConversionHelper(TR::Node *node, TR::CodeGenerator *cg, CaseConversionManager& manager);
 

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2009, 2020 IBM Corp. and others
+ * Copyright (c) 2009, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -313,8 +313,6 @@ public class StackWalker
 				swPrintf(walkState, 2, "\tSTART_AT_JIT_FRAME");
 			if ((walkState.flags & J9_STACKWALK_COUNT_SPECIFIED) != 0)
 				swPrintf(walkState, 2, "\tCOUNT_SPECIFIED");
-			if ((walkState.flags & J9_STACKWALK_INCLUDE_ARRAYLET_LEAVES) != 0)
-				swPrintf(walkState, 2, "\tINCLUDE_ARRAYLET_LEAVES");
 			if ((walkState.flags & J9_STACKWALK_INCLUDE_NATIVES) != 0)
 				swPrintf(walkState, 2, "\tINCLUDE_NATIVES");
 			if ((walkState.flags & J9_STACKWALK_INCLUDE_CALL_IN_FRAMES) != 0)
@@ -962,10 +960,16 @@ public class StackWalker
 				J9JavaVMPointer vm = walkState.walkThread.javaVM();
 				
 				walkState.constantPool = ConstantPoolHelpers.J9_CP_FROM_METHOD(walkState.method);
-				if ((walkState.pc != vm.impdep1PC()) && (walkState.pc != (vm.impdep1PC().addOffset(3)))) {
+				boolean isImpdep1 = false;
+				try {
+					isImpdep1 = (walkState.pc == vm.impdep1PC()) || (walkState.pc == vm.impdep1PC().addOffset(3));
+				} catch (NoSuchFieldException e) {
+					// impdep1PC field is disabled for OJDK method handles
+				}
+				if (!isImpdep1) {
 					walkState.bytecodePCOffset = walkState.pc.sub(walkState.method.bytecodes().getAddress());	
 				} else {
-					walkState.bytecodePCOffset = U8Pointer.cast(new UDATA(0));
+					walkState.bytecodePCOffset = U8Pointer.NULL;
 				}
 
 				romMethod = getOriginalROMMethod(walkState.method);

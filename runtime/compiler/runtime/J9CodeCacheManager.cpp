@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -43,6 +43,7 @@
 #include "env/VMJ9.h"
 #include "runtime/ArtifactManager.hpp"
 #include "env/IO.hpp"
+#include "env/VerboseLog.hpp"
 
 TR::CodeCacheManager *J9::CodeCacheManager::_codeCacheManager = NULL;
 J9JavaVM *J9::CodeCacheManager::_javaVM = NULL;
@@ -661,7 +662,7 @@ J9::CodeCacheManager::almostOutOfCodeCache()
       return false;
    else
       {
-      // Check the space in the the most current code cache
+      // Check the space in the most current code cache
       bool foundSpace = false;
 
          {
@@ -706,7 +707,7 @@ J9::CodeCacheManager::printRemainingSpaceInCodeCaches()
    CacheListCriticalSection scanCacheList(self());
    for (TR::CodeCache *codeCache = self()->getFirstCodeCache(); codeCache; codeCache = codeCache->next())
       {
-      fprintf(stderr, "cache %p has %lu bytes empty\n", codeCache, codeCache->getFreeContiguousSpace());
+      fprintf(stderr, "cache %p has %" OMR_PRIdSIZE " bytes empty\n", codeCache, codeCache->getFreeContiguousSpace());
       if (codeCache->isReserved())
          fprintf(stderr, "Above cache is reserved by compThread %d\n", codeCache->getReservingCompThreadID());
       }

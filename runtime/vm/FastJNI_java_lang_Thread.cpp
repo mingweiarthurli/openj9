@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2017 IBM Corp. and others
+ * Copyright (c) 2001, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,22 +15,22 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
 
 #include "fastJNI.h"
 #include "j9protos.h"
-#include "VMHelpers.hpp"
 #include "j9vmnls.h"
 #include "AtomicSupport.hpp"
+#include "VMHelpers.hpp"
 
 extern "C" {
 
-/* java.lang.Thread: public static native void sleep(long millis, int nanos) throws InterruptedException; */
+/* java.lang.Thread: private static native void sleepImpl(long millis, int nanos) throws InterruptedException; */
 void JNICALL
-Fast_java_lang_Thread_sleep(J9VMThread *currentThread, jlong millis, jint nanos)
+Fast_java_lang_Thread_sleepImpl(J9VMThread *currentThread, jlong millis, jint nanos)
 {
 	if (0 == threadSleepImpl(currentThread, (I_64)millis, (I_32)nanos)) {
 		/* No need to check return value here - pop frames cannot occur as this method is native */
@@ -45,17 +45,29 @@ Fast_java_lang_Thread_currentThread(J9VMThread *currentThread)
 	return currentThread->threadObject;
 }
 
+#if JAVA_SPEC_VERSION >= 19
+/* java.lang.Thread: native void setCurrentThread(Thread thread); */
+void JNICALL
+Fast_java_lang_Thread_setCurrentThread(J9VMThread *currentThread, j9object_t receiverObject, j9object_t threadObject)
+{
+	J9VMThread *targetThread = J9VMJAVALANGTHREAD_THREADREF(currentThread, receiverObject);
+	/* This is a package private method, currently the receiver object is Thread.currentCarrierThread()
+	 * which is assumed alive, hence targetThread can't be null.
+	 */
+	targetThread->threadObject = threadObject;
+}
+#endif /* JAVA_SPEC_VERSION >= 19 */
 
-/* java.lang.Thread: public static native boolean interrupted(); */
+/* java.lang.Thread: private static native boolean interruptedImpl(); */
 jboolean JNICALL
-Fast_java_lang_Thread_interrupted(J9VMThread *currentThread)
+Fast_java_lang_Thread_interruptedImpl(J9VMThread *currentThread)
 {
 	jboolean rc = JNI_FALSE;
 #if defined(WIN32)
 	/* Synchronize on the thread lock around interrupted() on windows */
 	j9object_t threadLock = J9VMJAVALANGTHREAD_LOCK(currentThread, currentThread->threadObject);
 	threadLock = (j9object_t)objectMonitorEnter(currentThread, threadLock);
-	if (NULL == threadLock) {
+	if (J9_OBJECT_MONITOR_ENTER_FAILED(threadLock)) {
 		setNativeOutOfMemoryError(currentThread, J9NLS_VM_FAILED_TO_ALLOCATE_MONITOR);
 		goto done;
 	}
@@ -98,12 +110,17 @@ Fast_java_lang_Thread_onSpinWait(J9VMThread *currentThread)
 #endif /* WIN32 */
 
 J9_FAST_JNI_METHOD_TABLE(java_lang_Thread)
-	J9_FAST_JNI_METHOD("sleep", "(JI)V", Fast_java_lang_Thread_sleep,
+	J9_FAST_JNI_METHOD("sleepImpl", "(JI)V", Fast_java_lang_Thread_sleepImpl,
 		J9_FAST_JNI_RETAIN_VM_ACCESS | J9_FAST_JNI_DO_NOT_WRAP_OBJECTS | J9_FAST_JNI_DO_NOT_PASS_RECEIVER)
 	J9_FAST_JNI_METHOD("currentThread", "()Ljava/lang/Thread;", Fast_java_lang_Thread_currentThread,
 		J9_FAST_JNI_RETAIN_VM_ACCESS | J9_FAST_JNI_NOT_GC_POINT | J9_FAST_JNI_NO_NATIVE_METHOD_FRAME | J9_FAST_JNI_NO_EXCEPTION_THROW |
 		J9_FAST_JNI_NO_SPECIAL_TEAR_DOWN | J9_FAST_JNI_DO_NOT_WRAP_OBJECTS | J9_FAST_JNI_DO_NOT_PASS_RECEIVER)
-	J9_FAST_JNI_METHOD("interrupted", "()Z", Fast_java_lang_Thread_interrupted,
+#if JAVA_SPEC_VERSION >= 19
+	J9_FAST_JNI_METHOD("setCurrentThread", "(Ljava/lang/Thread;)V", Fast_java_lang_Thread_setCurrentThread,
+		J9_FAST_JNI_RETAIN_VM_ACCESS | J9_FAST_JNI_NOT_GC_POINT | J9_FAST_JNI_NO_NATIVE_METHOD_FRAME | J9_FAST_JNI_NO_EXCEPTION_THROW |
+		J9_FAST_JNI_NO_SPECIAL_TEAR_DOWN | J9_FAST_JNI_DO_NOT_WRAP_OBJECTS )
+#endif /* JAVA_SPEC_VERSION >= 19 */
+	J9_FAST_JNI_METHOD("interruptedImpl", "()Z", Fast_java_lang_Thread_interruptedImpl,
 		INTERRUPTED_FLAGS)
 	J9_FAST_JNI_METHOD("isInterruptedImpl", "()Z", Fast_java_lang_Thread_isInterruptedImpl,
 		J9_FAST_JNI_RETAIN_VM_ACCESS | J9_FAST_JNI_NOT_GC_POINT | J9_FAST_JNI_NO_NATIVE_METHOD_FRAME | J9_FAST_JNI_NO_EXCEPTION_THROW |

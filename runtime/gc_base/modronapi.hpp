@@ -1,6 +1,5 @@
-
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -92,7 +91,7 @@ void j9gc_set_memoryController(J9VMThread *vmThread, j9object_t objectPtr, j9obj
 void j9gc_set_allocation_sampling_interval(J9JavaVM *vm, UDATA samplingInterval);
 void j9gc_set_allocation_threshold(J9VMThread *vmThread, UDATA low, UDATA high);
 UDATA j9gc_get_bytes_allocated_by_thread(J9VMThread *vmThread);
-void j9gc_get_CPU_times(J9JavaVM *javaVM, U_64 *masterCpuMillis, U_64 *slaveCpuMillis, U_32 *maxThreads, U_32 *currentThreads);
+void j9gc_get_CPU_times(J9JavaVM *javaVM, U_64 *mainCpuMillis, U_64 *workerCpuMillis, U_32 *maxThreads, U_32 *currentThreads);
 J9HookInterface** j9gc_get_private_hook_interface(J9JavaVM *javaVM);
 /**
  * Called whenever a ownable synchronizer object is created. Places the object on the thread-specific buffer of recently allocated ownable synchronizer objects.
@@ -102,13 +101,17 @@ J9HookInterface** j9gc_get_private_hook_interface(J9JavaVM *javaVM);
  */
 UDATA ownableSynchronizerObjectCreated(J9VMThread *vmThread, j9object_t object);
 
+UDATA continuationObjectCreated(J9VMThread *vmThread, j9object_t object);
+void preMountContinuation(J9VMThread *vmThread, j9object_t object);
+void postUnmountContinuation(J9VMThread *vmThread, j9object_t object);
+
 /**
  * Called during class redefinition to notify the GC of replaced classes.In certain cases the GC needs to 
  * update some of the fields in the classes
  * This function must be called under exclusive access only
  * @param vmThread
  * @param originalClass The class being redifined
- * @param replacementClass The result of the the class redefinition
+ * @param replacementClass The result of the class redefinition
  * @param isFastHCR Flag to indicate wether it replacement was done via fastHCR or not
  */
 void j9gc_notifyGCOfClassReplacement(J9VMThread *vmThread, J9Class *originalClass, J9Class *replacementClass, UDATA isFastHCR);

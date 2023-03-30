@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -77,6 +77,8 @@ JIT_HELPER(jitInduceOSRAtCurrentPCAndRecompile);  // asm calling-convention help
 JIT_HELPER(jitInstanceOf);  // asm calling-convention helper
 JIT_HELPER(jitInterpretNewInstanceMethod);  // asm calling-convention helper
 JIT_HELPER(jitLookupInterfaceMethod);  // asm calling-convention helper
+JIT_HELPER(jitLookupDynamicInterfaceMethod);  // asm calling-convention helper
+JIT_HELPER(jitLookupDynamicPublicInterfaceMethod);  // asm calling-convention helper
 JIT_HELPER(jitMethodIsNative);  // asm calling-convention helper
 JIT_HELPER(jitMethodIsSync);  // asm calling-convention helper
 JIT_HELPER(jitMethodMonitorEntry);  // asm calling-convention helper
@@ -87,13 +89,15 @@ JIT_HELPER(jitNewArray);  // asm calling-convention helper
 JIT_HELPER(jitNewInstanceImplAccessCheck);  // asm calling-convention helper
 JIT_HELPER(jitNewObject);  // asm calling-convention helper
 JIT_HELPER(jitGetFlattenableField);  // asm calling-convention helper
+JIT_HELPER(jitCloneValueType);  // asm calling-convention helper
 JIT_HELPER(jitWithFlattenableField);  // asm calling-convention helper
 JIT_HELPER(jitPutFlattenableField);  // asm calling-convention helper
 JIT_HELPER(jitGetFlattenableStaticField);  // asm calling-convention helper
 JIT_HELPER(jitPutFlattenableStaticField);  // asm calling-convention helper
 JIT_HELPER(jitLoadFlattenableArrayElement);  // asm calling-convention helper
 JIT_HELPER(jitStoreFlattenableArrayElement);  // asm calling-convention helper
-JIT_HELPER(jitAcmpHelper);  // asm calling-convention helper
+JIT_HELPER(jitAcmpeqHelper);  // asm calling-convention helper
+JIT_HELPER(jitAcmpneHelper);  // asm calling-convention helper
 JIT_HELPER(jitNewValue);  // asm calling-convention helper
 JIT_HELPER(jitObjectHashCode);  // asm calling-convention helper
 JIT_HELPER(jitPostJNICallOffloadCheck);  // asm calling-convention helper
@@ -111,6 +115,7 @@ JIT_HELPER(jitResolveFieldSetter);  // asm calling-convention helper
 JIT_HELPER(jitResolveFieldDirect);  // asm calling-convention helper
 JIT_HELPER(jitResolveFieldSetterDirect);  // asm calling-convention helper
 JIT_HELPER(jitResolveHandleMethod);  // asm calling-convention helper
+JIT_HELPER(jitResolveFlattenableField);  // asm calling-convention helper
 JIT_HELPER(jitResolveInterfaceMethod);  // asm calling-convention helper
 JIT_HELPER(jitResolveInvokeDynamic);  // asm calling-convention helper
 JIT_HELPER(jitResolveMethodHandle);  // asm calling-convention helper

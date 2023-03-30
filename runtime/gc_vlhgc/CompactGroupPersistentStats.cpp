@@ -1,6 +1,5 @@
-
 /*******************************************************************************
- * Copyright (c) 1991, 2014 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -431,7 +430,7 @@ MM_CompactGroupPersistentStats::calculateLiveBytesForRegion(MM_EnvironmentVLHGC 
 			if (region->getLowerAgeBound() < boundary) {
 				/* not a whole region is above boundary */
 
-				/* first calculated the the fraction of objects below average age */
+				/* first calculated the fraction of objects below average age */
 				UDATA liveBytesBelowAverageAge = (UDATA)(region->_projectedLiveBytesPreviousPGC
 														* (region->getUpperAgeBound() - region->getAllocationAge())
 														/ (region->getUpperAgeBound() - region->getLowerAgeBound()));
@@ -449,7 +448,7 @@ MM_CompactGroupPersistentStats::calculateLiveBytesForRegion(MM_EnvironmentVLHGC 
 			if (region->getUpperAgeBound() > boundary) {
 				/* at least a fraction of the region is above boundary */
 
-				/* first calculated the the fraction of objects above average age */
+				/* first calculated the fraction of objects above average age */
 				UDATA liveBytesAboveAverageAge = (UDATA)(region->_projectedLiveBytesPreviousPGC
 														* (region->getAllocationAge() - region->getLowerAgeBound())
 														/ (region->getUpperAgeBound() - region->getLowerAgeBound()));
@@ -483,8 +482,7 @@ MM_CompactGroupPersistentStats::updateStatsBeforeCopyForward(MM_EnvironmentVLHGC
 			UDATA compactGroup = MM_CompactGroupManager::getCompactGroupNumber(env, region);
 
 			if (!persistentStats[compactGroup]._statsHaveBeenUpdatedThisCycle) {
-				MM_MemoryPoolBumpPointer *pool = (MM_MemoryPoolBumpPointer *)region->getMemoryPool();
-				UDATA completeFreeMemory = pool->getFreeMemoryAndDarkMatterBytes();
+				UDATA completeFreeMemory = region->getMemoryPool()->getFreeMemoryAndDarkMatterBytes();
 				Assert_MM_true(completeFreeMemory <= regionSize);
 				UDATA measuredLiveBytes = regionSize - completeFreeMemory;
 				UDATA projectedLiveBytes = region->_projectedLiveBytes;
@@ -538,8 +536,7 @@ MM_CompactGroupPersistentStats::updateStatsBeforeSweep(MM_EnvironmentVLHGC *env,
 			UDATA compactGroup = MM_CompactGroupManager::getCompactGroupNumber(env, region);
 
 			if (!persistentStats[compactGroup]._statsHaveBeenUpdatedThisCycle) {
-				MM_MemoryPoolBumpPointer *pool = (MM_MemoryPoolBumpPointer *)region->getMemoryPool();
-				UDATA completeFreeMemory = pool->getFreeMemoryAndDarkMatterBytes();
+				UDATA completeFreeMemory = region->getMemoryPool()->getFreeMemoryAndDarkMatterBytes();
 				Assert_MM_true(completeFreeMemory <= regionSize);
 				UDATA measuredLiveBytes = regionSize - completeFreeMemory;
 				UDATA projectedLiveBytes = region->_projectedLiveBytes;
@@ -568,8 +565,7 @@ MM_CompactGroupPersistentStats::updateStatsAfterSweep(MM_EnvironmentVLHGC *env, 
 			UDATA compactGroup = MM_CompactGroupManager::getCompactGroupNumber(env, region);
 
 			if (!persistentStats[compactGroup]._statsHaveBeenUpdatedThisCycle) {
-				MM_MemoryPoolBumpPointer *pool = (MM_MemoryPoolBumpPointer *)region->getMemoryPool();
-				UDATA completeFreeMemory = pool->getFreeMemoryAndDarkMatterBytes();
+				UDATA completeFreeMemory = region->getMemoryPool()->getFreeMemoryAndDarkMatterBytes();
 				Assert_MM_true(completeFreeMemory <= regionSize);
 				UDATA measuredLiveBytes = regionSize - completeFreeMemory;
 
@@ -597,8 +593,7 @@ MM_CompactGroupPersistentStats::updateStatsBeforeCompact(MM_EnvironmentVLHGC *en
 			UDATA compactGroup = MM_CompactGroupManager::getCompactGroupNumber(env, region);
 
 			if (!persistentStats[compactGroup]._statsHaveBeenUpdatedThisCycle) {
-				MM_MemoryPoolBumpPointer *pool = (MM_MemoryPoolBumpPointer *)region->getMemoryPool();
-				UDATA completeFreeMemory = pool->getFreeMemoryAndDarkMatterBytes();
+				UDATA completeFreeMemory = region->getMemoryPool()->getFreeMemoryAndDarkMatterBytes();
 				Assert_MM_true(completeFreeMemory <= regionSize);
 				UDATA measuredLiveBytes = regionSize - completeFreeMemory;
 				UDATA projectedLiveBytes = region->_projectedLiveBytes;
@@ -627,8 +622,7 @@ MM_CompactGroupPersistentStats::updateStatsAfterCompact(MM_EnvironmentVLHGC *env
 			UDATA compactGroup = MM_CompactGroupManager::getCompactGroupNumber(env, region);
 
 			if (!persistentStats[compactGroup]._statsHaveBeenUpdatedThisCycle) {
-				MM_MemoryPoolBumpPointer *pool = (MM_MemoryPoolBumpPointer *)region->getMemoryPool();
-				UDATA completeFreeMemory = pool->getFreeMemoryAndDarkMatterBytes();
+				UDATA completeFreeMemory = region->getMemoryPool()->getFreeMemoryAndDarkMatterBytes();
 				Assert_MM_true(completeFreeMemory <= regionSize);
 				UDATA measuredLiveBytes = regionSize - completeFreeMemory;
 
@@ -653,8 +647,7 @@ MM_CompactGroupPersistentStats::initProjectedLiveBytes(MM_EnvironmentVLHGC *env)
 	while (NULL != (region = regionIterator.nextRegion())) {
 		/* UDATA_MAX has a special meaning of 'uninitialized' */
 		if(region->containsObjects() && (UDATA_MAX == region->_projectedLiveBytes)) {
-			MM_MemoryPoolBumpPointer *memoryPool = (MM_MemoryPoolBumpPointer *)region->getMemoryPool();
-			UDATA completeFreeMemory = memoryPool->getFreeMemoryAndDarkMatterBytes();
+			UDATA completeFreeMemory = region->getMemoryPool()->getFreeMemoryAndDarkMatterBytes();
 			Assert_MM_true(completeFreeMemory <= regionSize);
 			UDATA measuredLiveBytes = regionSize - completeFreeMemory;
 			region->_projectedLiveBytes = measuredLiveBytes;

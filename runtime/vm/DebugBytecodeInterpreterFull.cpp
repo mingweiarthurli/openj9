@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -24,10 +24,8 @@
 
 #if defined(OMR_GC_FULL_POINTERS)
 #define DEBUG_VERSION
-#define J9_OVERRIDE_COMPRESS_OBJECT_REFERENCES 0
+#define OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES 0
 #define LOOP_NAME debugBytecodeLoopFull
 #define INTERPRETER_CLASS VM_DebugBytecodeInterpreterFull
 #include "BytecodeInterpreter.inc"
-#else
-#define LOOP_NAME 0
 #endif /* OMR_GC_FULL_POINTERS */

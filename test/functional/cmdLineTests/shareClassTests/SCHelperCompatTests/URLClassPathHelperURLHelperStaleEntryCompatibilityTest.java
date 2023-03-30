@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -68,7 +68,7 @@ public class URLClassPathHelperURLHelperStaleEntryCompatibilityTest {
 		String classPath = props.getProperty("Classpath");
 		
 		String ctl = props.getProperty("NumberOfClassesToLoad");
-		Integer intctl = new Integer(ctl);
+		Integer intctl = Integer.valueOf(ctl);
 		int numberOfClassesToLoad = intctl.intValue();
 		
 		String classesString = props.getProperty("LoadClasses");
@@ -78,7 +78,7 @@ public class URLClassPathHelperURLHelperStaleEntryCompatibilityTest {
 		}
 		
 		String numberOfUrlsString = props.getProperty("NumberOfUrls");
-		Integer tempNumberOfUrls = new Integer(numberOfUrlsString);
+		Integer tempNumberOfUrls = Integer.valueOf(numberOfUrlsString);
 		int numberOfUrls = tempNumberOfUrls.intValue();
 		
 		int maxClassesToFind = 0;		
@@ -86,7 +86,7 @@ public class URLClassPathHelperURLHelperStaleEntryCompatibilityTest {
 		for(int index = 0; index < numberOfUrls; index++){
 			urls[index] = props.getProperty("Url"+index);
 			String ctf = props.getProperty("NumberOfClassesToFind"+index);
-			Integer intctf = new Integer(ctf);
+			Integer intctf = Integer.valueOf(ctf);
 			maxClassesToFind = ((intctf.intValue() > maxClassesToFind) ? intctf.intValue() : maxClassesToFind);
 		}
 		
@@ -97,7 +97,7 @@ public class URLClassPathHelperURLHelperStaleEntryCompatibilityTest {
 			String findClasses = props.getProperty("FindClasses"+urlIndex);
 			String result = props.getProperty("Results"+urlIndex);
 			String ctf = props.getProperty("NumberOfClassesToFind"+urlIndex);
-			Integer intctf = new Integer(ctf);
+			Integer intctf = Integer.valueOf(ctf);
 			int numberOfClassesToFind = intctf.intValue();
 			for(int classToFindIndex = 0; classToFindIndex < numberOfClassesToFind; classToFindIndex++){
 				classesToFind[urlIndex][classToFindIndex] = manipulator.getStringElement(classToFindIndex, findClasses);

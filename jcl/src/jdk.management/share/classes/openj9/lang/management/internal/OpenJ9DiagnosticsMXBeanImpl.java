@@ -1,6 +1,6 @@
-/*[INCLUDE-IF Sidecar17]*/
+/*[INCLUDE-IF JAVA_SPEC_VERSION >= 8]*/
 /*******************************************************************************
- * Copyright (c) 2018, 2019 IBM Corp. and others
+ * Copyright (c) 2018, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -27,7 +27,6 @@ import javax.management.ObjectName;
 /*[IF Sidecar19-SE]*/
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
-import java.security.AccessController;
 import java.security.PrivilegedAction;
 import java.util.Optional;
 /*[ELSE]*/
@@ -58,6 +57,7 @@ public final class OpenJ9DiagnosticsMXBeanImpl implements OpenJ9DiagnosticsMXBea
 	private final Method dump_heapDumpToFile;
 	private final Method dump_JavaDump;
 	private final Method dump_javaDumpToFile;
+	private final Method dump_queryDumpOptions;
 	private final Method dump_resetDumpOptions;
 	private final Method dump_setDumpOptions;
 	private final Method dump_SnapDump;
@@ -67,8 +67,11 @@ public final class OpenJ9DiagnosticsMXBeanImpl implements OpenJ9DiagnosticsMXBea
 	private final Method dump_triggerDump;
 	/*[ENDIF]*/
 
+	/*[IF JAVA_SPEC_VERSION >= 17]*/
+	@SuppressWarnings("removal")
+	/*[ENDIF] JAVA_SPEC_VERSION >= 17 */
 	private static OpenJ9DiagnosticsMXBean createInstance() {
-		/*[IF Sidecar19-SE]*/
+		/*[IF JAVA_SPEC_VERSION > 8]*/
 		// TODO remove the dependency on the openj9.jvm module
 		final Optional<Module> openj9_jvm = ModuleLayer.boot().findModule("openj9.jvm"); //$NON-NLS-1$
 
@@ -87,10 +90,10 @@ public final class OpenJ9DiagnosticsMXBeanImpl implements OpenJ9DiagnosticsMXBea
 			}
 		};
 
-		return AccessController.doPrivileged(action);
-		/*[ELSE]
+		return java.security.AccessController.doPrivileged(action);
+		/*[ELSE] JAVA_SPEC_VERSION > 8
 		return new OpenJ9DiagnosticsMXBeanImpl();
-		/*[ENDIF]*/
+		/*[ENDIF] JAVA_SPEC_VERSION > 8 */
 	}
 
 	/**
@@ -107,6 +110,23 @@ public final class OpenJ9DiagnosticsMXBeanImpl implements OpenJ9DiagnosticsMXBea
 			/*[ENDIF]*/
 		} catch (Exception e) {
 			handleDumpConfigurationUnavailableException(e);
+			throw handleError(e);
+		}
+	}
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	public String[] queryDumpOptions() {
+		checkManagementSecurityPermission();
+		try {
+			/*[IF Sidecar19-SE]*/ if (2 > 1) {
+			return (String[])dump_queryDumpOptions.invoke(null);
+			/*[ELSE]*/ }
+			return Dump.queryDumpOptions();
+			/*[ENDIF]*/
+		} catch (Exception e) {
 			throw handleError(e);
 		}
 	}
@@ -290,6 +310,7 @@ public final class OpenJ9DiagnosticsMXBeanImpl implements OpenJ9DiagnosticsMXBea
 
 	private static void checkManagementSecurityPermission() {
 		/* Check the caller has Management Permission. */
+		@SuppressWarnings("removal")
 		SecurityManager manager = System.getSecurityManager();
 		if (manager != null) {
 			manager.checkPermission(ManagementPermissionHelper.MPCONTROL);
@@ -320,6 +341,7 @@ public final class OpenJ9DiagnosticsMXBeanImpl implements OpenJ9DiagnosticsMXBea
 		dump_heapDumpToFile = dumpClass.getMethod("heapDumpToFile", String.class); //$NON-NLS-1$
 		dump_JavaDump = dumpClass.getMethod("JavaDump"); //$NON-NLS-1$
 		dump_javaDumpToFile = dumpClass.getMethod("javaDumpToFile", String.class); //$NON-NLS-1$
+		dump_queryDumpOptions = dumpClass.getMethod("queryDumpOptions"); //$NON-NLS-1$
 		dump_resetDumpOptions = dumpClass.getMethod("resetDumpOptions"); //$NON-NLS-1$
 		dump_setDumpOptions = dumpClass.getMethod("setDumpOptions", String.class); //$NON-NLS-1$
 		dump_SnapDump = dumpClass.getMethod("SnapDump"); //$NON-NLS-1$

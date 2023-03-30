@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -79,7 +79,6 @@ struct TR_RatHT
 //#define CLASS_EXTEND_ASSUMPTIONTABLE_SIZE 1543  // other choices: 3079 6151
 class TR_RuntimeAssumptionTable
    {
-   friend class TR_DebugExt;
    public:
    TR_RuntimeAssumptionTable() {} // constructor of TR_RuntimeAssumptionTable
    bool init();  // Must call this during bootstrap on a single thread because it is not MT safe
@@ -105,6 +104,7 @@ class TR_RuntimeAssumptionTable
    void notifyIllegalStaticFinalFieldModificationEvent(TR_FrontEnd *vm, void *key);
    void notifyClassRedefinitionEvent(TR_FrontEnd *vm, bool isSMP, void *oldKey, void *newKey);
    void notifyMutableCallSiteChangeEvent(TR_FrontEnd *vm, uintptr_t cookie);
+   void notifyMethodBreakpointed(TR_FrontEnd *fe, TR_OpaqueMethodBlock *method);
 
    int32_t getAssumptionCount(int32_t tableId) const { return assumptionCount[tableId]; }
    int32_t getReclaimedAssumptionCount(int32_t tableId) const { return reclaimedAssumptionCount[tableId]; }

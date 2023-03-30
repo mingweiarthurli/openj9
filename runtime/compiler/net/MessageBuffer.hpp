@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2020, 2020 IBM Corp. and others
+ * Copyright (c) 2020, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -26,6 +26,7 @@
 #include "env/jittypes.h"
 #include "env/TRMemory.hpp"
 #include "OMR/Bytes.hpp" // for alignNoCheck
+#include "env/CompilerEnv.hpp"
 
 namespace JITServer
 {
@@ -52,7 +53,7 @@ public:
 
    ~MessageBuffer()
       {
-      TR_Memory::jitPersistentFree(_storage);
+      freeMemory(_storage);
       }
 
 
@@ -182,31 +183,39 @@ public:
    /**
       @brief Expand the underlying buffer if more than allocated memory is needed.
 
-      If requiredSize is greater than _capacity, allocates a new buffer of size
-      requiredSize * 2 (to prevent frequent reallocations),
-      copies all existing data based on _curPtr location to the new buffer,
-      and frees the old buffer.
-
       @param requiredSize the number of bytes the buffer needs to fit.
    */
    void expandIfNeeded(uint32_t requiredSize);
 
    /**
-      @brief Expand the underlying buffer to requiredSize and copy numBytesToCopy
+      @brief Expand the underlying buffer to fit requiredSize and copy numBytesToCopy
       from the old buffer to the new buffer when requiredSize is greater than
       the capacity, and free the old buffer.
+
+      If requiredSize is greater than _capacity, allocates a new buffer that can fit requiredSize
+      bytes rounded up to the nearest power of 2,
+      copies all existing data based on _curPtr location to the new buffer,
+      and frees the old buffer.
+
+      @param requiredSize the number of bytes the buffer needs to fit.
+      @param numBytesToCopy the number of bytes that need to be copied over from the old buffer
    */
    void expand(uint32_t requiredSize, uint32_t numBytesToCopy);
 
    uint32_t getCapacity() const { return _capacity; }
 
+
 private:
-   static const size_t INITIAL_BUFFER_SIZE = 18000;
+   static const size_t INITIAL_BUFFER_SIZE = 32768; // Initial buffer size is 32K
    uint32_t offset(char *addr) const { return addr - _storage; }
+   char *allocateMemory(uint32_t capacity) { return static_cast<char *>(_allocator.allocate(capacity)); }
+   void freeMemory(char *storage) { _allocator.deallocate(storage); }
+   uint32_t computeRequiredCapacity(uint32_t requiredSize);
 
    uint32_t _capacity;
    char *_storage;
    char *_curPtr;
+   TR::PersistentAllocator &_allocator;
    };
 };
 #endif

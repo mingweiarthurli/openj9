@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -168,7 +168,6 @@ class MonitorElimination : public TR::Optimization
    void removeRedundantMonitors();
 
    //TransactionalMemory
-#ifndef PUBLIC_BUILD
    bool evaluateMonitorsForTMCandidates();
    void transformMonitorsIntoTMRegions();
    void searchAndLabelNearbyMonitors(TR_ActiveMonitor *currentMonitor);
@@ -179,7 +178,7 @@ class MonitorElimination : public TR::Optimization
 
    TR_Array<TR::Block *>* createFailHandlerBlocks(TR_ActiveMonitor *monitor, TR::SymbolReference *tempSymRef, TR::Block *monitorBlock, TR::Block *tstartblock);
    TR::SymbolReference *createAndInsertTMRetryCounter(TR_ActiveMonitor *monitor);
-#endif
+
    void resetReadMonitors(int32_t);
    bool tagReadMonitors();
    bool transformIntoReadMonitor();

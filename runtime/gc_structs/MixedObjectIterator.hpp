@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -85,15 +85,7 @@ public:
 	 * @return true, if object references are compressed
 	 */
 	MMINLINE bool compressObjectReferences() {
-#if defined(OMR_GC_COMPRESSED_POINTERS)
-#if defined(OMR_GC_FULL_POINTERS)
-		return _compressObjectReferences;
-#else /* defined(OMR_GC_FULL_POINTERS) */
-		return true;
-#endif /* defined(OMR_GC_FULL_POINTERS) */
-#else /* defined(OMR_GC_COMPRESSED_POINTERS) */
-		return false;
-#endif /* defined(OMR_GC_COMPRESSED_POINTERS) */
+		return OMR_COMPRESS_OBJECT_REFERENCES(_compressObjectReferences);
 	}
 
 	/**
@@ -242,7 +234,7 @@ public:
 	/**
 	 * @param vm[in] pointer to the JVM
 	 */
-	GC_MixedObjectIterator (OMR_VM *omrVM)
+	GC_MixedObjectIterator(OMR_VM *omrVM)
 		: _slotObject(GC_SlotObject(omrVM, NULL))
 #if defined(OMR_GC_COMPRESSED_POINTERS) && defined(OMR_GC_FULL_POINTERS)
 		, _compressObjectReferences(OMRVM_COMPRESS_OBJECT_REFERENCES(omrVM))
@@ -253,13 +245,14 @@ public:
 		, _descriptionPtr(NULL)
 		, _description(0)
 		, _descriptionIndex(0)
-	{}
+	{
+	}
 
 	/**
 	 * @param vm[in] pointer to the JVM
 	 * @param objectPtr[in] the object to be processed
 	 */
-	GC_MixedObjectIterator (OMR_VM *omrVM, J9Object *objectPtr)
+	GC_MixedObjectIterator(OMR_VM *omrVM, J9Object *objectPtr)
 		: _slotObject(GC_SlotObject(omrVM, NULL))
 #if defined(OMR_GC_COMPRESSED_POINTERS) && defined(OMR_GC_FULL_POINTERS)
 		, _compressObjectReferences(OMRVM_COMPRESS_OBJECT_REFERENCES(omrVM))
@@ -270,9 +263,9 @@ public:
 		, _descriptionPtr(NULL)
 		, _description(0)
 		, _descriptionIndex(0)
-	  {
+	{
 		initialize(omrVM, objectPtr);
-	  }
+	}
 };
 
 #endif /* MIXEDOBJECTITERATOR_HPP_ */

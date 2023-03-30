@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -68,9 +68,17 @@ dummygcDebugVerboseShutdownLogging(J9JavaVM *javaVM, UDATA releaseVerboseStructu
 UDATA
 dummyconfigureVerbosegc(J9JavaVM *javaVM, int enable, char* filename, UDATA numFiles, UDATA numCycles)
 {
+	const char *verboseDLLName = J9_VERBOSE_DLL_NAME;
+
+#if defined(OMR_MIXED_REFERENCES_MODE_STATIC)
+	if (!J9JAVAVM_COMPRESS_OBJECT_REFERENCES(vm)) {
+		verboseDLLName = J9_VERBOSE_FULL_DLL_NAME;
+	}
+#endif /* defined(OMR_MIXED_REFERENCES_MODE_STATIC) */
+
 	/* The verbose DLL isn't loaded, so call back into the VM to load it. This will
 	 * reconfigure the function table to point at the functions in the verbose DLL. */
-	if(JNI_OK != javaVM->internalVMFunctions->postInitLoadJ9DLL(javaVM, J9_VERBOSE_DLL_NAME, NULL)) {
+	if (JNI_OK != javaVM->internalVMFunctions->postInitLoadJ9DLL(javaVM, verboseDLLName, NULL)) {
 		/* we failed to load the library */
 		return 0;
 	}

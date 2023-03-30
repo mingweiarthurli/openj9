@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -86,8 +86,8 @@ uint8_t *TR::X86AllocPrefetchSnippet::emitSnippetBody()
    else
       {
       TR_RuntimeHelper helper = (comp->getOption(TR_EnableNewX86PrefetchTLH)) ? TR_X86newPrefetchTLH : TR_X86prefetchTLH;
-      helperSymRef = cg()->symRefTab()->findOrCreateRuntimeHelper(helper, false, false, false);
-      disp32 = cg()->branchDisplacementToHelperOrTrampoline(buffer+4, helperSymRef);
+      helperSymRef = cg()->symRefTab()->findOrCreateRuntimeHelper(helper);
+      disp32 = cg()->branchDisplacementToHelperOrTrampoline(buffer-1, helperSymRef);
       if (fej9->needRelocationsForHelpers())
          {
          cg()->addExternalRelocation(new (cg()->trHeapMemory()) TR::ExternalRelocation(buffer,
@@ -225,14 +225,13 @@ uint8_t* TR::X86AllocPrefetchSnippet::emitSharedBody(uint8_t* prefetchSnippetBuf
       prefetchSnippetBuffer += 3;
       }
 
-   // PREFETCHNTA [rcx + distance]
-   // PREFETCHNTA [rcx + distance + lineSize]
+   // TR::InstOpCode::PREFETCHNTA [rcx + distance]
+   // TR::InstOpCode::PREFETCHNTA [rcx + distance + lineSize]
    // ...
-   // PREFETCHNTA [rcx + distance + n*lineSize]
+   // TR::InstOpCode::PREFETCHNTA [rcx + distance + n*lineSize]
    //
    for (int32_t lineOffset = 0; lineOffset < numLines; ++lineOffset)
       {
-      TR_ASSERT_FATAL(comp->compileRelocatableCode() || comp->isOutOfProcessCompilation() || TR::CodeGenerator::getX86ProcessorInfo().isAMD15h() == comp->target().cpu.is(OMR_PROCESSOR_X86_AMDFAMILY15H), "OMR_PROCESSOR_X86_AMDFAMILY15H\n");
       prefetchSnippetBuffer[0] = 0x0F;
       if (comp->target().cpu.is(OMR_PROCESSOR_X86_AMDFAMILY15H))
          prefetchSnippetBuffer[1] = 0x0D;
@@ -267,7 +266,7 @@ uint8_t* TR::X86AllocPrefetchSnippet::emitSharedBody(uint8_t* prefetchSnippetBuf
    //
    *prefetchSnippetBuffer++ = 0x59;
 
-   // RET
+   // TR::InstOpCode::RET
    //
    *prefetchSnippetBuffer++ = 0xC3;
 

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -48,13 +48,13 @@
 #include "SublistFragment.hpp"
 
 MM_StandardAccessBarrier *
-MM_StandardAccessBarrier::newInstance(MM_EnvironmentBase *env)
+MM_StandardAccessBarrier::newInstance(MM_EnvironmentBase *env, MM_MarkingScheme *markingScheme)
 {
 	MM_StandardAccessBarrier *barrier;
 	
 	barrier = (MM_StandardAccessBarrier *)env->getForge()->allocate(sizeof(MM_StandardAccessBarrier), MM_AllocationCategory::FIXED, J9_GET_CALLSITE());
 	if (barrier) {
-		new(barrier) MM_StandardAccessBarrier(env);
+		new(barrier) MM_StandardAccessBarrier(env, markingScheme);
 		if (!barrier->initialize(env)) {
 			barrier->kill(env);
 			barrier = NULL;
@@ -63,25 +63,12 @@ MM_StandardAccessBarrier::newInstance(MM_EnvironmentBase *env)
 	return barrier;
 }
 
-/**
- * Enables the double barrier on the provided thread.
- */
-void
-MM_StandardAccessBarrier::setDoubleBarrierActiveOnThread(MM_EnvironmentBase* env)
-{
-	MM_GCExtensions::getExtensions(env)->sATBBarrierRememberedSet->preserveLocalFragmentIndex(env, &(((J9VMThread *)env->getLanguageVMThread())->sATBBarrierRememberedSetFragment));
-}
-
 void
 MM_StandardAccessBarrier::initializeForNewThread(MM_EnvironmentBase* env)
 {
 #if defined(OMR_GC_REALTIME)
-	if (_extensions->configuration->isSnapshotAtTheBeginningBarrierEnabled()) {
-
+	if (_extensions->usingSATBBarrier()) {
 		_extensions->sATBBarrierRememberedSet->initializeFragment(env, &(((J9VMThread *)env->getLanguageVMThread())->sATBBarrierRememberedSetFragment));
-		if (isDoubleBarrierActive()) {
-			setDoubleBarrierActiveOnThread(env);
-		}
 	}
 #endif /* OMR_GC_REALTIME */
 }
@@ -122,9 +109,7 @@ MM_StandardAccessBarrier::tearDown(MM_EnvironmentBase *env)
 void
 MM_StandardAccessBarrier::rememberObjectToRescan(MM_EnvironmentBase *env, J9Object *object)
 {
-	MM_ParallelGlobalGC *globalCollector = (MM_ParallelGlobalGC *)_extensions->getGlobalCollector();
-
-	if (globalCollector->getMarkingScheme()->markObject(env, object, true)) {
+	if (_markingScheme->markObject(env, object, true)) {
 		rememberObjectImpl(env, object);
 	}
 }
@@ -137,8 +122,10 @@ MM_StandardAccessBarrier::rememberObjectToRescan(MM_EnvironmentBase *env, J9Obje
 void
 MM_StandardAccessBarrier::rememberObjectImpl(MM_EnvironmentBase *env, J9Object* object)
 {
+#if defined(OMR_GC_REALTIME)
 	J9VMThread *vmThread = (J9VMThread *)env->getLanguageVMThread();
 	_extensions->sATBBarrierRememberedSet->storeInFragment(env, &vmThread->sATBBarrierRememberedSetFragment, (UDATA *)object);
+#endif /* OMR_GC_REALTIME */
 }
 
 
@@ -147,12 +134,8 @@ MM_StandardAccessBarrier::preObjectStoreImpl(J9VMThread *vmThread, J9Object *des
 {
 	MM_EnvironmentBase* env = MM_EnvironmentBase::getEnvironment(vmThread->omrVMThread);
 
-	if (isSATBBarrierActive(env)) {
+	if (_extensions->isSATBBarrierActive()) {
 		if (NULL != destObject) {
-			if (isDoubleBarrierActiveOnThread(vmThread)) {
-				rememberObjectToRescan(env, value);
-			}
-
 			J9Object *oldObject = NULL;
 			protectIfVolatileBefore(vmThread, isVolatile, true, false);
 			GC_SlotObject slotObject(vmThread->javaVM->omrVM, destAddress);
@@ -170,10 +153,7 @@ MM_StandardAccessBarrier::preObjectStoreImpl(J9VMThread *vmThread, J9Object **de
 {
 	MM_EnvironmentBase* env = MM_EnvironmentBase::getEnvironment(vmThread->omrVMThread);
 
-	if (isSATBBarrierActive(env)) {
-		if (isDoubleBarrierActiveOnThread(vmThread)) {
-			rememberObjectToRescan(env, value);
-		}
+	if (_extensions->isSATBBarrierActive()) {
 		J9Object* oldObject = NULL;
 		protectIfVolatileBefore(vmThread, isVolatile, true, false);
 		oldObject = *destAddress;
@@ -247,19 +227,19 @@ MM_StandardAccessBarrier::postObjectStore(J9VMThread *vmThread, J9Class *destCla
 }
 
 bool 
-MM_StandardAccessBarrier::preBatchObjectStore(J9VMThread *vmThread, J9Object *destObject, bool isVolatile)
+MM_StandardAccessBarrier::postBatchObjectStore(J9VMThread *vmThread, J9Object *destObject, bool isVolatile)
 {
-	preBatchObjectStoreImpl(vmThread, destObject);
+	postBatchObjectStoreImpl(vmThread, destObject);
 	
 	return true;
 }
 
 bool 
-MM_StandardAccessBarrier::preBatchObjectStore(J9VMThread *vmThread, J9Class *destClass, bool isVolatile)
+MM_StandardAccessBarrier::postBatchObjectStore(J9VMThread *vmThread, J9Class *destClass, bool isVolatile)
 {
 	j9object_t destObject = J9VM_J9CLASS_TO_HEAPCLASS(destClass);
 	
-	preBatchObjectStoreImpl(vmThread, destObject);
+	postBatchObjectStoreImpl(vmThread, destObject);
 	
 	return true;
 }
@@ -285,15 +265,17 @@ MM_StandardAccessBarrier::postObjectStoreImpl(J9VMThread *vmThread, J9Object *ds
 {
 	/* If the source object is NULL, there is no need for a write barrier. */
 	if(NULL != srcObject) {
+#if defined(OMR_GC_CONCURRENT_SCAVENGER)
 		if (_extensions->isConcurrentScavengerEnabled() && !_extensions->isScavengerBackOutFlagRaised()) {
-			Assert_MM_false(_extensions->scavenger->isObjectInEvacuateMemory(dstObject));
-			Assert_MM_false(_extensions->scavenger->isObjectInEvacuateMemory(srcObject));
+			Assert_MM_false(_scavenger->isObjectInEvacuateMemory(dstObject));
+			Assert_MM_false(_scavenger->isObjectInEvacuateMemory(srcObject));
 		}
+#endif /* OMR_GC_CONCURRENT_SCAVENGER */
 
 #if defined(OMR_GC_MODRON_CONCURRENT_MARK)
 		/* Call the concurrent write barrier if required */
 		if(isIncrementalUpdateBarrierActive(vmThread) && _extensions->isOld(dstObject)) {
-			J9ConcurrentWriteBarrierStore(vmThread->omrVMThread, dstObject, srcObject);
+			concurrentPostWriteBarrierStore(vmThread->omrVMThread, dstObject, srcObject);
 		}
 #endif /* OMR_GC_MODRON_CONCURRENT_MARK */
 	
@@ -321,19 +303,20 @@ MM_StandardAccessBarrier::postObjectStoreImpl(J9VMThread *vmThread, J9Object *ds
  * to optimistically add an object to the remembered set without checking too hard.
  */
 void 
-MM_StandardAccessBarrier::preBatchObjectStoreImpl(J9VMThread *vmThread, J9Object *dstObject)
+MM_StandardAccessBarrier::postBatchObjectStoreImpl(J9VMThread *vmThread, J9Object *dstObject)
 {
 #if defined(OMR_GC_MODRON_CONCURRENT_MARK)
+	Assert_MM_true(!_extensions->usingSATBBarrier());
 	/* Call the concurrent write barrier if required */
 	if(_extensions->concurrentMark && 
 		(vmThread->privateFlags & J9_PRIVATE_FLAGS_CONCURRENT_MARK_ACTIVE) &&
 		_extensions->isOld(dstObject)) {
-		J9ConcurrentWriteBarrierBatchStore(vmThread->omrVMThread, dstObject);
+		concurrentPostWriteBarrierBatchStore(vmThread->omrVMThread, dstObject);
 	}
 #endif /* OMR_GC_MODRON_CONCURRENT_MARK */
 
 #if defined(J9VM_GC_GENERATIONAL)
-	_generationalAccessBarrierComponent.preBatchObjectStore(vmThread, dstObject);
+	_generationalAccessBarrierComponent.postBatchObjectStore(vmThread, dstObject);
 #endif /* J9VM_GC_GENERATIONAL */
 }
 
@@ -368,7 +351,7 @@ MM_StandardAccessBarrier::recentlyAllocatedObject(J9VMThread *vmThread, J9Object
 				 * The REMEMBERED bit is kept in the object for optimization purposes (only scan objects
 				 * whose REMEMBERED bit is set in an overflow scan)
 				 */
-				extensions->setRememberedSetOverflowState();
+				extensions->setScavengerRememberedSetOverflowState();
 #if defined(J9VM_GC_MODRON_EVENTS)			
 				reportRememberedSetOverflow(vmThread);
 #endif /* J9VM_GC_MODRON_EVENTS */
@@ -517,7 +500,7 @@ MM_StandardAccessBarrier::jniGetStringCritical(J9VMThread* vmThread, jstring str
 				jint i;
 				
 				for (i = 0; i < length; i++) {
-					data[i] = (jchar)J9JAVAARRAYOFBYTE_LOAD(vmThread, (j9object_t)valueObject, i) & (jchar)0xFF;
+					data[i] = (jchar)(U_8)J9JAVAARRAYOFBYTE_LOAD(vmThread, (j9object_t)valueObject, i);
 				}
 			} else {
 				if (J9_ARE_ANY_BITS_SET(javaVM->runtimeFlags, J9_RUNTIME_STRING_BYTE_ARRAY)) {
@@ -676,8 +659,8 @@ I_32
 MM_StandardAccessBarrier::backwardReferenceArrayCopyIndex(J9VMThread *vmThread, J9IndexableObject *srcObject, J9IndexableObject *destObject, I_32 srcIndex, I_32 destIndex, I_32 lengthInSlots)
 {
 	I_32 retValue = ARRAY_COPY_NOT_DONE;
-	//TODO SATB re-enable opt?
-	if (_extensions->configuration->isSnapshotAtTheBeginningBarrierEnabled()) {
+	/* TODO SATB re-enable opt? */
+	if (_extensions->usingSATBBarrier()) {
 		return retValue;
 	}
 
@@ -701,7 +684,7 @@ MM_StandardAccessBarrier::backwardReferenceArrayCopyIndex(J9VMThread *vmThread, 
 		}
 		Assert_MM_true(retValue == ARRAY_COPY_SUCCESSFUL);
 
-		preBatchObjectStoreImpl(vmThread, (J9Object *)destObject);
+		postBatchObjectStoreImpl(vmThread, (J9Object *)destObject);
 	}
 	return retValue;
 }
@@ -713,10 +696,10 @@ MM_StandardAccessBarrier::backwardReferenceArrayCopyIndex(J9VMThread *vmThread, 
 I_32
 MM_StandardAccessBarrier::forwardReferenceArrayCopyIndex(J9VMThread *vmThread, J9IndexableObject *srcObject, J9IndexableObject *destObject, I_32 srcIndex, I_32 destIndex, I_32 lengthInSlots)
 {
-	//TODO SATB re-enable opt
+	/* TODO SATB re-enable opt */
 	I_32 retValue = ARRAY_COPY_NOT_DONE;
 
-	if (_extensions->configuration->isSnapshotAtTheBeginningBarrierEnabled()) {
+	if (_extensions->usingSATBBarrier()) {
 		return retValue;
 	}
 
@@ -739,7 +722,7 @@ MM_StandardAccessBarrier::forwardReferenceArrayCopyIndex(J9VMThread *vmThread, J
 		}
 
 		Assert_MM_true(retValue == ARRAY_COPY_SUCCESSFUL);
-		preBatchObjectStoreImpl(vmThread, (J9Object *)destObject);
+		postBatchObjectStoreImpl(vmThread, (J9Object *)destObject);
 	}
 	return retValue;
 }
@@ -776,10 +759,10 @@ MM_StandardAccessBarrier::preWeakRootSlotRead(J9VMThread *vmThread, j9object_t *
 	omrobjectptr_t object = (omrobjectptr_t)*srcAddress;
 	bool const compressed = compressObjectReferences();
 
-	if ((NULL != _extensions->scavenger) && _extensions->scavenger->isObjectInEvacuateMemory(object)) {
+	if ((NULL != _scavenger) && _scavenger->isObjectInEvacuateMemory(object)) {
 		MM_EnvironmentStandard *env = MM_EnvironmentStandard::getEnvironment(vmThread->omrVMThread);
-		Assert_MM_true(_extensions->scavenger->isConcurrentCycleInProgress());
-		Assert_MM_true(_extensions->scavenger->isMutatorThreadInSyncWithCycle(env));
+		Assert_MM_true(_scavenger->isConcurrentCycleInProgress());
+		Assert_MM_true(_scavenger->isMutatorThreadInSyncWithCycle(env));
 
 		MM_ForwardedHeader forwardHeader(object, compressed);
 		omrobjectptr_t forwardPtr = forwardHeader.getForwardedObject();
@@ -806,8 +789,8 @@ MM_StandardAccessBarrier::preWeakRootSlotRead(J9JavaVM *vm, j9object_t *srcAddre
 	omrobjectptr_t object = (omrobjectptr_t)*srcAddress;
 	bool const compressed = compressObjectReferences();
 
-	if ((NULL != _extensions->scavenger) && _extensions->scavenger->isObjectInEvacuateMemory(object)) {
-		Assert_MM_true(_extensions->scavenger->isConcurrentCycleInProgress());
+	if ((NULL != _scavenger) && _scavenger->isObjectInEvacuateMemory(object)) {
+		Assert_MM_true(_scavenger->isConcurrentCycleInProgress());
 
 		MM_ForwardedHeader forwardHeader(object, compressed);
 		omrobjectptr_t forwardPtr = forwardHeader.getForwardedObject();
@@ -831,10 +814,10 @@ MM_StandardAccessBarrier::preObjectRead(J9VMThread *vmThread, J9Class *srcClass,
 	omrobjectptr_t object = *(volatile omrobjectptr_t *)srcAddress;
 	bool const compressed = compressObjectReferences();
 
-	if ((NULL != _extensions->scavenger) && _extensions->scavenger->isObjectInEvacuateMemory(object)) {
+	if ((NULL != _scavenger) && _scavenger->isObjectInEvacuateMemory(object)) {
 		MM_EnvironmentStandard *env = MM_EnvironmentStandard::getEnvironment(vmThread->omrVMThread);
-		Assert_MM_true(_extensions->scavenger->isConcurrentCycleInProgress());
-		Assert_MM_true(_extensions->scavenger->isMutatorThreadInSyncWithCycle(env));
+		Assert_MM_true(_scavenger->isConcurrentCycleInProgress());
+		Assert_MM_true(_scavenger->isMutatorThreadInSyncWithCycle(env));
 
 		MM_ForwardedHeader forwardHeader(object, compressed);
 		omrobjectptr_t forwardPtr = forwardHeader.getForwardedObject();
@@ -844,7 +827,7 @@ MM_StandardAccessBarrier::preObjectRead(J9VMThread *vmThread, J9Class *srcClass,
 			forwardHeader.copyOrWait(forwardPtr);
 			MM_AtomicOperations::lockCompareExchange((uintptr_t *)srcAddress, (uintptr_t)object, (uintptr_t)forwardPtr);
 		} else {
-			omrobjectptr_t destinationObjectPtr = _extensions->scavenger->copyObject(env, &forwardHeader);
+			omrobjectptr_t destinationObjectPtr = _scavenger->copyObject(env, &forwardHeader);
 			if (NULL == destinationObjectPtr) {
 				/* Failure - the scavenger must back out the work it has done. Attempt to return the original object. */
 				forwardPtr = forwardHeader.setSelfForwardedObject();
@@ -875,13 +858,13 @@ MM_StandardAccessBarrier::preObjectRead(J9VMThread *vmThread, J9Object *srcObjec
 	fomrobject_t objectToken = (fomrobject_t)(compressed ? (uintptr_t)*(volatile uint32_t *)srcAddress: *(volatile uintptr_t *)srcAddress);
 	omrobjectptr_t object = convertPointerFromToken(objectToken);
 
-	if (NULL != _extensions->scavenger) {
+	if (NULL != _scavenger) {
 		MM_EnvironmentStandard *env = MM_EnvironmentStandard::getEnvironment(vmThread->omrVMThread);
-		Assert_GC_true_with_message(env, !_extensions->scavenger->isObjectInEvacuateMemory((omrobjectptr_t)srcAddress) || _extensions->isScavengerBackOutFlagRaised(), "readObject %llx in Evacuate\n", srcAddress);
-		if (_extensions->scavenger->isObjectInEvacuateMemory(object)) {
-			Assert_GC_true_with_message2(env, _extensions->scavenger->isConcurrentCycleInProgress(),
+		Assert_GC_true_with_message(env, !_scavenger->isObjectInEvacuateMemory((omrobjectptr_t)srcAddress) || _extensions->isScavengerBackOutFlagRaised(), "readObject %llx in Evacuate\n", srcAddress);
+		if (_scavenger->isObjectInEvacuateMemory(object)) {
+			Assert_GC_true_with_message2(env, _scavenger->isConcurrentCycleInProgress(),
 					"CS not in progress, found a object in Survivor: slot %llx object %llx\n", srcAddress, object);
-			Assert_MM_true(_extensions->scavenger->isMutatorThreadInSyncWithCycle(env));
+			Assert_MM_true(_scavenger->isMutatorThreadInSyncWithCycle(env));
 			/* since object is still in evacuate, srcObject has not been scanned yet => we cannot assert
 			 * if srcObject should (already) be remembered (even if it's old)
 			 */
@@ -900,7 +883,7 @@ MM_StandardAccessBarrier::preObjectRead(J9VMThread *vmThread, J9Object *srcObjec
 				forwardHeader.copyOrWait(forwardPtr);
 				slotObject.atomicWriteReferenceToSlot(object, forwardPtr);
 			} else {
-				omrobjectptr_t destinationObjectPtr = _extensions->scavenger->copyObject(env, &forwardHeader);
+				omrobjectptr_t destinationObjectPtr = _scavenger->copyObject(env, &forwardHeader);
 				if (NULL == destinationObjectPtr) {
 					/* We have no place to copy (or less likely, we lost to another thread forwarding it).
 					 * We are forced to return the original location of the object.
@@ -931,3 +914,147 @@ MM_StandardAccessBarrier::preObjectRead(J9VMThread *vmThread, J9Object *srcObjec
 }
 #endif
 
+void
+MM_StandardAccessBarrier::forcedToFinalizableObject(J9VMThread* vmThread, J9Object* object)
+{
+	MM_EnvironmentBase* env = MM_EnvironmentBase::getEnvironment(vmThread->omrVMThread);
+	if (_extensions->isSATBBarrierActive()) {
+		rememberObjectToRescan(env, object);
+	}
+}
+
+/**
+ * Override of referenceGet.  When the collector is tracing, it makes any gotten object "grey" to ensure
+ * that it is eventually traced.
+ *
+ * @param refObject the SoftReference or WeakReference object on which get() is being called.
+ *	This barrier must not be called for PhantomReferences.  The parameter must not be NULL.
+ */
+J9Object *
+MM_StandardAccessBarrier::referenceGet(J9VMThread *vmThread, J9Object *refObject)
+{
+	J9Object *referent = J9VMJAVALANGREFREFERENCE_REFERENT_VM(vmThread->javaVM, refObject);
+
+	/* SATB - Throughout tracing, we must turn any gotten reference into a root, because the
+	 * thread doing the getting may already have been scanned.  However, since we are
+	 * running on a mutator thread and not a gc thread we do this indirectly by putting
+	 * the object in the barrier buffer.
+	 *
+	 * Do nothing exceptional for NULL or marked referents
+	 */
+	if ((_extensions->isSATBBarrierActive()) && (NULL != referent) && (!_markingScheme->isMarked(referent))) {
+		MM_EnvironmentBase *env = MM_EnvironmentBase::getEnvironment(vmThread->omrVMThread);
+		rememberObjectToRescan(env, referent);
+	}
+
+	/* We must return the external reference */
+	return referent;
+}
+
+void
+MM_StandardAccessBarrier::referenceReprocess(J9VMThread *vmThread, J9Object *refObject)
+{
+	if (_extensions->usingSATBBarrier()) {
+		referenceGet(vmThread, refObject);
+	} else {
+		postBatchObjectStore(vmThread, refObject);
+	}
+}
+
+void
+MM_StandardAccessBarrier::jniDeleteGlobalReference(J9VMThread *vmThread, J9Object *reference)
+{
+	if (_extensions->isSATBBarrierActive()) {
+		MM_EnvironmentBase *env = MM_EnvironmentBase::getEnvironment(vmThread->omrVMThread);
+		rememberObjectToRescan(env, reference);
+	}
+}
+
+void
+MM_StandardAccessBarrier::stringConstantEscaped(J9VMThread *vmThread, J9Object *stringConst)
+{
+	MM_EnvironmentBase *env = MM_EnvironmentBase::getEnvironment(vmThread->omrVMThread);
+
+	if (_extensions->isSATBBarrierActive()) {
+		rememberObjectToRescan(env, stringConst);
+	}
+}
+
+bool
+MM_StandardAccessBarrier::checkStringConstantsLive(J9JavaVM *javaVM, j9object_t stringOne, j9object_t stringTwo)
+{
+	if (_extensions->isSATBBarrierActive()) {
+		J9VMThread* vmThread =  javaVM->internalVMFunctions->currentVMThread(javaVM);
+		stringConstantEscaped(vmThread, (J9Object *)stringOne);
+		stringConstantEscaped(vmThread, (J9Object *)stringTwo);
+	}
+
+	return true;
+}
+
+/**
+ *  Equivalent to checkStringConstantsLive but for a single string constant
+ */
+bool
+MM_StandardAccessBarrier::checkStringConstantLive(J9JavaVM *javaVM, j9object_t string)
+{
+	if (_extensions->isSATBBarrierActive()) {
+		J9VMThread* vmThread =  javaVM->internalVMFunctions->currentVMThread(javaVM);
+		stringConstantEscaped(vmThread, (J9Object *)string);
+	}
+
+	return true;
+}
+
+#if defined(J9VM_GC_DYNAMIC_CLASS_UNLOADING)
+bool
+MM_StandardAccessBarrier::checkClassLive(J9JavaVM *javaVM, J9Class *classPtr)
+{
+	bool result = true;
+
+	if (_extensions->usingSATBBarrier()) {
+		J9ClassLoader *classLoader = classPtr->classLoader;
+		result = false;
+
+		if ((0 == (classLoader->gcFlags & J9_GC_CLASS_LOADER_DEAD)) && (0 == (J9CLASS_FLAGS(classPtr) & J9AccClassDying))) {
+			result = true;
+			/* this class has not been discovered dead yet so mark it if necessary to force it to be alive */
+			J9Object *classLoaderObject = classLoader->classLoaderObject;
+
+			if (NULL != classLoaderObject) {
+				/*  If mark is active but not completed yet force this class to be marked to survive this GC */
+				J9VMThread* vmThread =  javaVM->internalVMFunctions->currentVMThread(javaVM);
+				MM_EnvironmentBase* env = MM_EnvironmentBase::getEnvironment(vmThread->omrVMThread);
+				if (_extensions->isSATBBarrierActive()) {
+					rememberObjectToRescan(env, classLoaderObject);
+				}
+			}
+			/* else this class loader probably is in initialization process and class loader object has not been attached yet */
+		}
+	}
+
+	return result;
+}
+#endif /* defined(J9VM_GC_DYNAMIC_CLASS_UNLOADING) */
+
+void
+MM_StandardAccessBarrier::preMountContinuation(J9VMThread *vmThread, j9object_t contObject)
+{
+#if defined(OMR_GC_CONCURRENT_SCAVENGER)
+	if (_extensions->isConcurrentScavengerInProgress()) {
+		/* concurrent scavenger in progress */
+		MM_EnvironmentStandard *env = MM_EnvironmentStandard::getEnvironment(vmThread->omrVMThread);
+		MM_ScavengeScanReason reason = SCAN_REASON_SCAVENGE;
+		_scavenger->getDelegate()->scanContinuationNativeSlots(env, contObject, reason);
+	}
+#endif /* OMR_GC_CONCURRENT_SCAVENGER */
+}
+
+void
+MM_StandardAccessBarrier::postUnmountContinuation(J9VMThread *vmThread, j9object_t contObject)
+{
+	/* Conservatively assume that via mutations of stack slots (which are not subject to access barriers),
+	 * all post-write barriers have been triggered on this Continuation object, since it's been mounted.
+	 */
+	postBatchObjectStore(vmThread, contObject);
+}

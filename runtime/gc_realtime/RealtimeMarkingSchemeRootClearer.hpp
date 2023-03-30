@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2019, 2019 IBM Corp. and others
+ * Copyright (c) 2019, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -84,7 +84,7 @@ public:
 	doMonitorReference(J9ObjectMonitor *objectMonitor, GC_HashTableIterator *monitorReferenceIterator)
 	{
 		J9ThreadAbstractMonitor * monitor = (J9ThreadAbstractMonitor*)objectMonitor->monitor;
-		if(!_markingScheme->isMarked((J9Object *)monitor->userData)) {
+		if (!_markingScheme->isMarked((J9Object *)monitor->userData)) {
 			monitorReferenceIterator->removeSlot();
 			/* We must call objectMonitorDestroy (as opposed to omrthread_monitor_destroy) when the
 			 * monitor is not internal to the GC */
@@ -102,7 +102,7 @@ public:
 		MM_EnvironmentRealtime *env = (MM_EnvironmentRealtime *)envBase;
 		
 		/* @NOTE For SRT and MT to play together this needs to be investigated */
-		if(_singleThread || J9MODRON_HANDLE_NEXT_WORK_UNIT(env)) {
+		if (_singleThread || J9MODRON_HANDLE_NEXT_WORK_UNIT(env)) {
 			reportScanningStarted(RootScannerEntity_MonitorReferences);
 		
 			J9ObjectMonitor *objectMonitor = NULL;
@@ -148,7 +148,7 @@ public:
 		MM_EnvironmentRealtime *env = MM_EnvironmentRealtime::getEnvironment(envBase);
 		reportScanningStarted(RootScannerEntity_WeakReferenceObjectsComplete);
 
-		if (env->_currentTask->synchronizeGCThreadsAndReleaseMaster(env, UNIQUE_ID)) {
+		if (env->_currentTask->synchronizeGCThreadsAndReleaseMain(env, UNIQUE_ID)) {
 			env->_cycleState->_referenceObjectOptions |= MM_CycleState::references_clear_weak;
 			env->_currentTask->releaseSynchronizedGCThreads(env);
 		}
@@ -170,7 +170,7 @@ public:
 	virtual CompletePhaseCode scanSoftReferencesComplete(MM_EnvironmentBase *envBase) {
 		MM_EnvironmentRealtime *env = MM_EnvironmentRealtime::getEnvironment(envBase);
 		reportScanningStarted(RootScannerEntity_SoftReferenceObjectsComplete);
-		if (env->_currentTask->synchronizeGCThreadsAndReleaseMaster(env, UNIQUE_ID)) {
+		if (env->_currentTask->synchronizeGCThreadsAndReleaseMain(env, UNIQUE_ID)) {
 			env->_cycleState->_referenceObjectOptions |= MM_CycleState::references_clear_soft;
 			env->_currentTask->releaseSynchronizedGCThreads(env);
 		}
@@ -190,7 +190,7 @@ public:
 	virtual CompletePhaseCode scanPhantomReferencesComplete(MM_EnvironmentBase *envBase) {
 		MM_EnvironmentRealtime *env = MM_EnvironmentRealtime::getEnvironment(envBase);
 		reportScanningStarted(RootScannerEntity_PhantomReferenceObjectsComplete);
-		if (env->_currentTask->synchronizeGCThreadsAndReleaseMaster(env, UNIQUE_ID)) {
+		if (env->_currentTask->synchronizeGCThreadsAndReleaseMain(env, UNIQUE_ID)) {
 			env->_cycleState->_referenceObjectOptions |= MM_CycleState::references_clear_phantom;
 			env->_currentTask->releaseSynchronizedGCThreads(env);
 		}
@@ -241,6 +241,16 @@ public:
 		reportScanningEnded(RootScannerEntity_OwnableSynchronizerObjects);
 	}
 
+	virtual void
+	scanContinuationObjects(MM_EnvironmentBase *envBase)	{
+		MM_EnvironmentRealtime *env = MM_EnvironmentRealtime::getEnvironment(envBase);
+
+		reportScanningStarted(RootScannerEntity_ContinuationObjects);
+		/* allow the marking scheme to handle this */
+		_realtimeGC->getRealtimeDelegate()->scanContinuationObjects(env);
+		reportScanningEnded(RootScannerEntity_ContinuationObjects);
+	}
+
 	/**
 	 * Wraps the MM_RootScanner::scanJNIWeakGlobalReferences method to disable yielding during the scan.
 	 * @see MM_RootScanner::scanJNIWeakGlobalReferences()
@@ -262,7 +272,7 @@ public:
 	doJNIWeakGlobalReference(J9Object **slotPtr)
 	{
 		J9Object *objectPtr = *slotPtr;
-		if(objectPtr && !_markingScheme->isMarked(objectPtr)) {
+		if (objectPtr && !_markingScheme->isMarked(objectPtr)) {
 			*slotPtr = NULL;
 		}
 	}
@@ -275,7 +285,7 @@ public:
 	doJVMTIObjectTagSlot(J9Object **slotPtr, GC_JVMTIObjectTagTableIterator *objectTagTableIterator)
 	{
 		J9Object *objectPtr = *slotPtr;
-		if(objectPtr && !_markingScheme->isMarked(objectPtr)) {
+		if (objectPtr && !_markingScheme->isMarked(objectPtr)) {
 			*slotPtr = NULL;
 		}
 	}

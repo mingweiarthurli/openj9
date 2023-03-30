@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2020 IBM Corp. and others
+ * Copyright (c) 2001, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -84,7 +84,7 @@ import static com.ibm.j9ddr.vm29.j9.BCNames.JBlookupswitch;
 import static com.ibm.j9ddr.vm29.j9.BCNames.JBlstore;
 import static com.ibm.j9ddr.vm29.j9.BCNames.JBlstorew;
 import static com.ibm.j9ddr.vm29.j9.BCNames.JBmultianewarray;
-import static com.ibm.j9ddr.vm29.j9.BCNames.JBdefaultvalue;
+import static com.ibm.j9ddr.vm29.j9.BCNames.JBaconst_init;
 import static com.ibm.j9ddr.vm29.j9.BCNames.JBnew;
 import static com.ibm.j9ddr.vm29.j9.BCNames.JBnewdup;
 import static com.ibm.j9ddr.vm29.j9.BCNames.JBnewarray;
@@ -428,13 +428,13 @@ public class ByteCodeDumper {
 
 				nameAndSig = J9ROMNameAndSignaturePointer.cast(callSiteData.add(index).get());
 
-				out.append("bsm #" + String.valueOf(bsmIndices.at(index).longValue()));	/* Bootstrap method index */
+				out.append("bsm #" + bsmIndices.at(index).longValue()); /* Bootstrap method index */
 				out.append(":");
 				out.append(J9UTF8Helper.stringValue(nameAndSig.name())); /* dump name */
 				out.append(J9UTF8Helper.stringValue(nameAndSig.signature())); /* dump signature */
 				out.append(nl);
 
-				pc = pc.add(4);
+				pc = pc.add(2);
 			} else if (bcIntVal == JBinvokeinterface2) {
 				incIndex();
 				pc = pc.add(1);
@@ -481,7 +481,7 @@ public class ByteCodeDumper {
 				pc = pc.add(2);
 			} else if ((bcIntVal == JBnew)
 				|| (bcIntVal == JBnewdup)
-				|| (bcIntVal == JBdefaultvalue)
+				|| (bcIntVal == JBaconst_init)
 				|| (bcIntVal == JBanewarray)
 				|| (bcIntVal == JBcheckcast)
 				|| (bcIntVal == JBinstanceof)

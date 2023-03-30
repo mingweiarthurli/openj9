@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-Copyright (c) 2006, 2020 IBM Corp. and others
+Copyright (c) 2006, 2022 IBM Corp. and others
 
 This program and the accompanying materials are made available under
 the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@ Exception [1] and GNU General Public License, version 2 with the
 OpenJDK Assembly Exception [2].
 
 [1] https://www.gnu.org/software/classpath/license.html
-[2] http://openjdk.java.net/legal/assembly-exception.html
+[2] https://openjdk.org/legal/assembly-exception.html
 
 SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 -->
@@ -39,10 +39,10 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 		<property name="complianceTestingSupportedModes" value="proxytck_cldc11,proxytck_cdc10,proxytck_cdc11,proxytck_foun10,proxytck_foun11"/>
 		<property name="directoryDelimiter" value="/"/>
 		<property name="graph_arch.cpu" value="{$spec.arch.cpuISA$}"/>
-		<property name="graph_commands.chroot" value=""/>
+		<property name="graph_commands.chroot" value="{$commands.docker.rhel6.x86_64$}"/>
 		<property name="graph_commands.unix.remote_host" value=""/>
 		<property name="graph_datamines" value="commands.unix.datamine,site-ottawa.datamine,use.local.datamine"/>
-		<property name="graph_enable_gcc7_cmd" value="source {$buildinfo.fsroot.unixBin$}/platform/linux386/set_gcc7.5_env &amp;&amp;"/>
+		<property name="graph_enable_compiler_cmd" value=""/>
 		<property name="graph_flags.linux_2.4" value="graph_tck"/>
 		<property name="graph_label.classlib" value="150"/>
 		<property name="graph_label.java5" value="j9vmxi3224"/>
@@ -72,7 +72,7 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 		<property name="graph_property.linux_hammer.graph_variant.trailingID" value=".linux_hammer"/>
 		<property name="graph_req.arch0" value="arch:x86"/>
 		<property name="graph_req.arch1" value="arch:32bit"/>
-		<property name="graph_req.aux0" value=""/>
+		<property name="graph_req.aux0" value="docker"/>
 		<property name="graph_req.build" value="{$common.req.build.java9$}"/>
 		<property name="graph_req.build2" value="{$common.req.build.java8$}"/>
 		<property name="graph_req.machine" value="{$machine_mapping.x86$}"/>
@@ -174,6 +174,7 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 		<flag id="interp_nativeSupport" value="true"/>
 		<flag id="interp_profilingBytecodes" value="true"/>
 		<flag id="interp_sigQuitThread" value="true"/>
+		<flag id="interp_sigUsr2" value="true"/>
 		<flag id="interp_useUnsafeHelper" value="true"/>
 		<flag id="ive_jxeFileRelocator" value="true"/>
 		<flag id="ive_jxeInPlaceRelocator" value="true"/>
@@ -238,7 +239,6 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 		<flag id="opt_jvmti" value="true"/>
 		<flag id="opt_jxeLoadSupport" value="true"/>
 		<flag id="opt_memoryCheckSupport" value="true"/>
-		<flag id="opt_methodHandle" value="true"/>
 		<flag id="opt_multiVm" value="true"/>
 		<flag id="opt_reflect" value="true"/>
 		<flag id="opt_sharedClasses" value="true"/>
@@ -255,8 +255,6 @@ SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-excepti
 		<flag id="port_omrsigSupport" value="true"/>
 		<flag id="port_signalSupport" value="true"/>
 		<flag id="prof_eventReporting" value="true"/>
-		<flag id="ras_dumpAgents" value="true"/>
-		<flag id="ras_eyecatchers" value="true"/>
 		<flag id="size_optimizeSendTargets" value="true"/>
 		<flag id="test_cunit" value="true"/>
 		<flag id="test_jvmti" value="true"/>

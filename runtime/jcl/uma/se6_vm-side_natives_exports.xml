@@ -1,5 +1,5 @@
 <!-- 
-	Copyright (c) 2009, 2020 IBM Corp. and others
+	Copyright (c) 2009, 2022 IBM Corp. and others
 	
 	This program and the accompanying materials are made available under
 	the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
 	OpenJDK Assembly Exception [2].
 	
 	[1] https://www.gnu.org/software/classpath/license.html
-	[2] http://openjdk.java.net/legal/assembly-exception.html
+	[2] https://openjdk.org/legal/assembly-exception.html
 
 	SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 -->
@@ -133,8 +133,8 @@
 	<export name="Java_com_ibm_java_lang_management_internal_MemoryMXBeanImpl_isVerboseImpl" />
 	<export name="Java_com_ibm_java_lang_management_internal_MemoryMXBeanImpl_setMaxHeapSizeImpl" />
 	<export name="Java_com_ibm_java_lang_management_internal_MemoryMXBeanImpl_setVerboseImpl" />
-	<export name="Java_com_ibm_java_lang_management_internal_MemoryMXBeanImpl_getGCMasterThreadCpuUsedImpl" />
-	<export name="Java_com_ibm_java_lang_management_internal_MemoryMXBeanImpl_getGCSlaveThreadsCpuUsedImpl" />
+	<export name="Java_com_ibm_java_lang_management_internal_MemoryMXBeanImpl_getGCMainThreadCpuUsedImpl" />
+	<export name="Java_com_ibm_java_lang_management_internal_MemoryMXBeanImpl_getGCWorkerThreadsCpuUsedImpl" />
 	<export name="Java_com_ibm_java_lang_management_internal_MemoryMXBeanImpl_getMaximumGCThreadsImpl" />
 	<export name="Java_com_ibm_java_lang_management_internal_MemoryMXBeanImpl_getCurrentGCThreadsImpl" />
 	<export name="Java_com_ibm_lang_management_internal_MemoryNotificationThread_processNotificationLoop" />
@@ -170,7 +170,9 @@
 	<export name="Java_com_ibm_java_lang_management_internal_RuntimeMXBeanImpl_getStartTimeImpl" />
 	<export name="Java_com_ibm_java_lang_management_internal_RuntimeMXBeanImpl_getUptimeImpl" />
 	<export name="Java_com_ibm_java_lang_management_internal_RuntimeMXBeanImpl_isBootClassPathSupportedImpl" />
-	<export name="Java_com_ibm_lang_management_internal_ExtendedRuntimeMXBeanImpl_getProcessIDImpl" />
+	<export name="Java_com_ibm_lang_management_internal_ExtendedRuntimeMXBeanImpl_getProcessIDImpl">
+		<exclude-if condition="spec.java19" />
+	</export>
 	<export name="Java_com_ibm_lang_management_internal_ExtendedRuntimeMXBeanImpl_getVMIdleStateImpl" />
 	<export name="Java_com_ibm_java_lang_management_internal_ThreadMXBeanImpl_findMonitorDeadlockedThreadsImpl" />
 	<export name="Java_com_ibm_java_lang_management_internal_ThreadMXBeanImpl_getAllThreadIdsImpl" />
@@ -228,7 +230,9 @@
 	<export name="Java_com_ibm_oti_vm_VM_getClassPathCount" />
 	<export name="Java_com_ibm_oti_vm_VM_getPathFromClassPath" />
 	<export name="Java_com_ibm_oti_vm_VM_setCommonData" />
+	<export name="Java_java_lang_Class_isCircularDeclaringClass" />
 	<export name="Java_java_lang_Class_isClassADeclaredClass" />
+	<export name="Java_java_lang_Class_isClassAnEnclosedClass" />
 	<export name="Java_java_lang_ClassLoader_defineClassImpl" />
 	<export name="Java_java_lang_ClassLoader_isVerboseImpl" />
 	<export name="Java_java_lang_ClassLoader_foundJavaAssertOption" />
@@ -242,7 +246,7 @@
 	<export name="Java_java_lang_reflect_Proxy_defineClass0__Ljava_lang_ClassLoader_2Ljava_lang_String_2_3BIILjava_lang_Object_2_3Ljava_lang_Object_2Ljava_lang_Object_2" />
 	<export name="Java_java_lang_reflect_Proxy_defineClassImpl" />
 	<export name="Java_java_lang_reflect_Array_multiNewArrayImpl" />
-	<export name="Java_java_lang_System_getEncoding" />
+	<export name="Java_java_lang_System_getSysPropBeforePropertiesInitialized" />
 	<export name="Java_java_lang_System_getPropertyList" />
 	<export name="Java_java_lang_System_mapLibraryName" />
 	<export name="Java_java_lang_System_setFieldImpl" />
@@ -276,16 +280,21 @@
 	<export name="Java_java_lang_Class_getVirtualMethodsImpl" />
 	<export name="Java_java_lang_J9VMInternals_getStackTrace" />
 	<export name="Java_java_lang_J9VMInternals_dumpString" />
-	<export name="Java_java_lang_ref_Finalizer_runAllFinalizersImpl" />
 	<export name="Java_java_lang_ref_Finalizer_runFinalizationImpl" />
 	<export name="Java_java_lang_ref_Reference_reprocess" />
 	<export name="Java_java_lang_Thread_getStackTraceImpl" />
 	<export name="Java_java_lang_Thread_holdsLock" />
 	<export name="Java_java_lang_Thread_interruptImpl" />
-	<export name="Java_java_lang_Thread_resumeImpl" />
+	<export name="Java_java_lang_Thread_resumeImpl">
+		<exclude-if condition="spec.java20" />
+	</export>
 	<export name="Java_java_lang_Thread_startImpl" />
-	<export name="Java_java_lang_Thread_stopImpl" />
-	<export name="Java_java_lang_Thread_suspendImpl" />
+	<export name="Java_java_lang_Thread_stopImpl">
+		<exclude-if condition="spec.java20" />
+	</export>
+	<export name="Java_java_lang_Thread_suspendImpl">
+		<exclude-if condition="spec.java20" />
+	</export>
 	<export name="Java_java_security_AccessController_getAccSnapshot" />
 	<export name="Java_java_security_AccessController_getCallerPD" />
 	<export name="JCL_OnLoad" />

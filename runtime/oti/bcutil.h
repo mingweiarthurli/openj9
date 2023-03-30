@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2011, 2019 IBM Corp. and others
+ * Copyright (c) 2011, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -37,3 +37,11 @@
 #define BCT_ERR_LINE_NUMBER_TABLE_DECOMPRESS_FAILED -14
 #define BCT_ERR_INVALID_BYTECODE_SIZE -15
 #define BCT_ERR_GENERIC_ERROR_CUSTOM_MSG  -16
+#define BCT_ERR_INVALID_CLASS_TYPE -17
+#define BCT_ERR_INVALID_ANNOTATION_BAD_CP_INDEX_OUT_OF_RANGE  -18
+#define BCT_ERR_INVALID_ANNOTATION_BAD_CP_UTF8_STRING  -19
+#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+#define BCT_ERR_INVALID_VALUE_TYPE -20
+#endif /* defined(J9VM_OPT_VALHALLA_VALUE_TYPES) */
+#define BCT_ERR_DUPLICATE_NAME -21
+

@@ -8,7 +8,7 @@ import java.math.RoundingMode;
 import java.util.Arrays;
 
 /*******************************************************************************
- * Copyright (c) 2009, 2019 IBM Corp. and others
+ * Copyright (c) 2009, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -24,7 +24,7 @@ import java.util.Arrays;
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -1362,7 +1362,7 @@ public class BigDecimalExtension implements java.math.BigDecimal.BigDecimalExten
          nlz>>=2;
          nlz=16-nlz;
 
-         // Preceding algorithm algorithm would return 0 for 0
+         // Preceding algorithm would return 0 for 0
          // and we need it to return a precision of 1
          if (nlz == 0)
             nlz++;

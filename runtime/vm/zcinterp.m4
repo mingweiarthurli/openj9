@@ -1,4 +1,4 @@
-dnl Copyright (c) 2017, 2020 IBM Corp. and others
+dnl Copyright (c) 2017, 2022 IBM Corp. and others
 dnl
 dnl This program and the accompanying materials are made available under
 dnl the terms of the Eclipse Public License 2.0 which accompanies this
@@ -14,7 +14,7 @@ dnl Exception [1] and GNU General Public License, version 2 with the
 dnl OpenJDK Assembly Exception [2].
 dnl
 dnl [1] https://www.gnu.org/software/classpath/license.html
-dnl [2] http://openjdk.java.net/legal/assembly-exception.html
+dnl [2] https://openjdk.org/legal/assembly-exception.html
 dnl
 dnl SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 
@@ -165,7 +165,7 @@ dnl
 dnl 1. TX was a non-constrained transaction:
 dnl    If this was the case do not execute the read barrier and simply return to
 dnl    the fallback transaction abort JIT code to handle it by forcing condition
-dnl    code to be 2 with the below CL(G)FI instruction indicating a transient 
+dnl    code to be 2 with the below CL(G)FI instruction indicating a transient
 dnl    transaction abort.
 dnl
 dnl 2. TX was a constrained transaction:
@@ -175,9 +175,9 @@ dnl    code will be functionally incorrect we force a crash here so we fail fast
 dnl    and can manually debug.
 dnl
 dnl See the following PRs for more details:
-dnl eclipse/openj9#2545
-dnl eclipse/openj9#2790
-dnl eclipse/openj9#3763
+dnl eclipse-openj9/openj9#2545
+dnl eclipse-openj9/openj9#2790
+dnl eclipse-openj9/openj9#3763
     TM J9TR_VMThread_gsParameters_GSECI(J9VMTHREAD),128
     JZ LABEL_NAME(L_GS_CALL_HELPER)
     TM J9TR_VMThread_gsParameters_GSECI(J9VMTHREAD),64

@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -41,7 +41,7 @@
 #include "Scheduler.hpp"
 #include "WorkPacketsRealtime.hpp"
 
-class MM_Dispatcher;
+class MM_ParallelDispatcher;
 class MM_EnvironmentBase;
 class MM_MemorySubSpaceMetronome;
 class MM_RealtimeMarkingScheme;
@@ -68,7 +68,7 @@ private:
 
 	uintptr_t _gcPhase; /**< What gc phase are we currently in? */
 	
-	MM_CycleState _cycleState;  /**< Embedded cycle state to be used as the master cycle state for GC activity */
+	MM_CycleState _cycleState;  /**< Embedded cycle state to be used as the main cycle state for GC activity */
 
 	bool _moreTracingRequired; /**< Is used to decide if there needs to be another pass of the tracing loop. */
 
@@ -107,8 +107,8 @@ protected:
 	void reportGCEnd(MM_EnvironmentBase *env);
 	
 public:
-	void masterSetupForGC(MM_EnvironmentBase *env);
-	void masterCleanupAfterGC(MM_EnvironmentBase *env);
+	void mainSetupForGC(MM_EnvironmentBase *env);
+	void mainCleanupAfterGC(MM_EnvironmentBase *env);
 	void doAuxiliaryGCWork(MM_EnvironmentBase *env); /* Wake up finalizer thread. Discard segments freed by class unloading. */
 	void incrementalCollect(MM_EnvironmentRealtime *env);
 

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -125,6 +125,12 @@ done:
 	return referent;
 }
 
+void
+MM_RealtimeAccessBarrier::referenceReprocess(J9VMThread *vmThread, J9Object *refObject)
+{
+	referenceGet(vmThread, refObject);
+}
+
 /**
  * Barrier called from within j9jni_deleteGlobalRef to maintain the "double barrier"
  * invariant (see comment in preObjectStore).  To maintain EXACTLY what we do for ordinary
@@ -169,6 +175,56 @@ MM_RealtimeAccessBarrier::stringConstantEscaped(J9VMThread *vmThread, J9Object *
 }
 
 /**
+ * Check that the two string constants should be considered truly "live".
+ * This is a bit of a hack to enable us to scan the string table incrementally.
+ * If we are still doing marking work, we treat a call to this method as meaning
+ * that one of the strings has been fetched from the string table. If we are finished
+ * marking work, but have yet to clear the string table, we treat any unmarked strings
+ * as cleared, by returning false from this function.
+ * NOTE: Because this function is called from the hash equals function, we can't
+ * actually tell which one of the strings is actually the one in the table already,
+ * so we have to assume they both are.
+ * @return true if they can be considered live, false otherwise.
+ */
+bool
+MM_RealtimeAccessBarrier::checkStringConstantsLive(J9JavaVM *javaVM, j9object_t stringOne, j9object_t stringTwo)
+{
+	if (_realtimeGC->isBarrierEnabled()) {
+		if (_realtimeGC->getRealtimeDelegate()->_unmarkedImpliesStringsCleared) {
+			/* If this flag is set, we will not scan the remembered set again, so we must
+			 * treat any unmarked string constant as having been cleared.
+			 */
+			return (_realtimeGC->getMarkingScheme()->isMarked((J9Object *)stringOne) && _realtimeGC->getMarkingScheme()->isMarked((J9Object *)stringTwo));
+		} else {
+			J9VMThread* vmThread =  javaVM->internalVMFunctions->currentVMThread(javaVM);
+			stringConstantEscaped(vmThread, (J9Object *)stringOne);
+			stringConstantEscaped(vmThread, (J9Object *)stringTwo);
+		}
+	}
+	return true;
+}
+
+/**
+ *  Equivalent to checkStringConstantsLive but for a single string constant
+ */
+bool
+MM_RealtimeAccessBarrier::checkStringConstantLive(J9JavaVM *javaVM, j9object_t string)
+{
+	if (_realtimeGC->isBarrierEnabled()) {
+		if (_realtimeGC->getRealtimeDelegate()->_unmarkedImpliesStringsCleared) {
+			/* If this flag is set, we will not scan the remembered set again, so we must
+			 * treat any unmarked string constant as having been cleared.
+			 */
+			return _realtimeGC->getMarkingScheme()->isMarked((J9Object *)string);
+		} else {
+			J9VMThread* vmThread =  javaVM->internalVMFunctions->currentVMThread(javaVM);
+			stringConstantEscaped(vmThread, (J9Object *)string);
+		}
+	}
+	return true;
+}
+
+/**
  * Take any required action when a heap reference is deleted. This method is called on
  * all slots when finalizing a scoped object. It's also called from jniDeleteGlobalReference,
  * but only when the collector is tracing (therefore we shouldn't check for isBarrierEnabled
@@ -195,6 +251,7 @@ MM_RealtimeAccessBarrier::validateWriteBarrier(J9VMThread *vmThread, J9Object *d
 	case GC_ObjectModel::SCAN_ATOMIC_MARKABLE_REFERENCE_OBJECT:
 	case GC_ObjectModel::SCAN_MIXED_OBJECT:
 	case GC_ObjectModel::SCAN_OWNABLESYNCHRONIZER_OBJECT:
+	case GC_ObjectModel::SCAN_CONTINUATION_OBJECT:
 	case GC_ObjectModel::SCAN_CLASS_OBJECT:
 	case GC_ObjectModel::SCAN_CLASSLOADER_OBJECT:
 	case GC_ObjectModel::SCAN_REFERENCE_MIXED_OBJECT:
@@ -344,7 +401,9 @@ mm_j9object_t
 MM_RealtimeAccessBarrier::readObjectFromInternalVMSlotImpl(J9VMThread *vmThread, j9object_t *srcAddress, bool isVolatile)
 {
 	mm_j9object_t object = *srcAddress;
-	rememberObjectIfBarrierEnabled(vmThread, object);
+	if (NULL != vmThread) {
+		rememberObjectIfBarrierEnabled(vmThread, object);
+	}
 	return object;
 }
 
@@ -506,7 +565,7 @@ MM_RealtimeAccessBarrier::jniGetStringCritical(J9VMThread* vmThread, jstring str
 				jint i;
 				
 				for (i = 0; i < length; i++) {
-					data[i] = (jchar)J9JAVAARRAYOFBYTE_LOAD(vmThread, (j9object_t)valueObject, i) & (jchar)0xFF;
+					data[i] = (jchar)(U_8)J9JAVAARRAYOFBYTE_LOAD(vmThread, (j9object_t)valueObject, i);
 				}
 			} else {
 				if (J9_ARE_ANY_BITS_SET(javaVM->runtimeFlags, J9_RUNTIME_STRING_BYTE_ARRAY)) {
@@ -611,83 +670,6 @@ MM_RealtimeAccessBarrier::checkClassLive(J9JavaVM *javaVM, J9Class *classPtr)
 	return result;
 }
 #endif /* defined(J9VM_GC_DYNAMIC_CLASS_UNLOADING) */
-
-extern "C" {
-
-/**
- * The "barrier" in java.lang.ref.Reference.get() is essentially a complete replacement
- * for the original function.
- */
-J9Object*
-j9gc_objaccess_referenceGet(J9VMThread *vmThread, j9object_t refObject) 
-{
-	MM_RealtimeAccessBarrier *barrier = (MM_RealtimeAccessBarrier*)MM_GCExtensions::getExtensions(vmThread)->accessBarrier;
-	return barrier->referenceGet(vmThread, refObject);
-}
-
-void
-j9gc_objaccess_jniDeleteGlobalReference(J9VMThread *vmThread, J9Object *reference) {
-	MM_RealtimeAccessBarrier *barrier = (MM_RealtimeAccessBarrier*)MM_GCExtensions::getExtensions(vmThread)->accessBarrier;
-	barrier->jniDeleteGlobalReference(vmThread, reference);
-}
-
-/**
- * Check that the two string constants should be considered truly "live".
- * This is a bit of a hack to enable us to scan the string table incrementally.
- * If we are still doing marking work, we treat a call to this method as meaning
- * that one of the strings has been fetched from the string table. If we are finished
- * marking work, but have yet to clear the string table, we treat any unmarked strings
- * as cleared, by returning false from this function.
- * NOTE: Because this function is called from the hash equals function, we can't
- * actually tell which one of the strings is actually the one in the table already,
- * so we have to assume they both are.
- * @return true if they can be considered live, false otherwise.
- */
-UDATA 
-j9gc_objaccess_checkStringConstantsLive(J9JavaVM *javaVM, j9object_t stringOne, j9object_t stringTwo)
-{
-	MM_GCExtensions *extensions = MM_GCExtensions::getExtensions(javaVM);
-	MM_RealtimeGC *realtimeGC = extensions->realtimeGC;
-
-	if (realtimeGC->isBarrierEnabled()) {
-		if (realtimeGC->getRealtimeDelegate()->_unmarkedImpliesStringsCleared) {
-			/* If this flag is set, we will not scan the remembered set again, so we must
-			 * treat any unmarked string constant as having been cleared.
-			 */
-			return realtimeGC->getMarkingScheme()->isMarked((J9Object *)stringOne) && realtimeGC->getMarkingScheme()->isMarked((J9Object *)stringTwo);
-		} else {
-			J9VMThread* vmThread =  javaVM->internalVMFunctions->currentVMThread(javaVM);
-			((MM_RealtimeAccessBarrier*)extensions->accessBarrier)->stringConstantEscaped(vmThread, (J9Object *)stringOne);
-			((MM_RealtimeAccessBarrier*)extensions->accessBarrier)->stringConstantEscaped(vmThread, (J9Object *)stringTwo);
-		}
-	}
-	return true;
-}
-
-/**
- *  Equivalent to j9gc_objaccess_checkStringConstantsLive but for a single string constant
- */
-BOOLEAN
-j9gc_objaccess_checkStringConstantLive(J9JavaVM *javaVM, j9object_t string)
-{
-	MM_GCExtensions *extensions = MM_GCExtensions::getExtensions(javaVM);
-	MM_RealtimeGC *realtimeGC = extensions->realtimeGC;
-
-	if (realtimeGC->isBarrierEnabled()) {
-		if (realtimeGC->getRealtimeDelegate()->_unmarkedImpliesStringsCleared) {
-			/* If this flag is set, we will not scan the remembered set again, so we must
-			 * treat any unmarked string constant as having been cleared.
-			 */
-			return realtimeGC->getMarkingScheme()->isMarked((J9Object *)string) ? TRUE : FALSE;
-		} else {
-			J9VMThread* vmThread =  javaVM->internalVMFunctions->currentVMThread(javaVM);
-			((MM_RealtimeAccessBarrier*)extensions->accessBarrier)->stringConstantEscaped(vmThread, (J9Object *)string);
-		}
-	}
-	return TRUE;
-}
-
-}
 
 /**
  * Unmarked, heap reference, about to be deleted (or overwritten), while marking
@@ -966,6 +948,15 @@ MM_RealtimeAccessBarrier::forwardReferenceArrayCopyIndex(J9VMThread *vmThread, J
 	}
 
 	return -2;
+}
+
+void
+MM_RealtimeAccessBarrier::preMountContinuation(J9VMThread *vmThread, j9object_t contObject)
+{
+	MM_EnvironmentRealtime *env =  MM_EnvironmentRealtime::getEnvironment(vmThread->omrVMThread);
+	if (isBarrierActive(env)) {
+		_realtimeGC->getRealtimeDelegate()->scanContinuationNativeSlots(env, contObject);
+	}
 }
 
 #endif /* J9VM_GC_REALTIME */

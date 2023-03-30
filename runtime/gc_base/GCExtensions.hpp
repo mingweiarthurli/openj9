@@ -1,6 +1,6 @@
 
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -57,6 +57,7 @@ class MM_HeapMap;
 class MM_MemorySubSpace;
 class MM_ObjectAccessBarrier;
 class MM_OwnableSynchronizerObjectList;
+class MM_ContinuationObjectList;
 class MM_StringTable;
 class MM_UnfinalizedObjectList;
 class MM_Wildcard;
@@ -73,6 +74,13 @@ class MM_ReferenceObjectList;
 class MM_IdleGCManager;
 #endif
 
+#define DEFAULT_SURVIVOR_MINIMUM_FREESIZE 	2048
+#define DEFAULT_SURVIVOR_THRESHOLD 			512
+#define MAXIMUM_SURVIVOR_MINIMUM_FREESIZE 	524288
+#define MAXIMUM_SURVIVOR_THRESHOLD 			8192
+#define MINIMUM_SURVIVOR_MINIMUM_FREESIZE 	512
+#define MINIMUM_SURVIVOR_THRESHOLD 			512
+
 /**
  * @todo Provide class documentation
  * @ingroup GC_Base
@@ -80,6 +88,7 @@ class MM_IdleGCManager;
 class MM_GCExtensions : public MM_GCExtensionsBase {
 private:
 	MM_OwnableSynchronizerObjectList* ownableSynchronizerObjectLists; /**< The global linked list of ownable synchronizer object lists. */
+	MM_ContinuationObjectList* continuationObjectLists; /**< The global linked list of continuation object lists. */
 public:
 	MM_StringTable* stringTable; /**< top level String Table structure (internally organized as a set of hash sub-tables */
 
@@ -140,16 +149,14 @@ public:
 	MM_ObjectAccessBarrier* accessBarrier;
 
 #if defined(J9VM_GC_FINALIZATION)
-	UDATA finalizeMasterPriority; /**< cmd line option to set finalize master thread priority */
-	UDATA finalizeSlavePriority; /**< cmd line option to set finalize slave thread priority */
+	UDATA finalizeMainPriority; /**< cmd line option to set finalize main thread priority */
+	UDATA finalizeWorkerPriority; /**< cmd line option to set finalize worker thread priority */
 #endif /* J9VM_GC_FINALIZATION */
 
 	MM_ClassLoaderManager* classLoaderManager; /**< Pointer to the gc's classloader manager to process classloaders/classes */
 #if defined(J9VM_GC_DYNAMIC_CLASS_UNLOADING)
 	UDATA deadClassLoaderCacheSize;
 #endif /*defined(J9VM_GC_DYNAMIC_CLASS_UNLOADING) */
-
-
 
 	MM_UnfinalizedObjectList* unfinalizedObjectLists; /**< The global linked list of unfinalized object lists. */
 	
@@ -186,6 +193,9 @@ public:
 
 	double maxRAMPercent; /**< Value of -XX:MaxRAMPercentage specified by the user */
 	double initialRAMPercent; /**< Value of -XX:InitialRAMPercentage specified by the user */
+	UDATA minimumFreeSizeForSurvivor; /**< minimum free size can be reused by collector as survivor, for balanced GC only */
+	UDATA freeSizeThresholdForSurvivor; /**< if average freeSize(freeSize/freeCount) of the region is smaller than the Threshold, the region would not be reused by collector as survivor, for balanced GC only */
+	bool recycleRemainders; /**< true if need to recycle TLHRemainders at the end of PGC, for balanced GC only */
 
 protected:
 private:
@@ -198,6 +208,8 @@ public:
 	virtual void kill(MM_EnvironmentBase* env);
 
 	void computeDefaultMaxHeapForJava(bool enableOriginalJDK8HeapSizeCompatibilityOption);
+
+	virtual void registerScavenger(MM_Scavenger *scavenger);
 
 	MMINLINE J9HookInterface** getHookInterface() { return J9_HOOK_INTERFACE(hookInterface); };
 
@@ -274,12 +286,17 @@ public:
 	MMINLINE MM_OwnableSynchronizerObjectList* getOwnableSynchronizerObjectLists() { return ownableSynchronizerObjectLists; }
 	MMINLINE void setOwnableSynchronizerObjectLists(MM_OwnableSynchronizerObjectList* newOwnableSynchronizerObjectLists) { ownableSynchronizerObjectLists = newOwnableSynchronizerObjectLists; }
 
+	MM_ContinuationObjectList* getContinuationObjectListsExternal(J9VMThread *vmThread);
+	MMINLINE MM_ContinuationObjectList* getContinuationObjectLists() { return continuationObjectLists; }
+	MMINLINE void setContinuationObjectLists(MM_ContinuationObjectList* newContinuationObjectLists) { continuationObjectLists = newContinuationObjectLists; }
+
 	/**
 	 * Create a GCExtensions object
 	 */
 	MM_GCExtensions()
 		: MM_GCExtensionsBase()
 		, ownableSynchronizerObjectLists(NULL)
+		, continuationObjectLists(NULL)
 		, stringTable(NULL)
 		, gcchkExtensions(NULL)
 		, tgcExtensions(NULL)
@@ -298,8 +315,8 @@ public:
 		, _stringTableListToTreeThreshold(1024)
 		, maxSoftReferenceAge(32)
 #if defined(J9VM_GC_FINALIZATION)
-		, finalizeMasterPriority(J9THREAD_PRIORITY_NORMAL)
-		, finalizeSlavePriority(J9THREAD_PRIORITY_NORMAL)
+		, finalizeMainPriority(J9THREAD_PRIORITY_NORMAL)
+		, finalizeWorkerPriority(J9THREAD_PRIORITY_NORMAL)
 #endif /* J9VM_GC_FINALIZATION */
 		, classLoaderManager(NULL)
 #if defined(J9VM_GC_DYNAMIC_CLASS_UNLOADING)
@@ -317,6 +334,9 @@ public:
 #endif
 		, maxRAMPercent(0.0) /* this would get overwritten by user specified value */
 		, initialRAMPercent(0.0) /* this would get overwritten by user specified value */
+		, minimumFreeSizeForSurvivor(DEFAULT_SURVIVOR_MINIMUM_FREESIZE)
+		, freeSizeThresholdForSurvivor(DEFAULT_SURVIVOR_THRESHOLD)
+		, recycleRemainders(true)
 	{
 		_typeId = __FUNCTION__;
 	}

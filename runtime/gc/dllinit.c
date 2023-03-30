@@ -1,6 +1,6 @@
 
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2020 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -32,6 +32,7 @@
 #include "jvminit.h"
 #include "mminit.h"
 #include "ModronAssertions.h"
+#include "util_api.h"
 
 jint JNICALL 
 JVM_OnLoad( JavaVM *jvm, char* commandLineOptions, void *reserved ) 
@@ -52,9 +53,9 @@ JVM_OnLoad( JavaVM *jvm, char* commandLineOptions, void *reserved )
 IDATA 
 J9VMDllMain(J9JavaVM* vm, IDATA stage, void* reserved) 
 {
-	J9VMDllLoadInfo* loadInfo = FIND_DLL_TABLE_ENTRY( THIS_DLL_NAME );
 	IDATA rc = J9VMDLLMAIN_OK;
-	
+	J9VMDllLoadInfo *loadInfo = getGCDllLoadInfo(vm);
+
 	switch (stage) {
 		case PORT_LIBRARY_GUARANTEED:
 		case ALL_DEFAULT_LIBRARIES_LOADED:

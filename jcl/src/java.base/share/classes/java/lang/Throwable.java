@@ -1,6 +1,6 @@
 /*[INCLUDE-IF Sidecar18-SE]*/
 /*******************************************************************************
- * Copyright (c) 1998, 2020 IBM Corp. and others
+ * Copyright (c) 1998, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -354,9 +354,7 @@ private void printStackTraceHelper(Appendable appendable) {
  * @return		String
  *				a printable representation for the receiver.
  */
-/*[IF AnnotateOverride]*/
 @Override
-/*[ENDIF]*/
 public String toString () {
 	/*[PR 102230] Should call getLocalizedMessage() */
 	String msg = getLocalizedMessage();
@@ -384,11 +382,11 @@ public String toString () {
 public synchronized Throwable initCause(Throwable throwable) {
 	if (cause != this) {
 		/*[MSG "K05c9", "Cause already initialized"]*/
-		throw new IllegalStateException(Msg.getString("K05c9")); //$NON-NLS-1$
+		throw new IllegalStateException(Msg.getString("K05c9"), this); //$NON-NLS-1$
 	}
 	if (throwable == this) {
 		/*[MSG "K05c8", "Cause cannot be the receiver"]*/
-		throw new IllegalArgumentException(Msg.getString("K05c8")); //$NON-NLS-1$
+		throw new IllegalArgumentException(Msg.getString("K05c8"), this); //$NON-NLS-1$
 	}
 	return setCause(throwable);
 }
@@ -491,14 +489,13 @@ private void readObject(ObjectInputStream s)
 	}
 }
 
-/* 
- * CMVC 97756 try to continue printing as much as possible of the stack trace even
- *            in the presence of OutOfMemoryErrors.
- */
-
 /**
- * Print stack trace
- *  
+ * Print stack trace.
+ *
+ * The stack trace is constructed with appendTo() and avoids allocating Objects (i.e. Strings)
+ * to try to continue printing as much as possible of the stack trace even in the presence of
+ * OutOfMemoryErrors (CMVC 97756).
+ *
  * @param	err	
  * 			the specified print stream/writer 
  * @param	parentStack	
@@ -593,18 +590,19 @@ private StackTraceElement[] printStackTrace(
 		return null;
 	}
 	for (int i=0; i < stack.length - duplicates; i++) {
+		StackTraceElement element = stack[i];
 		if (!outOfMemory) {
 			try {
-				appendTo(err, "\tat " + stack[i], indents);			 //$NON-NLS-1$
+				appendTo(err, "\tat " + element, indents); //$NON-NLS-1$
 			} catch(OutOfMemoryError e) {
 				outOfMemory = true;
 			}
 		}
 		if (outOfMemory) {
 			appendTo(err, "\tat ", indents); //$NON-NLS-1$
-			Util.printStackTraceElement(stack[i], null, err, false);
+			Util.printStackTraceElement(element, null, err, false);
 		}
-		appendLnTo(err);		
+		appendLnTo(err);
 	}
 	if (duplicates > 0) {
 		if (!outOfMemory) {

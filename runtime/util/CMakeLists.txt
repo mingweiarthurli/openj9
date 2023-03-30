@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2017, 2020 IBM Corp. and others
+# Copyright (c) 2017, 2021 IBM Corp. and others
 #
 # This program and the accompanying materials are made available under
 # the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
 # OpenJDK Assembly Exception [2].
 #
 # [1] https://www.gnu.org/software/classpath/license.html
-# [2] http://openjdk.java.net/legal/assembly-exception.html
+# [2] https://openjdk.org/legal/assembly-exception.html
 #
 # SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 ################################################################################
@@ -42,6 +42,7 @@ j9vm_add_library(j9util STATIC
 	cpplink.c
 	defarg.c
 	divhelp.c
+	dllloadinfo.c
 	eventframe.c
 	extendedHCR.c
 	extendedmethodblockaccess.c
@@ -120,6 +121,23 @@ if(OMR_ARCH_X86)
 		PRIVATE
 			fpusup.s
 	)
+	if(OMR_ENV_DATA32 AND OMR_OS_WINDOWS)
+		# On windows we have to set the language, because we have ASM_MASM and ASM_NASM both enabled.
+		set_source_files_properties(
+			sse2enabled.asm
+			sse2memclear.asm
+			wi32/volatile.asm
+			PROPERTIES
+				LANGUAGE ASM_MASM
+		)
+		target_sources(j9util
+			PRIVATE
+			clang_comp.c
+			sse2enabled.asm
+			sse2memclear.asm
+			wi32/volatile.asm
+		)
+	endif()
 endif()
 
 target_include_directories(j9util

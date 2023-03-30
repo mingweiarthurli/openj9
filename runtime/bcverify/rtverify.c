@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -162,7 +162,7 @@ j9rtv_verifyBytecodes (J9BytecodeVerificationData *verifyData)
 	J9ROMMethod *romMethod = verifyData->romMethod;
 
 	UDATA oldState = verifyData->vmStruct->omrVMThread->vmState;
-	IDATA result;
+	IDATA result = BCV_SUCCESS;
 
 	verifyData->vmStruct->omrVMThread->vmState = J9VMSTATE_RTVERIFY;
 
@@ -170,28 +170,27 @@ j9rtv_verifyBytecodes (J9BytecodeVerificationData *verifyData)
 			(UDATA) J9UTF8_LENGTH(J9ROMCLASS_CLASSNAME(romClass)),
 			J9UTF8_DATA(J9ROMCLASS_CLASSNAME(romClass)));
 
-	/* Go walk the bytecodes */
-	result = verifyBytecodes (verifyData);
-
-	if ((result == BCV_SUCCESS) && (romMethod->modifiers & CFR_ACC_HAS_EXCEPTION_INFO)) {
+	if (romMethod->modifiers & CFR_ACC_HAS_EXCEPTION_INFO) {
 		result = verifyExceptions (verifyData);
+	}
 
-		if (BCV_SUCCESS != result) {
-			if (BCV_ERR_INSUFFICIENT_MEMORY == result) {
-				Trc_RTV_j9rtv_verifyBytecodes_OutOfMemoryException(verifyData->vmStruct,
-							(UDATA) J9UTF8_LENGTH(J9ROMCLASS_CLASSNAME(romClass)),
-							J9UTF8_DATA(J9ROMCLASS_CLASSNAME(romClass)));
-
-				verifyData->errorModule = J9NLS_BCV_ERR_VERIFY_OUT_OF_MEMORY__MODULE;
-				verifyData->errorCode = J9NLS_BCV_ERR_VERIFY_OUT_OF_MEMORY__ID;
-			} else {
-				verifyData->errorModule = J9NLS_BCV_ERR_NOT_THROWABLE__MODULE;
-				verifyData->errorCode = J9NLS_BCV_ERR_NOT_THROWABLE__ID;
-			}
-		}
+	/* Go walk the bytecodes */
+	if (BCV_SUCCESS == result) {
+		result = verifyBytecodes (verifyData);
 	}
 
 	if (BCV_SUCCESS != result) {
+		if (BCV_ERR_INSUFFICIENT_MEMORY == result) {
+			Trc_RTV_j9rtv_verifyBytecodes_OutOfMemoryException(verifyData->vmStruct,
+						(UDATA) J9UTF8_LENGTH(J9ROMCLASS_CLASSNAME(romClass)),
+						J9UTF8_DATA(J9ROMCLASS_CLASSNAME(romClass)));
+
+			verifyData->errorModule = J9NLS_BCV_ERR_VERIFY_OUT_OF_MEMORY__MODULE;
+			verifyData->errorCode = J9NLS_BCV_ERR_VERIFY_OUT_OF_MEMORY__ID;
+		} else {
+			verifyData->errorModule = J9NLS_BCV_ERR_NOT_THROWABLE__MODULE;
+			verifyData->errorCode = J9NLS_BCV_ERR_NOT_THROWABLE__ID;
+		}
 		Trc_RTV_j9rtv_verifyBytecodes_VerifyError(verifyData->vmStruct, verifyData->errorCode, verifyData->errorPC);
 	}
 
@@ -313,6 +312,7 @@ matchStack(J9BytecodeVerificationData * verifyData, J9BranchTargetStack *liveSta
 	/* Note: Target stack frame flag needs to be subset of ours. See JVM sepc 4.10.1.4 */
 	if (liveStack->uninitializedThis && !targetStack->uninitializedThis) {
 		rc = BCV_FAIL;
+		verifyData->errorDetailCode = BCV_ERR_INIT_FLAGS_MISMATCH;
 		goto _finished;
 	}
 
@@ -347,8 +347,8 @@ matchStack(J9BytecodeVerificationData * verifyData, J9BranchTargetStack *liveSta
 					}
 				}
 			} else if (*targetPtr != BCV_BASE_TYPE_TOP) {
-				if ((*targetPtr & BCV_SPECIAL) && verifyData->createdStackMap) {
-					/* Generated stackmaps can skip the check on the target slot with BCV_SPECIAL
+				if ((*targetPtr & BCV_SPECIAL_INIT) && verifyData->createdStackMap) {
+					/* Generated stackmaps can skip the check on the target slot with BCV_SPECIAL_INIT
 					 * as this slot is set up based on the bytecode itself rather than decompressed stackmaps.
 					 */
 				} else {
@@ -793,7 +793,7 @@ _inconsistentStack2:
 			}
 			POP_TOS_TYPE( type, type1 );
 			if (inconsistentStack) {
-				/* Jazz 82615: Set the the 2nd slot of long/double type (already in type1) and
+				/* Jazz 82615: Set the 2nd slot of long/double type (already in type1) and
 				 * the location of wrong data type on stack when the verification error occurs.
 				 */
 				errorTargetType = BCV_BASE_TYPE_TOP;
@@ -1397,8 +1397,12 @@ _illegalPrimitiveReturn:
 
 			receiver = BCV_BASE_TYPE_NULL; /* makes class compare work with statics */
 
-			if (bc & 1) {
-				/* JBputfield/JBpustatic - odd bc's */
+			if ((bc & 1)
+#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+				|| (bc == JBwithfield)
+#endif /* J9VM_OPT_VALHALLA_VALUE_TYPES */
+			) {
+				/* case for JBwithfield and odd bc's which are JBputfield/JBpustatic  */
 				type = POP;
 				if ((*J9UTF8_DATA(utf8string) == 'D') || (*J9UTF8_DATA(utf8string) == 'J')) {
 					inconsistentStack |= (type != BCV_BASE_TYPE_TOP);
@@ -1434,7 +1438,7 @@ _illegalPrimitiveReturn:
 					 * The stackTop pointer doesn't get updated after calling pushFieldType() to store the return type, so *stackTop stores
 					 * the expected data type rather than the wrong data type which has already been popped up from stack.
 					 *
-					 * According to the output format of error message framework, only the the wrong data type is expected to occur at *stackTop on stack
+					 * According to the output format of error message framework, only the wrong data type is expected to occur at *stackTop on stack
 					 * rather than the expected data type. Thus, the wrong data type must be pushed back to *stackTop after saving the expected data type
 					 * somewhere else.
 					 */
@@ -1531,15 +1535,26 @@ _illegalPrimitiveReturn:
 				 * cases of invokevirtual which only invoke public methods of a public class.
 				 */
 
+				/* Remove the receiver from the stack. */
+				type = POP;
 				/* Receiver compatible with MethodHandle? */
-				type = POP;		/* Remove the receiver from the stack */
-				rc = isClassCompatibleByName (verifyData, type, (U_8 *)"java/lang/invoke/MethodHandle", sizeof("java/lang/invoke/MethodHandle") - 1, &reasonCode);
+				rc = isClassCompatibleByName(verifyData, type, (U_8 *)"java/lang/invoke/MethodHandle", sizeof("java/lang/invoke/MethodHandle") - 1, &reasonCode);
+#if (defined(J9VM_OPT_OPENJDK_METHODHANDLE) && (JAVA_SPEC_VERSION >= 11))
+				if ((JBinvokehandle == bc) && (FALSE == rc)) {
+					if (BCV_ERR_INSUFFICIENT_MEMORY == reasonCode) {
+						goto _outOfMemoryError;
+					}
+					/* Receiver compatible with VarHandle? */
+					rc = isClassCompatibleByName(verifyData, type, (U_8 *)"java/lang/invoke/VarHandle", sizeof("java/lang/invoke/VarHandle") - 1, &reasonCode);
+				}
+#endif /* (defined(J9VM_OPT_OPENJDK_METHODHANDLE) && (JAVA_SPEC_VERSION >= 11)) */
 				if (FALSE == rc) {
 					if (BCV_ERR_INSUFFICIENT_MEMORY == reasonCode) {
 						goto _outOfMemoryError;
 					}
 					errorType = J9NLS_BCV_ERR_RECEIVER_NOT_COMPATIBLE__ID;
-					/* Jazz 82615: Store the index of the expected data type 'java/lang/invoke/MethodHandle' for later retrieval in classNameList */
+					/* Jazz 82615: Store the index of the expected data type 'java/lang/invoke/MethodHandle'
+					 * or 'java/lang/invoke/VarHandle' for later retrieval in classNameList. */
 					errorTargetType = (UDATA)(BCV_JAVA_LANG_INVOKE_METHODHANDLE_INDEX << BCV_CLASS_INDEX_SHIFT);
 					errorStackIndex = stackTop - liveStack->stackElements;
 					goto _inconsistentStack2;
@@ -1791,8 +1806,28 @@ _illegalPrimitiveReturn:
 
 		case RTV_PUSH_NEW:
 			switch (bc) {
+#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+			case JBaconst_init:
+				index = PARAM_16(bcIndex, 1);
+				info = &constantPool[index];
+				utf8string = J9ROMSTRINGREF_UTF8DATA((J9ROMStringRef *) info);
+				stackTop = pushClassType(verifyData, utf8string, stackTop);
+				break;
+#endif /* J9VM_OPT_VALHALLA_VALUE_TYPES */
+
 			case JBnew:
 			case JBnewdup:
+				index = PARAM_16(bcIndex, 1);
+				info = &constantPool[index];
+				utf8string = J9ROMSTRINGREF_UTF8DATA((J9ROMStringRef *) info);
+				stackTop = pushClassType(verifyData, utf8string, stackTop);
+				type = POP;
+				if (J9_ARE_ANY_BITS_SET(type, BCV_ARITY_MASK)) {
+					errorType = J9NLS_BCV_ERR_BC_NEW_ARRAY__ID;
+					verboseErrorCode = BCV_ERR_NEW_OJBECT_MISMATCH;
+					errorTempData = ((type & BCV_ARITY_MASK) >> BCV_ARITY_SHIFT);
+					goto _miscError;
+				}
 				/* put a uninitialized object of the correct type on the stack */
 				PUSH(BCV_SPECIAL_NEW | (start << BCV_CLASS_INDEX_SHIFT));
 				break;
@@ -2586,16 +2621,17 @@ j9rtv_verifyArguments (J9BytecodeVerificationData *verifyData, J9UTF8 * utf8stri
 		}
 
 		/* Object or array */
-		if ((*signature == 'L') || arity) {
+		if (IS_REF_OR_VAL_SIGNATURE(*signature) || arity) {
 			IDATA reasonCode = 0;
 
 			/* Object array */
-			if (*signature == 'L') {
+			if (IS_REF_OR_VAL_SIGNATURE(*signature)) {
+				UDATA type = BCV_GET_TYPE_FROM_CHAR(*signature);
 				signature++;
 				string = signature;	/* remember the start of the string */
 				while (*signature++ != ';');
 				length = (U_16) (signature - string - 1);
-				objectType = convertClassNameToStackMapType(verifyData, string, length, 0, arity);
+				objectType = convertClassNameToStackMapType(verifyData, string, length, type, arity);
 
 			/* Base type array */
 			} else {

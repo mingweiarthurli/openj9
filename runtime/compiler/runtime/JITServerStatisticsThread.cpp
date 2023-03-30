@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2019 IBM Corp. and others
+ * Copyright (c) 2018, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -23,7 +23,9 @@
 #include "runtime/JITServerStatisticsThread.hpp"
 #include "runtime/JITClientSession.hpp" // for purgeOldDataIfNeeded()
 #include "env/VMJ9.h" // for TR_JitPrivateConfig
+#include "env/VerboseLog.hpp"
 #include "control/CompilationRuntime.hpp" // for CompilatonInfo
+#include "control/JITServerCompilationThread.hpp"
 
 JITServerStatisticsThread::JITServerStatisticsThread()
    : _statisticsThread(NULL), _statisticsThreadMonitor(NULL), _statisticsOSThread(NULL),
@@ -71,15 +73,18 @@ static int32_t J9THREAD_PROC statisticsThreadProc(void * entryarg)
    TR::CompilationInfo *compInfo = TR::CompilationInfo::get(jitConfig);
    TR::PersistentInfo *persistentInfo = compInfo->getPersistentInfo();
    PORT_ACCESS_FROM_JAVAVM(vm);
+   OMRPORT_ACCESS_FROM_J9PORT(PORTLIB);
    uint64_t crtTime = j9time_current_time_millis();
    uint64_t lastStatsTime = crtTime;
    uint64_t lastPurgeTime = crtTime;
+   uint64_t lastCpuUpdate = crtTime;
+   char timestamp[32];
 
    persistentInfo->setStartTime(crtTime);
    persistentInfo->setElapsedTime(0);
-   while(!statsThreadObj->getStatisticsThreadExitFlag())
+   while (!statsThreadObj->getStatisticsThreadExitFlag())
       {
-      while(!statsThreadObj->getStatisticsThreadExitFlag() && j9thread_sleep_interruptable((IDATA) samplingPeriod, 0) == 0)
+      while (!statsThreadObj->getStatisticsThreadExitFlag() && j9thread_sleep_interruptable(samplingPeriod, 0) == 0)
          {
          // Read current time but prevent situations where clock goes backwards
          // Maybe we should use a monotonic clock
@@ -88,9 +93,8 @@ static int32_t J9THREAD_PROC statisticsThreadProc(void * entryarg)
             crtTime = t;
          persistentInfo->setElapsedTime(crtTime - persistentInfo->getStartTime());
 
-         // Every 10000 ms look for stale sessions from clients that were inactive
-         // for a long time and purge them
-         if (crtTime - lastPurgeTime >= 10000)
+         // Look for stale sessions from clients that were inactive for a long time and purge them
+         if (crtTime - lastPurgeTime >= TR::Options::_timeBetweenPurges)
             {
             lastPurgeTime = crtTime;
             OMR::CriticalSection compilationMonitorLock(compInfo->getCompilationMonitor());
@@ -98,27 +102,41 @@ static int32_t J9THREAD_PROC statisticsThreadProc(void * entryarg)
             }
 
          // Print operational statistics to vlog if enabled
-         if ((statsThreadObj->getStatisticsFrequency() != 0) && ((crtTime - lastStatsTime) > statsThreadObj->getStatisticsFrequency()))
+         CpuUtilization *cpuUtil = compInfo->getCpuUtil(); 
+         if ((statsThreadObj->getStatisticsFrequency() != 0) && (crtTime - lastStatsTime > statsThreadObj->getStatisticsFrequency()))
             {
             int32_t cpuUsage = 0, avgCpuUsage = 0, vmCpuUsage = 0;
-            CpuUtilization *cpuUtil = compInfo->getCpuUtil();
             if (cpuUtil->isFunctional())
                {
+               lastCpuUpdate = crtTime;
                cpuUtil->updateCpuUtil(jitConfig);
                cpuUsage = cpuUtil->getCpuUsage();
                avgCpuUsage = cpuUtil->getAvgCpuUsage();
                vmCpuUsage = cpuUtil->getVmCpuUsage();
                }
-            TR_VerboseLog::vlogAcquire();
+            omrstr_ftime_ex(timestamp, sizeof(timestamp), "%b %d %H:%M:%S %Y", crtTime, OMRSTR_FTIME_FLAG_LOCAL);
+            
+            TR_VerboseLog::CriticalSection vlogLock;
+            TR_VerboseLog::writeLine(TR_Vlog_JITServer, "CurrentTime: %s", timestamp);
+            TR_VerboseLog::writeLine(TR_Vlog_JITServer, "Compilation Queue Size: %d", compInfo->getMethodQueueSize());
             TR_VerboseLog::writeLine(TR_Vlog_JITServer, "Number of clients : %u", compInfo->getClientSessionHT()->size());
             TR_VerboseLog::writeLine(TR_Vlog_JITServer, "Total compilation threads : %d", compInfo->getNumUsableCompilationThreads());
             TR_VerboseLog::writeLine(TR_Vlog_JITServer, "Active compilation threads : %d",compInfo->getNumCompThreadsActive());
+            if (TR::CompilationInfoPerThreadRemote::getNumClearedCaches() > 0)
+               TR_VerboseLog::writeLine(TR_Vlog_JITServer, "Number of times the clientSession caches are cleared: %d", TR::CompilationInfoPerThreadRemote::getNumClearedCaches());
+            bool incompleteInfo;
+            TR_VerboseLog::writeLine(TR_Vlog_JITServer, "Physical memory available: %llu MB", compInfo->computeAndCacheFreePhysicalMemory(incompleteInfo) >> 20);
             if (cpuUtil->isFunctional())
                {
                TR_VerboseLog::writeLine(TR_Vlog_JITServer, "CpuLoad %d%% (AvgUsage %d%%) JvmCpu %d%%", cpuUsage, avgCpuUsage, vmCpuUsage);
                }
-            TR_VerboseLog::vlogRelease();
             lastStatsTime = crtTime;
+            }
+            
+         if (cpuUtil->isFunctional() && TR::Options::isAnyVerboseOptionSet() && ((crtTime - lastCpuUpdate) >= 500))
+            {
+            lastCpuUpdate = crtTime;
+            cpuUtil->updateCpuUtil(jitConfig);
             }
          }
       // This thread has been interrupted or StatisticsThreadExitFlag flag was set
@@ -153,7 +171,7 @@ JITServerStatisticsThread::startStatisticsThread(J9JavaVM *javaVM)
                                                                &statisticsThreadProc,
                                                                javaVM->jitConfig,
                                                                J9THREAD_CATEGORY_SYSTEM_JIT_THREAD))
-         { 
+         {
          // cannot create the statistics thread
          TR::Monitor::destroy(_statisticsThreadMonitor);
          _statisticsThreadMonitor = NULL;
@@ -189,7 +207,7 @@ JITServerStatisticsThread::stopStatisticsThread(J9JITConfig * jitConfig)
       getStatisticsThreadMonitor()->exit();
 
       //Monitor is no longer needed
-      getStatisticsThreadMonitor()->destroy();
+      TR::Monitor::destroy(_statisticsThreadMonitor);
       _statisticsThreadMonitor = NULL;
       }
    }

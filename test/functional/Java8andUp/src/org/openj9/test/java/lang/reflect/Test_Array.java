@@ -1,7 +1,7 @@
 package org.openj9.test.java.lang.reflect;
 
 /*******************************************************************************
- * Copyright (c) 1998, 2018 IBM Corp. and others
+ * Copyright (c) 1998, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -17,7 +17,7 @@ package org.openj9.test.java.lang.reflect;
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -424,14 +424,18 @@ public class Test_Array {
 			Array.newInstance(Object.class, new int[] { -1 });
 			Assert.fail("NegativeArraySizeException should be thrown when a specified array length is negative");
 		} catch (NegativeArraySizeException e) {
-			// Correct behavior
+			if (!e.getMessage().contains("-1")) {
+				Assert.fail("NegativeArraySizeException should specify supplied nagative size");
+			}
 		}
 
 		try {
 			Array.newInstance(Object.class, new int[] { Integer.MIN_VALUE });
 			Assert.fail("NegativeArraySizeException should be thrown when a specified array length is negative");
 		} catch (NegativeArraySizeException e) {
-			// Correct behavior
+			if (!e.getMessage().contains(Integer.toString(Integer.MIN_VALUE))) {
+				Assert.fail("NegativeArraySizeException should specify supplied nagative size");
+			}
 		}
 	}
 
@@ -499,7 +503,7 @@ public class Test_Array {
 		Object ret = null;
 		boolean thrown = false;
 		try {
-			Array.set(x, 0, new Integer(1));
+			Array.set(x, 0, Integer.valueOf(1));
 		} catch (Exception e) {
 			AssertJUnit.assertTrue("Exception during get test: " + e.toString(), false);
 		}
@@ -514,7 +518,7 @@ public class Test_Array {
 			AssertJUnit.assertTrue("Passing non-array failed to throw exception", false);
 		thrown = false;
 		try {
-			Array.set(x, 4, new Integer(1));
+			Array.set(x, 4, Integer.valueOf(1));
 		} catch (ArrayIndexOutOfBoundsException e) {
 			// Correct behaviour
 			thrown = true;

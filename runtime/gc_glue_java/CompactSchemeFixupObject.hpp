@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2014 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -38,6 +38,7 @@ private:
 	MM_CompactScheme *_compactScheme;
 public:
 
+	void doStackSlot(MM_EnvironmentBase *env, omrobjectptr_t fromObject, omrobjectptr_t *slot);
 	/**
 	 * Perform fixup for a single object
 	 * @param env[in] the current thread
@@ -68,11 +69,25 @@ private:
 	void fixupArrayObject(omrobjectptr_t objectPtr);
 
 	/**
+	 * Perform fixup for a flattened array object
+	 * @param objectPtr pointer to object for fixup
+	 */
+	void fixupFlattenedArrayObject(omrobjectptr_t objectPtr);
+
+	void fixupContinuationNativeSlots(MM_EnvironmentStandard *env, omrobjectptr_t objectPtr);
+	void fixupContinuationObject(MM_EnvironmentStandard *env, omrobjectptr_t objectPtr);
+	/**
 	 * Called whenever a ownable synchronizer object is fixed up during compact. Places the object on the thread-specific buffer of gc work thread.
 	 * @param env -- current thread environment
 	 * @param object -- The object of type or subclass of java.util.concurrent.locks.AbstractOwnableSynchronizer.
 	 */
 	MMINLINE void addOwnableSynchronizerObjectInList(MM_EnvironmentBase *env, omrobjectptr_t objectPtr);
 };
+
+typedef struct StackIteratorData4CompactSchemeFixupObject {
+	MM_CompactSchemeFixupObject *compactSchemeFixupObject;
+	MM_EnvironmentBase *env;
+	J9Object *fromObject;
+} StackIteratorData4CompactSchemeFixupObject;
 
 #endif /* COMPACTSCHEMEOBJECTFIXUP_HPP_ */

@@ -1,6 +1,5 @@
-
 /*******************************************************************************
- * Copyright (c) 1991, 2014 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -44,8 +43,8 @@ private:
 	
 	U_64 _startTime;  			  /**< timestamp of matching Metronome_Synchronous_GC_Start event */
 	
-	UDATA _classLoadersUnloadedStart; /**< Number of classLoaders unloaded just just before SyncGC started, but only for the current GC cycle */
-	UDATA _classesUnloadedStart;      /**< Number of classes unloaded just just before SyncGC started, but only for the current GC cycle */
+	UDATA _classLoadersUnloadedStart; /**< Number of classLoaders unloaded just before SyncGC started, but only for the current GC cycle */
+	UDATA _classesUnloadedStart;      /**< Number of classes unloaded just before SyncGC started, but only for the current GC cycle */
 	UDATA _classLoadersUnloadedEnd;   /**< Number of classLoaders unloaded at the end of the current GC cycle */
 	UDATA _classesUnloadedEnd;        /**< Number of classes unloaded at the end of the current GC cycle */
 	

@@ -7,7 +7,7 @@ import org.testng.Assert;
 import org.testng.AssertJUnit;
 
 /*******************************************************************************
- * Copyright (c) 2010, 2018 IBM Corp. and others
+ * Copyright (c) 2010, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -23,14 +23,12 @@ import org.testng.AssertJUnit;
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
 import java.net.URL;
 import java.net.URLClassLoader;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
 import javax.xml.bind.annotation.XmlSchema;
 
 @Test(groups = { "level.sanity" })
@@ -123,16 +121,12 @@ public class Test_PackageAnnotation {
 	}
 
 	private static ClassLoader getClassLoader(final Class<?> clazz) {
-		return AccessController.doPrivileged(new PrivilegedAction<ClassLoader>() {
-			public ClassLoader run() {
-				ClassLoader cl = null;
-				try {
-					cl = clazz.getClassLoader();
-				} catch (SecurityException ex) {
-				}
-				return cl;
-			}
-		});
+		ClassLoader cl = null;
+		try {
+			cl = clazz.getClassLoader();
+		} catch (SecurityException ex) {
+		}
+		return cl;
 	}
 
 }

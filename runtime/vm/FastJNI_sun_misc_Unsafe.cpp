@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2014 IBM Corp. and others
+ * Copyright (c) 2001, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -31,7 +31,7 @@ extern "C" {
 void JNICALL
 Fast_sun_misc_Unsafe_park(J9VMThread *currentThread, jboolean isAbsolute, jlong time)
 {
-	threadParkImpl(currentThread, (IDATA)isAbsolute, (I_64)time);
+	threadParkImpl(currentThread, isAbsolute ? TRUE : FALSE, (I_64)time);
 }
 
 /* sun.misc.Unsafe: public native void unpark(java.lang.Object thread); */

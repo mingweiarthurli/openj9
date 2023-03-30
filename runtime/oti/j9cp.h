@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -30,9 +30,7 @@
 #define J9_AFTER_CLASS(clazz) ((UDATA *) (((J9Class *) (clazz)) + 1))
 
 #define J9_CP_FROM_METHOD(method) ((J9ConstantPool *) ((UDATA) ((method)->constantPool) & ~J9_STARTPC_STATUS))
-#ifndef J9_CP_FROM_CLASS
-#define J9_CP_FROM_CLASS(clazz) ((J9ConstantPool *) (clazz)->ramConstantPool)
-#endif
+#define J9_CP_FROM_CLASS(clazz) ((clazz)->ramConstantPool)
 #define J9_CLASS_FROM_CP(cp) (((J9ConstantPool *) (cp))->ramClass)
 #define J9_CLASS_FROM_METHOD(method) J9_CLASS_FROM_CP(J9_CP_FROM_METHOD(method))
 #define J9_ROM_CP_FROM_CP(cp) (((J9ConstantPool *) (cp))->romConstantPool)

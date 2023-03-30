@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -901,6 +901,62 @@ jvmtiIterateOverReachableObjects(jvmtiEnv* env,
 /* ---------------- jvmtiHelpers.c ---------------- */
 
 /**
+ * @brief Allocate a thread local storage key (which represents a jvmtiEnv) to index into a thread
+ * object's TLS array.
+ * @param[in] vm java vm
+ * @param[out] handle on successful return contains the allocated key value
+ * @return 0 on success, -1 on failure
+ */
+IDATA
+jvmtiTLSAlloc(J9JavaVM *vm, UDATA *handle);
+
+#if JAVA_SPEC_VERSION >= 19
+/**
+ * @brief Allocate a thread local storage key (which represents a jvmtiEnv) to index into a thread
+ * object's TLS array.
+ * @param[in] vm java vm
+ * @param[out] handle on successful return contains the allocated key value
+ * @param[in] finalizer a finalizer function which will be invoked when a thread is detached or terminates
+ * 		if the thread's TLS entry for this key is non-NULL
+ * @return 0 on success, -1 on failure
+ */
+IDATA
+jvmtiTLSAllocWithFinalizer(J9JavaVM *vm, UDATA *handle, j9_tls_finalizer_t finalizer);
+#endif /* JAVA_SPEC_VERSION >= 19 */
+
+/**
+ * @brief Free a thread local storage key allocated with jvmtiTLSAlloc.
+ * @param[in] vm java vm
+ * @param[in] key the key to be freed
+ * @return 0 on success, -1 on failure
+ */
+IDATA
+jvmtiTLSFree(J9JavaVM *vm, UDATA key);
+
+/**
+ * @brief Sets a thread's TLS value, accessed through a jvmtiEnv-thread pair. For JDK19+, the value is stored in the thread
+ * object. For JDK18 and earlier, it is stored in the VM thread. Both are fetched from a TLS array indexed by jvmtiEnv key.
+ * @param[in] vmThread current thread (JDK19+) or the vm thread to set the TLS value in (JDK18 and earlier)
+ * @param[in] thread the thread to set the value in (JDK19+) or unused (JDK18 and earlier)
+ * @param[in] key the jvmtiEnv key
+ * @param[in] value the value to set to the TLS
+ * @return 0 on success, -1 on failure
+ */
+IDATA
+jvmtiTLSSet(J9VMThread *vmThread, j9object_t thread, UDATA key, J9JVMTIThreadData *value);
+
+/**
+ * @brief Gets a thread's TLS value, accessed through a jvmtiEnv-thread pair. For JDK19+, the value is fetched from the thread
+ * object. For JDK18 and earlier, it is fetched from the VM thread. Both are fetched from a TLS array indexed by jvmtiEnv key.
+ * @param[in] vmThread current thread (JDK19+) or the vm thread to get the TLS value from (JDK18 and earlier)
+ * @param[in] thread thread the thread to get the value from (JDK19+) or unused (JDK18 and earlier)
+ * @param[in] key the jvmtiEnv key
+ * @return pointer to TLS data, NULL if data has not been set
+ */
+J9JVMTIThreadData *
+jvmtiTLSGet(J9VMThread *vmThread, j9object_t thread, UDATA key);
+
+/**
 * @brief Make the heap walkable, assume exclusive VM access is held
 * @param currentThread The current J9VMThread
 * @return void
@@ -939,14 +995,29 @@ jint
 allocateEnvironment(J9InvocationJavaVM * invocationJavaVM, jint version, void ** penv);
 
 
+#if JAVA_SPEC_VERSION >= 19
 /**
-* @brief
-* @param j9env
-* @param vmThread
-* @return jvmtiError
-*/
+ * @brief Lazy allocates TLS array and stores it in the given thread. Do nothing if it already exists.
+ * @param vm the java vm
+ * @param thread the thread to allocate TLS in
+ * @return JVMTI_ERROR_NONE on success, a JVMTI_ERROR on failure
+ */
 jvmtiError
-createThreadData(J9JVMTIEnv * j9env, J9VMThread * vmThread);
+allocateTLS(J9JavaVM *vm, j9object_t thread);
+#endif /* JAVA_SPEC_VERSION >= 19 */
+
+
+/**
+ * @brief Lazy allocates TLS data and stores it in the given thread. Do nothing if it already exists. For JDK19+,
+ * it will be stored in the thread object. For earlier JDK versions, it will be stored in the OMR thread
+ * associated with vmThread.
+ * @param j9env the JVMTI environment associated with the TLS
+ * @param vmThread the current J9VMThread (JDK19+) or the thread to store the tls data in (JDK18 and earlier)
+ * @param thread the thread to allocate TLS data in (JDK19+) or unused (JDK18 and earlier)
+ * @return JVMTI_ERROR_NONE on success, a JVMTI_ERROR on failure
+ */
+jvmtiError
+createThreadData(J9JVMTIEnv *j9env, J9VMThread *vmThread, j9object_t thread);
 
 
 /**
@@ -1122,18 +1193,29 @@ getObjectSize(J9JavaVM *vm, j9object_t obj);
 jint
 getThreadState(J9VMThread *currentThread, j9object_t threadObject);
 
+#if JAVA_SPEC_VERSION >= 19
+/**
+ * Get the state of a virtual thread.
+ * @param currentThread The current thread.
+ * @param thread The virtual thread whose state is queried.
+ * @return jint The virtual thread state .
+ */
+jint
+getVirtualThreadState(J9VMThread *currentThread, jthread thread);
+#endif /* JAVA_SPEC_VERSION >= 19 */
 
 /**
-* @brief
-* @param currentThread
-* @param thread
-* @param vmThreadPtr
-* @param allowNull
-* @param mustBeAlive
-* @return jvmtiError
-*/
+ * @brief Get the J9VMThread for the input jthread instance.
+ *
+ * @param[in] currentThread the current thread.
+ * @param[in] thread the input jthread instance.
+ * @param[out] vmThreadPtr stores the corresponding J9VMThread for the input thread parameter.
+ * @param[in] vThreadError error to be thrown if virtual threads are excluded.
+ * @param[in] flags specifies the control logic for error checking.
+ * @return JVMTI_ERROR_NONE (0) on success; otherwise a non-zero error value on failure.
+ */
 jvmtiError
-getVMThread(J9VMThread * currentThread, jthread thread, J9VMThread ** vmThreadPtr, UDATA allowNull, UDATA mustBeAlive);
+getVMThread(J9VMThread *currentThread, jthread thread, J9VMThread **vmThreadPtr, jvmtiError vThreadError, UDATA flags);
 
 
 /**
@@ -1203,13 +1285,14 @@ queueCompileEvent(J9JVMTIData * jvmtiData, jmethodID methodID, void * startPC, U
 
 
 /**
-* @brief
-* @param currentThread
-* @param targetThread
-* @return void
-*/
+ * @brief
+ * @param currentThread
+ * @param targetThread
+ * @param thread
+ * @return void
+ */
 void
-releaseVMThread(J9VMThread * currentThread, J9VMThread * targetThread);
+releaseVMThread(J9VMThread *currentThread, J9VMThread *targetThread, jthread thread);
 
 
 /**
@@ -1268,6 +1351,35 @@ suspendAgentBreakpoint(J9VMThread * currentThread, J9JVMTIAgentBreakpoint * agen
 
 UDATA
 findDecompileInfo(J9VMThread *currentThread, J9VMThread *targetThread, UDATA depth, J9StackWalkState *walkState);
+
+/**
+ * A helper to walk a platform thread or virtual thread
+ * @param[in] currentThread current thread
+ * @param[in] targetThread the thread to walk
+ * @param[in] threadObject the thread to walk
+ * @param[in] walkState a stack walk state
+ * @return 0 on success and non-zero on failure
+ */
+UDATA
+genericWalkStackFramesHelper(J9VMThread *currentThread, J9VMThread *targetThread, j9object_t threadObject, J9StackWalkState *walkState);
+
+#if JAVA_SPEC_VERSION >= 19
+/**
+ * With the introduction of virtual threads, targetThread may not have threadObject
+ * mounted. If threadObject is not mounted onto the targetThread, then its stack
+ * and other important details will be stored in a J9VMContinuation instance. This
+ * helper determines if threadObject is not mounted, and returns the corresponding
+ * J9VMContinuation for threadObject. If threadObject is mounted onto the targetThread,
+ * then this helper returns NULL.
+ *
+ * @param[in] currentThread current thread.
+ * @param[in] targetThread the J9VMThread where threadObject can be mounted.
+ * @param[in] threadObject the thread object.
+ * @return a J9VMContinuation if threadObject is not mounted; otherwise NULL.
+ */
+J9VMContinuation *
+getJ9VMContinuationToWalk(J9VMThread *currentThread, J9VMThread *targetThread, j9object_t threadObject);
+#endif /* JAVA_SPEC_VERSION >= 19 */
 
 /* ---------------- jvmtiHook.c ---------------- */
 
@@ -2260,6 +2372,35 @@ jvmtiResumeThreadList(jvmtiEnv* env,
 	jvmtiError* results);
 
 
+#if JAVA_SPEC_VERSION >= 19
+/**
+* @brief
+* @param env
+* @param except_count
+* @param except_list
+* @return jvmtiError
+*/
+jvmtiError JNICALL
+jvmtiSuspendAllVirtualThreads(jvmtiEnv* env,
+	jint except_count,
+	const jthread* except_list);
+
+
+/**
+* @brief
+* @param env
+* @param except_count
+* @param except_list
+* @return jvmtiError
+*/
+jvmtiError JNICALL
+jvmtiResumeAllVirtualThreads(jvmtiEnv* env,
+	jint except_count,
+	const jthread* except_list);
+
+#endif /* JAVA_SPEC_VERSION >= 19 */
+
+
 /**
 * @brief
 * @param env
@@ -2572,6 +2713,7 @@ jvmtiIsModifiableModule(jvmtiEnv* env,
 		jboolean* is_modifiable_module_ptr);
 
 #endif /* JAVA_SPEC_VERSION >= 9 */
+
 /* ---------------- suspendhelper.cpp ---------------- */
 /**
 * @brief
@@ -2582,7 +2724,17 @@ jvmtiIsModifiableModule(jvmtiEnv* env,
 * @return jvmtiError
 */
 jvmtiError
-suspendThread(J9VMThread *currentThread, jthread thread, UDATA allowNull, UDATA *currentThreadSuspended);
+suspendThread(J9VMThread *currentThread, jthread thread, BOOLEAN allowNull, BOOLEAN *currentThreadSuspended);
+
+/* ---------------- heapify.cpp ---------------- */
+/**
+* @brief
+* @param currentThread - the current thread
+* @param safePoint - TRUE if safepoint exclusive is in use, FALSE if not
+* @return JVMTI error code
+*/
+jvmtiError
+heapifyStackAllocatedObjects(J9VMThread *currentThread, UDATA safePoint);
 
 #ifdef __cplusplus
 }

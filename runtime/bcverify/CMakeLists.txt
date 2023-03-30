@@ -15,7 +15,7 @@
 # OpenJDK Assembly Exception [2].
 #
 # [1] https://www.gnu.org/software/classpath/license.html
-# [2] http://openjdk.java.net/legal/assembly-exception.html
+# [2] https://openjdk.org/legal/assembly-exception.html
 #
 # SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 ################################################################################
@@ -54,3 +54,9 @@ target_link_libraries(j9bcv
 		j9stackmap
 		j9shrcommon
 )
+
+# special handling bcverify.c to deal with ppcle64-specific crash when compiling with gcc 7.5
+if(OMR_ARCH_POWER AND OMR_ENV_LITTLE_ENDIAN AND OMR_ENV_DATA64 AND OMR_OS_LINUX AND (OMR_TOOLCONFIG STREQUAL "gnu"))
+	set_source_files_properties(bcverify.c PROPERTIES COMPILE_FLAGS -O2)
+endif()
+

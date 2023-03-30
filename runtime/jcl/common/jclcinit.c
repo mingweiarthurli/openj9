@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1998, 2020 IBM Corp. and others
+ * Copyright (c) 1998, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -46,7 +46,7 @@
 
 /* The vm version which must match the JCL.
  * It has the format 0xAABBCCCC
- *	AA - vm version, BB - jcl version, CCCC - master version
+ *	AA - vm version, BB - jcl version, CCCC - main version
  * CCCC must match exactly with the JCL
  * Up the vm version (AA) when adding natives
  * BB is the required level of JCL to run the vm
@@ -280,6 +280,7 @@ jint initializeKnownClasses(J9JavaVM* vm, U_32 runtimeFlags)
 					Trc_JCL_initializeKnownClasses_ClassRefNotResolvedForInstanceFieldRef(vm->mainThread, romFieldConstantPool[i].classRefCPIndex, i);
 				}  else {
 					Trc_JCL_initializeKnownClasses_ExitError(vm->mainThread, i);
+					Trc_JCL_Assert_StartupFailure();
 					return JNI_ERR;
 				}
 			}
@@ -307,6 +308,7 @@ jint initializeKnownClasses(J9JavaVM* vm, U_32 runtimeFlags)
 						Trc_JCL_initializeKnownClasses_ClassRefNotResolvedForMethodRef(vm->mainThread, romMethodConstantPool[i].classRefCPIndex, i);
 					} else {
 						Trc_JCL_initializeKnownClasses_ExitError(vm->mainThread, i);
+						Trc_JCL_Assert_StartupFailure();
 						return JNI_ERR;
 					}
 				}
@@ -323,6 +325,7 @@ jint initializeKnownClasses(J9JavaVM* vm, U_32 runtimeFlags)
 						Trc_JCL_initializeKnownClasses_ClassRefNotResolvedForMethodRef(vm->mainThread, romMethodConstantPool[i].classRefCPIndex, i);
 					} else {
 						Trc_JCL_initializeKnownClasses_ExitError(vm->mainThread, i);
+						Trc_JCL_Assert_StartupFailure();
 						return JNI_ERR;
 					}
 				} else {
@@ -339,6 +342,7 @@ jint initializeKnownClasses(J9JavaVM* vm, U_32 runtimeFlags)
 						Trc_JCL_initializeKnownClasses_ClassRefNotResolvedForMethodRef(vm->mainThread, romMethodConstantPool[i].classRefCPIndex, i);
 					} else {
 						Trc_JCL_initializeKnownClasses_ExitError(vm->mainThread, i);
+						Trc_JCL_Assert_StartupFailure();
 						return JNI_ERR;
 					}
 				} else {
@@ -414,7 +418,8 @@ static const J9IntConstantMapping intVMConstants[] = {
 		{ J9VMCONSTANTPOOL_COMIBMOTIVMVM_J9_GC_WRITE_BARRIER_TYPE_CARDMARK, J9_GC_WRITE_BARRIER_TYPE_CARDMARK },
 		{ J9VMCONSTANTPOOL_COMIBMOTIVMVM_J9_GC_WRITE_BARRIER_TYPE_CARDMARK_INCREMENTAL, J9_GC_WRITE_BARRIER_TYPE_CARDMARK_INCREMENTAL },
 		{ J9VMCONSTANTPOOL_COMIBMOTIVMVM_J9_GC_WRITE_BARRIER_TYPE_CARDMARK_AND_OLDCHECK, J9_GC_WRITE_BARRIER_TYPE_CARDMARK_AND_OLDCHECK },
-		{ J9VMCONSTANTPOOL_COMIBMOTIVMVM_J9_GC_WRITE_BARRIER_TYPE_REALTIME, J9_GC_WRITE_BARRIER_TYPE_REALTIME },
+		{ J9VMCONSTANTPOOL_COMIBMOTIVMVM_J9_GC_WRITE_BARRIER_TYPE_SATB, J9_GC_WRITE_BARRIER_TYPE_SATB },
+		{ J9VMCONSTANTPOOL_COMIBMOTIVMVM_J9_GC_WRITE_BARRIER_TYPE_SATB_AND_OLDCHECK, J9_GC_WRITE_BARRIER_TYPE_SATB_AND_OLDCHECK },
 
 		{ J9VMCONSTANTPOOL_COMIBMOTIVMVM_J9_GC_ALLOCATION_TYPE_TLH, J9_GC_ALLOCATION_TYPE_TLH },
 		{ J9VMCONSTANTPOOL_COMIBMOTIVMVM_J9_GC_ALLOCATION_TYPE_SEGREGATED, J9_GC_ALLOCATION_TYPE_SEGREGATED },
@@ -554,7 +559,6 @@ done:
 }
 
 #define ADDMODS_PROPERTY_BASE "jdk.module.addmods."
-#define AGENT_MODULE_NAME "jdk.management.agent"
 UDATA
 initializeRequiredClasses(J9VMThread *vmThread, char* dllName)
 {
@@ -581,11 +585,23 @@ initializeRequiredClasses(J9VMThread *vmThread, char* dllName)
 			J9VMCONSTANTPOOL_JAVALANGCLASSNOTFOUNDEXCEPTION,
 			J9VMCONSTANTPOOL_JAVALANGLINKAGEERROR,
 			J9VMCONSTANTPOOL_JAVALANGNOCLASSDEFFOUNDERROR,
+			J9VMCONSTANTPOOL_JAVALANGNULLPOINTEREXCEPTION,
+#if JAVA_SPEC_VERSION >= 15
+			J9VMCONSTANTPOOL_JDKINTERNALLOADERNATIVELIBRARIES,
+			J9VMCONSTANTPOOL_JDKINTERNALLOADERNATIVELIBRARIESNATIVELIBRARYIMPL,
+#endif /* JAVA_SPEC_VERSION >= 15 */
+#if JAVA_SPEC_VERSION >= 18
+			J9VMCONSTANTPOOL_JAVALANGINVOKEMETHODHANDLENATIVES,
+#endif /* JAVA_SPEC_VERSION >= 18 */
+#if JAVA_SPEC_VERSION >= 19
+			J9VMCONSTANTPOOL_JAVALANGTHREADFIELDHOLDER,
+			J9VMCONSTANTPOOL_JAVALANGBASEVIRTUALTHREAD,
+#endif /* JAVA_SPEC_VERSION >= 19 */
 	};
 
 	/* Determine java/lang/String.value signature before any required class is initialized */
 	if (J2SE_VERSION(vm) >= J2SE_V11) {
-	   vm->runtimeFlags |= J9_RUNTIME_STRING_BYTE_ARRAY;
+		vm->runtimeFlags |= J9_RUNTIME_STRING_BYTE_ARRAY;
 	}
 
 	/* CANNOT hold VM Access while calling registerBootstrapLibrary */
@@ -609,6 +625,51 @@ initializeRequiredClasses(J9VMThread *vmThread, char* dllName)
 	if (0 != vmFuncs->addHiddenInstanceField(vm, "java/lang/Module", "modulePointer", "J", &vm->modulePointerOffset)) {
 		return 1;
 	}
+
+#ifdef J9VM_OPT_OPENJDK_METHODHANDLE
+	if (0 != vmFuncs->addHiddenInstanceField(vm, "java/lang/invoke/MemberName", "vmindex", "J", &vm->vmindexOffset)) {
+		return 1;
+	}
+
+	if (0 != vmFuncs->addHiddenInstanceField(vm, "java/lang/invoke/MemberName", "vmtarget", "J", &vm->vmtargetOffset)) {
+		return 1;
+	}
+
+	if (0 != vmFuncs->addHiddenInstanceField(vm, "java/lang/invoke/MutableCallSite", "invalidationCookie", "J", &vm->mutableCallSiteInvalidationCookieOffset)) {
+		return 1;
+	}
+
+	if (0 != vmFuncs->addHiddenInstanceField(vm, "java/lang/invoke/MethodHandle", "jitVMEntryKeepAlive", "Ljava/lang/invoke/MemberName;", &vm->jitVMEntryKeepAliveOffset)) {
+		return 1;
+	}
+#endif /* defined(J9VM_OPT_OPENJDK_METHODHANDLE) */
+
+#if JAVA_SPEC_VERSION >= 19
+	/* TLS hidden field points to an array holding jvmti thread local data. */
+	if (0 != vmFuncs->addHiddenInstanceField(vm, "java/lang/Thread", "tls", "J", &vm->tlsOffset)) {
+		return 1;
+	}
+
+	/* Points to the next VirtualThread in the liveVirtualThreadList. */
+	if (0 != vmFuncs->addHiddenInstanceField(vm, "java/lang/VirtualThread", "linkNext", "Ljava/lang/VirtualThread;", &vm->virtualThreadLinkNextOffset)) {
+		return 1;
+	}
+
+	/* Points to the previous VirtualThread in the liveVirtualThreadList. */
+	if (0 != vmFuncs->addHiddenInstanceField(vm, "java/lang/VirtualThread", "linkPrevious", "Ljava/lang/VirtualThread;", &vm->virtualThreadLinkPreviousOffset)) {
+		return 1;
+	}
+
+	/* Counter to track if the virtual thread is being inspected by JVMTI. */
+	if (0 != vmFuncs->addHiddenInstanceField(vm, "java/lang/VirtualThread", "inspectorCount", "J", &vm->virtualThreadInspectorCountOffset)) {
+		return 1;
+	}
+
+	/* Stores a non-zero value if the virtual thread is suspended by JVMTI. */
+	if (0 != vmFuncs->addHiddenInstanceField(vm, "java/lang/VirtualThread", "isSuspendedByJVMTI", "I", &vm->isSuspendedByJVMTIOffset)) {
+		return 1;
+	}
+#endif /* JAVA_SPEC_VERSION >= 19 */
 
 	vmThread->privateFlags |= J9_PRIVATE_FLAGS_REPORT_ERROR_LOADING_CLASS;
 
@@ -723,6 +784,8 @@ initializeRequiredClasses(J9VMThread *vmThread, char* dllName)
 	for (i=0; i < sizeof(requiredClasses) / sizeof(UDATA); i++) {
 		clazz = vmFuncs->internalFindKnownClass(vmThread, requiredClasses[i], J9_FINDKNOWNCLASS_FLAG_NON_FATAL);
 		if ((NULL == clazz) || (NULL != vmThread->currentException)) {
+			Trc_JCL_initializeRequiredClasses_ExitError(vmThread, i);
+			Trc_JCL_Assert_StartupFailure();
 			return 1;
 		}
 		vmFuncs->initializeClass(vmThread, clazz);
@@ -734,21 +797,26 @@ initializeRequiredClasses(J9VMThread *vmThread, char* dllName)
 	if (J9_ARE_ANY_BITS_SET(vm->extendedRuntimeFlags2, J9_EXTENDED_RUNTIME2_LOAD_AGENT_MODULE)
 		&& (NULL != vm->modulesPathEntry->extraInfo))
 	{
-		const char *module = NULL;
-		Trc_JCL_initializeRequiredClasses_addAgentModuleEntry(vmThread);
-		module = vm->jimageIntf->jimagePackageToModule(
+		const char *packageName = "jdk/internal/agent";
+		const char *expectedModuleName = "jdk.management.agent";
+		const char *moduleName = vm->jimageIntf->jimagePackageToModule(
 				vm->jimageIntf, (UDATA) vm->modulesPathEntry->extraInfo,
-				"jdk/internal/agent");
-		if (NULL != module) {
+				packageName);
+		if (NULL == moduleName) {
+			Trc_JCL_initializeRequiredClasses_moduleForPackageNotFound(vmThread, packageName);
+		} else if (0 != strcmp(expectedModuleName, moduleName)) {
+			Trc_JCL_initializeRequiredClasses_unexpectedModuleForPackage(vmThread, packageName, moduleName, expectedModuleName);
+		} else {
 			J9VMSystemProperty *systemProperty = NULL;
+			Trc_JCL_initializeRequiredClasses_addAgentModuleEntry(vmThread, moduleName);
 			/* Handle the case where there are no user-specified modules. In this case, there
 			 * is typically one system property but no user-set "add-modules" arguments.
 			 */
-			if ((0 == vm->addModulesCount) &&
-				(J9SYSPROP_ERROR_NONE == vmFuncs->getSystemProperty(vm, ADDMODS_PROPERTY_BASE "0", &systemProperty)))
+			if ((0 == vm->addModulesCount)
+				&& (J9SYSPROP_ERROR_NONE == vmFuncs->getSystemProperty(vm, ADDMODS_PROPERTY_BASE "0", &systemProperty)))
 			{
 				/* this is implicitly an unused property */
-				vmFuncs->setSystemProperty(vm, systemProperty, AGENT_MODULE_NAME);
+				vmFuncs->setSystemProperty(vm, systemProperty, moduleName);
 			} else {
 				UDATA indexLen = j9str_printf(PORTLIB, NULL, 0, "%zu", vm->addModulesCount); /* get the length of the number string */
 				char *propNameBuffer = j9mem_allocate_memory(sizeof(ADDMODS_PROPERTY_BASE) + indexLen, OMRMEM_CATEGORY_VM);
@@ -757,9 +825,49 @@ initializeRequiredClasses(J9VMThread *vmThread, char* dllName)
 					return 1;
 				}
 				j9str_printf(PORTLIB, propNameBuffer, sizeof(ADDMODS_PROPERTY_BASE) + indexLen, ADDMODS_PROPERTY_BASE "%zu", vm->addModulesCount);
-				Trc_JCL_initializeRequiredClasses_addAgentModuleSetProperty(vmThread, propNameBuffer);
-				vmFuncs->addSystemProperty(vm, propNameBuffer, AGENT_MODULE_NAME, J9SYSPROP_FLAG_NAME_ALLOCATED);
+				Trc_JCL_initializeRequiredClasses_addAgentModuleSetProperty(vmThread, propNameBuffer, moduleName);
+				vmFuncs->addSystemProperty(vm, propNameBuffer, moduleName, J9SYSPROP_FLAG_NAME_ALLOCATED);
 			}
+			vm->addModulesCount += 1;
+		}
+	}
+
+	if (J9_ARE_ANY_BITS_SET(vm->extendedRuntimeFlags2, J9_EXTENDED_RUNTIME2_LOAD_HEALTHCENTER_MODULE)
+		&& (NULL != vm->modulesPathEntry->extraInfo))
+	{
+		const char *packageName = "com/ibm/java/diagnostics/healthcenter/agent";
+		const char *expectedModuleName = "ibm.healthcenter";
+		const char *moduleName = vm->jimageIntf->jimagePackageToModule(
+				vm->jimageIntf, (UDATA) vm->modulesPathEntry->extraInfo,
+				packageName);
+		if (NULL == moduleName) {
+			Trc_JCL_initializeRequiredClasses_moduleForPackageNotFound(vmThread, packageName);
+		} else if (0 != strcmp(expectedModuleName, moduleName)) {
+			// package %s found in module %s (expected %s) - not loading"
+			Trc_JCL_initializeRequiredClasses_unexpectedModuleForPackage(vmThread, packageName, moduleName, expectedModuleName);
+		} else {
+			J9VMSystemProperty *systemProperty = NULL;
+			Trc_JCL_initializeRequiredClasses_addAgentModuleEntry(vmThread, moduleName);
+			/* Handle the case where there are no user-specified modules. In this case, there
+			 * is typically one system property but no user-set "add-modules" arguments.
+			 */
+			if ((0 == vm->addModulesCount)
+				&& (J9SYSPROP_ERROR_NONE == vmFuncs->getSystemProperty(vm, ADDMODS_PROPERTY_BASE "0", &systemProperty)))
+			{
+				/* this is implicitly an unused property */
+				vmFuncs->setSystemProperty(vm, systemProperty, moduleName);
+			} else {
+				UDATA indexLen = j9str_printf(PORTLIB, NULL, 0, "%zu", vm->addModulesCount); /* get the length of the number string */
+				char *propNameBuffer = j9mem_allocate_memory(sizeof(ADDMODS_PROPERTY_BASE) + indexLen, OMRMEM_CATEGORY_VM);
+				if (NULL == propNameBuffer) {
+					Trc_JCL_initializeRequiredClasses_addAgentModuleOutOfMemory(vmThread);
+					return 1;
+				}
+				j9str_printf(PORTLIB, propNameBuffer, sizeof(ADDMODS_PROPERTY_BASE) + indexLen, ADDMODS_PROPERTY_BASE "%zu", vm->addModulesCount);
+				Trc_JCL_initializeRequiredClasses_addAgentModuleSetProperty(vmThread, propNameBuffer, moduleName);
+				vmFuncs->addSystemProperty(vm, propNameBuffer, moduleName, J9SYSPROP_FLAG_NAME_ALLOCATED);
+			}
+			vm->addModulesCount += 1;
 		}
 	}
 
@@ -777,5 +885,3 @@ initializeRequiredClasses(J9VMThread *vmThread, char* dllName)
 	return 0;
 }
 #undef ADDMODS_PROPERTY_BASE
-#undef AGENT_MODULE_NAME
-

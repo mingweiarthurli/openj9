@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -75,12 +75,6 @@ J9::Simplifier::isLegalToUnaryCancel(TR::Node *node, TR::Node *firstChild, TR::I
             node->getType().isBCD() && 
             !firstChild->getType().isBCD())
       {
-      // illegal to fold an intermediate truncation:
-      // dd2zd p=20 srcP=13
-      //   zd2dd (no p specified, but by data type, must be <= 16 and by srcP must be <= 13)
-      //     zdX p=20
-      // Folding gives an incorrect result if either srcP or the implied p of the zd2dd is 
-      // less than p on the dd2zd
       int32_t nodeP = node->getDecimalPrecision();
       int32_t childP = TR::DataType::getMaxPackedDecimalPrecision();
       int32_t grandChildP = firstChild->getFirstChild()->getDecimalPrecision();
@@ -101,12 +95,6 @@ J9::Simplifier::isLegalToUnaryCancel(TR::Node *node, TR::Node *firstChild, TR::I
             !node->getType().isBCD() && 
             !firstChild->getType().isBCD())
       {
-      // illegal to fold an intermediate truncation:
-      // dd2l
-      //   l2dd
-      //     lX
-      // Folding could give an incorrect result because the max precision of a dd is 16 
-      // and the max precision of an l is 19
       if (node->getDataType().canGetMaxPrecisionFromType() && 
           firstChild->getDataType().canGetMaxPrecisionFromType() &&
           node->getDataType().getMaxPrecisionFromType() > firstChild->getDataType().getMaxPrecisionFromType())
@@ -177,44 +165,6 @@ J9::Simplifier::unaryCancelOutWithChild(TR::Node *node, TR::Node *firstChild, TR
                TR::DataType::getValue(alwaysGeneratedSign));
          }
       }
-   else if (node->getType().isDFP() && firstChild->getType().isBCD())
-      {
-      // zd2dd
-      //   dd2zd p=12 srcP=13
-      //     ddX (p possibly unknown but <= 16)
-      // Folding gives an incorrect result if the truncation on the dd2zd isn't preserved
-      int32_t nodeP = TR::DataType::getMaxPackedDecimalPrecision();
-      int32_t childP = firstChild->getDecimalPrecision();
-      int32_t grandChildP = TR::DataType::getMaxPackedDecimalPrecision();
-
-      if (node->getDataType().canGetMaxPrecisionFromType())
-         {
-         nodeP = node->getDataType().getMaxPrecisionFromType();
-         grandChildP = nodeP;
-         }
-      if (firstChild->hasSourcePrecision())
-         grandChildP = firstChild->getSourcePrecision();
-
-      if (childP < nodeP && childP < grandChildP)
-         {
-         TR::Node *origOrigGrandChild = grandChild;
-         TR::Node *origGrandChild = grandChild;
-         grandChild = TR::Node::create(TR::ILOpCode::modifyPrecisionOpCode(grandChild->getDataType()), 1, origGrandChild);
-         origGrandChild->decReferenceCount(); // inc'd an extra time when creating modPrecision node above
-         grandChild->incReferenceCount();
-         grandChild->setDFPPrecision(childP);
-         dumpOptDetails(comp(), "%sCreate %s [" POINTER_PRINTF_FORMAT "] to reconcile precision mismatch between node %s [" POINTER_PRINTF_FORMAT "] grandChild %s [" POINTER_PRINTF_FORMAT "] (%d != %d)\n",
-               optDetailString(),
-               grandChild->getOpCode().getName(),
-               grandChild,
-               node->getOpCode().getName(),
-               node,
-               origOrigGrandChild->getOpCode().getName(),
-               origOrigGrandChild,
-               nodeP,
-               childP);
-         }
-      }
 
    return grandChild;
    }
@@ -238,6 +188,30 @@ J9::Simplifier::isRecognizedAbsMethod(TR::Node * node)
             (methodSymbol->getRecognizedMethod() == TR::java_lang_Math_abs_D ||
              methodSymbol->getRecognizedMethod() == TR::java_lang_Math_abs_F ||
              methodSymbol->getRecognizedMethod() == TR::java_lang_Math_abs_I));
+   }
+
+bool
+J9::Simplifier::isRecognizedObjectComparisonNonHelper(TR::Node *node, TR::SymbolReferenceTable::CommonNonhelperSymbol &nonHelperSymbol)
+   {
+   bool isRecognized = false;
+
+   if (node->getOpCode().isCall())
+      {
+      if (comp()->getSymRefTab()->isNonHelper(node->getSymbolReference(),
+                TR::SymbolReferenceTable::objectEqualityComparisonSymbol))
+         {
+         isRecognized = true;
+         nonHelperSymbol = TR::SymbolReferenceTable::objectEqualityComparisonSymbol;
+         }
+      else if (comp()->getSymRefTab()->isNonHelper(node->getSymbolReference(),
+                     TR::SymbolReferenceTable::objectInequalityComparisonSymbol))
+         {
+         isRecognized = true;
+         nonHelperSymbol = TR::SymbolReferenceTable::objectInequalityComparisonSymbol;
+         }
+      }
+
+   return isRecognized;
    }
 
 TR::Node *
@@ -300,6 +274,48 @@ J9::Simplifier::simplifyiCallMethods(TR::Node * node, TR::Block * block)
          foldDoubleConstant(node, 10000.0, (TR::Simplifier *) this);
          }
       }
+   else
+      {
+      TR::SymbolReferenceTable::CommonNonhelperSymbol nonHelperSymbol;
+
+      if (isRecognizedObjectComparisonNonHelper(node, nonHelperSymbol))
+         {
+         TR::Node *lhs = node->getChild(0);
+         const bool lhsNull =
+            lhs->getOpCodeValue() == TR::aconst
+            && lhs->getConstValue() == 0;
+
+         TR::Node *rhs = node->getChild(1);
+         const bool rhsNull =
+            rhs->getOpCodeValue() == TR::aconst
+            && rhs->getConstValue() == 0;
+
+         // If either operand is null, no need to use the equality/inequality comparison
+         // helper, as direct comparison of the two references will suffice.  Also, if both operands
+         // are the same node, no need to use the comparison helper - the references must be
+         // equal.  Fold both cases to use acmpeq or acmpne which might be further simplified
+         //
+         if (lhsNull || rhsNull || lhs == rhs)
+            {
+            const bool isEqualityComparison = (nonHelperSymbol == TR::SymbolReferenceTable::objectEqualityComparisonSymbol);
+            if (performTransformation(
+                  comp(),
+                  "%sChanging n%un from %s to %s\n",
+                  optDetailString(),
+                  node->getGlobalIndex(),
+                  comp()->getSymRefTab()->getNonHelperSymbolName(nonHelperSymbol),
+                  isEqualityComparison ? "acmpeq" : "acmpne"))
+               {
+               const char *counterName = TR::DebugCounter::debugCounterName(comp(), "vt-helper/simplifier-xformed/acmp/(%s)/bc=%d",
+                                                               comp()->signature(), node->getByteCodeIndex());
+               TR::DebugCounter::incStaticDebugCounter(comp(), counterName);
+
+               TR::Node::recreate(node, isEqualityComparison ? TR::acmpeq : TR::acmpne);
+               node = simplify(node, block);
+               }
+            }
+         }
+      }
 
    return node;
    }
@@ -310,22 +326,20 @@ J9::Simplifier::simplifyiCallMethods(TR::Node * node, TR::Block * block)
 TR::Node *
 J9::Simplifier::simplifylCallMethods(TR::Node * node, TR::Block * block)
    {
-   if (comp()->cg()->getSupportsCurrentTimeMaxPrecision())
+   TR::MethodSymbol * methodSymbol = node->getSymbol()->getMethodSymbol();
+   if (methodSymbol)
       {
-      TR::MethodSymbol * methodSymbol = node->getSymbol()->getMethodSymbol();
-      if (methodSymbol)
+      if ((methodSymbol->getRecognizedMethod() == TR::java_lang_System_currentTimeMillis) &&
+          comp()->cg()->getSupportsMaxPrecisionMilliTime() &&
+          (methodSymbol->isJNI() || methodSymbol->isVMInternalNative() || methodSymbol->isJITInternalNative()))
          {
-         if (comp()->cg()->getSupportsMaxPrecisionMilliTime() &&
-             (methodSymbol->getRecognizedMethod() == TR::java_lang_System_currentTimeMillis) &&
-             (methodSymbol->isJNI() || methodSymbol->isVMInternalNative() || methodSymbol->isJITInternalNative()))
-            {
-            node = convertCurrentTimeMillis(node, block);
-            }
-         else if (methodSymbol->getRecognizedMethod() == TR::java_lang_System_nanoTime &&
+         node = convertCurrentTimeMillis(node, block);
+         }
+      else if ((methodSymbol->getRecognizedMethod() == TR::java_lang_System_nanoTime) &&
+               comp()->cg()->getSupportsCurrentTimeMaxPrecision() &&
                (methodSymbol->isJNI() || methodSymbol->isVMInternalNative() || methodSymbol->isJITInternalNative()))
-            {
-            node = convertNanoTime(node, block);
-            }
+         {
+         node = convertNanoTime(node, block);
          }
       }
    else

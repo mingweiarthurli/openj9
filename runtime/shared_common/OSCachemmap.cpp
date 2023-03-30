@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2019 IBM Corp. and others
+ * Copyright (c) 2001, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -714,7 +714,7 @@ SH_OSCachemmap::acquireWriteLock(UDATA lockID)
 			 *  - Current thread owns the RW monitor, and gets EDEADLK on RW lock
 			 *
 			 * Note:
-			 *  - Deadlock might caused by the order in which threads have taken taken locks, when compared to another JVM.
+			 *  - Deadlock might caused by the order in which threads have taken locks, when compared to another JVM.
 			 *  - In the recovery code below the first release of the RW Monitor is to ensure SCStoreTransactions
 			 *    can complete.
 			 *
@@ -1419,7 +1419,7 @@ SH_OSCachemmap::getCacheStats(J9JavaVM* vm, const char* ctrlDirName, UDATA group
 	SH_OSCachemmap *cache = NULL;
 	void *cacheHeader;
 	I_64 *timeValue;
-	I_32 inUse;
+	UDATA inUse = J9SH_OSCACHE_UNKNOWN;
 	IDATA lockRc;
 	J9SharedClassPreinitConfig piconfig;
 	J9PortShcVersion versionData;
@@ -1450,7 +1450,7 @@ SH_OSCachemmap::getCacheStats(J9JavaVM* vm, const char* ctrlDirName, UDATA group
 			cache->cleanup();
 			return -1;
 		}
-		inUse = J9SH_OSCACHE_UNKNOWN; /* We can't determine whether there are JVMs attached to a read-only cache */
+		/* We can't determine whether there are JVMs attached to a read-only cache */
 
 	} else {
 		/* Try to acquire the attach write lock. This will only succeed if no one else
@@ -1466,11 +1466,11 @@ SH_OSCachemmap::getCacheStats(J9JavaVM* vm, const char* ctrlDirName, UDATA group
 		}
 	}
 
-	cacheInfo->lastattach = J9SH_OSCACHE_UNKNOWN;
-	cacheInfo->lastdetach = J9SH_OSCACHE_UNKNOWN;
-	cacheInfo->createtime = J9SH_OSCACHE_UNKNOWN;
-	cacheInfo->os_shmid = (UDATA)J9SH_OSCACHE_UNKNOWN;
-	cacheInfo->os_semid = (UDATA)J9SH_OSCACHE_UNKNOWN;
+	cacheInfo->lastattach = (IDATA)J9SH_OSCACHE_UNKNOWN;
+	cacheInfo->lastdetach = (IDATA)J9SH_OSCACHE_UNKNOWN;
+	cacheInfo->createtime = (IDATA)J9SH_OSCACHE_UNKNOWN;
+	cacheInfo->os_shmid = J9SH_OSCACHE_UNKNOWN;
+	cacheInfo->os_semid = J9SH_OSCACHE_UNKNOWN;
 	cacheInfo->nattach = inUse;
 
 	/* CMVC 177634: Skip calling internalAttach() when destroying the cache */
@@ -1558,11 +1558,11 @@ SH_OSCachemmap::getNonTopLayerCacheInfo(J9JavaVM* vm, const char* ctrlDirName, U
 		goto done;
 	}
 
-	cacheInfo->lastattach = J9SH_OSCACHE_UNKNOWN;
-	cacheInfo->lastdetach = J9SH_OSCACHE_UNKNOWN;
-	cacheInfo->createtime = J9SH_OSCACHE_UNKNOWN;
-	cacheInfo->os_shmid = (UDATA)J9SH_OSCACHE_UNKNOWN;
-	cacheInfo->os_semid = (UDATA)J9SH_OSCACHE_UNKNOWN;
+	cacheInfo->lastattach = (IDATA)J9SH_OSCACHE_UNKNOWN;
+	cacheInfo->lastdetach = (IDATA)J9SH_OSCACHE_UNKNOWN;
+	cacheInfo->createtime = (IDATA)J9SH_OSCACHE_UNKNOWN;
+	cacheInfo->os_shmid = J9SH_OSCACHE_UNKNOWN;
+	cacheInfo->os_semid = J9SH_OSCACHE_UNKNOWN;
 	cacheInfo->nattach = J9SH_OSCACHE_UNKNOWN;
 
 	/* The offset of fields createTime, lastAttachedTime, lastDetachedTime in struct OSCache_mmap_header2 are different on 32-bit and 64-bit caches. 
@@ -1752,6 +1752,7 @@ SH_OSCachemmap::getJavacoreData(J9JavaVM *vm, J9SharedClassJavacoreDataDescripto
 	descriptor->cacheGen = _activeGeneration;
 	descriptor->shmid = descriptor->semid = -2;
 	descriptor->cacheDir = _cachePathName;
+	descriptor->nattach = J9SH_OSCACHE_UNKNOWN;
 
 	return 1;
 }

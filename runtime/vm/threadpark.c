@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1998, 2014 IBM Corp. and others
+ * Copyright (c) 1998, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,135 +15,129 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
 
 #include "j9.h"
-#include "omrthread.h"
 #include "j9consts.h"
 #include "j9protos.h"
-#include "ut_j9vm.h"
+#include "j9vmnls.h"
 #include "objhelp.h"
+#include "omrthread.h"
+#include "ut_j9vm.h"
 
 #include <string.h>
 
-
-
-/**
- * @param[in] vmThread the current thread
- * @param[in] timeoutIsEpochRelative is the timeout in milliseconds relative to the beginning of the epoch
- * @param[in] timeout nanosecond or millisecond timeout
- */
 void
-threadParkImpl(J9VMThread *vmThread, IDATA timeoutIsEpochRelative, I_64 timeout)
+threadParkImpl(J9VMThread *vmThread, BOOLEAN timeoutIsEpochRelative, I_64 timeout)
 {
+	const I_32 oneMillion = 1000000;
 	I_64 millis = 0;
-	IDATA nanos = 0;
+	I_32 nanos = 0;
 	IDATA rc = 0;
-	UDATA thrstate;
+	UDATA thrstate = J9_PUBLIC_FLAGS_THREAD_PARKED;
+	J9JavaVM *vm = vmThread->javaVM;
 
-
-	/*Trc_JCL_park_Entry(vmThread, timeoutIsEpochRelative, timeout);*/
-
-	if (timeout || timeoutIsEpochRelative) {
+	/* Trc_JCL_park_Entry(vmThread, timeoutIsEpochRelative, timeout); */
+	if ((0 != timeout) || (timeoutIsEpochRelative)) {
 		if (timeoutIsEpochRelative) {
 			/* Currently, the omrthread layer provides no direct support for absolute timeouts.
-			 * Simulate the timeout by calculating the delta from the current time
+			 * Simulate the timeout by calculating the delta from the current time.
 			 */
 			PORT_ACCESS_FROM_VMC(vmThread);
 			I_64 timeNow = j9time_current_time_millis();
-			
+
 			millis = timeout - timeNow;
 			nanos = 0;
-			
+
 			if (millis <= 0) {
 				rc = J9THREAD_TIMED_OUT;
 				/*Trc_JCL_park_timeIsInPast(vmThread, timeNow);*/
 			}
 		} else {
-			millis = timeout / 1000000;
-			nanos = (IDATA)(timeout % 1000000);
+			millis = timeout / oneMillion;
+			nanos = (I_32)(timeout % oneMillion);
 		}
-		thrstate = J9_PUBLIC_FLAGS_THREAD_PARKED | J9_PUBLIC_FLAGS_THREAD_TIMED;
-	} else {
-		thrstate = J9_PUBLIC_FLAGS_THREAD_PARKED;
+		thrstate |= J9_PUBLIC_FLAGS_THREAD_TIMED;
 	}
 
 #ifdef J9VM_OPT_SIDECAR
-	/* Increment the wait count even if the deadline is past */
+	/* Increment the wait count even if the deadline is past. */
 	vmThread->mgmtWaitedCount++;
 #endif
 
-	if (rc != J9THREAD_TIMED_OUT) {
+	if (J9THREAD_TIMED_OUT != rc) {
 		PORT_ACCESS_FROM_VMC(vmThread);
 		/* vmThread->threadObject != NULL because vmThread must be the current thread */
 		J9VMTHREAD_SET_BLOCKINGENTEROBJECT(vmThread, vmThread, J9VMJAVALANGTHREAD_PARKBLOCKER(vmThread, vmThread->threadObject));
-		TRIGGER_J9HOOK_VM_PARK(vmThread->javaVM->hookInterface, vmThread, millis, nanos);
+		TRIGGER_J9HOOK_VM_PARK(vm->hookInterface, vmThread, millis, nanos);
 		internalReleaseVMAccessSetStatus(vmThread, thrstate);
 
-		while(1){
-			I_64 timeNow;
-			rc = omrthread_park(millis, nanos);
-
-			if(!(timeoutIsEpochRelative && rc == J9THREAD_TIMED_OUT && ((timeNow=j9time_current_time_millis()) < timeout))){
-				break;
+		while (1) {
+			rc = timeCompensationHelper(vmThread, HELPER_TYPE_THREAD_PARK, NULL, millis, nanos);
+			if (timeoutIsEpochRelative
+				&& (J9THREAD_TIMED_OUT == rc)
+			) {
+				I_64 timeNow = j9time_current_time_millis();
+				if (timeNow < timeout) {
+					millis = timeout - timeNow;
+					nanos = 0;
+					continue;
+				}
 			}
-			millis = timeout - timeNow;
-			nanos = 0;
+			break;
 		}
-	
+
 		internalAcquireVMAccessClearStatus(vmThread, thrstate);
-		TRIGGER_J9HOOK_VM_UNPARKED(vmThread->javaVM->hookInterface, vmThread);
+		TRIGGER_J9HOOK_VM_UNPARKED(vm->hookInterface, vmThread);
 		J9VMTHREAD_SET_BLOCKINGENTEROBJECT(vmThread, vmThread, NULL);
 	}
-	
-	/*Trc_JCL_park_Exit(vmThread, rc);*/
+	/* Trc_JCL_park_Exit(vmThread, rc); */
 }
-
 
 /**
  * @param[in] vmThread the current thread
  * @param[in] threadObject the thread to unpark
  */
 void
-threadUnparkImpl(J9VMThread* vmThread, j9object_t threadObject)
+threadUnparkImpl(J9VMThread *vmThread, j9object_t threadObject)
 {
-	J9VMThread* otherVmThread = NULL;
 	j9object_t threadLock = J9VMJAVALANGTHREAD_LOCK(vmThread, threadObject);
 
-	if (threadLock == NULL){
-		/* thread not fully set up yet so we cannot really need to unpark
-		 * just return
-		 */
+	if (NULL == threadLock) {
+		/* thread not fully set up yet so we cannot really need to unpark, just return */
 		/*Trc_JCL_park_unparkBeforeThreadFullySetup(vmThread);*/
-		return;
+	} else {
+		/* don't allow another thread terminate while I'm unparking it, because we may release vm access during
+		 * the enter and the gc could move the targetThreadObject we have to push/pop on a special frame so that
+		 * we will have the updated value if the object is moved */
+		PUSH_OBJECT_IN_SPECIAL_FRAME(vmThread, threadObject);
+		threadLock = (j9object_t)objectMonitorEnter(vmThread, threadLock);
+		if (J9_OBJECT_MONITOR_ENTER_FAILED(threadLock)) {
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+			if (J9_OBJECT_MONITOR_CRIU_SINGLE_THREAD_MODE_THROW == (UDATA)threadLock) {
+				setCRIUSingleThreadModeJVMCRIUException(vmThread, 0, 0);
+			} else
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
+			if (J9_OBJECT_MONITOR_OOM == (UDATA)threadLock) {
+				/* we may be out of memory in which case we will not unpark
+				 * the call to objectMonitorEnter will already have posted an OOM on the
+				 * thread in this case so we just return */
+				/*Trc_JCL_park_outOfMemoryInUnpark(vmThread);*/
+			}
+		} else {
+			threadObject = POP_OBJECT_IN_SPECIAL_FRAME(vmThread);
+			/* get the vmThread for the thread object, since we hold the lock this will not change under us */
+			J9VMThread *otherVmThread = J9VMJAVALANGTHREAD_THREADREF(vmThread, threadObject);
+			/*Trc_JCL_unpark_Entry(vmThread, otherVmThread);*/
+			if (NULL != otherVmThread) {
+				/* in this case the thread is already dead so we don't need to unpark */
+				omrthread_unpark(otherVmThread->osThread);
+			}
+			objectMonitorExit(vmThread, threadLock);
+			/*Trc_JCL_unpark_Exit(vmThread);*/
+		}
 	}
-
-	/* don't allow another thread terminate while I'm unparking it, because we may release vm access during
-	 * the enter and the gc could move the targetThreadObject we have to push/pop on a special frame so that
-	 * we will have the updated value if the object is moved */
-	PUSH_OBJECT_IN_SPECIAL_FRAME(vmThread, threadObject);
-	threadLock = (j9object_t) objectMonitorEnter(vmThread, threadLock);
-	threadObject = POP_OBJECT_IN_SPECIAL_FRAME(vmThread);
-	if(threadLock == NULL) {
-		/* we may be out of memory in which case we will not unpark 
-		 * the call to objectMonitorEnter will already have posted an OOM on the
-		 * thread in this case so we just return */
-		/*Trc_JCL_park_outOfMemoryInUnpark(vmThread);*/
-		return;
-	}
-
-	/* get the vmThread for the thread object, since we hold the lock this will not change under us */
-	otherVmThread = J9VMJAVALANGTHREAD_THREADREF(vmThread, threadObject);
-	/*Trc_JCL_unpark_Entry(vmThread, otherVmThread);*/
-	if (otherVmThread != NULL){
-		/* in this case the thread is already dead so we don't need to unpark */
-		omrthread_unpark(otherVmThread->osThread);
-	}
-	objectMonitorExit(vmThread, threadLock);
-
-	/*Trc_JCL_unpark_Exit(vmThread);*/
 }
-

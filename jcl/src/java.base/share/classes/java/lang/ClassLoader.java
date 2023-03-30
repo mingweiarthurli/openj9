@@ -1,6 +1,6 @@
 /*[INCLUDE-IF Sidecar18-SE]*/
 /*******************************************************************************
- * Copyright (c) 1998, 2020 IBM Corp. and others
+ * Copyright (c) 1998, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -48,7 +48,7 @@ import java.lang.reflect.*;
 import java.security.cert.Certificate;
 import sun.security.util.SecurityConstants;
 
-/*[IF Sidecar19-SE]
+/*[IF JAVA_SPEC_VERSION >= 11]*/
 import java.lang.reflect.Modifier;
 import java.util.Spliterator;
 import java.util.Spliterators;
@@ -62,7 +62,16 @@ import jdk.internal.loader.BootLoader;
 /*[ELSE]
 import sun.reflect.CallerSensitive;
 /*[ENDIF]*/
- 
+
+/*[IF JAVA_SPEC_VERSION >= 15]*/
+import jdk.internal.loader.NativeLibraries;
+import jdk.internal.loader.NativeLibrary;
+/*[ENDIF] JAVA_SPEC_VERSION >= 15 */
+
+/*[IF JAVA_SPEC_VERSION >= 18]*/
+import jdk.internal.reflect.CallerSensitiveAdapter;
+/*[ENDIF] JAVA_SPEC_VERSION >= 18 */
+
 /**
  * ClassLoaders are used to dynamically load, link and install
  * classes into a running image.
@@ -96,10 +105,6 @@ public abstract class ClassLoader {
 
 	private long vmRef;
 	ClassLoader parent;
-	
-	/*[IF Panama]*/
-	private static String[]	usr_paths = new String[1];
-	/*[ENDIF]*/
 
 	/*[PR CMVC 130382] Optimize checking ClassLoader assertion status */
 	private static boolean checkAssertionOptions;
@@ -147,7 +152,10 @@ public abstract class ClassLoader {
 /*[ENDIF]*/	
 	private static boolean specialLoaderInited = false;
 	private static InternalAnonymousClassLoader internalAnonClassLoader;
-	private static native void initAnonClassLoader(InternalAnonymousClassLoader anonClassLoader);	
+/*[IF JAVA_SPEC_VERSION >= 15]*/
+	private NativeLibraries nativelibs = null;
+/*[ENDIF] JAVA_SPEC_VERSION >= 15 */
+	private static native void initAnonClassLoader(InternalAnonymousClassLoader anonClassLoader);
 	
 	/*[PR JAZZ 73143]: ClassLoader incorrectly discards class loading locks*/
 	static final class ClassNameLockRef extends WeakReference<Object> implements Runnable {
@@ -204,7 +212,7 @@ public abstract class ClassLoader {
 			// ignore
 		}
 
-		/*[IF Java11]*/
+		/*[IF JAVA_SPEC_VERSION >= 11]*/
 		// This static method call ensures jdk.internal.loader.ClassLoaders.BOOT_LOADER initialization first
 		jdk.internal.loader.ClassLoaders.platformClassLoader();
 		if (bootstrapClassLoader.servicesCatalog != null) {
@@ -212,11 +220,14 @@ public abstract class ClassLoader {
 		}
 		bootstrapClassLoader.servicesCatalog = BootLoader.getServicesCatalog();
 		if (bootstrapClassLoader.classLoaderValueMap != null) {
+			/*[IF JAVA_SPEC_VERSION < 17]*/
 			throw new InternalError("bootstrapClassLoader.classLoaderValueMap is NOT null "); //$NON-NLS-1$
+			/*[ENDIF] JAVA_SPEC_VERSION < 17 */
+		} else {
+			bootstrapClassLoader.classLoaderValueMap = BootLoader.getClassLoaderValueMap();
 		}
-		bootstrapClassLoader.classLoaderValueMap = BootLoader.getClassLoaderValueMap();
 		applicationClassLoader = ClassLoaders.appClassLoader();
-		/*[ELSE] Java11 */
+		/*[ELSE] JAVA_SPEC_VERSION >= 11 */
 		ClassLoader sysTemp = null;
 		// Proper initialization requires BootstrapLoader is the first loader instantiated
 		String systemLoaderString = System.internalGetProperties().getProperty("systemClassLoader"); //$NON-NLS-1$
@@ -234,7 +245,7 @@ public abstract class ClassLoader {
 		AbstractClassLoader.setBootstrapClassLoader(bootstrapClassLoader);
 		lazyClassLoaderInit = true;
 		applicationClassLoader = bootstrapClassLoader;
-		/*[ENDIF] Java11 */
+		/*[ENDIF] JAVA_SPEC_VERSION >= 11 */
 
 		/* [PR 78889] The creation of this classLoader requires lazy initialization. The internal classLoader struct
 		 * is created in the initAnonClassLoader call. The "new InternalAnonymousClassLoader()" call must be 
@@ -256,51 +267,31 @@ public abstract class ClassLoader {
 		/* 
 		 * Following code ensures that the field jdk.internal.reflect.langReflectAccess 
 		 * is initialized before any usage references. This is a workaround.
-		 * More details are at https://github.com/eclipse/openj9/issues/3399#issuecomment-459004840.
+		 * More details are at https://github.com/eclipse-openj9/openj9/issues/3399#issuecomment-459004840.
 		 */
 		Modifier.isPublic(Modifier.PUBLIC);
-		/*[IF Java10]*/
+		/*[IF JAVA_SPEC_VERSION >= 10]*/
 		try {
-		/*[ENDIF]*/
+		/*[ENDIF] JAVA_SPEC_VERSION >= 10 */
 			System.bootLayer = jdk.internal.module.ModuleBootstrap.boot();
-		/*[IF Java10]*/
+		/*[IF JAVA_SPEC_VERSION >= 10]*/
 		} catch (Exception ex) {
-			ex.printStackTrace();
+			System.out.println(ex);
+			Throwable t = ex.getCause();
+			while (t != null) {
+				System.out.println("Caused by: " + t); //$NON-NLS-1$
+				t = t.getCause();
+			}
 			System.exit(1);
 		}
-		/*[ENDIF]*/
+		/*[ENDIF] JAVA_SPEC_VERSION >= 10 */
 		jdk.internal.misc.VM.initLevel(2);
-		String javaSecurityManager = System.internalGetProperties().getProperty("java.security.manager"); //$NON-NLS-1$
-		if ((javaSecurityManager != null) 
-		/*[IF Java12]*/
-			/* See the SecurityManager javadoc for details about special tokens. */
-			&& !javaSecurityManager.equals("disallow") //$NON-NLS-1$ /* special token to disallow SecurityManager */
-			&& !javaSecurityManager.equals("allow") //$NON-NLS-1$ /* special token to allow SecurityManager */
-			/*[ENDIF] Java12 */
-		) {
-			if (javaSecurityManager.isEmpty() || "default".equals(javaSecurityManager)) { //$NON-NLS-1$
-				System.setSecurityManager(new SecurityManager());
-			} else {
-				try {
-					Constructor<?> constructor = Class.forName(javaSecurityManager, true, applicationClassLoader).getConstructor();
-					constructor.setAccessible(true);
-					System.setSecurityManager((SecurityManager)constructor.newInstance());
-				} catch (Throwable e) {
-					/*[MSG "K0631", "JVM can't set custom SecurityManager due to {0}"]*/
-					throw new Error(com.ibm.oti.util.Msg.getString("K0631", e.toString()), e); //$NON-NLS-1$
-				}
-			}
-		}
+		System.initSecurityManager(applicationClassLoader);
 		jdk.internal.misc.VM.initLevel(3);
 		/*[ELSE]*/
 		applicationClassLoader = sun.misc.Launcher.getLauncher().getClassLoader();
 		/*[ENDIF]*/
 
-		/*[IF Panama]*/
-		/* RI jdk.internal.nicl.LdLoader uses reflection to lookup this field */
-		usr_paths[0] = System.getProperty("user.dir");
-		/*[ENDIF]*/
-		
 		/* Find the extension class loader */
 		ClassLoader tempLoader = applicationClassLoader;
 		while (null != tempLoader.parent) {
@@ -332,6 +323,7 @@ protected ClassLoader() {
  * @return Void a unused reference passed to the Constructor
  */
 private static Void checkSecurityPermission() {
+	@SuppressWarnings("removal")
 	SecurityManager security = System.getSecurityManager();
 	if (security != null) {
 		security.checkCreateClassLoader();
@@ -380,31 +372,31 @@ private ClassLoader(Void staticMethodHolder, String classLoaderName, ClassLoader
 	// This assumes that DelegatingClassLoader is constructed via ClassLoader(parentLoader)
 	isDelegatingCL = DELEGATING_CL.equals(this.getClass().getName());
 
-/*[IF Sidecar19-SE]*/
+/*[IF JAVA_SPEC_VERSION > 8]*/
 	if ((classLoaderName != null) && classLoaderName.isEmpty()) {
 		/*[MSG "K0645", "The given class loader name can't be empty."]*/
 		throw new IllegalArgumentException(com.ibm.oti.util.Msg.getString("K0645")); //$NON-NLS-1$
 	}
-/*[ENDIF]*/
+/*[ENDIF] JAVA_SPEC_VERSION > 8 */
 
 	if (parallelCapableCollection.containsKey(this.getClass())) {
 		isParallelCapable = true;
 	}
-	
+
 	// VM Critical: must set parent before calling initializeInternal()
 	parent = parentLoader;
-/*[IF !Sidecar19-SE]*/
+/*[IF JAVA_SPEC_VERSION == 8]*/
 	specialLoaderInited = (bootstrapClassLoader != null);
-/*[ENDIF]*/
+/*[ENDIF] JAVA_SPEC_VERSION == 8 */
 	if (specialLoaderInited) {
 		if (!lazyClassLoaderInit) {
 			VM.initializeClassLoader(this, VM.J9_CLASSLOADER_TYPE_OTHERS, isParallelCapable);
 		}
-/*[IF Sidecar19-SE]*/
+/*[IF JAVA_SPEC_VERSION > 8]*/
 		unnamedModule = new Module(this);
-/*[ENDIF]*/
-	} 
-/*[IF Sidecar19-SE]*/	
+/*[ENDIF] JAVA_SPEC_VERSION > 8 */
+	}
+/*[IF JAVA_SPEC_VERSION > 8]*/
 	else {
 		if (bootstrapClassLoader == null) {
 			// BootstrapClassLoader.unnamedModule is set by JVM_SetBootLoaderUnnamedModule
@@ -419,8 +411,14 @@ private ClassLoader(Void staticMethodHolder, String classLoaderName, ClassLoader
 		}
 	}
 	this.classLoaderName = classLoaderName;
-/*[ENDIF]*/	
-	
+/*[ENDIF] JAVA_SPEC_VERSION > 8 */
+
+/*[IF JAVA_SPEC_VERSION >= 19]*/
+	this.nativelibs = NativeLibraries.newInstance((this == bootstrapClassLoader) ? null : this);
+/*[ELSEIF JAVA_SPEC_VERSION >= 17] */
+	this.nativelibs = NativeLibraries.jniNativeLibraries((this == bootstrapClassLoader) ? null : this);
+/*[ENDIF] JAVA_SPEC_VERSION >= 19 */
+
 	if (isAssertOptionFound) {
 		initializeClassLoaderAssertStatus();
 	}
@@ -598,6 +596,24 @@ final Class<?> defineClassInternal(
 	}
 	return answer;
 }
+
+/*[IF JAVA_SPEC_VERSION >= 15]*/
+
+private final native Class<?> defineClassImpl1(Class<?> hostClass, String className, byte[] classRep, ProtectionDomain protectionDomain, boolean init, int flags, Object classData);
+final Class<?> defineClassInternal(
+		Class<?> hostClass, 
+		String className, 
+		byte[] classRep, 
+		ProtectionDomain protectionDomain, 
+		boolean init, 
+		int flags, 
+		Object classData)
+		throws java.lang.ClassFormatError 
+{
+	Class<?> answer = defineClassImpl1(hostClass, className, classRep, protectionDomain, init, flags, classData);
+	return answer;
+}
+/*[ENDIF] JAVA_SPEC_VERSION >= 15 */
 
 /*[IF Sidecar19-SE]*/
 /**
@@ -786,7 +802,7 @@ private native Class<?> findLoadedClassImpl(String className);
 
 /**
  * Attempts to load a class using the system class loader.
- * Note that the class has already been been linked.
+ * Note that the class has already been linked.
  *
  * @return 		java.lang.Class
  *					the class which was loaded.
@@ -810,6 +826,10 @@ protected final Class<?> findSystemClass (String className) throws ClassNotFound
  */
 @CallerSensitive
 public final ClassLoader getParent() {
+	if (parent == null) {
+		return null;
+	}
+	@SuppressWarnings("removal")
 	SecurityManager security = System.getSecurityManager();
 	if (security != null) {	
 		ClassLoader callersClassLoader = callerClassLoader();
@@ -1034,6 +1054,7 @@ static ClassLoader getClassLoader(Class<?> clz) {
  */
 @CallerSensitive
 public static ClassLoader getPlatformClassLoader() {
+	@SuppressWarnings("removal")
 	SecurityManager security = System.getSecurityManager();
 	ClassLoader platformClassLoader = ClassLoaders.platformClassLoader();
 	if (security != null) {
@@ -1114,6 +1135,7 @@ public static ClassLoader getSystemClassLoader () {
 	}
 	
 	ClassLoader sysLoader = applicationClassLoader;
+	@SuppressWarnings("removal")
 	SecurityManager security = System.getSecurityManager();
 	if (security != null) {	
 		ClassLoader callersClassLoader = callerClassLoader();
@@ -1124,6 +1146,15 @@ public static ClassLoader getSystemClassLoader () {
 
 	return sysLoader;
 }
+
+/*[IF JAVA_SPEC_VERSION >= 19]*/
+/*
+ * Returns the system class loader without a security check.
+*/
+static ClassLoader internalGetSystemClassLoader() {
+	return applicationClassLoader;
+}
+/*[ENDIF] JAVA_SPEC_VERSION >= 19 */
 
 /**
  * Answers an URL specifying a resource which can be found by 
@@ -1197,16 +1228,16 @@ public final Module getUnnamedModule()
  * @exception	ClassNotFoundException
  *					If the class could not be found.
  */
-public Class<?> loadClass (String className) throws ClassNotFoundException {
-/*[IF Sidecar19-SE]*/
+public Class<?> loadClass(String className) throws ClassNotFoundException {
+/*[IF JAVA_SPEC_VERSION > 8]*/
 	if ((bootstrapClassLoader == null) || (this == bootstrapClassLoader)) {
 		Class<?> cls = VMAccess.findClassOrNull(className, bootstrapClassLoader);
-		if (cls == null) {
-			throw new ClassNotFoundException(className);
+		if (cls != null) {
+			return cls;
 		}
-		return cls;
+		throw new ClassNotFoundException(className);
 	}
-/*[ENDIF] Sidecar19-SE */	
+/*[ENDIF] JAVA_SPEC_VERSION > 8 */
 	return loadClass(className, false);
 }
 
@@ -1345,12 +1376,16 @@ Class<?> loadClassHelper(final String className, boolean resolveClass, boolean d
 }
 
 /**
- * Attempts to register the  the ClassLoader as being capable of 
+ * Attempts to register the ClassLoader as being capable of 
  * parallel class loading.  This requires that all superclasses must
  * also be parallel capable.
  *
  * @return		True if the ClassLoader successfully registers as 
  * 				parallel capable, false otherwise.
+/*[IF JAVA_SPEC_VERSION >= 19]
+ *
+ * @throws IllegalCallerException if the caller is not a subclass of ClassLoader
+/*[ENDIF] JAVA_SPEC_VERSION >= 19
  *
  * @see			java.lang.ClassLoader
  */
@@ -1358,6 +1393,34 @@ Class<?> loadClassHelper(final String className, boolean resolveClass, boolean d
 protected static boolean registerAsParallelCapable() {
 	final Class<?> callerCls = System.getCallerClass();
 	
+/*[IF JAVA_SPEC_VERSION >= 18]*/
+	return registerAsParallelCapable(callerCls);
+/*[ELSE] JAVA_SPEC_VERSION >= 18
+	if (parallelCapableCollection.containsKey(callerCls)) {
+		return true;
+	}
+
+	Class<?> superCls = callerCls.getSuperclass();
+
+	if (superCls == ClassLoader.class || parallelCapableCollection.containsKey(superCls)) {
+		parallelCapableCollection.put(callerCls, null);
+		return true;
+	}
+
+	return false;
+/*[ENDIF] JAVA_SPEC_VERSION >= 18 */
+}
+
+/*[IF JAVA_SPEC_VERSION >= 18]*/
+@CallerSensitiveAdapter
+private static boolean registerAsParallelCapable(Class<?> callerCls) {
+	/*[IF JAVA_SPEC_VERSION >= 19]*/
+	if ((null == callerCls) || !ClassLoader.class.isAssignableFrom(callerCls)) {
+		// callerCls may be null, which must throw IllegalCallerException
+		throw new IllegalCallerException(String.valueOf(callerCls));
+	}
+	/*[ENDIF] JAVA_SPEC_VERSION >= 19 */
+
 	if (parallelCapableCollection.containsKey(callerCls)) {
 		return true;
 	}
@@ -1371,6 +1434,7 @@ protected static boolean registerAsParallelCapable() {
 	
 	return false;
 }
+/*[ENDIF] JAVA_SPEC_VERSION >= 18 */
 
 /**
  * Answers the lock object for class loading in parallel. 
@@ -1873,9 +1937,6 @@ static ClassLoader callerClassLoader() {
  *							if the library was not allowed to be loaded
  */
 static void loadLibraryWithClassLoader(String libName, ClassLoader loader) {
-	SecurityManager smngr = System.getSecurityManager();
-	if (smngr != null)
-		smngr.checkLink(libName);
 	if (loader != null) {
 		String realLibName = loader.findLibrary(libName);
 		
@@ -1888,14 +1949,13 @@ static void loadLibraryWithClassLoader(String libName, ClassLoader loader) {
 	* [PR JAZZ 93728] Match behaviour of System.loadLibrary() in reference
 	* implementation when system property java.library.path is set 
 	*/
-
-	if (null == loader) {
+	try {
 		loadLibraryWithPath(libName, loader, System.internalGetProperties().getProperty("com.ibm.oti.vm.bootstrap.library.path")); //$NON-NLS-1$
-	} else {
-		try {
+	} catch (UnsatisfiedLinkError ule) {
+		if (loader == null) {
+			throw ule;
+		} else {
 			loadLibraryWithPath(libName, loader, System.internalGetProperties().getProperty("java.library.path")); //$NON-NLS-1$
-		} catch (UnsatisfiedLinkError ule) {
-			loadLibraryWithPath(libName, loader, System.internalGetProperties().getProperty("com.ibm.oti.vm.bootstrap.library.path")); //$NON-NLS-1$
 		}
 	}
 }
@@ -1944,7 +2004,9 @@ static void loadLibraryWithPath(String libName, ClassLoader loader, String libra
 		} catch (java.io.IOException e) {
 			error = com.ibm.oti.util.Util.toString(message);
 		}
-		throw new UnsatisfiedLinkError(libName + " (" + error + ")"); //$NON-NLS-1$ //$NON-NLS-2$
+		/*[MSG "K0649", "{0} ({1})"]*/
+		throw new UnsatisfiedLinkError(com.ibm.oti.util.Msg.getString("K0649", libName, error));//$NON-NLS-1$
+
 	}
 }
 
@@ -1957,14 +2019,58 @@ static void loadLibrary(Class<?> caller, String name, boolean fullPath) {
 		loadLibraryWithClassLoader(name, caller.getClassLoaderImpl());
 }
 
-/*[IF Java15]*/
+/*[IF JAVA_SPEC_VERSION >= 15]*/
 static void loadLibrary(Class<?> caller, File file) {
-	loadLibraryWithPath(file.getAbsolutePath(), caller.getClassLoaderImpl(), null);
+	ClassLoader loader = (caller == null) ? null : caller.getClassLoader();
+	NativeLibraries nls = (loader == null) ? BootLoader.getNativeLibraries() : loader.nativelibs;
+	NativeLibrary nl = nls.loadLibrary(caller, file);
+	if (nl == null) {
+		/*[MSG "K0647", "Can't load {0}"]*/
+		throw new UnsatisfiedLinkError(com.ibm.oti.util.Msg.getString("K0647", file));//$NON-NLS-1$
+	}
 }
 static void loadLibrary(Class<?> caller, String libName) {
-	loadLibraryWithClassLoader(libName, caller.getClassLoaderImpl());
+	ClassLoader loader = (caller == null) ? null : caller.getClassLoader();
+	if (loader == null) {
+		NativeLibrary nl = BootLoader.getNativeLibraries().loadLibrary(caller, libName);
+		if (nl == null) {
+			/*[MSG "K0647", "Can't load {0}"]*/
+			throw new UnsatisfiedLinkError(com.ibm.oti.util.Msg.getString("K0647", libName));//$NON-NLS-1$
+		}
+	} else {
+		NativeLibraries nls = loader.nativelibs;
+		String libfilename = loader.findLibrary(libName);
+		if (libfilename != null) {
+			File libfile = new File(libfilename);
+			if (!libfile.isAbsolute()) {
+				/*[MSG "K0648", "Not an absolute path: {0}"]*/
+				throw new UnsatisfiedLinkError(com.ibm.oti.util.Msg.getString("K0648", libfilename));//$NON-NLS-1$
+			}
+			NativeLibrary nl = nls.loadLibrary(caller, libfile);
+			if (nl == null) {
+				/*[MSG "K0647", "Can't load {0}"]*/
+				throw new UnsatisfiedLinkError(com.ibm.oti.util.Msg.getString("K0647", libfilename));//$NON-NLS-1$
+			}
+		} else {
+			NativeLibrary nl = nls.loadLibrary(caller, libName);
+			if (nl == null) {
+				/*[MSG "K0647", "Can't load {0}"]*/
+				throw new UnsatisfiedLinkError(com.ibm.oti.util.Msg.getString("K0647", libName));//$NON-NLS-1$
+			}
+		}
+	}
 }
-/*[ENDIF] Java15 */
+
+static long findNative(ClassLoader loader, String entryName) {
+	NativeLibraries nativelib;
+	if ((loader == null) || (loader == bootstrapClassLoader)) {
+		nativelib = BootLoader.getNativeLibraries();
+	} else {
+		nativelib = loader.nativelibs;
+	}
+	return nativelib.find(entryName);
+}
+/*[ENDIF] JAVA_SPEC_VERSION >= 15 */
 
 /**
  * Sets the assertion status of a class.
@@ -2447,4 +2553,18 @@ public final boolean isRegisteredAsParallelCapable() {
 }
 
 /*[ENDIF] Sidecar19-SE*/
+
+/*[IF JAVA_SPEC_VERSION >= 19]*/
+static void checkClassLoaderPermission(ClassLoader classLoader, Class<?> caller) {
+	@SuppressWarnings("removal")
+	SecurityManager security = System.getSecurityManager();
+	if (security != null) {
+		ClassLoader callersClassLoader = caller.getClassLoaderImpl();
+		/*[PR JAZZ103 76960] permission check is needed against the parent instead of this classloader */
+		if (needsClassLoaderPermissionCheck(callersClassLoader, classLoader)) {
+			security.checkPermission(SecurityConstants.GET_CLASSLOADER_PERMISSION);
+		}
+	}
+}
+/*[ENDIF] JAVA_SPEC_VERSION >= 19 */
 }

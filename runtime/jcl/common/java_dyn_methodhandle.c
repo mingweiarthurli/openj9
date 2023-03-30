@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2001, 2019 IBM Corp. and others
+ * Copyright (c) 2001, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -28,6 +28,7 @@
 #include "j9consts.h"
 #include "jni.h"
 #include "j9protos.h"
+#include "jcl_internal.h"
 #include "jclprots.h"
 #include "ut_j9jcl.h"
 #include "VM_MethodHandleKinds.h"
@@ -36,14 +37,15 @@
 #include "j9vmnls.h"
 #include "j9vmconstantpool.h"
 #include "j9jclnls.h"
+#include "cfreader.h"
 
 /*
  * Note that the following native methods are implemented in sun_reflect_ConstantPool.c because
  * they effectively extend the ConstantPool API and require functionality from that module:
- * 		Java_java_lang_invoke_MethodHandle_getCPTypeAt
- * 		Java_java_lang_invoke_MethodHandle_getCPMethodTypeAt
- * 		Java_java_lang_invoke_MethodHandle_getCPMethodHandleAt
- * 		Java_java_lang_invoke_MethodHandle_getCPConstantDynamicAt
+ * 		Java_java_lang_invoke_MethodHandleResolver_getCPTypeAt
+ * 		Java_java_lang_invoke_MethodHandleResolver_getCPMethodTypeAt
+ * 		Java_java_lang_invoke_MethodHandleResolver_getCPMethodHandleAt
+ * 		Java_java_lang_invoke_MethodHandleResolver_getCPConstantDynamicAt
  */
 
 static VMINLINE UDATA lookupImpl(J9VMThread *currentThread, J9Class *lookupClass, J9UTF8 *name, J9UTF8 *signature, J9Class *senderClass, UDATA options, BOOLEAN *foundDefaultConflicts);
@@ -55,9 +57,6 @@ static void JNICALL vmInvalidate(JNIEnv *env, jclass mutableCallSiteClass, jlong
 static BOOLEAN accessCheckMethodSignature(J9VMThread *currentThread, J9Method *method, j9object_t methodType, J9UTF8 *lookupSig);
 static BOOLEAN accessCheckFieldSignature(J9VMThread *currentThread, J9Class* lookupClass, UDATA romField, j9object_t methodType, J9UTF8 *lookupSig);
 static char * expandNLSTemplate(J9VMThread *vmThread, const char *nlsTemplate, ...);
-#if defined(J9VM_OPT_JAVA_OFFLOAD_SUPPORT)
-static void clearNonZAAPEligibleBit(JNIEnv *env, jclass nativeClass, const JNINativeMethod *nativeMethods, jint nativeMethodCount);
-#endif /* J9VM_OPT_JAVA_OFFLOAD_SUPPORT */
 
 /**
  * Lookup static method name of type signature on lookupClass class.
@@ -348,7 +347,7 @@ accessCheckFieldSignature(J9VMThread *currentThread, J9Class* lookupClass, UDATA
 	
 		if ('L' == lookupSigData[sigOffset]) {
 			BOOLEAN isVirtual = (0 == (((J9ROMFieldShape*)romField)->modifiers & J9AccStatic));
-			j9object_t argsArray = J9VMJAVALANGINVOKEMETHODTYPE_ARGUMENTS(currentThread, methodType);
+			j9object_t argsArray = J9VMJAVALANGINVOKEMETHODTYPE_PTYPES(currentThread, methodType);
 			U_32 numParameters = J9INDEXABLEOBJECT_SIZE(currentThread, argsArray);
 			j9object_t clazz = NULL;
 			J9Class *ramClass = NULL;
@@ -359,7 +358,7 @@ accessCheckFieldSignature(J9VMThread *currentThread, J9Class* lookupClass, UDATA
 
 			/* '()X' or '(Receiver)X' are both getters.  All others are setters */
 			if (((0 == numParameters) && !isVirtual) || ((1 == numParameters) && isVirtual)) {
-				clazz = J9VMJAVALANGINVOKEMETHODTYPE_RETURNTYPE(currentThread, methodType);
+				clazz = J9VMJAVALANGINVOKEMETHODTYPE_RTYPE(currentThread, methodType);
 			} else {
 				U_32 argumentIndex = 0;
 
@@ -397,7 +396,7 @@ accessCheckMethodSignature(J9VMThread *currentThread, J9Method *method, j9object
 	if (NULL != verifyData) {
 		U_8 *lookupSigData = J9UTF8_DATA(lookupSig);
 		/* Grab the args array and length from MethodType.arguments */
-		j9object_t argsArray = J9VMJAVALANGINVOKEMETHODTYPE_ARGUMENTS(currentThread, methodType);
+		j9object_t argsArray = J9VMJAVALANGINVOKEMETHODTYPE_PTYPES(currentThread, methodType);
 		j9object_t clazz = NULL;
 		J9Class *methodRamClass = J9_CLASS_FROM_METHOD(method);
 		J9ClassLoader *targetClassloader = methodRamClass->classLoader;
@@ -466,7 +465,7 @@ accessCheckMethodSignature(J9VMThread *currentThread, J9Method *method, j9object
 		if('L' == lookupSigData[index]) {
 			J9Class *returnRamClass = NULL;
 			/* Grab the MethodType returnType */
-			clazz = J9VMJAVALANGINVOKEMETHODTYPE_RETURNTYPE(currentThread, methodType);
+			clazz = J9VMJAVALANGINVOKEMETHODTYPE_RTYPE(currentThread, methodType);
 			returnRamClass = J9VM_J9CLASS_FROM_HEAPCLASS(currentThread, clazz);
 
 			/* Check if we really need to check this classloader constraint */
@@ -789,20 +788,6 @@ Java_java_lang_invoke_MethodHandle_vmRefFieldOffset(JNIEnv *env, jclass clazz, j
 	return (jint) J9VMJAVALANGCLASS_VMREF_OFFSET(((J9VMThread *) env));
 }
 
-jobject JNICALL
-Java_java_lang_invoke_MethodHandle_invokeExact(JNIEnv *env, jclass ignored, jobject handle, jobject args)
-{
-	throwNewUnsupportedOperationException(env);
-	return NULL;
-}
-
-jobject JNICALL
-Java_java_lang_invoke_MethodHandle_invoke(JNIEnv *env, jclass ignored, jobject handle, jobject args)
-{
-	throwNewUnsupportedOperationException(env);
-	return NULL;
-}
-
 #ifdef J9VM_OPT_PANAMA
 jlong JNICALL
 Java_java_lang_invoke_MethodHandles_findNativeAddress(JNIEnv *env, jclass jlClass, jstring methodName)
@@ -1016,34 +1001,49 @@ setClassLoadingConstraintLinkageError(J9VMThread *vmThread, J9Class *methodOrFie
 	j9mem_free_memory(msg);
 }
 
-#if defined(J9VM_OPT_JAVA_OFFLOAD_SUPPORT)
-/**
- * Clear the non-ZAAP eligible bit for JCL natives to allow them to run on zAAP.
- *
- * @param[in] env                 The JNI interface pointer
- * @param[in] nativeClass         The class containing the native method
- * @param[in] nativeMethods       The JNI native method pointer
- * @param[in] nativeMethodCount  The count of native methods
- */
-static void
-clearNonZAAPEligibleBit(JNIEnv *env, jclass nativeClass, const JNINativeMethod *nativeMethods, jint nativeMethodCount)
+#if JAVA_SPEC_VERSION >= 15
+void JNICALL
+Java_java_lang_invoke_MethodHandleNatives_checkClassBytes(JNIEnv *env, jclass jlClass, jbyteArray classRep)
 {
-	J9VMThread *vmThread = (J9VMThread *) env;
-	J9JavaVM *vm = vmThread->javaVM;
-	J9InternalVMFunctions* vmFuncs = vm->internalVMFunctions;
-	const JNINativeMethod *nativeMethod = nativeMethods;
-	jint count = nativeMethodCount;
-	J9Class *j9clazz = NULL;
-
-	vmFuncs->internalEnterVMFromJNI(vmThread);
-	j9clazz = J9VM_J9CLASS_FROM_HEAPCLASS(vmThread, J9_JNI_UNWRAP_REFERENCE(nativeClass));
-
-	while (0 < count) {
-		J9Method *jniMethod = vmFuncs->findJNIMethod(vmThread, j9clazz, nativeMethod->name, nativeMethod->signature);
-		vmFuncs->atomicAndIntoConstantPool(vm, jniMethod, ~(UDATA)J9_STARTPC_NATIVE_REQUIRES_SWITCHING);
-		count -= 1;
-		nativeMethod +=1;
+	J9VMThread *currentThread = (J9VMThread *)env;
+	J9JavaVM *vm = currentThread->javaVM;
+	J9InternalVMFunctions *vmFuncs = vm->internalVMFunctions;
+	jsize length = 0;
+	U_8* classBytes = NULL;
+	I_32 rc = 0;
+	U_8* segment = NULL;
+	U_32 segmentLength = 0;
+	PORT_ACCESS_FROM_JAVAVM(vm);
+	
+	if (NULL == classRep) {
+		throwNewNullPointerException(env, NULL);
+		goto done;
 	}
-	vmFuncs->internalExitVMToJNI(vmThread);
+	length = (*env)->GetArrayLength(env, classRep);
+	if (0 == length) {
+		goto done;
+	}
+
+	segmentLength = ESTIMATE_SIZE(length);
+	segment = (U_8*)j9mem_allocate_memory(segmentLength, J9MEM_CATEGORY_VM_JCL);
+	if (NULL == segment) {
+		vmFuncs->setNativeOutOfMemoryError(currentThread, 0, 0);
+		goto done;
+	}
+	memset(segment, 0, segmentLength);
+	classBytes = (*env)->GetPrimitiveArrayCritical(env, classRep, NULL);
+
+	rc = vmFuncs->checkClassBytes(currentThread, classBytes, length, segment, segmentLength);
+	(*env)->ReleasePrimitiveArrayCritical(env, classRep, classBytes, 0);
+	if (0 != rc) {
+		J9CfrError *cfrError = (J9CfrError *)segment;
+		const char* errorMsg = OMRPORT_FROM_J9PORT(PORTLIB)->nls_lookup_message(OMRPORT_FROM_J9PORT(PORTLIB), J9NLS_DO_NOT_APPEND_NEWLINE, cfrError->errorCatalog, cfrError->errorCode, NULL);
+		vmFuncs->internalEnterVMFromJNI(currentThread);
+		vmFuncs->setCurrentExceptionUTF(currentThread, cfrError->errorAction, errorMsg);
+		vmFuncs->internalExitVMToJNI(currentThread);
+	}
+	j9mem_free_memory(segment);
+done:
+	return;
 }
-#endif /* J9VM_OPT_JAVA_OFFLOAD_SUPPORT */
+#endif /* JAVA_SPEC_VERSION >= 15 */

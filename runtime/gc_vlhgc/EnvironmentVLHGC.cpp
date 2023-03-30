@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -99,9 +99,9 @@ MM_EnvironmentVLHGC::initializeGCThread()
 {
 	Assert_MM_true(NULL == _rememberedSetCardBucketPool);
 	MM_GCExtensions *extensions = MM_GCExtensions::getExtensions(this);
-	UDATA threadPoolSize = extensions->getHeap()->getHeapRegionManager()->getTableRegionCount();
+	uintptr_t threadPoolSize = extensions->getHeap()->getHeapRegionManager()->getTableRegionCount();
 	/* Make this thread aware of its RSCL buckets for all regions */
-	_rememberedSetCardBucketPool = &extensions->rememberedSetCardBucketPool[getSlaveID() * threadPoolSize];
+	_rememberedSetCardBucketPool = &extensions->rememberedSetCardBucketPool[getWorkerID() * threadPoolSize];
     /* Associate buckets with appropriate RSCL (each RSCL maintains a list of its own buckets) */
 	extensions->interRegionRememberedSet->threadLocalInitialize(this);
 }

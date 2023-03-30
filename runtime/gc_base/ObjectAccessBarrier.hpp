@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,11 +15,10 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
-
 
 /**
  * @file
@@ -53,14 +52,15 @@ private:
 protected:
 	MM_GCExtensions *_extensions; 
 	MM_Heap *_heap;
-#if defined (OMR_GC_COMPRESSED_POINTERS)
-#if defined (OMR_GC_FULL_POINTERS)
+#if defined(OMR_GC_COMPRESSED_POINTERS)
+#if defined(OMR_GC_FULL_POINTERS)
 	bool _compressObjectReferences;
-#endif /* OMR_GC_FULL_POINTERS */
+#endif /* defined(OMR_GC_FULL_POINTERS) */
 	UDATA _compressedPointersShift; /**< the number of bits to shift by when converting between the compressed pointers heap and real heap */
-#endif /* OMR_GC_COMPRESSED_POINTERS */
+#endif /* defined(OMR_GC_COMPRESSED_POINTERS) */
 	UDATA _referenceLinkOffset; /** Offset within java/lang/ref/Reference of the reference link field */
 	UDATA _ownableSynchronizerLinkOffset; /** Offset within java/util/concurrent/locks/AbstractOwnableSynchronizer of the ownable synchronizer link field */
+	UDATA _continuationLinkOffset; /** Offset within java/lang/VirtualThread$VThreadContinuation (jdk/internal/vm/Continuation) of the continuation link field */
 public:
 
 	/* member function */
@@ -229,10 +229,10 @@ public:
 	virtual U_8 *getArrayObjectDataAddress(J9VMThread *vmThread, J9IndexableObject *arrayObject);
 	virtual j9objectmonitor_t *getLockwordAddress(J9VMThread *vmThread, J9Object *object);
 	virtual void cloneObject(J9VMThread *vmThread, J9Object *srcObject, J9Object *destObject);
-	virtual void copyObjectFields(J9VMThread *vmThread, J9Class *valueClass, J9Object *srcObject, UDATA srcOffset, J9Object *destObject, UDATA destOffset);
+	virtual void copyObjectFields(J9VMThread *vmThread, J9Class *valueClass, J9Object *srcObject, UDATA srcOffset, J9Object *destObject, UDATA destOffset, MM_objectMapFunction objectMapFunction = NULL, void *objectMapData = NULL, bool initializeLockWord = true);
 	virtual BOOLEAN structuralCompareFlattenedObjects(J9VMThread *vmThread, J9Class *valueClass, j9object_t lhsObject, j9object_t rhsObject, UDATA startOffset);
-	virtual void cloneIndexableObject(J9VMThread *vmThread, J9IndexableObject *srcObject, J9IndexableObject *destObject);
-	virtual J9Object* asConstantPoolObject(J9VMThread *vmThread, J9Object* toConvert, UDATA allocationFlags);
+	virtual void cloneIndexableObject(J9VMThread *vmThread, J9IndexableObject *srcObject, J9IndexableObject *destObject, MM_objectMapFunction objectMapFunction, void *objectMapData);
+	virtual J9Object *asConstantPoolObject(J9VMThread *vmThread, J9Object* toConvert, UDATA allocationFlags);
 	virtual void storeObjectToInternalVMSlot(J9VMThread *vmThread, J9Object** destSlot, J9Object *value);
 	virtual J9Object *readObjectFromInternalVMSlot(J9VMThread *vmThread, J9Object **srcSlot);
 	virtual bool compareAndSwapObject(J9VMThread *vmThread, J9Object *destObject, fj9object_t *destAddress, J9Object *compareObject, J9Object *swapObject);
@@ -257,8 +257,8 @@ public:
 	virtual void postObjectStore(J9VMThread *vmThread, J9Class *destClass, J9Object **destAddress, J9Object *value, bool isVolatile=false);
 	virtual void postObjectStore(J9VMThread *vmThread, J9Object **destAddress, J9Object *value, bool isVolatile=false);
 	
-	virtual bool preBatchObjectStore(J9VMThread *vmThread, J9Object *destObject, bool isVolatile=false);
-	virtual bool preBatchObjectStore(J9VMThread *vmThread, J9Class *destClass, bool isVolatile=false);
+	virtual bool postBatchObjectStore(J9VMThread *vmThread, J9Object *destObject, bool isVolatile=false);
+	virtual bool postBatchObjectStore(J9VMThread *vmThread, J9Class *destClass, bool isVolatile=false);
 
 	virtual bool preObjectRead(J9VMThread *vmThread, J9Object *srcObject, fj9object_t *srcAddress);
 	virtual bool preObjectRead(J9VMThread *vmThread, J9Class *srcClass, j9object_t *srcAddress);
@@ -267,6 +267,8 @@ public:
 	virtual bool postObjectRead(J9VMThread *vmThread, J9Object *srcObject, fj9object_t *srcAddress);
 	virtual bool postObjectRead(J9VMThread *vmThread, J9Class *srcClass, J9Object **srcAddress);
 
+	virtual void preMountContinuation(J9VMThread *vmThread, j9object_t contObject) {}
+	virtual void postUnmountContinuation(J9VMThread *vmThread, j9object_t contObject) {}
 	/**
 	 * Return back true if object references are compressed
 	 * @return true, if object references are compressed
@@ -274,15 +276,7 @@ public:
 	MMINLINE bool
 	compressObjectReferences()
 	{
-#if defined(OMR_GC_COMPRESSED_POINTERS)
-#if defined(OMR_GC_FULL_POINTERS)
-		return _compressObjectReferences;
-#else /* OMR_GC_FULL_POINTERS */
-		return true;
-#endif /* OMR_GC_FULL_POINTERS */
-#else /* OMR_GC_COMPRESSED_POINTERS */
-		return false;
-#endif /* OMR_GC_COMPRESSED_POINTERS */
+		return OMR_COMPRESS_OBJECT_REFERENCES(_compressObjectReferences);
 	}
 
 	/**
@@ -500,6 +494,26 @@ public:
 	}
 
 	/**
+	 * Set the continuationLink link field of the specified reference object to value.
+	 * @param object the object to modify
+	 * @param value the value to store into the object's reference link field
+	 */
+	void setContinuationLink(j9object_t object, j9object_t value);
+
+	/**
+	 * Fetch the continuationLink link field of the specified reference object.
+	 * @param object the object to read
+	 * @return the value stored in the object's reference link field
+	 */
+	j9object_t getContinuationLink(j9object_t object)
+	{
+		UDATA linkOffset = _continuationLinkOffset;
+		fj9object_t *continuationLink = (fj9object_t*)((UDATA)object + linkOffset);
+		GC_SlotObject slot(_extensions->getOmrVM(), continuationLink);
+		return slot.readReferenceFromSlot();
+	}
+
+	/**
 	 * Implementation of the JNI GetPrimitiveArrayCritical API.
 	 * See the JNI spec for full details.
 	 *
@@ -550,6 +564,16 @@ public:
 		/* no-op default implementation */
 	}
 
+	virtual J9Object *referenceGet(J9VMThread *vmThread, J9Object *refObject)
+	{
+		return J9VMJAVALANGREFREFERENCE_REFERENT_VM(vmThread->javaVM, refObject);
+	}
+
+	virtual void referenceReprocess(J9VMThread *vmThread, J9Object *refObject)
+	{
+		/* no-op default implementation */
+	}
+
 #if defined(J9VM_GC_DYNAMIC_CLASS_UNLOADING)
 	/**
 	 * Check is class alive
@@ -565,17 +589,33 @@ public:
 	}
 #endif /* defined(J9VM_GC_DYNAMIC_CLASS_UNLOADING) */
 
+	virtual bool checkStringConstantsLive(J9JavaVM *javaVM, j9object_t stringOne, j9object_t stringTwo)
+	{
+		return true;
+	}
+
+	virtual bool checkStringConstantLive(J9JavaVM *javaVM, j9object_t string)
+	{
+		return true;
+	}
+
+	virtual void jniDeleteGlobalReference(J9VMThread *vmThread, J9Object *reference)
+	{
+		/* no-op default implementation */
+	}
+
 	MM_ObjectAccessBarrier(MM_EnvironmentBase *env) : MM_BaseVirtual()
 		, _extensions(NULL) 
 		, _heap(NULL)
-#if defined (OMR_GC_COMPRESSED_POINTERS)
-#if defined (OMR_GC_FULL_POINTERS)
+#if defined(OMR_GC_COMPRESSED_POINTERS)
+#if defined(OMR_GC_FULL_POINTERS)
 		, _compressObjectReferences(false)
-#endif /* OMR_GC_FULL_POINTERS */
+#endif /* defined(OMR_GC_FULL_POINTERS) */
 		, _compressedPointersShift(0)
-#endif /* OMR_GC_COMPRESSED_POINTERS */
+#endif /* defined(OMR_GC_COMPRESSED_POINTERS) */
 		, _referenceLinkOffset(UDATA_MAX)
 		, _ownableSynchronizerLinkOffset(UDATA_MAX)
+		, _continuationLinkOffset(UDATA_MAX)
 	{
 		_typeId = __FUNCTION__;
 	}

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -141,6 +141,8 @@
 #if !defined(J9ZOS390)
 #define __errno2() 0
 #endif
+
+#define SHM_STRING_ENDS_WITH_CHAR(str, ch) ((ch) == *((str) + strlen(str) - 1))
 
 static int32_t createSharedMemory(J9PortLibrary *portLibrary, intptr_t fd, BOOLEAN isReadOnlyFD, const char *baseFile, int32_t size, int32_t perm, struct j9shmem_controlFileFormat * controlinfo, uintptr_t groupPerm, struct j9shmem_handle *handle);
 static intptr_t checkSize(J9PortLibrary *portLibrary, int shmid, int64_t size);
@@ -327,6 +329,10 @@ j9shmem_open (J9PortLibrary *portLibrary, const char* cacheDirName, uintptr_t gr
 	Trc_PRT_shmem_j9shmem_open_Entry(rootname, size, perm);
 
 	clearPortableError(portLibrary);
+	
+	if (NULL != controlFileStatus) {
+		memset(controlFileStatus, 0, sizeof(J9ControlFileStatus));
+	}
 
 	if (cacheDirName == NULL) {
 		Trc_PRT_shmem_j9shmem_open_ExitNullCacheDirName();
@@ -358,10 +364,6 @@ j9shmem_open (J9PortLibrary *portLibrary, const char* cacheDirName, uintptr_t gr
 		tmphandle->currentStorageProtectKey = getStorageKey();
 	}	
 #endif
-	
-	if (NULL != controlFileStatus) {
-		memset(controlFileStatus, 0, sizeof(J9ControlFileStatus));
-	}
 
 	for (retryIfReadOnlyCount = 10; retryIfReadOnlyCount > 0; retryIfReadOnlyCount -= 1) {
 		/*Open control file with write lock*/
@@ -613,6 +615,14 @@ j9shmem_attach(struct J9PortLibrary *portLibrary, struct j9shmem_handle *handle,
 				int32_t myerrno = omrerror_last_error_number();
 				if ((J9PORT_ERROR_SYSV_IPC_SHMAT_ERROR + J9PORT_ERROR_SYSV_IPC_ERRNO_EACCES) == myerrno) {
 					omrnls_printf(J9NLS_WARNING, J9NLS_PORT_ZOS_SHMEM_STORAGE_KEY_MISMATCH, handle->controlStorageProtectKey, handle->currentStorageProtectKey);
+					/*
+					 * omrnls_printf() can change the last error, this occurs when libj9ifa29.so is APF authorized (extattr +a).
+					 * The last error may be set to -108 EDC5129I No such file or directory.
+					 * This causes cmdLineTester_shareClassesStorageKey to fail with an unexpected error code. It also shows
+					 * the incorrect last error as the reason the shared cache could not be opened, which is confusing.
+					 * Reset the last error to what it was before omrnls_printf().
+					 */
+					omrerror_set_last_error(EACCES, J9PORT_ERROR_SYSV_IPC_SHMAT_ERROR + J9PORT_ERROR_SYSV_IPC_ERRNO_EACCES);
 				}
 			}
 		}
@@ -1260,8 +1270,10 @@ j9shmem_getDir(struct J9PortLibrary* portLibrary, const char* ctrlDirName, uint3
 		rootDir = ctrlDirName;
 	} else {
 		if (J9_ARE_ALL_BITS_SET(flags, J9SHMEM_GETDIR_USE_USERHOME)) {
+			/* If J9SHMEM_GETDIR_USE_USERHOME is set, try setting cache directory to $HOME/.cache/javasharedresources/ */
 			Assert_PRT_true(TRUE == appendBaseDir);
-			uintptr_t baseDirLen = strlen(J9SH_BASEDIR);
+			uintptr_t baseDirLen = sizeof(J9SH_HIDDENDIR) - 1 + sizeof(J9SH_BASEDIR) - 1;
+			uintptr_t minBufLen = bufLength < J9SH_MAXPATH ? bufLength : J9SH_MAXPATH;
 			/*
 			 *  User could define/change their notion of the home directory by setting environment variable "HOME".
 			 *  So check "HOME" first, if failed, then check getpwuid(getuid())->pw_dir.
@@ -1269,37 +1281,52 @@ j9shmem_getDir(struct J9PortLibrary* portLibrary, const char* ctrlDirName, uint3
 			if (0 == omrsysinfo_get_env("HOME", homeDirBuf, J9SH_MAXPATH)) {
 				uintptr_t dirLen = strlen((const char*)homeDirBuf);
 				if (0 < dirLen
-					&& ((dirLen + baseDirLen) < bufLength))
+					&& ((dirLen + baseDirLen) < minBufLen))
 				{
 					homeDir = homeDirBuf;
 				} else {
-					Trc_PRT_j9shmem_getDir_tryHomeDirFailed_homeDirTooLong(dirLen, bufLength - baseDirLen);
+					Trc_PRT_j9shmem_getDir_tryHomeDirFailed_homeDirTooLong(dirLen, minBufLen - baseDirLen);
 				}
 			} else {
 				Trc_PRT_j9shmem_getDir_tryHomeDirFailed_getEnvHomeFailed();
 			}
 			if (NULL == homeDir) {
-				struct passwd *pwent = getpwuid(getuid());
+				struct passwd *pwent = NULL;
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+				/* finalRestore is equivalent to !isCheckpointAllowed().
+				 * https://github.com/eclipse-openj9/openj9/issues/15800
+				 */
+				if (!portLibrary->finalRestore) {
+					Trc_PRT_j9shmem_getDir_tryHomeDirFailed_notFinalRestore();
+				} else
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
+				{
+					pwent = getpwuid(getuid());
+					if (NULL == pwent) {
+						Trc_PRT_j9shmem_getDir_tryHomeDirFailed_getpwuidFailed();
+					}
+				}
 				if (NULL != pwent) {
 					uintptr_t dirLen = strlen((const char*)pwent->pw_dir);
-					if (0 < dirLen
-						&& ((dirLen + baseDirLen) < bufLength))
-					{
+					if ((0 < dirLen)
+						&& ((dirLen + baseDirLen) < minBufLen)
+					) {
 						homeDir = pwent->pw_dir;
 					} else {
 						rc = J9PORT_ERROR_SHMEM_GET_DIR_HOME_BUF_OVERFLOW;
-						Trc_PRT_j9shmem_getDir_tryHomeDirFailed_pw_dirDirTooLong(dirLen, bufLength - baseDirLen);
+						Trc_PRT_j9shmem_getDir_tryHomeDirFailed_pw_dirDirTooLong(dirLen, minBufLen - baseDirLen);
 					}
 				} else {
 					rc = J9PORT_ERROR_SHMEM_GET_DIR_FAILED_TO_GET_HOME;
-					Trc_PRT_j9shmem_getDir_tryHomeDirFailed_getpwuidFailed();
 				}
 			}
 			if (NULL != homeDir) {
 				struct J9FileStat statBuf = {0};
 				if (0 == omrfile_stat(homeDir, 0, &statBuf)) {
 					if (!statBuf.isRemote) {
-						rootDir = homeDir;
+						uintptr_t charWritten = omrstr_printf(homeDirBuf, J9SH_MAXPATH, SHM_STRING_ENDS_WITH_CHAR(homeDir, '/') ? "%s%s" : "%s/%s", homeDir, J9SH_HIDDENDIR);
+						Assert_PRT_true(charWritten < J9SH_MAXPATH);
+						rootDir = homeDirBuf;
 					} else {
 						rc = J9PORT_ERROR_SHMEM_GET_DIR_HOME_ON_NFS;
 						Trc_PRT_j9shmem_getDir_tryHomeDirFailed_homeOnNFS(homeDir);
@@ -1318,7 +1345,7 @@ j9shmem_getDir(struct J9PortLibrary* portLibrary, const char* ctrlDirName, uint3
 		Assert_PRT_true(rc < 0);
 	} else {
 		if (appendBaseDir) {
-			if (omrstr_printf(buffer, bufLength, "%s/%s", rootDir, J9SH_BASEDIR) == bufLength - 1) {
+			if (omrstr_printf(buffer, bufLength, SHM_STRING_ENDS_WITH_CHAR(rootDir, '/') ? "%s%s" : "%s/%s", rootDir, J9SH_BASEDIR) >= bufLength) {
 				Trc_PRT_j9shmem_getDir_ExitFailedOverflow();
 				rc = J9PORT_ERROR_SHMEM_GET_DIR_BUF_OVERFLOW;
 			}
@@ -1326,8 +1353,8 @@ j9shmem_getDir(struct J9PortLibrary* portLibrary, const char* ctrlDirName, uint3
 			/* Avoid appending two slashes; this leads to problems in matching full file names. */
 			if (omrstr_printf(buffer,
 								bufLength,
-								('/' == rootDir[strlen(rootDir)-1]) ? "%s" : "%s/",
-										rootDir) == bufLength - 1) {
+								SHM_STRING_ENDS_WITH_CHAR(rootDir, '/') ? "%s" : "%s/",
+								rootDir) >= bufLength) {
 				Trc_PRT_j9shmem_getDir_ExitFailedOverflow();
 				rc = J9PORT_ERROR_SHMEM_GET_DIR_BUF_OVERFLOW;
 			}
@@ -1695,7 +1722,7 @@ openSharedMemory (J9PortLibrary *portLibrary, intptr_t fd, const char *baseFile,
 				}/*Any other error and we will terminate*/
 
 				/*If sXmctl fails our checks below will also fail (they use the same function) ... so we terminate with an error*/
-				Trc_PRT_shmem_j9shmem_openSharedMemory_MsgWithError("Error: shmctl failed. Can not open shared shared memory, portable errorCode = ", lastError);
+				Trc_PRT_shmem_j9shmem_openSharedMemory_MsgWithError("Error: shmctl failed. Can not open shared memory, portable errorCode = ", lastError);
 				goto failDontUnlink;
 			}
 		} else {
@@ -1742,7 +1769,7 @@ openSharedMemory (J9PortLibrary *portLibrary, intptr_t fd, const char *baseFile,
 					}/*Any other error and we will terminate*/
 
 					/*If sXmctl fails our checks below will also fail (they use the same function) ... so we terminate with an error*/
-					Trc_PRT_shmem_j9shmem_openSharedMemory_MsgWithError("Error: __getipc(): failed. Can not open shared shared memory, portable errorCode = ", lastError);
+					Trc_PRT_shmem_j9shmem_openSharedMemory_MsgWithError("Error: __getipc(): failed. Can not open shared memory, portable errorCode = ", lastError);
 					goto failDontUnlink;
 				}
 			} else {
@@ -1829,7 +1856,7 @@ failDontUnlink:
  * @param[in] fd of file to write info to ...
  * @param[in] isReadOnlyFD set to TRUE if control file is read-only, FALSE otherwise
  * @param[in] baseFile file being used for control file
- * @param[in] size size of the the shared memory
+ * @param[in] size size of the shared memory
  * @param[in] perm permission for the region
  * @param[in] controlinfo control file info (copy of data last written to control file)
  * @param[in] groupPerm group permission of the shared memory

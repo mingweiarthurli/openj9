@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2019 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -57,7 +57,7 @@ namespace TR { class TreeTop; }
 
 typedef enum
    {
-   TR_variable = TR::NumIlOps,
+   TR_variable = TR::NumAllIlOps,
    TR_booltable,
    TR_entrynode,
    TR_exitnode,
@@ -417,7 +417,7 @@ protected:
    void setOpcode(uint32_t opc)
       {
       _opcode = opc;
-      _ilOpCode.setOpCodeValue(opc < TR::NumIlOps ? (TR::ILOpCodes)opc : TR::BadILOp);
+      _ilOpCode.setOpCodeValue(opc < TR::NumAllIlOps ? (TR::ILOpCodes)opc : TR::BadILOp);
       }
    uint32_t _opcode;    // TR::ILOpCodes enum
    TR::ILOpCode _ilOpCode;
@@ -765,6 +765,7 @@ public:
 
    static void setEssentialNodes(TR_CISCGraph*);
    static void makePreparedCISCGraphs(TR::Compilation *c);
+   static void initializeGraphs(TR::Compilation *c);
 
    TR_CISCGraph(TR_Memory * m, const char *title = 0, int32_t numHashTrNode = 31, int32_t numHashOpc = 17)
       : _titleOfCISC(title), _entryNode(0), _exitNode(0), _numNodes(0), _numDagIds(0),

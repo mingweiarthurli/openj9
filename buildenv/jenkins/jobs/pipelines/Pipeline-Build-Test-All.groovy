@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2018, 2020 IBM Corp. and others
+ * Copyright (c) 2018, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -28,30 +28,15 @@
  * VARIABLE_FILE allows to run it in a custom configuration on a different server.
  *
  * Parameters:
- *   PLATFORMS: String - Comma separated platforms to build.
- *              Expected values: all or any of the following:
- *              aix_ppc-64_cmprssptrs,
- *              linux_x86-64,
- *              linux_x86-64_cmprssptrs,
- *              linux_ppc-64,
- *              linux_ppc-64_cmprssptrs_le,
- *              linux_390-64,
- *              linux_390-64_cmprssptrs,
- *              win_x86-64_cmprssptrs,
- *              win_x86 (Java 8 support only),
- *              zos_390-64_cmprssptrs (Java 11 support only),
- *              osx_x86-64 (Java 8 and Java 11 support only),
- *              osx_x86-64_cmprssptrs (Java 8 and Java 11 support only),
- *              aarch64_linux (Java 11 support only),
- *              aarch64_linux_xl (Java 11 support only)
- *   OPENJ9_REPO: String - the OpenJ9 git repository URL: e.g. https://github.com/eclipse/openj9.git (default)
+ *   PLATFORMS: String - Comma separated platforms to build, or `all`. For the list of platforms, see `id=` in the `.spec` files found in the buildspecs directory (the id should be the same as the spec file name without the `.spec`).
+ *   OPENJ9_REPO: String - the OpenJ9 git repository URL: e.g. https://github.com/eclipse-openj9/openj9.git (default)
  *   OPENJ9_BRANCH: String - the OpenJ9 branch to clone from: e.g. master (default)
  *   OPENJ9_SHA: String - the last commit SHA of the OpenJ9 repository
- *   OMR_REPO: String - the OMR git repository URL: e.g. https://github.com/eclipse/openj9-omr.git (default)
+ *   OMR_REPO: String - the OMR git repository URL: e.g. https://github.com/eclipse-openj9/openj9-omr.git (default)
  *   OMR_BRANCH: String - the OMR branch to clone from: e.g. openj9 (default)
  *   OMR_SHA: String - the last commit SHA of the OMR repository
- *   ADOPTOPENJDK_REPO: String - the AdoptOpenJDK testing repository URL: e.g. https://github.com/AdoptOpenJDK/openjdk-tests.git
- *   ADOPTOPENJDK_BRANCH: String - the AdoptOpenJDK testing branch: e.g. master
+ *   ADOPTOPENJDK_REPO: String - the Adoptium AQA testing repository URL: e.g. https://github.com/adoptium/aqa-tests.git
+ *   ADOPTOPENJDK_BRANCH: String - the Adoptium AQA testing branch: e.g. master
  *   TESTS_TARGETS: String - The test targets to run. Expected values: _sanity, _extended, none
  *   VARIABLE_FILE: String - the custom variables file. Uses defaults.yml when no value is provided.
  *   VENDOR_REPO: String - the repository URL of a Git repository that stores a custom variables file
@@ -81,107 +66,123 @@
  *   ENABLE_SUMMARY_AUTO_REFRESH: Boolean - flag to enable the downstream summary auto-refresh, default: false
  */
 
-CURRENT_RELEASES = ['8', '11', '14', '15', 'next']
+CURRENT_RELEASES = ['8', '11', '17', '18', '19', 'next']
 
-SPECS = ['ppc64_aix'      : CURRENT_RELEASES,
-         'ppc64_aix_xl'   : CURRENT_RELEASES,
+SPECS = ['ppc64_aix' : CURRENT_RELEASES,
          'ppc64le_linux'  : CURRENT_RELEASES,
-         'ppc64le_linux_cm' : CURRENT_RELEASES - '11',
-         'ppc64le_linux_uma' : ['11'],
+         'ppc64le_linux_criu' : CURRENT_RELEASES,
+         'ppc64le_linux_gcc11': CURRENT_RELEASES,
          'ppc64le_linux_jit' : CURRENT_RELEASES,
-         'ppc64le_linux_xl' : CURRENT_RELEASES,
-         'ppc64le_linux_xl_cm' : CURRENT_RELEASES - '11',
-         'ppc64le_linux_xl_uma' : ['11'],
          's390x_linux'    : CURRENT_RELEASES,
-         's390x_linux_cm' : CURRENT_RELEASES - '11',
-         's390x_linux_uma' : ['11'],
+         's390x_linux_criu' : CURRENT_RELEASES,
+         's390x_linux_gcc11': CURRENT_RELEASES,
          's390x_linux_jit' : CURRENT_RELEASES,
-         's390x_linux_xl' : CURRENT_RELEASES,
-         's390x_linux_xl_cm' : CURRENT_RELEASES - '11',
-         's390x_linux_xl_uma' : ['11'],
          's390x_zos'      : ['11'],
          'x86-64_linux'   : CURRENT_RELEASES,
-         'x86-64_linux_cm': CURRENT_RELEASES - '11',
-         'x86-64_linux_uma' : ['11'],
-         'x86-64_linux_xl': CURRENT_RELEASES,
-         'x86-64_linux_xl_cm': CURRENT_RELEASES - '11',
-         'x86-64_linux_xl_uma' : ['11'],
+         'x86-64_linux_criu': CURRENT_RELEASES,
+         'x86-64_linux_gcc11': CURRENT_RELEASES,
          'x86-64_linux_jit' : CURRENT_RELEASES,
          'x86-64_linux_valhalla'   : ['next'],
-         'x86-64_mac_xl'  : CURRENT_RELEASES,
+         'x86-64_linux_vt_standard' : ['next'],
          'x86-64_mac'     : CURRENT_RELEASES,
-         'x86-64_mac_cm'  : CURRENT_RELEASES - '11',
-         'x86-64_mac_xl_cm'  : CURRENT_RELEASES - '11',
-         'x86-64_mac_uma' : ['11'],
-         'x86-64_mac_xl_uma' : ['11'],
          'x86-32_windows' : ['8'],
          'x86-64_windows' : CURRENT_RELEASES,
-         'x86-64_windows_xl' : CURRENT_RELEASES,
-         'aarch64_linux' : ['11'],
-         'aarch64_linux_cm': ['11'],
-         'aarch64_linux_xl' : ['11'],
-         'aarch64_linux_xl_cm': ['11']]
+         'aarch64_linux' : CURRENT_RELEASES,
+         'aarch64_linux_criu': CURRENT_RELEASES,
+         'aarch64_linux_gcc11' : CURRENT_RELEASES,
+         'aarch64_mac' : CURRENT_RELEASES - '8',
+         'ppc64_aix_ojdk292' : ['8', '11'],
+         'ppc64le_linux_ojdk292' : ['8', '11'],
+         's390x_linux_ojdk292' : ['8', '11'],
+         's390x_zos_ojdk292' : ['11'],
+         'x86-64_linux_ojdk292' : ['8', '11'],
+         'x86-64_mac_ojdk292' : ['8', '11'],
+         'x86-32_windows_ojdk292' : ['8'],
+         'x86-64_windows_ojdk292' : ['8', '11'],
+         'aarch64_linux_ojdk292' : ['8', '11'],
+         'aarch64_linux_aot'  : CURRENT_RELEASES,
+         'aarch64_mac_aot'    : CURRENT_RELEASES - '8',
+         'ppc64_aix_aot'      : CURRENT_RELEASES,
+         'ppc64le_linux_aot'  : CURRENT_RELEASES,
+         's390x_linux_aot'    : CURRENT_RELEASES,
+         'x86-64_linux_aot'   : CURRENT_RELEASES,
+         'x86-64_mac_aot'     : CURRENT_RELEASES,
+         'x86-64_windows_aot' : CURRENT_RELEASES,
+         'ppc64le_linux_valhalla'   : ['next'],
+         'ppc64le_linux_vt_standard' : ['next'],
+         'aarch64_linux_valhalla'   : ['next'],
+         'aarch64_linux_vt_standard' : ['next'],
+         'x86-64_mac_valhalla'   : ['next'],
+         'x86-64_mac_vt_standard' : ['next'],
+         's390x_linux_valhalla'   : ['next'],
+         's390x_linux_vt_standard' : ['next'],
+         'x86-64_windows_valhalla'   : ['next'],
+         'x86-64_windows_vt_standard' : ['next'],
+         'ppc64_aix_valhalla'   : ['next'],
+         'ppc64_aix_vt_standard' : ['next']]
 
 // SHORT_NAMES is used for PullRequest triggers
 // TODO Combine SHORT_NAMES and SPECS
-SHORT_NAMES = ['all' : ['ppc64le_linux','ppc64le_linux_xl','s390x_linux','s390x_linux_xl','x86-64_linux','x86-64_linux_xl','ppc64_aix','x86-64_windows','x86-32_windows','x86-64_mac'],
+SHORT_NAMES = ['all' : ['ppc64le_linux','s390x_linux','x86-64_linux','ppc64_aix','x86-64_windows','x86-32_windows','x86-64_mac', 'aarch64_linux', 'aarch64_mac'],
             'aix' : ['ppc64_aix'],
-            'aixlargeheap' : ['ppc64_aix_xl'],
-            'aixxl' : ['ppc64_aix_xl'],
             'zlinux' : ['s390x_linux'],
-            'zlinuxcm' : ['s390x_linux_cm'],
-            'zlinuxuma' : ['s390x_linux_uma'],
+            'zlinuxcriu' : ['s390x_linux_criu'],
+            'zlinuxgcc11' : ['s390x_linux_gcc11'],
             'zlinuxjit' : ['s390x_linux_jit'],
-            'zlinuxlargeheap' : ['s390x_linux_xl'],
-            'zlinuxxl' : ['s390x_linux_xl'],
-            'zlinuxxlcm' : ['s390x_linux_xl_cm'],
-            'zlinuxxluma' : ['s390x_linux_xl_uma'],
             'plinux' : ['ppc64le_linux'],
-            'plinuxcmake' : ['ppc64le_linux_cm'],
-            'plinuxcm' : ['ppc64le_linux_cm'],
-            'plinuxuma' : ['ppc64le_linux_uma'],
+            'plinuxcriu' : ['ppc64le_linux_criu'],
+            'plinuxgcc11' : ['ppc64le_linux_gcc11'],
             'plinuxjit' : ['ppc64le_linux_jit'],
-            'plinuxlargeheap' : ['ppc64le_linux_xl'],
-            'plinuxxl' : ['ppc64le_linux_xl'],
-            'plinuxxlcm' : ['ppc64le_linux_xl_cm'],
-            'plinuxxluma' : ['ppc64le_linux_xl_uma'],
-            'xlinuxlargeheap' : ['x86-64_linux_xl'],
-            'xlinuxxl' : ['x86-64_linux_xl'],
             'xlinux' : ['x86-64_linux'],
-            'xlinuxcmake' : ['x86-64_linux_cm'],
-            'xlinuxcm' : ['x86-64_linux_cm'],
-            'xlinuxuma' : ['x86-64_linux_uma'],
-            'xlinuxxlcm' : ['x86-64_linux_xl_cm'],
-            'xlinuxxluma' : ['x86-64_linux_xl_uma'],
+            'xlinuxcriu' : ['x86-64_linux_criu'],
+            'xlinuxgcc11' : ['x86-64_linux_gcc11'],
             'xlinuxjit' : ['x86-64_linux_jit'],
             'xlinuxval' : ['x86-64_linux_valhalla'],
+            'xlinuxvalst' : ['x86-64_linux_vt_standard'],
             'win32' : ['x86-32_windows'],
-            'win32cm' : ['x86-32_windows_cm'],
-            'win32uma' : ['x86-32_windows_uma'],
             'win' : ['x86-64_windows'],
-            'wincm' : ['x86-64_windows_cm'],
-            'winlargeheap' : ['x86-64_windows_xl'],
-            'winxl' : ['x86-64_windows_xl'],
-            'winxlcm' : ['x86-64_windows_xl_cm'],
-            'winxluma' : ['x86-64_windows_xl_uma'],
             'osx' : ['x86-64_mac'],
-            'osxlargeheap' : ['x86-64_mac_xl'],
-            'osxxl' : ['x86-64_mac_xl'],
-            'osxcm' : ['x86-64_mac_cm'],
-            'osxcmake': ['x86-64_mac_cm'],
-            'osxxlcm': ['x86-64_mac_xl_cm'],
-            'osxuma': ['x86-64_mac_uma'],
-            'osxxluma': ['x86-64_mac_xl_uma'],
+            'xmac' : ['x86-64_mac'],
             'alinux64' : ['aarch64_linux'],
-            'alinux64cm' : ['aarch64_linux_cm'],
-            'alinux64uma' : ['aarch64_linux_uma'],
-            'alinux64xl' : ['aarch64_linux_xl'],
-            'alinux64xlcm' : ['aarch64_linux_xl_cm'],
-            'alinux64xluma' : ['aarch64_linux_xl_uma'],
-            'alinux64largeheap' : ['aarch64_linux_xl'],
+            'alinux64criu' : ['aarch64_linux_criu'],
+            'alinux64gcc11' : ['aarch64_linux_gcc11'],
+            'amac' : ['aarch64_mac'],
             'zos' : ['s390x_zos'],
-            'zoscm' : ['s390x_zos_cm'],
-            'zosuma' : ['s390x_zos_uma']]
+            'aixojdk292' : ['ppc64_aix_ojdk292'],
+            'plinuxojdk292' : ['ppc64le_linux_ojdk292'],
+            'zlinuxojdk292' : ['s390x_linux_ojdk292'],
+            'xlinuxojdk292' : ['x86-64_linux_ojdk292'],
+            'win32ojdk292' : ['x86-32_windows_ojdk292'],
+            'winojdk292' : ['x86-64_windows_ojdk292'],
+            'osxojdk292' : ['x86-64_mac_ojdk292'],
+            'xmacojdk292' : ['x86-64_mac_ojdk292'],
+            'alinux64ojdk292' : ['aarch64_linux_ojdk292'],
+            'zosojdk292' : ['s390x_zos_ojdk292'],
+            'zosxlojdk292' : ['s390x_zos_xl_ojdk292'],
+            'zoslargeheapojdk292' : ['s390x_zos_xl_ojdk292'],
+            'aixaot' : ['ppc64_aix_aot'],
+            'alinuxaot' : ['aarch64_linux_aot'],
+            'amacaot' : ['aarch64_mac_aot'],
+            'plinuxaot' : ['ppc64le_linux_aot'],
+            'zlinuxaot' : ['s390x_linux_aot'],
+            'xlinuxaot' : ['x86-64_linux_aot'],
+            'osxaot' : ['x86-64_mac_aot'],
+            'xmacaot' : ['x86-64_mac_aot'],
+            'winaot' : ['x86-64_windows_aot'],
+            'alinuxval' : ['aarch64_linux_valhalla'],
+            'alinuxvalst' : ['aarch64_linux_vt_standard'],
+            'zlinuxval' : ['s390x_linux_valhalla'],
+            'zlinuxvalst' : ['s390x_linux_vt_standard'],
+            'winval' : ['x86-64_windows_valhalla'],
+            'winvalst' : ['x86-64_windows_vt_standard'],
+            'osxval' : ['x86-64_mac_valhalla'],
+            'xmacval' : ['x86-64_mac_valhalla'],
+            'osxvalst' : ['x86-64_mac_vt_standard'],
+            'xmacvalst' : ['x86-64_mac_vt_standard'],
+            'plinuxval' : ['ppc64le_linux_valhalla'],
+            'plinuxvalst' : ['ppc64le_linux_vt_standard'],
+            'aixval' : ['ppc64_aix_valhalla'],
+            'aixvalst' : ['ppc64_aix_vt_standard']]
 
 // Initialize all PARAMETERS (params) to Groovy Variables even if they are not passed
 echo "Initialize all PARAMETERS..."
@@ -229,7 +230,7 @@ echo "ghprbActualCommit:'${ghprbActualCommit}'"
 // If custom repo/branch/refspec is passed, use it,
 // elif build is OpenJ9 PR, use pr merge-ref/refspec,
 // else use eclipse/master/blank for defaults respectively.
-SCM_REPO = 'https://github.com/eclipse/openj9.git'
+SCM_REPO = 'https://github.com/eclipse-openj9/openj9.git'
 if (params.SCM_REPO) {
     SCM_REPO = params.SCM_REPO
 }
@@ -304,7 +305,7 @@ try {
 
                     SHAS = buildFile.get_shas(OPENJDK_REPO, OPENJDK_BRANCH, OPENJ9_REPO, OPENJ9_BRANCH, OMR_REPO, OMR_BRANCH)
 
-                    if (PERSONAL_BUILD) {
+                    if (PERSONAL_BUILD.equalsIgnoreCase('true')) {
                         // update build description
                         currentBuild.description += "<br/>${PLATFORMS}"
                     }
@@ -312,7 +313,7 @@ try {
                     def BUILD_NODES = get_node_labels(BUILD_NODE_LABELS, BUILD_SPECS.keySet())
                     def TEST_NODES = get_node_labels(TEST_NODE_LABELS, BUILD_SPECS.keySet())
 
-                    // Stash DSL file so we can quickly load it on master
+                    // Stash DSL file so we can quickly load it on Jenkins Manager node
                     if (AUTOMATIC_GENERATION != 'false') {
                         stash includes: 'buildenv/jenkins/jobs/pipelines/Pipeline_Template.groovy', name: 'DSL'
                     }
@@ -342,13 +343,6 @@ try {
                                 def EXTRA_MAKE_OPTIONS = get_value_by_spec(EXTRA_MAKE_OPTIONS_MAP, SDK_VERSION, SPEC)
                                 def OPENJDK_CLONE_DIR = get_value_by_spec(OPENJDK_CLONE_DIR_MAP, SDK_VERSION, SPEC)
 
-                                def ADOPTOPENJDK_REPO = ''
-                                def ADOPTOPENJDK_BRANCH = ''
-                                if (ADOPTOPENJDK_MAP.get(SDK_VERSION)) {
-                                    ADOPTOPENJDK_REPO = ADOPTOPENJDK_MAP.get(SDK_VERSION).get('repoUrl')
-                                    ADOPTOPENJDK_BRANCH = ADOPTOPENJDK_MAP.get(SDK_VERSION).get('branch')
-                                }
-
                                 builds["${job_name}"] = {
                                     if (AUTOMATIC_GENERATION != 'false') {
                                         node(SETUP_LABEL) {
@@ -357,7 +351,7 @@ try {
                                         }
                                     }
                                     pipelinesStatus[job_name] = 'RUNNING'
-                                    build(job_name, REPO, BRANCH, SHAS, OPENJ9_REPO, OPENJ9_BRANCH, OMR_REPO, OMR_BRANCH, SPEC, SDK_VERSION, BUILD_NODE, TEST_NODE, EXTRA_GETSOURCE_OPTIONS, EXTRA_CONFIGURE_OPTIONS, EXTRA_MAKE_OPTIONS, OPENJDK_CLONE_DIR, ADOPTOPENJDK_REPO, ADOPTOPENJDK_BRANCH, AUTOMATIC_GENERATION, CUSTOM_DESCRIPTION, ARCHIVE_JAVADOC)
+                                    build(job_name, REPO, BRANCH, SHAS, OPENJ9_REPO, OPENJ9_BRANCH, OMR_REPO, OMR_BRANCH, SPEC, SDK_VERSION, BUILD_NODE, TEST_NODE, EXTRA_GETSOURCE_OPTIONS, EXTRA_CONFIGURE_OPTIONS, EXTRA_MAKE_OPTIONS, OPENJDK_CLONE_DIR, ADOPTOPENJDK_REPO, ADOPTOPENJDK_BRANCH, AUTOMATIC_GENERATION, CUSTOM_DESCRIPTION, ARCHIVE_JAVADOC, CODE_COVERAGE, USE_TESTENV_PROPERTIES)
                                 }
                             }
                         }
@@ -421,7 +415,7 @@ try {
     draw_summary_table()
 }
 
-def build(JOB_NAME, OPENJDK_REPO, OPENJDK_BRANCH, SHAS, OPENJ9_REPO, OPENJ9_BRANCH, OMR_REPO, OMR_BRANCH, SPEC, SDK_VERSION, BUILD_NODE, TEST_NODE, EXTRA_GETSOURCE_OPTIONS, EXTRA_CONFIGURE_OPTIONS, EXTRA_MAKE_OPTIONS, OPENJDK_CLONE_DIR, ADOPTOPENJDK_REPO, ADOPTOPENJDK_BRANCH, AUTOMATIC_GENERATION, CUSTOM_DESCRIPTION, ARCHIVE_JAVADOC) {
+def build(JOB_NAME, OPENJDK_REPO, OPENJDK_BRANCH, SHAS, OPENJ9_REPO, OPENJ9_BRANCH, OMR_REPO, OMR_BRANCH, SPEC, SDK_VERSION, BUILD_NODE, TEST_NODE, EXTRA_GETSOURCE_OPTIONS, EXTRA_CONFIGURE_OPTIONS, EXTRA_MAKE_OPTIONS, OPENJDK_CLONE_DIR, ADOPTOPENJDK_REPO, ADOPTOPENJDK_BRANCH, AUTOMATIC_GENERATION, CUSTOM_DESCRIPTION, ARCHIVE_JAVADOC, CODE_COVERAGE, USE_TESTENV_PROPERTIES) {
     stage ("${JOB_NAME}") {
         JOB = build job: JOB_NAME,
                 parameters: [
@@ -463,7 +457,9 @@ def build(JOB_NAME, OPENJDK_REPO, OPENJDK_BRANCH, SHAS, OPENJ9_REPO, OPENJ9_BRAN
                     string(name: 'SCM_BRANCH', value: SCM_BRANCH),
                     string(name: 'SCM_REFSPEC', value: SCM_REFSPEC),
                     string(name: 'SCM_REPO', value: SCM_REPO),
-                    booleanParam(name: 'ARCHIVE_JAVADOC', value: ARCHIVE_JAVADOC)]
+                    booleanParam(name: 'ARCHIVE_JAVADOC', value: ARCHIVE_JAVADOC),
+                    booleanParam(name: 'CODE_COVERAGE', value: CODE_COVERAGE),
+                    booleanParam(name: 'USE_TESTENV_PROPERTIES', value: USE_TESTENV_PROPERTIES)]
         return JOB
     }
 }

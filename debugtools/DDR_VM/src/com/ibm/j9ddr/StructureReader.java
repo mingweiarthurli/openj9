@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -51,7 +51,7 @@ import com.ibm.j9ddr.logging.LoggerNames;
 // TODO: Lazy initializing has been removed.  Need to decide if it stays out.
 public class StructureReader {
 	public static final int VERSION = 1;
-	public static final int J9_STRUCTURES_EYECATCHER = 0xFACEDEB8;	// eyecatcher / magic identifier for a J9 structure file
+	public static final int J9_STRUCTURES_EYECATCHER = 0xFACEDEB8; // eyecatcher / magic identifier for a J9 structure file
 	private Map<String, StructureDescriptor> structures = null;
 
 	private String packageDotBaseName;
@@ -63,6 +63,7 @@ public class StructureReader {
 	private static final Logger logger = Logger.getLogger(LoggerNames.LOGGER_STRUCTURE_READER);
 	private StructureHeader header;
 
+	@SuppressWarnings("rawtypes")
 	public static final Class<?>[] STRUCTURE_CONSTRUCTOR_SIGNATURE = new Class[] { Long.TYPE };
 	public static final byte BIT_FIELD_FORMAT_LITTLE_ENDIAN = 1;
 	public static final byte BIT_FIELD_FORMAT_BIG_ENDIAN = 2;
@@ -71,6 +72,7 @@ public class StructureReader {
 	private static final Pattern MULTI_LINE_COMMENT_PATTERN = Pattern.compile(Pattern.quote("/*") + ".*?" + Pattern.quote("*/") , Pattern.DOTALL);
 	private static final Pattern SINGLE_LINE_COMMENT_PATTERN = Pattern.compile(Pattern.quote("//") + ".*$", Pattern.MULTILINE);
 	private static final Pattern MAP_PATTERN = Pattern.compile("(.*?)=(.*?)$", Pattern.MULTILINE);
+	private static final Pattern CONSTANT_PATTERN = Pattern.compile("(.+?)\\.(.+?)=(.+)$", Pattern.MULTILINE);
 
 	private Long packageVersion;
 	private String basePackage = DDR_VERSIONED_PACKAGE_PREFIX;
@@ -116,6 +118,8 @@ public class StructureReader {
 		parse(in);
 		setStream();
 		applyAliases();
+		addCompatibilityConstants();
+		loadAuxFieldInfo();
 		typeManager = new StructureTypeManager(getStructures());
 	}
 
@@ -146,7 +150,7 @@ public class StructureReader {
 		 * Therefore, we needed a new way to differentiate the special ARM jvm.29 stream
 		 * and this is the reason why the ARM_SPLIT_DDR_HACK field was added.
 		 */
-		String versionFormat = "%2d";
+		String versionFormat = "%02d";
 		if (version != null) {
 			for (ConstantDescriptor constant : version.getConstants()) {
 				String constantName = constant.getName();
@@ -155,7 +159,7 @@ public class StructureReader {
 				} else if (constantName.equals(VM_MINOR_VERSION)) {
 					vmMinorVersion = constant.getValue() / 10;
 				} else if (constantName.equals(ARM_SPLIT_DDR_HACK) && constant.getValue() == 1) {
-					versionFormat = "%2d_00";
+					versionFormat = "%02d_00";
 				}
 			}
 		}
@@ -215,7 +219,7 @@ public class StructureReader {
 	}
 
 	private void applyAliases() throws IOException {
-		Map<String, String> aliasMap = loadAliasMap();
+		Map<String, String> aliasMap = loadAliasMap(getAliasVersion());
 
 		for (StructureDescriptor thisStruct : structures.values()) {
 			for (FieldDescriptor thisField : thisStruct.fields) {
@@ -224,8 +228,82 @@ public class StructureReader {
 		}
 	}
 
-	private Map<String, String> loadAliasMap() throws IOException {
-		String mapData = loadAliasMapData();
+	private void addCompatibilityConstants() throws IOException {
+		String resource = "/com/ibm/j9ddr/CompatibilityConstants" + getPackageVersion() + ".dat";
+
+		try (InputStream inputStream = StructureReader.class.getResourceAsStream(resource)) {
+			if (inputStream != null) {
+				addCompatibilityConstants(inputStream);
+			}
+		}
+	}
+
+	public void addCompatibilityConstants(InputStream inputStream) throws IOException {
+		Map<String, Map<String, Long>> map = new HashMap<>();
+		String text = stripComments(loadUTF8(inputStream));
+
+		for (Matcher matcher = CONSTANT_PATTERN.matcher(text); matcher.find();) {
+			String type = matcher.group(1).trim();
+			String name = matcher.group(2).trim();
+			String value = matcher.group(3).trim();
+
+			if (type.isEmpty() || name.isEmpty() || value.isEmpty()) {
+				throw new IOException("Malformed constant: " + matcher.group());
+			}
+
+			Map<String, Long> constants = map.get(type);
+
+			if (constants == null) {
+				constants = new HashMap<>();
+				map.put(type, constants);
+			}
+
+			try {
+				constants.put(name, Long.decode(value));
+			} catch (NumberFormatException e) {
+				throw new IOException("Malformed constant: " + matcher.group(), e);
+			}
+		}
+
+		for (StructureDescriptor structure : structures.values()) {
+			Map<String, Long> constants = map.remove(structure.getName());
+
+			if (constants == null) {
+				/* nothing applies to this structure */
+				continue;
+			}
+
+			/* remove entries that are already present */
+			for (ConstantDescriptor constant : structure.constants) {
+				constants.remove(constant.name);
+			}
+
+			/* add missing constants */
+			for (Map.Entry<String, Long> entry : constants.entrySet()) {
+				structure.constants.add(new ConstantDescriptor(entry.getKey(), entry.getValue()));
+			}
+		}
+
+		/* add default constants for new types */
+		for (Map.Entry<String, Map<String, Long>> entry : map.entrySet()) {
+			String name = entry.getKey();
+			String line = "S|" + name + "|" + name + "Pointer|";
+			StructureDescriptor structure = new StructureDescriptor(line);
+
+			for (Map.Entry<String, Long> constant : entry.getValue().entrySet()) {
+				structure.constants.add(new ConstantDescriptor(constant.getKey(), constant.getValue()));
+			}
+
+			structures.put(structure.getName(), structure);
+		}
+	}
+
+	public static Map<String, String> loadAliasMap(long version) throws IOException {
+		return loadAliasMap(Long.toString(version));
+	}
+
+	private static Map<String, String> loadAliasMap(String version) throws IOException {
+		String mapData = loadAliasMapData(version);
 
 		mapData = stripComments(mapData);
 
@@ -242,18 +320,136 @@ public class StructureReader {
 		return Collections.unmodifiableMap(aliasMap);
 	}
 
+	private void loadAuxFieldInfo() throws IOException {
+		String resource = "/com/ibm/j9ddr/AuxFieldInfo" + getPackageVersion() + ".dat";
+
+		try (InputStream stream = StructureReader.class.getResourceAsStream(resource)) {
+			if (stream != null) {
+				loadAuxFieldInfo(stream);
+			}
+		}
+	}
+
+	public void loadAuxFieldInfo(InputStream stream) throws IOException {
+		Map<String, Map<String, String>> fieldMap = new HashMap<>();
+		Pattern fieldPattern = Pattern.compile("(.+?)\\.(.+?)=(.+)$", Pattern.MULTILINE);
+		String text = stripComments(loadUTF8(stream));
+
+		for (Matcher matcher = fieldPattern.matcher(text); matcher.find();) {
+			String typeName = matcher.group(1).trim();
+			String fieldName = matcher.group(2).trim();
+			String fieldType = matcher.group(3).trim();
+
+			if (typeName.isEmpty() || fieldName.isEmpty() || fieldType.isEmpty()) {
+				throw new IOException("Malformed field: " + matcher.group());
+			}
+
+			Map<String, String> infoMap = fieldMap.get(typeName);
+
+			if (infoMap == null) {
+				infoMap = new HashMap<>();
+				fieldMap.put(typeName, infoMap);
+			}
+
+			String previous = infoMap.put(fieldName, fieldType);
+
+			if (previous != null) {
+				throw new IOException("Duplicate field: " + matcher.group());
+			}
+		}
+
+		boolean debug = Boolean.getBoolean("aux.field.info.debug");
+
+		for (StructureDescriptor structure : structures.values()) {
+			String typeName = structure.getName();
+			Map<String, String> infoMap = fieldMap.remove(typeName);
+
+			if (infoMap == null) {
+				// No required or optional fields for this structure.
+				continue;
+			}
+
+			List<FieldDescriptor> fields = structure.getFields();
+
+			// Mark required fields and remove corresponding entries from infoMap.
+			for (FieldDescriptor field : fields) {
+				String fieldName = field.getName();
+				String fieldType = infoMap.remove(fieldName);
+
+				if (fieldType == null) {
+					// No auxilliary information for this field.
+				} else if (fieldType.equals("required")) {
+					field.required = true;
+				} else {
+					field.optional = true;
+					if (debug) {
+						field.declaredType = fieldType;
+						field.type = fieldType;
+					}
+				}
+			}
+
+			// Remaining entries in infoMap are for missing fields.
+			for (Map.Entry<String, String> entry : infoMap.entrySet()) {
+				String fieldName = entry.getKey();
+				String fieldType = entry.getValue();
+				FieldDescriptor field;
+
+				if (fieldType.equals("required")) {
+					field = new FieldDescriptor(0, "?", "?", fieldName, fieldName);
+					field.required = true;
+				} else {
+					field = new FieldDescriptor(0, fieldType, fieldType, fieldName, fieldName);
+					field.optional = true;
+				}
+
+				field.present = false;
+				fields.add(field);
+			}
+		}
+
+		// Remaining entries in fieldMap are for missing types.
+		for (Map.Entry<String, Map<String, String>> typeEntry : fieldMap.entrySet()) {
+			StructureDescriptor type = new StructureDescriptor();
+			String typeName = typeEntry.getKey();
+			List<FieldDescriptor> fields = new ArrayList<>();
+
+			type.name = typeName;
+			type.constants = new ArrayList<>();
+			type.fields = fields;
+
+			structures.put(typeName, type);
+
+			for (Map.Entry<String, String> fieldEntry : typeEntry.getValue().entrySet()) {
+				String fieldName = fieldEntry.getKey();
+				String fieldType = fieldEntry.getValue();
+				FieldDescriptor field;
+
+				if (fieldType.equals("required")) {
+					field = new FieldDescriptor(0, "?", "?", fieldName, fieldName);
+					field.required = true;
+				} else {
+					field = new FieldDescriptor(0, fieldType, fieldType, fieldName, fieldName);
+					field.optional = true;
+				}
+
+				field.present = false;
+				fields.add(field);
+			}
+		}
+	}
+
 	private static String stripComments(String mapData) {
 		mapData = filterOutPattern(mapData, MULTI_LINE_COMMENT_PATTERN);
 		mapData = filterOutPattern(mapData, SINGLE_LINE_COMMENT_PATTERN);
 		return mapData;
 	}
 
-	private String loadAliasMapData() throws IOException {
-		String resourceNameFormat = "/com/ibm/j9ddr/StructureAliases%d%s.dat";
+	private String getAliasVersion() {
+		long version = getPackageVersion();
 		String variant = "";
 
-		if ((packageVersion.longValue() == 29)
-				&& !getBuildFlagValue("J9BuildFlags", "J9VM_OPT_USE_OMR_DDR", false)) {
+		if ((version == 29) && !getBuildFlagValue("J9BuildFlags", "J9VM_OPT_USE_OMR_DDR", false)) {
 			/*
 			 * For blobs generated from the current stream but with legacy tools,
 			 * load a variant of the alias map.
@@ -261,16 +457,23 @@ public class StructureReader {
 			variant = "-edg";
 		}
 
-		String streamAliasMapResource = String.format(resourceNameFormat, packageVersion, variant);
-		InputStream is = StructureReader.class.getResourceAsStream(streamAliasMapResource);
+		return version + variant;
+	}
 
-		if (null == is) {
-			throw new RuntimeException("Failed to load alias map from resource: " + streamAliasMapResource + " - cannot continue");
+	private static String loadAliasMapData(String version) throws IOException {
+		String streamAliasMapResource = "/com/ibm/j9ddr/StructureAliases" + version + ".dat";
+
+		try (InputStream is = StructureReader.class.getResourceAsStream(streamAliasMapResource)) {
+			if (null == is) {
+				throw new RuntimeException("Failed to load alias map from resource: " + streamAliasMapResource + " - cannot continue");
+			}
+
+			return loadUTF8(is);
 		}
+	}
 
-		Reader reader = new InputStreamReader(is, StandardCharsets.UTF_8);
-
-		try {
+	private static String loadUTF8(InputStream is) throws IOException {
+		try (Reader reader = new InputStreamReader(is, StandardCharsets.UTF_8)) {
 			StringBuilder builder = new StringBuilder();
 			char[] buffer = new char[4096];
 			int read;
@@ -280,8 +483,6 @@ public class StructureReader {
 			}
 
 			return builder.toString();
-		} finally {
-			reader.close();
 		}
 	}
 
@@ -342,12 +543,20 @@ public class StructureReader {
 		header = new StructureHeader(inputStream);
 		structures = new HashMap<>();
 		BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream));
-
-		String line = reader.readLine();
 		StructureDescriptor structure = null;
-		while (line != null) {
+
+		for (;;) {
+			String line = reader.readLine();
+			if (line == null) {
+				break;
+			}
+			int hash = line.indexOf('#');
+			if (hash >= 0) {
+				// remove comments
+				line = line.substring(0, hash);
+			}
 			if (line.isEmpty()) {
-				// we don't expect blank lines, but it's simplest to just ignore them
+				// ignore blank lines
 				continue;
 			}
 			char type = line.charAt(0);
@@ -371,9 +580,8 @@ public class StructureReader {
 				structure.constants.add(constant);
 				break;
 			default:
-				throw new IllegalArgumentException(String.format("Superset stream contained unknown line: %s", line));
+				throw new IllegalArgumentException("Superset stream contains unknown line: " + line);
 			}
-			line = reader.readLine();
 		}
 	}
 
@@ -456,20 +664,17 @@ public class StructureReader {
 		for (int i = 0; i < header.getStructureCount(); i++) {
 			logger.logp(FINER, null, null, "Reading structure on iteration {0}", i);
 			StructureDescriptor structure = new StructureDescriptor();
-			structure.name = readString(ddrStream, ddrStringTableStart);
+			structure.name = decodeTypeName(readString(ddrStream, ddrStringTableStart));
 			if (structure.name == null) {
 				logger.logp(FINE, null, null, "Structure name was null for structure {0}", i);
-				throw new IllegalArgumentException(String.format("Structure name was null for structure %d", i));
+				throw new IllegalArgumentException("Structure name was null for structure " + i);
 			} else if (structure.name.isEmpty()) {
 				logger.logp(FINE, null, null, "Structure name was blank for structure {0}", i);
-				throw new IllegalArgumentException(String.format("No name found for structure %d", i));
+				throw new IllegalArgumentException("No name found for structure " + i);
 			}
-			structure.name = structure.name.replace("__", "$");
 			logger.logp(FINE, null, null, "Reading structure {0}", structure.name);
 
-			structure.pointerName = structure.name + "Pointer";
-			structure.superName = readString(ddrStream, ddrStringTableStart);
-			structure.superName = structure.superName.replace("__", "$");
+			structure.superName = decodeTypeName(readString(ddrStream, ddrStringTableStart));
 			structure.sizeOf = ddrStream.readInt();
 			int numberOfFields = ddrStream.readInt();
 			structure.fields = new ArrayList<>(numberOfFields);
@@ -513,6 +718,33 @@ public class StructureReader {
 		logger.logp(FINE, null, null, "Finished parsing structures");
 	}
 
+	private static String decodeTypeName(String typeName) {
+		if (typeName != null) {
+			int index = typeName.indexOf("__");
+
+			if (index >= 0) {
+				StringBuilder buffer = new StringBuilder();
+				int start = 0;
+
+				do {
+					if (index == start) {
+						buffer.append("__");
+					} else {
+						buffer.append(typeName, start, index).append("$");
+					}
+
+					start = index + 2;
+					index = typeName.indexOf("__", start);
+				} while (index >= 0);
+
+				buffer.append(typeName, start, typeName.length());
+				typeName = buffer.toString();
+			}
+		}
+
+		return typeName;
+	}
+
 	private static String readString(ImageInputStream ddrStream, long ddrStringTableStart) {
 		try {
 			int stringOffset = ddrStream.readInt();
@@ -525,7 +757,7 @@ public class StructureReader {
 			ddrStream.seek(seekPos);
 			int length = ddrStream.readUnsignedShort();
 			if (length > 200) {
-				throw new IOException(String.format("Improbable string length: %d", length));
+				throw new IOException("Improbable string length: " + length);
 			}
 			// TODO: Reuse buffer
 			byte[] buffer = new byte[length];
@@ -553,7 +785,6 @@ public class StructureReader {
 	public static class StructureDescriptor {
 		String name;
 		String superName;
-		String pointerName;
 		int sizeOf;
 		List<FieldDescriptor> fields;
 		List<ConstantDescriptor> constants;
@@ -567,8 +798,13 @@ public class StructureReader {
 			inflate(line);
 		}
 
+		@Override
 		public String toString() {
-			return name + " extends " + superName;
+			if (superName == null || superName.isEmpty()) {
+				return String.valueOf(name);
+			} else {
+				return name + " extends " + superName;
+			}
 		}
 
 		public String getPointerName() {
@@ -580,7 +816,7 @@ public class StructureReader {
 		}
 
 		public String getSuperName() {
-			return superName;
+			return superName != null ? superName : "";
 		}
 
 		public List<FieldDescriptor> getFields() {
@@ -598,12 +834,11 @@ public class StructureReader {
 		private void inflate(String line) {
 			String[] parts = line.split("\\|");
 			if (parts.length < 3 || parts.length > 4) {
-				throw new IllegalArgumentException(String.format("Superset file line is invalid: %s", line));
+				throw new IllegalArgumentException("Superset file line is invalid: " + line);
 			}
 			constants = new ArrayList<>();
 			fields = new ArrayList<>();
 			name = parts[1];
-			pointerName = parts[2];
 
 			if (parts.length == 4) {
 				superName = parts[3];
@@ -662,7 +897,7 @@ public class StructureReader {
 		private void inflate(String line) {
 			String[] parts = line.split("\\|");
 			if (parts.length != 2) {
-				throw new IllegalArgumentException(String.format("Superset file line is invalid: %s", line));
+				throw new IllegalArgumentException("Superset file line is invalid: " + line);
 			}
 			name = parts[1];
 		}
@@ -693,14 +928,20 @@ public class StructureReader {
 		String name;		  // Name as declared in Java
 		String declaredName;  // Name as declared in C or C++
 		int offset;
+		boolean optional;
+		boolean present;
+		boolean required;
 
 		public FieldDescriptor(int offset, String type, String declaredType, String name, String declaredName) {
 			super();
 			this.type = type;
 			this.declaredType = declaredType;
 			this.name = name;
-			this.offset = offset;
 			this.declaredName = declaredName;
+			this.offset = offset;
+			this.optional = false;
+			this.present = true;
+			this.required = false;
 		}
 
 		public void applyAliases(Map<String, String> aliasMap) {
@@ -769,6 +1010,18 @@ public class StructureReader {
 			return offset;
 		}
 
+		public final boolean isOptional() {
+			return optional;
+		}
+
+		public final boolean isPresent() {
+			return present;
+		}
+
+		public final boolean isRequired() {
+			return required;
+		}
+
 		@Override
 		public String toString() {
 			return type + " " + name + " Offset: " + offset;
@@ -782,7 +1035,7 @@ public class StructureReader {
 		public static Collection<FieldDescriptor> inflate(String line) {
 			String[] parts = line.split("\\|");
 			if (parts.length < 5 || ((parts.length - 3) % 2) != 0) {
-				throw new IllegalArgumentException(String.format("Superset file line is invalid: %s", line));
+				throw new IllegalArgumentException("Superset file line is invalid: " + line);
 			}
 
 			int count = (parts.length - 3) / 2;
@@ -841,7 +1094,7 @@ public class StructureReader {
 		StructureDescriptor structure = structures.get(clazzName);
 
 		if (structure == null) {
-			throw new ClassNotFoundException(String.format("%s is not in core file.", clazzName));
+			throw new ClassNotFoundException(clazzName + " is not in core file");
 		}
 
 		String fullClassName = getPackageName(PackageNameType.STRUCTURE_PACKAGE_SLASH_NAME) + clazzName;
@@ -871,7 +1124,7 @@ public class StructureReader {
 		StructureDescriptor structure = structures.get(structureName);
 
 		if (structure == null) {
-			throw new ClassNotFoundException(String.format("%s is not in core file.", clazzName));
+			throw new ClassNotFoundException(clazzName + " is not in core file");
 		}
 
 		String fullClassName = getPackageName(PackageNameType.POINTER_PACKAGE_SLASH_NAME) + clazzName;

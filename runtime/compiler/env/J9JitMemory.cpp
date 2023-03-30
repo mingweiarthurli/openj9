@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -24,6 +24,7 @@
 #include "jilconsts.h"
 #include "compile/Compilation.hpp"
 #include "env/jittypes.h"
+#include "env/VerboseLog.hpp"
 #include "infra/Monitor.hpp"
 #include "runtime/RuntimeAssumptions.hpp"
 #include "control/CompilationRuntime.hpp"
@@ -68,15 +69,11 @@ void preventAllocationOfBTLMemory(J9MemorySegment * &segment, J9JavaVM * javaVM,
          // Compilation will be retried at lower opt level.
          if (freeSegmentOverride || segmentType == heapAlloc || segmentType == stackAlloc)
             {
-            // We should not reject requests coming from hooks. Test if this is a comp thread
-            if (compInfo->useSeparateCompilationThread())
+            J9VMThread *crtVMThread = javaVM->internalVMFunctions->currentVMThread(javaVM);
+            if (compInfo->getCompInfoForThread(crtVMThread))
                {
-               J9VMThread *crtVMThread = javaVM->internalVMFunctions->currentVMThread(javaVM);
-               if (compInfo->getCompInfoForThread(crtVMThread))
-                  {
-                  javaVM->internalVMFunctions->freeMemorySegment(javaVM, segment, TRUE);
-                  segment = NULL;
-                  }
+               javaVM->internalVMFunctions->freeMemorySegment(javaVM, segment, TRUE);
+               segment = NULL;
                }
             }
          }

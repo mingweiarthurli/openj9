@@ -1,6 +1,6 @@
 /*[INCLUDE-IF Sidecar18-SE]*/
 /*******************************************************************************
- * Copyright (c) 2006, 2017 IBM Corp. and others
+ * Copyright (c) 2006, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -50,7 +50,7 @@ import com.ibm.dtfj.corereaders.zos.util.CompressedRecordArray;
 import com.ibm.dtfj.corereaders.zos.util.ObjectMap;
 
 /**
- * This class represents an svcdump. It is is the main class in the dumpreader package and
+ * This class represents an svcdump. It is the main class in the dumpreader package and
  * provides low-level access to the contents of an svcdump (eg the ability to read the contents
  * of an address in a given address space).
  * <p>

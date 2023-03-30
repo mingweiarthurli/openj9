@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -128,15 +128,6 @@ I_32
 bcvCheckClassName (J9CfrConstantPoolInfo * info);
 
 /**
-* Check the validity of a class name during class loading.
-*
-* @param info A pointer to J9CfrConstantPoolInfo
-* @returns The arity of the class if valid, -1 otherwise
-*/
-I_32
-bcvCheckClassNameInLoading (J9CfrConstantPoolInfo * info);
-
-/**
 * @brief
 * @param info
 * @return IDATA
@@ -158,7 +149,17 @@ bcvCheckMethodName (J9CfrConstantPoolInfo * info);
 * @return IDATA
 */
 I_32
-bcvIsInitOrClinit (J9CfrConstantPoolInfo * info);
+bcvIsInitOrClinitOrNew (J9CfrConstantPoolInfo * info);
+
+#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+/**
+* @brief
+* @param info
+* @return BOOLEAN
+*/
+BOOLEAN
+bcvIsReferenceTypeDescriptor(J9CfrConstantPoolInfo * info);
+#endif /* #if defined(J9VM_OPT_VALHALLA_VALUE_TYPES) */
 
 /* ---------------- clconstraints.c ---------------- */
 

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2018 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -24,6 +24,13 @@
 #include <string.h>
 #include <errno.h>
 #include <math.h>
+#include <locale.h>
+#if !defined(OMR_OS_WINDOWS)
+#include <langinfo.h>
+#endif /* !defined(OMR_OS_WINDOWS) */
+#if defined(OSX)
+#include <xlocale.h>
+#endif /* defined(OSX) */
 #include "j9.h"
 #include "j9argscan.h"
 #include "j9port.h"
@@ -111,8 +118,57 @@ void scan_failed(J9PortLibrary * portLibrary, const char* module, const char *sc
 uintptr_t scan_double(char **scan_start, double *result)
 {
 	char *endPtr = NULL;
+	int bruteParse = 1;
+#if defined(OMR_OS_WINDOWS)
+	_locale_t clocale = _create_locale(LC_ALL, "C");
+	if (NULL != clocale) {
+		*result = _strtod_l(*scan_start, &endPtr, clocale);
+		_free_locale(clocale);
+		bruteParse = 0;
+	}
+#elif defined(LINUX) || defined(OSX) || defined(LC_ALL_MASK) /* defined(OMR_OS_WINDOWS) */
+	/* AIX 7.1+ has support for newlocale() */
+	locale_t clocale = newlocale(LC_ALL_MASK, "C", NULL);
+	if (NULL != clocale) {
+		locale_t orglocale = uselocale(clocale);
+		*result = strtod(*scan_start, &endPtr);
+		uselocale(orglocale);
+		freelocale(clocale);
+		bruteParse = 0;
+	}
+#endif /* defined(OMR_OS_WINDOWS) */
 
-	*result = strtod(*scan_start, &endPtr);
+	/* There is no per thread locale support on AIX 6.1 or z/OS so far. */
+	if (0 != bruteParse) {
+		/* 256 is more than enough to hold the string double. */
+		char buffer[256];
+		char *dest = *scan_start;
+		/* Determine the locale radix character and substitute it in the value being parsed. */
+#if defined(OMR_OS_WINDOWS)
+		struct lconv *linfo = localeconv();
+		char *localeRadix = linfo->decimal_point;
+#else /* defined(OMR_OS_WINDOWS) */
+		char *localeRadix = nl_langinfo(RADIXCHAR);
+#endif /* defined(OMR_OS_WINDOWS) */
+		if ((NULL != localeRadix) && ('.' != *localeRadix)) {
+			char *radixPos = NULL;
+			size_t len = strlen(*scan_start);
+			if (len >= sizeof(buffer)) {
+				return OPTION_MALFORMED;
+			}
+			strcpy(buffer, *scan_start);
+			radixPos = strstr(buffer, ".");
+			if (NULL != radixPos) {
+				*radixPos = *localeRadix;
+			}
+			dest = buffer;
+		}
+		*result = strtod(dest, &endPtr);
+		if (dest == buffer) {
+			endPtr = *scan_start + (endPtr - buffer);
+		}
+	}
+
 	if (ERANGE == errno) {
 		if ((HUGE_VAL == *result) || (-HUGE_VAL == *result)) {
 			/* overflow */
@@ -385,6 +441,96 @@ scan_hex_caseflag_u64(char **scan_start, BOOLEAN uppercaseAllowed, uint64_t* res
 	return bits;
 }
 
+/**
+ * Scan the next unsigned number off of the argument string, and parses for memory sizes.
+ * Specify the size in TiBs, GiBs, MiBs, or KiBs (with T,t,G,g,M,m,K,k suffixes) or in bytes (no suffix).
+ * @param[in] scan_start The string to be scanned
+ * @param[out] result The result
+ * @return returns 0 on success, 1 if the argument string is not a number, or 2 if overflow occurs.
+ */
+uintptr_t
+scan_u64_memory_size(char **scan_start, uint64_t* result)
+{
+	uintptr_t rc = scan_u64(scan_start, result);
+
+	if (0 == rc) {
+		if (try_scan(scan_start, "T") || try_scan(scan_start, "t")) {
+			if (*result <= (((U_64)-1) >> 40)) {
+				*result <<= 40;
+			} else {
+				rc = 2;
+			}
+		} else if (try_scan(scan_start, "G") || try_scan(scan_start, "g")) {
+			if (*result <= (((U_64)-1) >> 30)) {
+				*result <<= 30;
+			} else {
+				rc = 2;
+			}
+		} else if (try_scan(scan_start, "M") || try_scan(scan_start, "m")) {
+			if (*result <= (((U_64)-1) >> 20)) {
+				*result <<= 20;
+			} else {
+				rc = 2;
+			}
+		} else if (try_scan(scan_start, "K") || try_scan(scan_start, "k")) {
+			if (*result <= (((U_64)-1) >> 10)) {
+				*result <<= 10;
+			} else {
+				rc = 2;
+			}
+		}
+	}
+	return rc;
+}
+
+/**
+ * Scan the next unsigned number off of the argument string, and parses for memory sizes.
+ * Specify the size in TiBs, GiBs, MiBs, or KiBs (with T,t,G,g,M,m,K,k suffixes) or in bytes (no suffix).
+ * @param[in] scan_start The string to be scanned
+ * @param[out] result The result
+ * @return returns 0 on success, 1 if the argument string is not a number, or 2 if overflow occurs.
+ */
+uintptr_t
+scan_udata_memory_size(char **scan_start, uintptr_t* result)
+{
+	uintptr_t rc = scan_udata(scan_start, result);
+
+	if (0 == rc) {
+		/* Scan Memory String, and check for overflow */
+		if (try_scan(scan_start, "T") || try_scan(scan_start, "t")) {
+			if (0 != *result) {
+	#if defined(J9VM_ENV_DATA64)
+				if (*result <= (((UDATA)-1) >> 40)) {
+					*result <<= 40;
+				} else
+	#endif /* defined(J9VM_ENV_DATA64) */
+				{
+					rc = 2;
+				}
+			}
+		} else if (try_scan(scan_start, "G") || try_scan(scan_start, "g")) {
+			if (*result <= (((UDATA)-1) >> 30)) {
+				*result <<= 30;
+			} else {
+				rc = 2;
+			}
+		} else if (try_scan(scan_start, "M") || try_scan(scan_start, "m")) {
+			if (*result <= (((UDATA)-1) >> 20)) {
+				*result <<= 20;
+			} else {
+				rc = 2;
+			}
+		} else if (try_scan(scan_start, "K") || try_scan(scan_start, "k")) {
+			if (*result <= (((UDATA)-1) >> 10)) {
+				*result <<= 10;
+			} else {
+				rc = 2;
+			}
+		}
+	}
+
+	return rc;
+}
 
 /*
  * Print an error message indicating that an option was not recognized

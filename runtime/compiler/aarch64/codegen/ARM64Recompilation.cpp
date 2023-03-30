@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -66,7 +66,7 @@ TR::Instruction *TR_ARM64Recompilation::generatePrePrologue()
    TR::Register *lr = machine->getRealRegister(TR::RealRegister::lr); // Link Register
    TR::Register *xzr = machine->getRealRegister(TR::RealRegister::xzr); // zero register
    TR::Node *firstNode = comp()->getStartTree()->getNode();
-   TR::SymbolReference *recompileMethodSymRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_ARM64samplingRecompileMethod, false, false, false);
+   TR::SymbolReference *recompileMethodSymRef = cg()->symRefTab()->findOrCreateRuntimeHelper(TR_ARM64samplingRecompileMethod);
    TR_PersistentJittedBodyInfo *info = getJittedBodyInfo();
 
    // Force creation of switch to interpreter preprologue if in Full Speed Debug

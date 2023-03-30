@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -24,6 +24,25 @@
 #include "j9ddr.h"
 #include "ddrtable.h"
 #include "env/defines.h" /* for TR_HOST_XXX */
+#include "runtime/MethodMetaData.h"
+
+#if !defined(INTERNAL_PTR_REG_MASK)
+/*
+ * Make INTERNAL_PTR_REG_MASK visible to DDR even for platforms without
+ * a JIT compiler.
+ *
+ * A definition of INTERNAL_PTR_REG_MASK is provided by MethodMetaData.h,
+ * so this code is excluded by the compiler. On the other hand, the macro
+ * recognition that supports DDR won't know that and will contribute the
+ * line
+ *   MACRO_INTERNAL_PTR_REG_MASK INTERNAL_PTR_REG_MASK
+ * to jitflagsddr.stub.c, which will be expanded by the preprocessor and
+ * ultimately included in j9ddr.macros, making the actual value available
+ * to DDR (not the one provided here).
+ */
+/* @ddr_namespace: map_to_type=MethodMetaDataConstants */
+#define INTERNAL_PTR_REG_MASK 0
+#endif /* !defined(INTERNAL_PTR_REG_MASK) */
 
 /* @ddr_namespace: map_to_type=TRBuildFlags */
 

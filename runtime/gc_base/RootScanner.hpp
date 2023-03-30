@@ -1,6 +1,6 @@
 
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -60,7 +60,7 @@ class MM_CollectorLanguageInterfaceImpl;
  * should be done rarely and in only extreme circumstances.  Handling of elements can be specialized for all
  * elements as well as for specific types of structures.
  * 
- * The core routines to be reimplemented are doSlot(J9Object **), doClassSlot(J9Class **) and doClass(J9Class *).
+ * The core routines to be reimplemented are doSlot(J9Object **), doClassSlot(J9Class *) and doClass(J9Class *).
  * All other slot types are forwarded by default to these routines for processing.  To handle structure slots in 
  * specific ways, the slot handler for that type should be overridden.
  * 
@@ -119,20 +119,9 @@ private:
 	 * @param manager current region manager
 	 * @param memoryType memory type
 	 */
-	void scanArrayObject(MM_EnvironmentBase *env, J9Object *objectPtr, MM_MemoryPool *memoryPool, MM_HeapRegionManager *manager, UDATA memoryType);
+	void scanArrayObject(MM_EnvironmentBase *env, J9Object *objectPtr, MM_MemoryPool *memoryPool, MM_HeapRegionManager *manager, uintptr_t memoryType);
 
 protected:
-	/**
-	 * Determine whether running method classes in stack frames should be walked.
-	 * @return boolean determining whether running method classes in stack frames should be walked
-	 */
-	MMINLINE bool isStackFrameClassWalkNeeded() {
-		if (_nurseryReferencesOnly || _nurseryReferencesPossibly) {
-			return false;
-		}
-		return 	_includeStackFrameClassReferences;
-	}
-
 	/* Family of yielding methods to be overridden by incremental scanners such
 	 * as the RealtimeRootScanner. The default implementations of these do
 	 * nothing. 
@@ -144,7 +133,7 @@ protected:
 	 * yield.
 	 * @return true if the GC should yield, false otherwise
 	 */
-	virtual bool shouldYieldFromClassScan(UDATA timeSlackNanoSec = 0);
+	virtual bool shouldYieldFromClassScan(uintptr_t timeSlackNanoSec = 0);
 
 	/**
 	 * Root scanning methods that have been incrementalized are responsible for
@@ -261,6 +250,16 @@ protected:
 	void scanModularityObjects(J9ClassLoader * classLoader);
 
 public:
+	/**
+	 * Determine whether running method classes in stack frames should be walked.
+	 * @return boolean determining whether running method classes in stack frames should be walked
+	 */
+	MMINLINE bool isStackFrameClassWalkNeeded() {
+		if (_nurseryReferencesOnly || _nurseryReferencesPossibly) {
+			return false;
+		}
+		return 	_includeStackFrameClassReferences;
+	}
 
 	/** 
 	 * Maintain start/end increment times when scan is suspended. Add the diff (duration) to scan entity time. 
@@ -366,6 +365,9 @@ public:
 	}
 #endif /* J9VM_GC_DYNAMIC_CLASS_UNLOADING */
 
+	bool getClassDataAsRoots() {
+		return _classDataAsRoots;
+	}
 #if defined(J9VM_OPT_JVMTI)
 	/** Set whether the iterator will scan the JVMTIObjectTagTables (if applicable to the scan type) */
 	void setIncludeJVMTIObjectTagTables(bool includeJVMTIObjectTagTables) {
@@ -378,11 +380,15 @@ public:
 		 _trackVisibleStackFrameDepth = trackVisibleStackFrameDepth;
 	}
 
+	bool getTrackVisibleStackFrameDepth() {
+		return _trackVisibleStackFrameDepth;
+	}
+
 	/** General object slot handler to be reimplemented by specializing class. This handler is called for every reference to a J9Object. */
 	virtual void doSlot(J9Object** slotPtr) = 0;
 
 	/** General class slot handler to be reimplemented by specializing class. This handler is called for every reference to a J9Class. */
-	virtual void doClassSlot(J9Class** slotPtr);
+	virtual void doClassSlot(J9Class *classPtr);
 
 	/** General class handler to be reimplemented by specializing class. This handler is called once per class. */
 	virtual void doClass(J9Class *clazz) = 0;
@@ -428,6 +434,8 @@ public:
 	 * which modifies elements within the list.
 	 */
 	virtual void scanOwnableSynchronizerObjects(MM_EnvironmentBase *env);
+	virtual void scanContinuationObjects(MM_EnvironmentBase *env);
+
 	virtual void scanStringTable(MM_EnvironmentBase *env);
 	void scanJNIGlobalReferences(MM_EnvironmentBase *env);
 	virtual void scanJNIWeakGlobalReferences(MM_EnvironmentBase *env);
@@ -482,11 +490,13 @@ public:
 	 * @todo Provide function documentation
 	 */
 	virtual void doOwnableSynchronizerObject(J9Object *objectPtr, MM_OwnableSynchronizerObjectList *list);
+	virtual void doContinuationObject(J9Object *objectPtr, MM_ContinuationObjectList *list);
 	
 	/**
 	 * @todo Provide function documentation
 	 */	
 	virtual CompletePhaseCode scanOwnableSynchronizerObjectsComplete(MM_EnvironmentBase *env);
+	virtual CompletePhaseCode scanContinuationObjectsComplete(MM_EnvironmentBase *env);
 
 	virtual void doMonitorReference(J9ObjectMonitor *objectMonitor, GC_HashTableIterator *monitorReferenceIterator);
 	virtual void doMonitorLookupCacheSlot(j9objectmonitor_t* slotPtr);
@@ -504,7 +514,7 @@ public:
 
 	virtual void doStringTableSlot(J9Object **slotPtr, GC_StringTableIterator *stringTableIterator);
 	virtual void doStringCacheTableSlot(J9Object **slotPtr);
-	virtual void doVMClassSlot(J9Class **slotPtr, GC_VMClassSlotIterator *vmClassSlotIterator);
+	virtual void doVMClassSlot(J9Class *classPtr);
 	virtual void doVMThreadSlot(J9Object **slotPtr, GC_VMThreadIterator *vmThreadIterator);
 #if defined(J9VM_GC_ENABLE_DOUBLE_MAP)
 	/**

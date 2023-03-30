@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -26,13 +26,13 @@
 
 #include "j9cfg.h"
 
-#if defined(J9_OVERRIDE_COMPRESS_OBJECT_REFERENCES)
-#if J9_OVERRIDE_COMPRESS_OBJECT_REFERENCES
+#if defined(OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES)
+#if OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES
 #define MM_ObjectAccessBarrierAPI MM_ObjectAccessBarrierAPICompressed
-#else /* J9_OVERRIDE_COMPRESS_OBJECT_REFERENCES */
+#else /* OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES */
 #define MM_ObjectAccessBarrierAPI MM_ObjectAccessBarrierAPIFull
-#endif /* J9_OVERRIDE_COMPRESS_OBJECT_REFERENCES */
-#endif /* J9_OVERRIDE_COMPRESS_OBJECT_REFERENCES */
+#endif /* OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES */
+#endif /* OMR_OVERRIDE_COMPRESS_OBJECT_REFERENCES */
 
 #include "j9.h"
 #include "j9modron.h"
@@ -41,6 +41,7 @@
 
 #include "AtomicSupport.hpp"
 #include "ArrayCopyHelpers.hpp"
+#include "ObjectMonitor.hpp"
 #include "j9nongenerated.h"
 
 #define J9OAB_MIXEDOBJECT_EA(object, offset, type) (type *)(((U_8 *)(object)) + offset)
@@ -52,16 +53,18 @@ class MM_ObjectAccessBarrierAPI
 
 /* Data members & types */
 public:
-protected:
+
 private:
 	const UDATA _writeBarrierType;
 	const UDATA _readBarrierType;
-#if defined (OMR_GC_COMPRESSED_POINTERS)
+#if defined(OMR_GC_COMPRESSED_POINTERS)
 	const UDATA _compressedPointersShift;
-#if defined(OMR_GC_FULL_POINTERS)
+#endif /* defined(OMR_GC_COMPRESSED_POINTERS) */
+
+protected:
+#if defined(OMR_GC_COMPRESSED_POINTERS) && defined(OMR_GC_FULL_POINTERS)
 	bool const _compressObjectReferences;
-#endif /* OMR_GC_FULL_POINTERS */
-#endif /* OMR_GC_COMPRESSED_POINTERS */
+#endif /* defined(OMR_GC_COMPRESSED_POINTERS) && defined(OMR_GC_FULL_POINTERS) */
 
 /* Methods */
 public:
@@ -72,12 +75,12 @@ public:
 	MM_ObjectAccessBarrierAPI(J9VMThread *currentThread)
 		: _writeBarrierType(currentThread->javaVM->gcWriteBarrierType)
 		, _readBarrierType(currentThread->javaVM->gcReadBarrierType)
-#if defined (OMR_GC_COMPRESSED_POINTERS)
+#if defined(OMR_GC_COMPRESSED_POINTERS)
 		, _compressedPointersShift(currentThread->javaVM->compressedPointersShift)
-#if defined(OMR_GC_FULL_POINTERS)
+#endif /* defined(OMR_GC_COMPRESSED_POINTERS) */
+#if defined(OMR_GC_COMPRESSED_POINTERS) && defined(OMR_GC_FULL_POINTERS)
 		, _compressObjectReferences(J9VMTHREAD_COMPRESS_OBJECT_REFERENCES(currentThread))
-#endif /* OMR_GC_FULL_POINTERS */
-#endif /* OMR_GC_COMPRESSED_POINTERS */
+#endif /* defined(OMR_GC_COMPRESSED_POINTERS) && defined(OMR_GC_FULL_POINTERS) */
 	{}
 
 	/**
@@ -85,15 +88,7 @@ public:
 	 * @return true, if object references are compressed
 	 */
 	MMINLINE bool compressObjectReferences() {
-#if defined(OMR_GC_COMPRESSED_POINTERS)
-#if defined(OMR_GC_FULL_POINTERS)
-		return _compressObjectReferences;
-#else /* defined(OMR_GC_FULL_POINTERS) */
-		return true;
-#endif /* defined(OMR_GC_FULL_POINTERS) */
-#else /* defined(OMR_GC_COMPRESSED_POINTERS) */
-		return false;
-#endif /* defined(OMR_GC_COMPRESSED_POINTERS) */
+		return OMR_COMPRESS_OBJECT_REFERENCES(_compressObjectReferences);
 	}
 
 	static VMINLINE void
@@ -347,44 +342,42 @@ public:
 	}
 
 	VMINLINE void
-	cloneArray(J9VMThread *currentThread, j9object_t original, j9object_t copy, J9Class *objectClass, U_32 size)
+	cloneArray(J9VMThread *currentThread, j9object_t original, j9object_t copy, J9Class *objectClass, U_32 size, MM_objectMapFunction objectMapFunction = NULL, void *objectMapData = NULL, bool initializeLockWord = true)
 	{
+		/* Note: initializeLockWord is ignored as arrays never have inline lockwords */
 #if defined(J9VM_GC_ALWAYS_CALL_OBJECT_ACCESS_BARRIER) 
-		currentThread->javaVM->memoryManagerFunctions->j9gc_objaccess_cloneIndexableObject(currentThread, (J9IndexableObject*)original, (J9IndexableObject*)copy);
+		currentThread->javaVM->memoryManagerFunctions->j9gc_objaccess_cloneIndexableObject(currentThread, (J9IndexableObject*)original, (J9IndexableObject*)copy), objectMapFunction, objectMapData;
 #else /* defined(J9VM_GC_ALWAYS_CALL_OBJECT_ACCESS_BARRIER) */
-		bool copyLockword = true;
-		
 		if (OBJECT_HEADER_SHAPE_POINTERS == J9CLASS_SHAPE(objectClass)) {
-			VM_ArrayCopyHelpers::referenceArrayCopy(currentThread, original, 0, copy, 0, size);
+			if (NULL != objectMapFunction) {
+				currentThread->javaVM->memoryManagerFunctions->j9gc_objaccess_cloneIndexableObject(currentThread, (J9IndexableObject*)original, (J9IndexableObject*)copy, objectMapFunction, objectMapData);
+			} else {
+				VM_ArrayCopyHelpers::referenceArrayCopy(currentThread, original, 0, copy, 0, size);
+			}
 		} else {
 			VM_ArrayCopyHelpers::primitiveArrayCopy(currentThread, original, 0, copy, 0, size, (((J9ROMArrayClass*)objectClass->romClass)->arrayShape & 0x0000FFFF));
-		}
-		if (copyLockword) {
-			/* zero lockword, if present */
-			j9objectmonitor_t *lockwordAddress = getLockwordAddress(currentThread, copy);
-			if (NULL != lockwordAddress) {
-				J9_STORE_LOCKWORD(currentThread, lockwordAddress, 0);
-			}
 		}
 #endif /* defined(J9VM_GC_ALWAYS_CALL_OBJECT_ACCESS_BARRIER) */
 	}
 
 	VMINLINE UDATA
-	mixedObjectGetHeaderSize()
+	mixedObjectGetHeaderSize(J9Class *objectClass)
 	{
-		return compressObjectReferences() ? sizeof(J9ObjectCompressed) : sizeof(J9ObjectFull);
+		return (compressObjectReferences() ? sizeof(J9ObjectCompressed) : sizeof(J9ObjectFull)) + J9CLASS_PREPADDING_SIZE(objectClass);
 	}
 
 	VMINLINE UDATA
 	mixedObjectGetDataSize(J9Class *objectClass)
 	{
-		return objectClass->totalInstanceSize;
+		return J9CLASS_UNPADDED_INSTANCE_SIZE(objectClass);
 	}
 
 	VMINLINE void
-	cloneObject(J9VMThread *currentThread, j9object_t original, j9object_t copy, J9Class *objectClass)
+	cloneObject(J9VMThread *currentThread, j9object_t original, j9object_t copy, J9Class *objectClass, MM_objectMapFunction objectMapFunction = NULL, void *objectMapData = NULL, bool initializeLockWord = true)
 	{
-		copyObjectFields(currentThread, objectClass, original, mixedObjectGetHeaderSize(), copy, mixedObjectGetHeaderSize());
+		UDATA offset = mixedObjectGetHeaderSize(objectClass);
+
+		copyObjectFields(currentThread, objectClass, original, offset, copy, offset, objectMapFunction, objectMapData, initializeLockWord);
 	}
 
 	VMINLINE void 
@@ -407,11 +400,12 @@ public:
 #if defined(J9VM_GC_ALWAYS_CALL_OBJECT_ACCESS_BARRIER)
 		return vmThread->javaVM->memoryManagerFunctions->j9gc_objaccess_structuralCompareFlattenedObjects(vmThread, valueClass, lhsObject, rhsObject, startOffset);
 #else /* defined(J9VM_GC_ALWAYS_CALL_OBJECT_ACCESS_BARRIER) */
-		if (j9gc_modron_readbar_none != _readBarrierType) {
+		bool hasReferences = J9CLASS_HAS_REFERENCES(valueClass);
+		if (hasReferences && (j9gc_modron_readbar_none != _readBarrierType)) {
 			return vmThread->javaVM->memoryManagerFunctions->j9gc_objaccess_structuralCompareFlattenedObjects(vmThread, valueClass, lhsObject, rhsObject, startOffset);
 		} else {
-			startOffset += valueClass->backfillOffset;
-			UDATA compareSize = mixedObjectGetDataSize(valueClass) - valueClass->backfillOffset;
+			UDATA compareSize = mixedObjectGetDataSize(valueClass);
+			startOffset += J9CLASS_PREPADDING_SIZE(valueClass);
 
 			return (0 == memcmp((void*)((UDATA)lhsObject + startOffset), (void*)((UDATA)rhsObject + startOffset), (size_t)compareSize));
 		}
@@ -423,26 +417,27 @@ public:
 	 * See MM_ObjectAccessBarrier::copyObjectFields for detailed description
 	 *
 	 * @param vmThread vmthread token
-	 * @param valueClass The valueType class
+	 * @param objectClass The class of the objects being copied
 	 * @param srcObject The object being used.
 	 * @param srcOffset The offset of the field.
 	 * @param destObject The object being used.
 	 * @param destOffset The offset of the field.
+	 * @param objectMapFunction Function to allow replacement of object fields, default NULL
+	 * @param objectMapData Data to pass to objectMapFunction, default NULL
+	 * @param initializeLockWord true to initialize inline lockword, false to copy it, default true
 	 */
 	VMINLINE void
-	copyObjectFields(J9VMThread *vmThread, J9Class *objectClass, j9object_t srcObject, UDATA srcOffset, j9object_t destObject, UDATA destOffset)
+	copyObjectFields(J9VMThread *vmThread, J9Class *objectClass, j9object_t srcObject, UDATA srcOffset, j9object_t destObject, UDATA destOffset, MM_objectMapFunction objectMapFunction = NULL, void *objectMapData = NULL, bool initializeLockWord = true)
 	{
 #if defined(J9VM_GC_ALWAYS_CALL_OBJECT_ACCESS_BARRIER)
-		vmThread->javaVM->memoryManagerFunctions->j9gc_objaccess_copyObjectFields(vmThread, objectClass, srcObject, srcOffset, destObject, destOffset);
+		vmThread->javaVM->memoryManagerFunctions->j9gc_objaccess_copyObjectFields(vmThread, objectClass, srcObject, srcOffset, destObject, destOffset, objectMapFunction, objectMapData, initializeLockWord);
 #else /* defined(J9VM_GC_ALWAYS_CALL_OBJECT_ACCESS_BARRIER) */
-		if (j9gc_modron_readbar_none != _readBarrierType) {	
-			vmThread->javaVM->memoryManagerFunctions->j9gc_objaccess_copyObjectFields(vmThread, objectClass, srcObject, srcOffset, destObject, destOffset);
+		bool hasReferences = J9CLASS_HAS_REFERENCES(objectClass);
+		if (hasReferences && ((NULL != objectMapFunction) || (j9gc_modron_readbar_none != _readBarrierType) || (j9gc_modron_wrtbar_always == _writeBarrierType))) {
+			vmThread->javaVM->memoryManagerFunctions->j9gc_objaccess_copyObjectFields(vmThread, objectClass, srcObject, srcOffset, destObject, destOffset, objectMapFunction, objectMapData, initializeLockWord);
 		} else {
 			UDATA offset = 0;
 			UDATA limit = mixedObjectGetDataSize(objectClass);
-			if (J9_IS_J9CLASS_VALUETYPE(objectClass)) {
-				offset += objectClass->backfillOffset;
-			}
 
 			if (J9VMTHREAD_COMPRESS_OBJECT_REFERENCES(vmThread)) {
 				while (offset < limit) {
@@ -455,14 +450,18 @@ public:
 					offset += sizeof(uintptr_t);
 				}
 			}
-		
-			/* zero lockword, if present */
-			j9objectmonitor_t *lockwordAddress = getLockwordAddress(vmThread, destObject);
-			if (NULL != lockwordAddress) {
-				J9_STORE_LOCKWORD(vmThread, lockwordAddress, 0);
-			}
 
-			postBatchStoreObject(vmThread, destObject);
+			if (initializeLockWord) {
+				/* zero lockword, if present */
+				j9objectmonitor_t *lockwordAddress = getLockwordAddress(vmThread, destObject);
+				if (NULL != lockwordAddress) {
+					j9objectmonitor_t lwValue = VM_ObjectMonitor::getInitialLockword(vmThread->javaVM, objectClass);
+					J9_STORE_LOCKWORD(vmThread, lockwordAddress, lwValue);
+				}
+			}
+			if (hasReferences) {
+				postBatchStoreObject(vmThread, destObject);
+			}
 		}
 #endif /* defined(J9VM_GC_ALWAYS_CALL_OBJECT_ACCESS_BARRIER) */
 	}
@@ -2063,8 +2062,36 @@ public:
 		return vmThread->javaVM->memoryManagerFunctions->j9gc_objaccess_asConstantPoolObject(vmThread, toConvert, allocateFlags);
 	}
 
-protected:
+	VMINLINE bool
+	isSATBBarrierEnabled(J9VMThread *vmThread) const
+	{
+#if defined(J9VM_GC_REALTIME)
+		if (usingSATB()) {
+			MM_GCRememberedSetFragment *fragment =  &vmThread->sATBBarrierRememberedSetFragment;
+			MM_GCRememberedSet *parent = fragment->fragmentParent;
+			return (0 != parent->globalFragmentIndex);
+		} else
+#endif /* J9VM_GC_REALTIME */
+		{
+			return false;
+		}
+	}
 
+	VMINLINE bool
+	isSATBDoubleBarrierEnabled(J9VMThread *vmThread) const
+	{
+#if defined(J9VM_GC_REALTIME)
+		if (usingSATB()) {
+			MM_GCRememberedSetFragment *fragment =  &vmThread->sATBBarrierRememberedSetFragment;
+			return (0 == fragment->localFragmentIndex);
+		} else
+#endif /* J9VM_GC_REALTIME */
+		{
+			return false;
+		}
+	}
+
+protected:
 	/**
 	 * Called before object references are stored into mixed objects to perform an prebarrier work.
 	 *
@@ -2096,15 +2123,15 @@ protected:
 	/**
 	 * Called before object references are stored into class statics to perform an prebarrier work.
 	 *
-	 * @param object - the class object being stored into
+	 * @param dstClassObject - the class object being stored into
 	 * @param destAddress - the address being stored into
 	 * @param value - the value being stored
 	 *
 	 */
 	VMINLINE void
-	preStaticStoreObject(J9VMThread *vmThread, j9object_t object, j9object_t *destAddress, j9object_t value)
+	preStaticStoreObject(J9VMThread *vmThread, j9object_t dstClassObject, j9object_t *destAddress, j9object_t value)
 	{
-		internalStaticPreStoreObject(vmThread, object, destAddress, value);
+		internalStaticPreStoreObject(vmThread, dstClassObject, destAddress, value);
 	}
 
 	/**
@@ -2154,7 +2181,7 @@ protected:
 	{
 		internalPostBatchStoreObject(vmThread, object);
 	}
-	
+
 	/**
 	 * Perform the preRead barrier for a reference slot within a mixed heap object
 	 *
@@ -2345,7 +2372,7 @@ protected:
 	preStaticReadObject(J9VMThread *vmThread, J9Class *clazz, j9object_t *srcAddress)
 	{
 		if (j9gc_modron_readbar_none != _readBarrierType) {
-			vmThread->javaVM->memoryManagerFunctions->J9ReadBarrierJ9Class(vmThread, srcAddress);
+			vmThread->javaVM->memoryManagerFunctions->J9ReadBarrierClass(vmThread, srcAddress);
 		}
 	}
 	
@@ -2701,8 +2728,7 @@ private:
 	VMINLINE void
 	internalPreStoreObject(J9VMThread *vmThread, j9object_t object, fj9object_t *destAddress, j9object_t value)
 	{
-		if ((j9gc_modron_wrtbar_satb == _writeBarrierType) ||
-				(j9gc_modron_wrtbar_satb_and_oldcheck == _writeBarrierType)) {
+		if (usingSATB()) {
 			internalPreStoreObjectSATB(vmThread, object, destAddress, value);
 		}
 	}
@@ -2713,17 +2739,16 @@ private:
 	 * Currently pre store barriers are only required for WRT. Check the barrier type
 	 * and forward accordingly
 	 *
-	 * @param object this is the class object being stored into
+	 * @param dstClassObject this is the class object being stored into
 	 * @param destAddress the address being stored at
 	 * @param value the value being stored
 	 *
 	 */
 	VMINLINE void
-	internalStaticPreStoreObject(J9VMThread *vmThread, j9object_t object, j9object_t *destAddress, j9object_t value)
+	internalStaticPreStoreObject(J9VMThread *vmThread, j9object_t dstClassObject, j9object_t *destAddress, j9object_t value)
 	{
-		if ((j9gc_modron_wrtbar_satb == _writeBarrierType) ||
-				(j9gc_modron_wrtbar_satb_and_oldcheck == _writeBarrierType)) {
-			internalStaticPreStoreObjectSATB(vmThread, object, destAddress, value);
+		if (usingSATB()) {
+			internalStaticPreStoreObjectSATB(vmThread, dstClassObject, destAddress, value);
 		}
 	}
 
@@ -2739,18 +2764,16 @@ private:
 	internalPreStoreObjectSATB(J9VMThread *vmThread, j9object_t object, fj9object_t *destAddress, j9object_t value)
 	{
 #if defined(J9VM_GC_REALTIME)
-		MM_GCRememberedSetFragment *fragment =  &vmThread->sATBBarrierRememberedSetFragment;
-		MM_GCRememberedSet *parent = fragment->fragmentParent;
 		/* Check if the barrier is enabled.  No work if barrier is not enabled */
-		if (0 != parent->globalFragmentIndex) {
+		if (isSATBBarrierEnabled(vmThread)) {
 			/* if the double barrier is enabled call OOL */
-			if (0 == fragment->localFragmentIndex) {
-				vmThread->javaVM->memoryManagerFunctions->J9MetronomeWriteBarrierStore(vmThread, object, destAddress, value);
+			if (isSATBDoubleBarrierEnabled(vmThread)) {
+				vmThread->javaVM->memoryManagerFunctions->J9WriteBarrierPre(vmThread, object, destAddress, value);
 			} else {
 				j9object_t oldObject = readObjectImpl(vmThread, destAddress, false);
 				if (NULL != oldObject) {
 					if (!isMarked(vmThread, oldObject)) {
-						vmThread->javaVM->memoryManagerFunctions->J9MetronomeWriteBarrierStore(vmThread, object, destAddress, value);
+						vmThread->javaVM->memoryManagerFunctions->J9WriteBarrierPre(vmThread, object, destAddress, value);
 					}
 				}
 			}
@@ -2761,27 +2784,25 @@ private:
 	/**
 	 * Perform the static preStore barrier for WRT
 	 *
-	 * @param object this is the class object being stored into
+	 * @param dstClassObject this is the class object being stored into
 	 * @param destAddress the address being stored at
 	 * @param value the value being stored
 	 *
 	 */
 	VMINLINE void
-	internalStaticPreStoreObjectSATB(J9VMThread *vmThread, j9object_t object, j9object_t *destAddress, j9object_t value)
+	internalStaticPreStoreObjectSATB(J9VMThread *vmThread, j9object_t dstClassObject, j9object_t *destAddress, j9object_t value)
 	{
 #if defined(J9VM_GC_REALTIME)
-		MM_GCRememberedSetFragment *fragment =  &vmThread->sATBBarrierRememberedSetFragment;
-		MM_GCRememberedSet *parent = fragment->fragmentParent;
 		/* Check if the barrier is enabled.  No work if barrier is not enabled */
-		if (0 != parent->globalFragmentIndex) {
+		if (isSATBBarrierEnabled(vmThread)) {
 			/* if the double barrier is enabled call OOL */
-			if (0 == fragment->localFragmentIndex) {
-				vmThread->javaVM->memoryManagerFunctions->J9MetronomeWriteBarrierJ9ClassStore(vmThread, object, destAddress, value);
+			if (isSATBDoubleBarrierEnabled(vmThread)) {
+				vmThread->javaVM->memoryManagerFunctions->J9WriteBarrierPreClass(vmThread, dstClassObject, destAddress, value);
 			} else {
 				j9object_t oldObject = *destAddress;
 				if (NULL != oldObject) {
 					if (!isMarked(vmThread, oldObject)) {
-						vmThread->javaVM->memoryManagerFunctions->J9MetronomeWriteBarrierJ9ClassStore(vmThread, object, destAddress, value);
+						vmThread->javaVM->memoryManagerFunctions->J9WriteBarrierPreClass(vmThread, dstClassObject, destAddress, value);
 					}
 				}
 			}
@@ -2793,7 +2814,7 @@ private:
 	/**
 	 * Check to see if the object is marked
 	 *
-	 * @NOTE only for WRT as this check the mark map for segregated heaps
+	 * @NOTE only for SATB Concurrent Mark
 	 *
 	 * @param object to check
 	 * @return true if the object was marked, false otherwise
@@ -2801,19 +2822,25 @@ private:
 	VMINLINE bool
 	isMarked(J9VMThread *vmThread, j9object_t object)
 	{
-		UDATA heapMapBits = 0;
 		J9JavaVM *const javaVM = vmThread->javaVM;
-		UDATA heapDelta = (UDATA)object - javaVM->realtimeHeapMapBasePageRounded;
-		UDATA slotIndex = heapDelta >> J9VMGC_SIZECLASSES_LOG_SMALLEST;
- 		UDATA bitIndex = slotIndex & J9_GC_MARK_MAP_UDATA_MASK;
-		UDATA bitMask = ((UDATA)1) << bitIndex;
-		slotIndex = slotIndex >> J9_GC_MARK_MAP_LOG_SIZEOF_UDATA;
 
-		UDATA *heapMapBitsBase = javaVM->realtimeHeapMapBits;
-		heapMapBits = heapMapBitsBase[slotIndex];
-		heapMapBits &= bitMask;
+		if (J9_GC_POLICY_METRONOME == javaVM->gcPolicy) {
+			UDATA heapMapBits = 0;
+			UDATA heapDelta = (UDATA)object - javaVM->realtimeHeapMapBasePageRounded;
+			UDATA slotIndex = heapDelta >> J9VMGC_SIZECLASSES_LOG_SMALLEST;
+			UDATA bitIndex = slotIndex & J9_GC_MARK_MAP_UDATA_MASK;
+			UDATA bitMask = ((UDATA)1) << bitIndex;
+			slotIndex = slotIndex >> J9_GC_MARK_MAP_LOG_SIZEOF_UDATA;
 
-		return (0 != heapMapBits);
+			UDATA *heapMapBitsBase = javaVM->realtimeHeapMapBits;
+			heapMapBits = heapMapBitsBase[slotIndex];
+			heapMapBits &= bitMask;
+
+			return 0 != heapMapBits;
+		} else {
+			/* TODO: Inline for SATB Standard Configuration */
+			return 0 != javaVM->memoryManagerFunctions->j9gc_ext_is_marked(vmThread->javaVM, object);
+		}
 	}
 #endif /* J9VM_GC_REALTIME */
 
@@ -2986,6 +3013,12 @@ private:
 		return result;
 	}
 #endif /* J9VM_GC_GENERATIONAL */
+
+	VMINLINE bool
+	usingSATB() const
+	{
+		return ((j9gc_modron_wrtbar_satb == _writeBarrierType) || (j9gc_modron_wrtbar_satb_and_oldcheck == _writeBarrierType));
+	}
 
 
 };

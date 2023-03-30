@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2020 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -68,6 +68,31 @@ alignedMemcpy(J9VMThread *vmStruct, void *dest, void *source, UDATA bytes, UDATA
 void
 alignedBackwardsMemcpy(J9VMThread *vmStruct, void *dest, void *source, UDATA bytes, UDATA alignment);
 
+/* ---------------- annhelp.c ---------------- */
+
+/**
+ * Check if a fieldref contains the specified Runtime Visible annotation. Fieldref
+ * must be resolved.
+ *
+ * @param currentThread Thread token
+ * @param clazz The class the field belongs to.
+ * @param cpIndex The constant pool index of the fieldref.
+ * @param annotationName The name of the annotation to check for.
+ * @return TRUE if the annotation is found, FALSE otherwise.
+ */
+BOOLEAN
+fieldContainsRuntimeAnnotation(J9VMThread *currentThread, J9Class *clazz, UDATA cpIndex, J9UTF8 *annotationName);
+
+/**
+ * Check if a method contains the specified Runtime Visible annotation.
+ *
+ * @param currentThread Thread token
+ * @param method The method to be queried
+ * @param annotationName The annotation name
+ * @return TRUE if the annotation is found, FALSE otherwise.
+ */
+BOOLEAN
+methodContainsRuntimeAnnotation(J9VMThread *currentThread, J9Method *method, J9UTF8 *annotationName);
 
 /* ---------------- argbits.c ---------------- */
 
@@ -155,13 +180,16 @@ instanceOfOrCheckCastNoCacheUpdate( J9Class *instanceClass, J9Class *castClass )
 /* ---------------- defarg.c ---------------- */
 
 /**
-* @brief
-* @param arg
-* @param key
-* @return char *
-*/
-char *getDefineArgument(char* arg, char* key);
-
+ * Look for the defined argument starting at the bottom of
+ * the vmInitArgs->options array.
+ *
+ * @param vmInitArgs a JavaVMInitArgs structure
+ * @param defArg the defined argument to be found
+ *
+ * @return the argument string value found or NULL
+ */
+const char*
+getDefinedArgumentFromJavaVMInitArgs(JavaVMInitArgs *vmInitArgs, const char *defArg);
 
 /* ---------------- divhelp.c ---------------- */
 
@@ -235,6 +263,23 @@ I_64 helperCLongMultiplyLong(I_64 a, I_64 b);
 */
 I_64 helperCLongRemainderLong(I_64 a, I_64 b);
 
+/* ---------------- dllloadinfo.c ---------------- */
+
+/**
+* @brief Retrieves the load info for the appropriate
+*        GC DLL based on reference mode.
+* @param[in] vm The Java VM.
+* @return J9VMDllLoadInfo for the GC DLL selected.
+*/
+J9VMDllLoadInfo *getGCDllLoadInfo(J9JavaVM *vm);
+
+/**
+* @brief Retrieves the load info for the appropriate
+*        VERBOSE DLL based on reference mode.
+* @param[in] vm The Java VM.
+* @return J9VMDllLoadInfo for the VERBOSE DLL selected.
+*/
+J9VMDllLoadInfo *getVerboseDllLoadInfo(J9JavaVM *vm);
 
 /* ---------------- eventframe.c ---------------- */
 
@@ -1295,6 +1340,16 @@ getNumberOfPermittedSubclassesPtr(J9ROMClass *romClass);
 J9UTF8*
 permittedSubclassesNameAtIndex(U_32* permittedSubclassesCountPtr, U_32 index);
 
+#if defined(J9VM_OPT_VALHALLA_VALUE_TYPES)
+/**
+ * Retrieves number of interfaces injected into a class.
+ * @param J9ROMClass class with injected interfaces
+ * @return U_32 number of injected interfaces in optionalinfo
+ */
+U_32
+getNumberOfInjectedInterfaces(J9ROMClass *romClass);
+#endif /* J9VM_OPT_VALHALLA_VALUE_TYPES */
+
 /**
  * Retrieves number of record components in this record. Assumes that 
  * ROM class parameter references a record class.
@@ -1726,6 +1781,16 @@ isSameOrSuperInterfaceOf(J9Class *superInterface, J9Class *baseInterface);
 J9VMThread *
 getVMThreadFromOMRThread(J9JavaVM *vm, omrthread_t omrthread);
 
+/**
+ * @brief Initialize the currentOSStackFree field in the J9VMThread. Must be called by
+ *	running thread, not thread creating the new vmThread.
+ * @param currentThread vmThread token
+ * @param osThread omrThread token
+ * @param osStackSize requested stack size, determined by -Xmso or J9_OS_STACK_SIZE
+ */
+void
+initializeCurrentOSStackFree(J9VMThread *currentThread, omrthread_t osThread, UDATA osStackSize);
+
 /* ---------------- thrinfo.c ---------------- */
 
 /**
@@ -2123,6 +2188,11 @@ fixArrayClasses(J9VMThread * currentThread, J9HashTable* classHashTable);
 void
 fixJNIRefs (J9VMThread * currentThread, J9HashTable* classHashTable, BOOLEAN fastHCR, UDATA extensionsUsed);
 
+#if defined(J9VM_OPT_OPENJDK_METHODHANDLE)
+void
+fixMemberNames(J9VMThread * currentThread, J9HashTable * classHashTable);
+#endif /* defined(J9VM_OPT_OPENJDK_METHODHANDLE) */
+
 void
 fixConstantPoolsForFastHCR(J9VMThread *currentThread, J9HashTable *classPairs, J9HashTable *methodPair);
 
@@ -2132,8 +2202,10 @@ unresolveAllClasses (J9VMThread * currentThread, J9HashTable * classPairs, J9Has
 void
 fixHeapRefs (J9JavaVM * vm, J9HashTable * classPairs);
 
+#if defined(J9VM_OPT_METHOD_HANDLE)
 void
 fixDirectHandles(J9VMThread * currentThread, J9HashTable * classHashTable, J9HashTable * methodHashTable);
+#endif /* defined(J9VM_OPT_METHOD_HANDLE) */
 
 void
 copyPreservedValues (J9VMThread * currentThread, J9HashTable* classHashTable, UDATA extensionsUsed);
@@ -2183,7 +2255,7 @@ flushClassLoaderReflectCache(J9VMThread * currentThread, J9HashTable * classPair
 
 #ifdef J9VM_INTERP_NATIVE_SUPPORT
 void
-jitClassRedefineEvent(J9VMThread * currentThread, J9JVMTIHCRJitEventData * jitEventData, UDATA extensionsEnabled);
+jitClassRedefineEvent(J9VMThread * currentThread, J9JVMTIHCRJitEventData * jitEventData, UDATA extensionsEnabled, UDATA extensionsUsed);
 #endif
 
 void
@@ -2280,7 +2352,7 @@ uint64_t
 getOpenJ9Sha();
 
 /**
- * If the class is a lambda class get the pointer to the last '$' sign of the class name which is in the format of HostClassName$$Lambda$<IndexNumber>/0000000000000000.
+ * If the class is a lambda class get the pointer to the last '$' sign of the class name which is in the format of HostClassName$$Lambda$<IndexNumber>/0x0000000000000000.
  * NULL otherwise.
  *
  * @param[in] className  pointer to the class name
@@ -2642,6 +2714,9 @@ UDATA
 setVMState(J9VMThread *currentThread, UDATA newState);
 
 /* ---------------- modularityHelper.c ---------------- */
+
+#if JAVA_SPEC_VERSION >= 11
+
 #define ERRCODE_SUCCESS                             0
 #define ERRCODE_GENERAL_FAILURE                     1
 #define ERRCODE_PACKAGE_ALREADY_DEFINED             2
@@ -2755,6 +2830,8 @@ addUTFNameToPackage(J9VMThread *currentThread, J9Package *j9package, const char 
  */
 J9Package*
 getPackageDefinitionWithName(J9VMThread *currentThread, J9Module *fromModule, U_8 *packageName, U_16 len, UDATA *errCode);
+
+#endif /* JAVA_SPEC_VERSION >= 11 */
 
 /* ---------------- strhelp.c ---------------- */
 /* This function searches for the last occurrence of the character c in a string given its length

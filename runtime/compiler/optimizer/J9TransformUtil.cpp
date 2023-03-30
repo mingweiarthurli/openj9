@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -153,16 +153,20 @@ static bool isFinalFieldPointingAtRepresentableNativeStruct(TR::SymbolReference 
       }
    }
 
-static bool isJavaField(TR::SymbolReference *symRef, TR::Compilation *comp)
+static bool isJavaField(TR::Symbol *symbol, int32_t cpIndex, TR::Compilation *comp)
    {
-   TR::Symbol *symbol = symRef->getSymbol();
    if (symbol->isShadow() &&
-       (symRef->getCPIndex() >= 0 ||
+       (cpIndex >= 0 ||
         // recognized fields are java fields
         symbol->getRecognizedField() != TR::Symbol::UnknownField))
       return true;
 
    return false;
+   }
+
+static bool isJavaField(TR::SymbolReference *symRef, TR::Compilation *comp)
+   {
+   return isJavaField(symRef->getSymbol(), symRef->getCPIndex(), comp);
    }
 
 static bool isFieldOfJavaObject(TR::SymbolReference *symRef, TR::Compilation *comp)
@@ -183,6 +187,172 @@ static bool isFieldOfJavaObject(TR::SymbolReference *symRef, TR::Compilation *co
    return false;
    }
 
+static bool isNullValueAtAddress(TR::Compilation *comp, TR::DataType loadType, uintptr_t fieldAddress, TR::Symbol *field)
+   {
+   TR_J9VMBase *fej9 = comp->fej9();
+
+   switch (loadType)
+      {
+      case TR::Int8:
+         {
+         int8_t value = *(int8_t*)fieldAddress;
+         if (value == 0)
+            return true;
+         }
+         break;
+      case TR::Int16:
+         {
+         int16_t value = *(int16_t*)fieldAddress;
+         if (value == 0)
+            return true;
+         }
+         break;
+      case TR::Int32:
+         {
+         int32_t value = *(int32_t*)fieldAddress;
+         if (value == 0)
+            return true;
+         }
+         break;
+      case TR::Int64:
+         {
+         int64_t value = *(int64_t*)fieldAddress;
+         if (value == 0)
+            return true;
+         }
+         break;
+      case TR::Float:
+         {
+         float value = *(float*)fieldAddress;
+         // This will not fold -0.0 but will fold NaN
+         if (value == 0.0)
+            return true;
+         }
+         break;
+     case TR::Double:
+        {
+        double value = *(double*)fieldAddress;
+        // This will not fold -0.0 but will fold NaN
+        if (value == 0.0)
+           return true;
+        }
+        break;
+     case TR::Address:
+        {
+        TR_ASSERT_FATAL(field->isCollectedReference(), "Expecting a collectable reference\n");
+        uintptr_t value = fej9->getReferenceFieldAtAddress((uintptr_t)fieldAddress);
+        if (value == 0)
+           return true;
+        }
+        break;
+     default:
+        TR_ASSERT_FATAL(false, "Unknown type of field being dereferenced\n");
+        break;
+     }
+
+   return false;
+   }
+
+bool J9::TransformUtil::avoidFoldingInstanceField(
+   uintptr_t object,
+   TR::Symbol *field,
+   uint32_t fieldOffset,
+   int cpIndex,
+   TR_ResolvedMethod *owningMethod,
+   TR::Compilation *comp)
+   {
+   TR_J9VMBase *fej9 = comp->fej9();
+
+   TR_ASSERT_FATAL(fej9->haveAccess(), "avoidFoldingInstanceField requires VM access\n");
+
+   TR_ASSERT_FATAL(
+      isJavaField(field, cpIndex, comp),
+      "avoidFoldingInstanceField: symbol %p is not a Java field shadow\n",
+      field);
+
+   TR_ASSERT_FATAL(
+      fej9->canDereferenceAtCompileTimeWithFieldSymbol(field, cpIndex, owningMethod),
+      "avoidFoldingInstanceField: symbol %p is never foldable (expected possibly foldable)\n",
+      field);
+
+   if (fej9->isStable(cpIndex, owningMethod, comp) && !field->isFinal())
+      {
+      uintptr_t fieldAddress = object + fieldOffset;
+      TR::DataType loadType = field->getDataType();
+
+      if (isNullValueAtAddress(comp, loadType, fieldAddress, field))
+         return true;
+      }
+
+   switch (field->getRecognizedField())
+      {
+      // In the LambdaForm-based JSR292 implementation, CallSite declares a
+      // target field to be inherited by all subclasses, including
+      // MutableCallSite, and that field is declared final even though it's
+      // actually mutable in instances of MCS.
+      //
+      // Because it is a final field declared in a trusted JCL package, loads
+      // of this field would normally be folded to a known object. However,
+      // folding the target in the case of a MCS can result in the spurious
+      // removal of the MCS target guard, so refuse to fold in that case.
+      //
+      // VolatileCallSite also has a mutable target, but there should be no
+      // need to check for it here because its implementation of getTarget()
+      // reads it using Unsafe.getReferenceVolatile().
+      //
+      // This checks only for CallSite.target because field recognition is
+      // based on the defining class even when the class named in the bytecode
+      // is a subclass.
+      //
+      // In the non-LambdaForm implementation, MCS declares its own target
+      // field, which is not final (and is in fact volatile), so we would not
+      // attempt to fold it. Furthermore, MutableCallSite.target will not be
+      // recognized as CallSite.target. Therefore, loads of CallSite.target
+      // from MCS instances can be rejected unconditionally here without
+      // affecting the non-LambdaForm implementation.
+      //
+      case TR::Symbol::Java_lang_invoke_CallSite_target:
+         {
+         TR_OpaqueClassBlock *objectClass =
+            fej9->getObjectClass((uintptr_t)object);
+
+         const char * const mcsName = "java/lang/invoke/MutableCallSite";
+         TR_OpaqueClassBlock *mcsClass =
+            fej9->getSystemClassFromClassName(mcsName, strlen(mcsName));
+
+         // If MCS isn't loaded, then object isn't an instance of it.
+         return mcsClass != NULL
+            && fej9->isInstanceOf(objectClass, mcsClass, true) != TR_no;
+         }
+
+      // MethodHandle.form can change even though it's declared final, so don't
+      // create a known object for it. Refinement doesn't rely on folding loads
+      // of this field to a known object. (LambdaForm.vmentry doesn't need to
+      // be listed here because it isn't even final.)
+      case TR::Symbol::Java_lang_invoke_MethodHandle_form:
+         return true;
+
+      default:
+         break;
+      }
+
+   return false;
+   }
+
+bool J9::TransformUtil::avoidFoldingInstanceField(
+   uintptr_t object,
+   TR::SymbolReference *field,
+   TR::Compilation *comp)
+   {
+   return TR::TransformUtil::avoidFoldingInstanceField(
+      object,
+      field->getSymbol(),
+      field->getOffset(),
+      field->getCPIndex(),
+      field->getOwningMethod(comp),
+      comp);
+   }
+
 static bool isFinalFieldPointingAtUnrepresentableNativeStruct(TR::SymbolReference *symRef, TR::Compilation *comp)
    {
    return isFinalFieldPointingAtNativeStruct(symRef, comp) && !isFinalFieldPointingAtRepresentableNativeStruct(symRef, comp);
@@ -196,8 +366,9 @@ static bool isArrayWithConstantElements(TR::SymbolReference *symRef, TR::Compila
       switch (symbol->getRecognizedField())
          {
          case TR::Symbol::Java_lang_invoke_BruteArgumentMoverHandle_extra:
-         case TR::Symbol::Java_lang_invoke_MethodType_arguments:
+         case TR::Symbol::Java_lang_invoke_MethodType_ptypes:
          case TR::Symbol::Java_lang_invoke_VarHandle_handleTable:
+         case TR::Symbol::Java_lang_invoke_MethodHandleImpl_LoopClauses_clauses:
          case TR::Symbol::Java_lang_String_value:
             return true;
          default:
@@ -207,7 +378,25 @@ static bool isArrayWithConstantElements(TR::SymbolReference *symRef, TR::Compila
    return false;
    }
 
-static bool verifyFieldAccess(void *curStruct, TR::SymbolReference *field, TR::Compilation *comp)
+static int32_t isArrayWithStableElements(TR::SymbolReference *symRef, TR::Compilation *comp)
+   {
+   TR_J9VMBase *fej9 = comp->fej9();
+   if (fej9->isStable(symRef->getCPIndex(), symRef->getOwningMethod(comp), comp))
+      {
+      int32_t signatureLength = 0;
+      char *signature = symRef->getOwningMethod(comp)->classSignatureOfFieldOrStatic(symRef->getCPIndex(), signatureLength);
+      // Support only one dimension for now (rank 1)
+      if (signature && signature[0] == '[')
+         {
+         traceMsg(comp, "Stable array: signature %.*s\n", signatureLength, signature);
+         return 1;
+         }
+      }
+   return 0;
+   }
+
+
+static bool verifyFieldAccess(void *curStruct, TR::SymbolReference *field, bool isStableArrayElement, TR::Compilation *comp)
    {
    // Return true only if loading the given field from the given struct will
    // itself produce a verifiable value.  (Primitives are trivially verifiable.)
@@ -244,7 +433,7 @@ static bool verifyFieldAccess(void *curStruct, TR::SymbolReference *field, TR::C
       TR_YesNoMaybe objectContainsField = fej9->isInstanceOf(objectClass, fieldClass, true);
       return objectContainsField == TR_yes;
       }
-   else if (comp->getSymRefTab()->isImmutableArrayShadow(field))
+   else if (comp->getSymRefTab()->isImmutableArrayShadow(field) || isStableArrayElement)
       {
       TR_OpaqueClassBlock *arrayClass = fej9->getObjectClass((uintptr_t)curStruct);
       if (!fej9->isClassArray(arrayClass) ||
@@ -253,6 +442,13 @@ static bool verifyFieldAccess(void *curStruct, TR::SymbolReference *field, TR::C
           (!field->getSymbol()->isCollectedReference() &&
           fej9->isReferenceArray(arrayClass)))
          return false;
+
+      if (isStableArrayElement && fej9->isPrimitiveArray(arrayClass))
+         {
+         if (TR::Compiler->om.getArrayElementWidthInBytes(comp, (uintptr_t)curStruct) != field->getSymbol()->getSize())
+            return false;
+         }
+
 
       return true;
       }
@@ -288,7 +484,6 @@ static bool verifyFieldAccess(void *curStruct, TR::SymbolReference *field, TR::C
    return true;
    }
 
-
 /**
  * Dereference through indirect load chain and return the address of field for curNode
  *
@@ -301,7 +496,7 @@ static bool verifyFieldAccess(void *curStruct, TR::SymbolReference *field, TR::C
  * The concepts of "verified" and "verifiable" are used here, they're explained in
  * J9::TransformUtil::transformIndirectLoadChainImpl
  */
-static void *dereferenceStructPointerChain(void *baseStruct, TR::Node *baseNode, TR::Node *curNode, TR::Compilation *comp)
+static void *dereferenceStructPointerChain(void *baseStruct, TR::Node *baseNode, bool isBaseStableArray, TR::Node *curNode, TR::Compilation *comp)
    {
    if (baseNode == curNode)
       {
@@ -322,6 +517,9 @@ static void *dereferenceStructPointerChain(void *baseStruct, TR::Node *baseNode,
       if (!addressChildNode->getOpCode().hasSymbolReference())
          return NULL;
 
+      if (isBaseStableArray)
+         TR_ASSERT_FATAL(addressChildNode == baseNode, "We should have only one level of indirection for stable arrays\n");
+
       // Use uintptr_t for pointer arithmetic operations and to save type conversions
       uintptr_t curStruct = 0;
       if (addressChildNode == baseNode)
@@ -334,7 +532,7 @@ static void *dereferenceStructPointerChain(void *baseStruct, TR::Node *baseNode,
          {
          TR::SymbolReference *addressChildSymRef = addressChildNode->getSymbolReference();
          // Get the address of struct containing current field and dereference it
-         void* addressChildAddress = dereferenceStructPointerChain(baseStruct, baseNode, addressChildNode, comp);
+         void* addressChildAddress = dereferenceStructPointerChain(baseStruct, baseNode, false, addressChildNode, comp);
 
          if (addressChildAddress == NULL)
             {
@@ -356,15 +554,29 @@ static void *dereferenceStructPointerChain(void *baseStruct, TR::Node *baseNode,
       // Get the field address of curNode
       if (curStruct)
          {
-         if (verifyFieldAccess((void*)curStruct, symRef, comp))
+         if (verifyFieldAccess((void*)curStruct, symRef, isBaseStableArray, comp))
             {
             uintptr_t fieldAddress = 0;
             // The offset of a java field is in its symRef
             if (isJavaField(symRef, comp))
                {
+               if (TR::TransformUtil::avoidFoldingInstanceField(curStruct, symRef, comp))
+                  {
+                  if (comp->getOption(TR_TraceOptDetails))
+                     {
+                     traceMsg(
+                        comp,
+                        "avoid folding load of field #%d from object at %p\n",
+                        symRef->getReferenceNumber(),
+                        (void*)curStruct);
+                     }
+                  return NULL;
+                  }
+
                fieldAddress = curStruct + symRef->getOffset();
                }
-            else if (comp->getSymRefTab()->isImmutableArrayShadow(symRef))
+            else if (comp->getSymRefTab()->isImmutableArrayShadow(symRef) ||
+                     isBaseStableArray)
                {
                TR::Node* offsetNode = curNode->getFirstChild()->getSecondChild();
                if (!offsetNode->getOpCode().isLoadConst())
@@ -389,6 +601,20 @@ static void *dereferenceStructPointerChain(void *baseStruct, TR::Node *baseNode,
                   }
 
                fieldAddress = TR::Compiler->om.getAddressOfElement(comp, curStruct, offset);
+
+               if (!comp->getSymRefTab()->isImmutableArrayShadow(symRef))
+                  {
+                  // if stable array, check that we are loading from the beginning of an element that it's not Null
+                  // size of the element was checked in verifyFieldAccess
+                  TR::DataType type = symRef->getSymbol()->getDataType();
+                  int32_t width = TR::Symbol::convertTypeToSize(type);
+                  if (type == TR::Address)
+                     width = TR::Compiler->om.sizeofReferenceField();
+
+                  if ((fieldAddress % width) != 0 ||
+                      isNullValueAtAddress(comp, type, fieldAddress, symRef->getSymbol()))
+                     return NULL;
+                  }
                }
             else
                {
@@ -418,9 +644,20 @@ bool J9::TransformUtil::foldFinalFieldsIn(TR_OpaqueClassBlock *clazz, const char
    {
    TR::SimpleRegex *classRegex = comp->getOptions()->getClassesWithFoldableFinalFields();
    if (classRegex)
-      return TR::SimpleRegex::match(classRegex, className);
+      {
+      // TR::SimpleRegex::match needs a NUL-terminated string
+      size_t size = classNameLength + 1;
+      char *name = (char*)comp->trMemory()->allocateMemory(size, stackAlloc);
+      strncpy(name, className, classNameLength);
+      name[size - 1] = '\0';
+      return TR::SimpleRegex::match(classRegex, name);
+      }
+   else if (classNameLength >= 21 && !strncmp(className, "jdk/internal/reflect/", 21))
+      return true;
    else if (classNameLength >= 17 && !strncmp(className, "java/lang/invoke/", 17))
       return true; // We can ONLY do this opt to fields that are never victimized by setAccessible
+   else if (classNameLength >= 18 && !strncmp(className, "java/lang/reflect/", 18))
+      return true;
    else if (classNameLength >= 30 && !strncmp(className, "java/lang/String$UnsafeHelpers", 30))
       return true;
 
@@ -441,16 +678,36 @@ bool J9::TransformUtil::foldFinalFieldsIn(TR_OpaqueClassBlock *clazz, const char
       return true;
    else if (classNameLength >= 17 && !strncmp(className, "java/util/EnumMap", 17))
       return true;
+   else if (classNameLength >= 38 && !strncmp(className, "java/util/concurrent/ThreadLocalRandom", 38))
+      return true;
    else if (classNameLength >= 18 && !strncmp(className, "java/nio/ByteOrder", 18))
       return true;
    else if (classNameLength >= 13 && !strncmp(className, "java/nio/Bits", 13))
+      return true;
+   else if (classNameLength >= 20 && !strncmp(className, "jdk/incubator/vector", 20))
+      return true;
+   else if (classNameLength >= 22 && !strncmp(className, "jdk/internal/vm/vector", 22))
+      return true;
+   else if (classNameLength >= 14 && !strncmp(className, "java/lang/Byte", 14))
+      return true;
+   else if (classNameLength >= 15 && !strncmp(className, "java/lang/Short", 15))
+      return true;
+   else if (classNameLength >= 17 && !strncmp(className, "java/lang/Integer", 17))
+      return true;
+   else if (classNameLength >= 14 && !strncmp(className, "java/lang/Long", 14))
+      return true;
+   else if (classNameLength >= 15 && !strncmp(className, "java/lang/Float", 15))
+      return true;
+   else if (classNameLength >= 16 && !strncmp(className, "java/lang/Double", 16))
+      return true;
+   else if (classNameLength >= 17 && !strncmp(className, "java/lang/Boolean", 17))
       return true;
 
    if (classNameLength == 16 && !strncmp(className, "java/lang/System", 16))
       return false;
 
    static char *enableJCLFolding = feGetEnv("TR_EnableJCLStaticFinalFieldFolding");
-   if ((enableJCLFolding || comp->getOption(TR_AggressiveOpts))
+   if (enableJCLFolding
        && isStatic
        && comp->fej9()->isClassLibraryClass(clazz)
        && comp->fej9()->isClassInitialized(clazz))
@@ -469,7 +726,6 @@ bool J9::TransformUtil::foldFinalFieldsIn(TR_OpaqueClassBlock *clazz, const char
    return false;
    }
 
-
 static bool changeIndirectLoadIntoConst(TR::Node *node, TR::ILOpCodes opCode, TR::Node **removedChild, TR::Compilation *comp)
    {
    // Note that this only does part of the job.  Caller must actually set the
@@ -485,474 +741,6 @@ static bool changeIndirectLoadIntoConst(TR::Node *node, TR::ILOpCodes opCode, TR
       return true;
       }
    return false;
-   }
-
-TR::Node *
-J9::TransformUtil::transformIndirectLoad(TR::Compilation *comp, TR::Node *node)
-   {
-   // TODO: This code does lots of refcount decrementing, which is not
-   // safe if we don't anchor the child trees first!
-   //
-   static char *enableTransformIndirectLoad = feGetEnv("TR_enableTransformIndirectLoad");
-   if (!enableTransformIndirectLoad)
-      return NULL;
-
-   TR_J9VMBase *fej9 = comp->fej9();
-
-   TR_ASSERT(node->getOpCode().isLoadIndirect(), "Expecting indirect load; found %s %p", node->getOpCode().getName(), node);
-   TR::SymbolReference *symRef = node->getSymbolReference();
-   TR::Symbol           *sym    = node->getSymbol();
-
-   if (!symRef->isUnresolved()
-      && sym->isShadow())
-      {
-      TR::Node *baseObject = node->getFirstChild();
-
-      // Start with a few field-specific goodies
-      //
-      switch (sym->getRecognizedField())
-         {
-         case TR::Symbol::Java_lang_invoke_MethodHandle_thunks:
-         case TR::Symbol::Java_lang_invoke_DynamicInvokerHandle_site:
-         case TR::Symbol::Java_lang_invoke_MutableCallSiteDynamicInvokerHandle_mutableSite:
-            if (!node->isNonNull() && performTransformation(comp, "O^O transformIndirectLoad: [%p] recognized field is never null\n", node))
-               {
-               node->setIsNull(false);
-               node->setIsNonNull(true);
-               }
-            break;
-         default:
-            // Here, we can check a few cases where the "base object" is not
-            // actually an object at all.
-            //
-            if (symRef == comp->getSymRefTab()->findJavaLangClassFromClassSymbolRef()
-               && !symRef->hasKnownObjectIndex()
-               && baseObject->getOpCodeValue() == TR::loadaddr
-               && !baseObject->getSymbolReference()->isUnresolved())
-               {
-               TR::SymbolReference *improvedSymRef = node->getSymbolReference();
-               TR::KnownObjectTable *knot = comp->getOrCreateKnownObjectTable();
-               if (knot)
-                  {
-#if defined(J9VM_OPT_JITSERVER)
-                  if (comp->isOutOfProcessCompilation())
-                     {
-                     auto stream = TR::CompilationInfo::getStream();
-                     stream->write(JITServer::MessageType::KnownObjectTable_createSymRefWithKnownObject,
-                           baseObject->getSymbol()->castToStaticSymbol()->getStaticAddress());
-
-                     auto recv = stream->read<TR::KnownObjectTable::Index, uintptr_t*>();
-                     TR::KnownObjectTable::Index knotIndex = std::get<0>(recv);
-                     uintptr_t *objectPointerReference = std::get<1>(recv);
-
-                     if (knotIndex != TR::KnownObjectTable::UNKNOWN)
-                        {
-                        knot->updateKnownObjectTableAtServer(knotIndex, objectPointerReference);
-                        improvedSymRef = comp->getSymRefTab()->findOrCreateSymRefWithKnownObject(node->getSymbolReference(), knotIndex);
-                        }
-                     }
-                  else
-#endif /* defined(J9VM_OPT_JITSERVER) */
-                     {
-                     TR::VMAccessCriticalSection createSymRefWithKnownObject(comp->fej9());
-                     uintptr_t jlClass = (uintptr_t)J9VM_J9CLASS_TO_HEAPCLASS((J9Class*)baseObject->getSymbol()->castToStaticSymbol()->getStaticAddress());
-                     TR_ASSERT(jlClass, "java/lang/Class reference from heap class must be non null");
-                     TR::KnownObjectTable::Index knotIndex = knot->getOrCreateIndexAt(&jlClass);
-                     if (knotIndex != TR::KnownObjectTable::UNKNOWN)
-                        {
-                        improvedSymRef = comp->getSymRefTab()->findOrCreateSymRefWithKnownObject(node->getSymbolReference(), knotIndex);
-                        }
-                     }
-                  }
-
-               if (improvedSymRef->hasKnownObjectIndex()
-                   && performTransformation(comp, "O^O transformIndirectLoad: [%p] use object-specific symref #%d (=obj%d) for load of java/lang/Class\n",
-                                            node,
-                                            improvedSymRef->getReferenceNumber(),
-                                            improvedSymRef->getKnownObjectIndex()))
-                  {
-                  node->setSymbolReference(improvedSymRef);
-                  node->setIsNull(false);
-                  node->setIsNonNull(true);
-                  return node;
-                  }
-               }
-            break;
-         }
-
-      // Check for loads of final primitive fields on objects that have finished initializing.
-      //
-      if (1) //sym->isFinal())
-         {
-         J9Class *fieldClass = (J9Class*)symRef->getOwningMethod(comp)->getClassFromFieldOrStatic(comp, symRef->getCPIndex());
-         if (!fieldClass)
-            return NULL;
-
-         int32_t len;
-         char * name = fej9->getClassNameChars((TR_OpaqueClassBlock*)fieldClass, len);
-         if (sym->getRecognizedField() != TR::Symbol::assertionsDisabled
-          && !J9::TransformUtil::foldFinalFieldsIn((TR_OpaqueClassBlock *)fieldClass, name, len, sym->isStaticField(), comp))
-            return NULL;
-
-         // Note that the load type can differ from the type of the symbol, eg.
-         // for sub-integer types.  The sub-integer types are included below
-         // just for completeness, but we likely never hit them.
-         //
-         TR::DataType loadType = node->getDataType();
-         bool typeIsConstible    = false;
-         bool symrefIsImprovable = false;
-         switch (loadType)
-            {
-            case TR::Int32:
-            case TR::Int64:
-               typeIsConstible = true;
-               break;
-            case TR::Address:
-               symrefIsImprovable = !symRef->hasKnownObjectIndex();
-               break;
-            default:
-                break;
-            }
-
-         TR::Node *firstDereference = NULL;
-         TR::Node *secondDereference = NULL;
-         if (isFinalFieldOfNativeStruct(symRef, comp))
-            {
-            // Ok, this is a bit complicated.
-            //
-            // We have an expression y.z where y is a native struct and z is
-            // some final field within that native struct.  Because y is a
-            // child node of y.z we can assume it has already been simplified
-            // because the optimizer does such things in a bottom-up fashion.
-            // If y happens to be a so-called "representable" native struct
-            // like a J9Class, then we're in luck because we can just read the
-            // field out of y at compile time.
-            //
-            // However, we also want to handle situations where y is not
-            // "representable", meaning it can only appear in the trees as a
-            // field load from some other base object x.  In that case, we
-            // must handle the whole expression x.y.z in one chunk, because
-            // we can't simplify x.y nor y.z independently.
-            //
-            // Generalizing, we can end up with an arbitrarily long reference
-            // chain a.b.c...y.z where b...y are final fields pointing at
-            // unrepresentable native structs, and we must collapse this whole
-            // chain in one chunk, or not at all.
-            //
-            // The following logic detects such chains, and finishes with
-            // baseObject = a (the representable base expression), and
-            // firstDereference = a.b and secondDereference = a.b.c (or NULL,
-            // if the expression is just a.b and a is representable).
-            // Note that our analysis starts from the "z" dereference, because
-            // that is the root TR::Node in this expression tree, and works its
-            // way down the tree to "a".
-
-            if (typeIsConstible) // can't yet tell whether the expression chain results in a Java object, so just do primitives
-               {
-               while (baseObject->getOpCode().isLoadIndirect() && isFinalFieldPointingAtUnrepresentableNativeStruct(baseObject->getSymbolReference(), comp))
-                  {
-                  secondDereference = firstDereference;
-                  firstDereference  = baseObject;
-                  baseObject        = firstDereference->getFirstChild();
-                  }
-
-               // at this point, baseObject is some representable expression
-               J9Class *clazz = NULL;
-               if (baseObject->getOpCode().isLoadIndirect())
-                  {
-                  if (isFinalFieldPointingAtNativeStruct(baseObject->getSymbolReference(), comp))
-                     {
-                     TR_ASSERT(isFinalFieldPointingAtRepresentableNativeStruct(baseObject->getSymbolReference(), comp), "Base expression pointing at native struct must be representable"); // Good luck to the poor soul doing triage trying to figure out what this means
-
-                     // Don't bother continuing.  Under normal circumstances, a
-                     // representable base object expression should already
-                     // have gone through this process and been simplified into
-                     // a const or loadaddr.
-                     dumpOptDetails(comp, "Could have transformed %p if representable baseObject %p had already been simplified\n", node, baseObject);
-                     return NULL;
-                     }
-                  else
-                     {
-                     // baseObject is an expression resulting in a Java object reference.
-                     // The logic below handles figuring out the address of the base Java
-                     // object.  Proceed with that, then do the dereference below.
-                     }
-                  }
-               else if (baseObject->chkClassPointerConstant())
-                  {
-                  clazz = (J9Class*)baseObject->getAddress();
-                  }
-               else if (baseObject->getOpCodeValue() == TR::loadaddr
-                     && baseObject->getSymbol()->isClassObject())
-                  {
-                  clazz = (J9Class*)baseObject->getSymbol()->castToStaticSymbol()->getStaticAddress();
-                  }
-               else
-                  {
-                  // TODO: The above checks are too conservative.  There's no
-                  // need to check for class pointers explicitly.  Once we know
-                  // it's a representable object, we can do getAddress, getInt,
-                  // getLongInt, or getStaticAddress depending on the opcode,
-                  // and use whatever we get back from that to start dereferencing.
-                  dumpOptDetails(comp, "Can't yet transform %p based on representable baseObject %p that isn't a J9Class\n", node, baseObject);
-                  return NULL;
-                  }
-
-               if (clazz && performTransformation(comp, "O^O transformIndirectLoad: [%p] evaluate native structure walk into const from %s, based on class pointer node %p\n", node, node->getSymbolReference()->getName(comp->getDebug()), baseObject))
-                  {
-                  // We have clazz.a.b.c.d.primitiveField
-                  // We can simplify this into a const.
-                  //
-                  uint8_t *structure = (uint8_t*)dereferenceStructPointerChain(clazz, baseObject, node->getFirstChild(), comp);
-                  if (verifyFieldAccess(structure, node->getSymbolReference(), comp)) switch (loadType)
-                     {
-                     case TR::Int32:
-                        node = TR::Node::iconst(node, *(int32_t*)(structure + node->getSymbolReference()->getOffset()));
-                        break;
-                     case TR::Int64:
-                        node = TR::Node::lconst(node, *(int64_t*)(structure + node->getSymbolReference()->getOffset()));
-                        break;
-                     default:
-                        TR_ASSERT(0, "Unexpected native field type %s", node->getDataType().toString());
-                        break;
-                     }
-                  return node;
-                  }
-               }
-            }
-
-         uintptr_t *baseObjectRefLocation = NULL;
-         if (baseObject->getOpCode().hasSymbolReference() && baseObject->getSymbolReference()->hasKnownObjectIndex())
-            {
-            baseObjectRefLocation = baseObject->getSymbolReference()->getKnownObjectReferenceLocation(comp);
-            }
-         else if (baseObject->getOpCode().isLoadVarDirect() && baseObject->getSymbol()->isStatic())
-            {
-            TR::StaticSymbol *baseSym = baseObject->getSymbol()->castToStaticSymbol();
-            if (!baseObject->getSymbolReference()->isUnresolved())
-               {
-               // Note: There is an implicit assumption here that if we can reach
-               // a const object, then its constructor must have completed and its
-               // final fields will never change again.  Since an object can't be
-               // reached through the constant pool or call site table until its
-               // constructor completes, there is no known case where this is false,
-               // but if one ever arises, we'll need to check for that case here.
-               //
-               if (baseSym->isFixedObjectRef())
-                  baseObjectRefLocation = (uintptr_t*)baseSym->getStaticAddress();
-               }
-            }
-
-         if (!baseObjectRefLocation
-#if defined(J9VM_OPT_JITSERVER)
-             || comp->isOutOfProcessCompilation() // The following code requires VM access that's not supported at the server
-#endif /* defined(J9VM_OPT_JITSERVER) */
-            )
-            return NULL; // Nothing left we can do
-
-         //
-         // Now we know we have an indirect from an identifiable location.
-         // We can use this information to simplify loads of final fields.
-         //
-
-         if (isFinalFieldOfNativeStruct(symRef, comp))
-            {
-            if (baseObjectRefLocation && typeIsConstible)
-               {
-               if (performTransformation(comp, "O^O transformIndirectLoad: [%p] evaluate native structure walk into const from %s, based on known object node %p\n", node, node->getSymbolReference()->getName(comp->getDebug()), baseObject))
-                  {
-                  // We have object.a.b.c.d.primitiveField, where a.b.c.d walks through some native data structure.
-                  // We can simplify this into a const.
-                  //
-                  bool loadFailed = false;
-                  uint8_t *structure;
-
-                     {
-                     // First dereference with VM access to dig a pointer out of an object
-                     TR::VMAccessCriticalSection digPointerOutOfObject(comp->fej9());
-
-                     uintptr_t baseObjectRef = baseObject->getSymbol()->isStatic() ?
-                                                comp->fej9()->getStaticReferenceFieldAtAddress((uintptr_t)baseObjectRefLocation) :
-                                                *baseObjectRefLocation;
-                     uintptr_t fieldAddress = baseObjectRef + firstDereference->getSymbolReference()->getOffset();
-
-                     switch (firstDereference->getDataType())
-                        {
-                        case TR::Int32:
-                           {
-                           uint32_t *intAddress = (uint32_t*)fieldAddress;
-                           structure = (uint8_t*)(uintptr_t)(*intAddress);
-                           }
-                           break;
-                        case TR::Int64:
-                           {
-                           uint64_t *longAddress = (uint64_t*)fieldAddress;
-                           structure = (uint8_t*)(uintptr_t)(*longAddress);
-                           }
-                           break;
-                        case TR::Address:
-                           {
-                           uintptr_t *refAddress = (uintptr_t*)fieldAddress;
-                           structure = (uint8_t*)(uintptr_t)(*refAddress);
-                           }
-                           break;
-                        default:
-                           loadFailed = true;
-                           break;
-                        }
-                     }
-
-                  TR_ASSERT(!loadFailed, "Expected int, long, or address load");
-                  TR_ASSERT(secondDereference, "Expected expression %p like a.b...c where a is a Java object, b points at a native struct, and c is a field in a native struct", node);
-                  if (secondDereference)
-                     structure = (uint8_t*)dereferenceStructPointerChain(structure, firstDereference, node->getFirstChild(), comp);
-
-                  if (verifyFieldAccess(structure, node->getSymbolReference(), comp))
-                     {
-                     switch (loadType)
-                        {
-                        case TR::Int32:
-                           node = TR::Node::iconst(node, *(int32_t*)(structure + node->getSymbolReference()->getOffset()));
-                           break;
-                        case TR::Int64:
-                           node = TR::Node::lconst(node, *(int64_t*)(structure + node->getSymbolReference()->getOffset()));
-                           break;
-                        default:
-                           TR_ASSERT(0, "Unexpected native field type %s", node->getDataType().toString());
-                           break;
-                        }
-                     }
-
-                  return node;
-                  }
-               }
-            }
-         else if (fej9->isFinalFieldPointingAtJ9Class(symRef, comp)
-               && isFinalFieldPointingAtRepresentableNativeStruct(symRef, comp)
-               && !comp->compileRelocatableCode())
-            {
-            TR_OpaqueClassBlock *clazz;
-
-               {
-               TR::VMAccessCriticalSection getClassFromJavaLangClassCS(comp->fej9());
-               clazz = fej9->getClassFromJavaLangClass(*baseObjectRefLocation);
-               }
-
-            TR::Node *clazzNode = TR::Node::createWithSymRef(node, TR::loadaddr, 0,
-               comp->getSymRefTab()->findOrCreateClassSymbol(comp->getMethodSymbol(), -1, clazz));
-            if (performTransformation(comp, "O^O transformIndirectLoad: [%p] turn load of J9Class into %s %p\n", node, clazzNode->getOpCode().getName(), clazzNode))
-               return clazzNode;
-            }
-         else if (sym->isFinal() && !comp->compileRelocatableCode()) // Constructor can set different values for the same field in different runs on AOT
-            {
-            int32_t fieldOffset = symRef->getOffset() - TR::Compiler->om.objectHeaderSizeInBytes(); // blah
-            if (typeIsConstible)
-               {
-               if (performTransformation(comp, "O^O transformIndirectLoad: [%p] turn final %s %s into load const\n", node, node->getOpCode().getName(), symRef->getName(comp->getDebug())))
-                  {
-                  TR::VMAccessCriticalSection recreate(comp->fej9());
-                  uintptr_t baseObjectRef = baseObject->getSymbol()->isStatic() ?
-                                             comp->fej9()->getStaticReferenceFieldAtAddress((uintptr_t)baseObjectRefLocation) :
-                                             *baseObjectRefLocation;
-
-                  node->getAndDecChild(0);
-                  node->setNumChildren(0);
-                  switch (loadType)
-                     {
-                     case TR::Int32:
-                        TR::Node::recreate(node, TR::iconst);
-                        node->setInt(fej9->getInt32FieldAt(baseObjectRef, fieldOffset));
-                        break;
-                     case TR::Int64:
-                        TR::Node::recreate(node, TR::lconst);
-                        node->setLongInt(fej9->getInt64FieldAt(baseObjectRef, fieldOffset));
-                        break;
-                     default:
-                        TR_ASSERT(0, "Unexpected type %s", node->getDataType().toString());
-                        break;
-                     }
-                  return node;
-                  }
-               }
-            else if (symrefIsImprovable)
-               {
-               uintptr_t targetObjectReference = 0;
-               TR::SymbolReference *improvedSymRef = node->getSymbolReference();
-               TR::KnownObjectTable *knot = comp->getOrCreateKnownObjectTable();
-#if defined(J9VM_OPT_JITSERVER)
-               if (comp->isOutOfProcessCompilation())
-                  {
-                  bool knotEnabled = (knot != NULL);
-                  auto stream = TR::CompilationInfo::getStream();
-                  stream->write(JITServer::MessageType::KnownObjectTable_getReferenceField,
-                        baseObject->getSymbol()->isStatic(), baseObjectRefLocation, fieldOffset, knotEnabled);
-
-                  auto recv = stream->read<TR::KnownObjectTable::Index, uintptr_t*, uintptr_t>();
-                  TR::KnownObjectTable::Index knotIndex = std::get<0>(recv);
-                  uintptr_t *objectPointerReference = std::get<1>(recv);
-                  targetObjectReference = std::get<2>(recv);
-
-                  if (knot && (knotIndex != TR::KnownObjectTable::UNKNOWN))
-                     {
-                     knot->updateKnownObjectTableAtServer(knotIndex, objectPointerReference);
-                     improvedSymRef = comp->getSymRefTab()->findOrCreateSymRefWithKnownObject(node->getSymbolReference(), knotIndex);
-                     }
-                  }
-               else
-#endif /* defined(J9VM_OPT_JITSERVER) */
-                  {
-                  TR::VMAccessCriticalSection getReferenceField(comp->fej9());
-                  uintptr_t baseObjectRef = baseObject->getSymbol()->isStatic() ?
-                                             comp->fej9()->getStaticReferenceFieldAtAddress((uintptr_t)baseObjectRefLocation) :
-                                             *baseObjectRefLocation;
-                  targetObjectReference = fej9->getReferenceFieldAt(baseObjectRef, fieldOffset);
-
-                  if (knot)
-                     {
-                     TR::KnownObjectTable::Index knotIndex = knot->getOrCreateIndexAt(&targetObjectReference);
-                     if (knotIndex != TR::KnownObjectTable::UNKNOWN)
-                        improvedSymRef = comp->getSymRefTab()->findOrCreateSymRefWithKnownObject(node->getSymbolReference(), knotIndex);
-                     }
-                  }
-
-               if (targetObjectReference)
-                  {
-                  if (improvedSymRef->hasKnownObjectIndex()
-                     && performTransformation(comp, "O^O transformIndirectLoad: [%p] use object-specific symref #%d (=obj%d) for %s of final field %s\n",
-                        node, improvedSymRef->getReferenceNumber(), improvedSymRef->getKnownObjectIndex(), node->getOpCode().getName(), symRef->getName(comp->getDebug())))
-                     {
-                     node->setSymbolReference(improvedSymRef);
-                     node->setIsNull(false);
-                     node->setIsNonNull(true);
-                     }
-                  }
-               else
-                  {
-                  switch (improvedSymRef->getSymbol()->getRecognizedField())
-                     {
-                     // J9VMInternals.jitHelpers is initialized after the class has been
-                     // initialized via an Unsafe helper - don't fold null in to improve perf
-                     case TR::Symbol::Java_lang_J9VMInternals_jitHelpers:
-                        return NULL;
-                     default:
-                        if (performTransformation(comp, "O^O transformIndirectLoad: [%p] field is null - change to aconst NULL\n", node))
-                           {
-                           node->getAndDecChild(0);
-                           node->setNumChildren(0);
-                           TR::Node::recreate(node, TR::aconst);
-                           node->setAddress(0);
-                           node->setIsNull(true);
-                           node->setIsNonNull(false);
-                           }
-                     }
-                  }
-               return node;
-               }
-            }
-         }
-      }
-
-   return NULL;
    }
 
 /** \brief
@@ -1350,8 +1138,7 @@ J9::TransformUtil::foldStaticFinalFieldImpl(TR::Compilation *comp, TR::Node *nod
       if (sym->getRecognizedField() == TR::Symbol::Java_lang_String_enableCompression)
          {
          // Add the flags in TR_AOTMethodHeader
-         J9JITDataCacheHeader *aotMethodHeader = (J9JITDataCacheHeader *)comp->getAotMethodDataStart();
-         TR_AOTMethodHeader *aotMethodHeaderEntry = (TR_AOTMethodHeader *)(aotMethodHeader + 1);
+         TR_AOTMethodHeader *aotMethodHeaderEntry = comp->getAotMethodHeaderEntry();
          aotMethodHeaderEntry->flags |= TR_AOTMethodHeader_UsesEnableStringCompressionFolding;
          TR_ASSERT(node->getDataType() == TR::Int32, "Java_lang_String_enableCompression must be Int32");
          bool fieldValue = ((TR_J9VM *) comp->fej9())->dereferenceStaticFinalAddress(sym->castToStaticSymbol()->getStaticAddress(), TR::Int32).dataInt32Bit != 0;
@@ -1523,7 +1310,7 @@ J9::TransformUtil::transformIndirectLoadChainAt(TR::Compilation *comp, TR::Node 
       {
       baseAddress = *baseReferenceLocation;
       }
-   bool result = TR::TransformUtil::transformIndirectLoadChainImpl(comp, node, baseExpression, (void*)baseAddress, removedNode);
+   bool result = TR::TransformUtil::transformIndirectLoadChainImpl(comp, node, baseExpression, (void*)baseAddress, false, removedNode);
    return result;
    }
 
@@ -1549,7 +1336,7 @@ J9::TransformUtil::transformIndirectLoadChain(TR::Compilation *comp, TR::Node *n
 #endif /* defined(J9VM_OPT_JITSERVER) */
 
    TR::VMAccessCriticalSection transformIndirectLoadChain(comp->fej9());
-   bool result = TR::TransformUtil::transformIndirectLoadChainImpl(comp, node, baseExpression, (void*)comp->getKnownObjectTable()->getPointer(baseKnownObject), removedNode);
+   bool result = TR::TransformUtil::transformIndirectLoadChainImpl(comp, node, baseExpression, (void*)comp->getKnownObjectTable()->getPointer(baseKnownObject), comp->getKnownObjectTable()->isArrayWithStableElements(baseKnownObject), removedNode);
    return result;
    }
 
@@ -1581,7 +1368,7 @@ J9::TransformUtil::transformIndirectLoadChain(TR::Compilation *comp, TR::Node *n
  *  actual data structure being walked matches the nodes closely enough to
  *  prevent the jit from doing something wrong.
  *
- *  This function must must verify that the structure we're loading from is
+ *  This function must verify that the structure we're loading from is
  *  of the correct type before the dereference.
  *
  *  In this narrow usage, "correct type" really means that subsequent
@@ -1617,7 +1404,7 @@ J9::TransformUtil::transformIndirectLoadChain(TR::Compilation *comp, TR::Node *n
  *
  */
 bool
-J9::TransformUtil::transformIndirectLoadChainImpl(TR::Compilation *comp, TR::Node *node, TR::Node *baseExpression, void *baseAddress, TR::Node **removedNode)
+J9::TransformUtil::transformIndirectLoadChainImpl(TR::Compilation *comp, TR::Node *node, TR::Node *baseExpression, void *baseAddress, bool isBaseStableArray, TR::Node **removedNode)
    {
    TR_J9VMBase *fej9 = comp->fej9();
 
@@ -1631,6 +1418,9 @@ J9::TransformUtil::transformIndirectLoadChainImpl(TR::Compilation *comp, TR::Nod
       }
 
    TR::SymbolReference *symRef = node->getSymbolReference();
+
+   if (isBaseStableArray && !symRef->getSymbol()->isArrayShadowSymbol())
+      return false;
 
    if (symRef->hasKnownObjectIndex())
       return false;
@@ -1663,7 +1453,7 @@ J9::TransformUtil::transformIndirectLoadChainImpl(TR::Compilation *comp, TR::Nod
          return false;
       }
 
-   if (!fej9->canDereferenceAtCompileTime(symRef, comp))
+   if (!isBaseStableArray && !fej9->canDereferenceAtCompileTime(symRef, comp))
       {
       if (comp->getOption(TR_TraceOptDetails))
          {
@@ -1673,7 +1463,7 @@ J9::TransformUtil::transformIndirectLoadChainImpl(TR::Compilation *comp, TR::Nod
       }
 
    // Dereference the chain starting from baseAddress and get the field address
-   void *fieldAddress = dereferenceStructPointerChain(baseAddress, baseExpression, node, comp);
+   void *fieldAddress = dereferenceStructPointerChain(baseAddress, baseExpression, isBaseStableArray, node, comp);
    if (!fieldAddress)
       {
       if (comp->getOption(TR_TraceOptDetails))
@@ -1686,6 +1476,9 @@ J9::TransformUtil::transformIndirectLoadChainImpl(TR::Compilation *comp, TR::Nod
    // The last step in the dereference chain is not necessarily an address.
    // Determine what it is and transform node appropriately.
    //
+   if (isBaseStableArray && comp->getOption(TR_TraceOptDetails))
+      traceMsg(comp, "Transforming a load from stable array %p\n", node);
+
    TR::DataType loadType = node->getDataType();
    switch (loadType)
       {
@@ -1771,12 +1564,20 @@ J9::TransformUtil::transformIndirectLoadChainImpl(TR::Compilation *comp, TR::Nod
             if (value)
                {
                TR::SymbolReference *improvedSymRef = comp->getSymRefTab()->findOrCreateSymRefWithKnownObject(symRef, &value, isArrayWithConstantElements(symRef, comp));
-               if (  improvedSymRef->hasKnownObjectIndex()
+               int32_t stableArrayRank = isArrayWithStableElements(symRef, comp);
+
+               if (improvedSymRef->hasKnownObjectIndex()
                   && performTransformation(comp, "O^O transformIndirectLoadChain: %s [%p] with fieldOffset %d is obj%d referenceAddr is %p\n", node->getOpCode().getName(), node, improvedSymRef->getKnownObjectIndex(), symRef->getOffset(), value))
                   {
                   node->setSymbolReference(improvedSymRef);
                   node->setIsNull(false);
                   node->setIsNonNull(true);
+
+                  if (stableArrayRank > 0)
+                     {
+                     TR::KnownObjectTable *knot = comp->getOrCreateKnownObjectTable();
+                     knot->addStableArray(improvedSymRef->getKnownObjectIndex(), stableArrayRank);
+                     }
                   }
                else
                   {
@@ -1813,7 +1614,6 @@ J9::TransformUtil::transformIndirectLoadChainImpl(TR::Compilation *comp, TR::Nod
    //
    return true;
    }
-
 
 bool
 J9::TransformUtil::fieldShouldBeCompressed(TR::Node *node, TR::Compilation *comp)
@@ -1898,7 +1698,6 @@ J9::TransformUtil::fieldShouldBeCompressed(TR::Node *node, TR::Compilation *comp
    return false;
    }
 
-
 TR::Block *
 J9::TransformUtil::insertNewFirstBlockForCompilation(TR::Compilation *comp)
    {
@@ -1932,17 +1731,10 @@ TR::Node * J9::TransformUtil::calculateElementAddress(TR::Compilation *comp, TR:
    else
       addrCalc = TR::Node::create(TR::aiadd, 2, array, TR::Node::create(TR::l2i, 1, offset));
 
+   addrCalc->setIsInternalPointer(true);
    return addrCalc;
 }
 
-/**
- * Calculate offset for an array element given its index
- *
- * @param index The index in the array of type Int32
- * @param type  The data type of the array element
- *
- * @return The Int64 value representing the offset into an array of the specified type given the index
- */
 TR::Node * J9::TransformUtil::calculateOffsetFromIndexInContiguousArray(TR::Compilation *comp, TR::Node * index, TR::DataType type)
    {
    int32_t width = TR::Symbol::convertTypeToSize(type);
@@ -1952,7 +1744,50 @@ TR::Node * J9::TransformUtil::calculateOffsetFromIndexInContiguousArray(TR::Comp
    if (comp->useCompressedPointers() && type == TR::Address)
       width = TR::Compiler->om.sizeofReferenceField();
 
-   int32_t shift = TR::TransformUtil::convertWidthToShift(width);
+   return calculateOffsetFromIndexInContiguousArrayWithElementStride(comp, index, width);
+   }
+
+TR::Node * J9::TransformUtil::calculateElementAddressWithElementStride(TR::Compilation *comp, TR::Node *array, TR::Node *index, int32_t elementStride)
+{
+   TR::Node * offset = TR::TransformUtil::calculateOffsetFromIndexInContiguousArrayWithElementStride(comp, index, elementStride);
+   offset->setIsNonNegative(true);
+
+   // Calculate element address
+   TR::Node *addrCalc = NULL;
+   if (comp->target().is64Bit())
+      addrCalc = TR::Node::create(TR::aladd, 2, array, offset);
+   else
+      addrCalc = TR::Node::create(TR::aiadd, 2, array, TR::Node::create(TR::l2i, 1, offset));
+
+   addrCalc->setIsInternalPointer(true);
+   return addrCalc;
+}
+
+static int32_t checkNonNegativePowerOfTwo(int32_t value)
+   {
+   if (isNonNegativePowerOf2(value))
+      {
+      int32_t shiftAmount = 0;
+      while ((value = ((uint32_t) value) >> 1))
+         {
+         ++shiftAmount;
+         }
+      return shiftAmount;
+      }
+   else
+      {
+      return -1;
+      }
+   }
+
+TR::Node * J9::TransformUtil::calculateOffsetFromIndexInContiguousArrayWithElementStride(TR::Compilation *comp, TR::Node * index, int32_t elementStride)
+   {
+   int32_t shift = -1;
+   if (elementStride > 0)
+      {
+      shift = checkNonNegativePowerOfTwo(elementStride);
+      }
+
    int32_t headerSize = TR::Compiler->om.contiguousArrayHeaderSizeInBytes();
 
    TR::Node * offset = index;
@@ -1964,13 +1799,21 @@ TR::Node * J9::TransformUtil::calculateOffsetFromIndexInContiguousArray(TR::Comp
    TR::ILOpCodes constOp = comp->target().is64Bit() ? TR::lconst : TR::iconst;
    TR::ILOpCodes shlOp = comp->target().is64Bit() ? TR::lshl : TR::ishl;
    TR::ILOpCodes addOp = comp->target().is64Bit() ? TR::ladd : TR::iadd;
+   TR::ILOpCodes mulOp = comp->target().is64Bit() ? TR::lmul : TR::imul;
 
-   if (shift)
+   if (shift > 0)
       {
       TR::Node *shiftNode = TR::Node::create(TR::iconst, 0);
       shiftNode->setConstValue(shift);
       offset = TR::Node::create(shlOp, 2, offset, shiftNode);
       }
+   else
+      {
+      TR::Node *elementStrideNode = TR::Node::create(constOp, 0);
+      elementStrideNode->setConstValue(elementStride);
+      offset = TR::Node::create(mulOp, 2, offset, elementStrideNode);
+      }
+
    if (headerSize > 0)
       {
       TR::Node *headerSizeNode = TR::Node::create(constOp, 0);
@@ -2035,7 +1878,6 @@ TR::Node * J9::TransformUtil::calculateIndexFromOffsetInContiguousArray(TR::Comp
    return index;
    }
 
-
 /**
  * \brief
  *    Save a node to temp slot
@@ -2061,7 +1903,6 @@ J9::TransformUtil::saveNodeToTempSlot(TR::Compilation* comp, TR::Node* node, TR:
    return TR::Node::createWithSymRef(node, comp->il.opCodeForDirectLoad(type), 0, symRef);
    }
 
-
 /**
  * \brief
  *    Create temps for a call's children and replace the call's children with loads from the newly created temps.
@@ -2082,7 +1923,6 @@ J9::TransformUtil::createTempsForCall(TR::Optimization* opt, TR::TreeTop *callTr
    for (int32_t i = 0 ; i < callNode->getNumChildren() ; ++i)
       {
       TR::Node *child = callNode->getChild(i);
-
 
       //create a store of the correct type and insert before call.
 
@@ -2295,6 +2135,9 @@ void J9::TransformUtil::separateNullCheck(TR::Compilation* comp, TR::TreeTop* tr
             comp->getSymRefTab()->findOrCreateResolveCheckSymbolRef(comp->getMethodSymbol()));
          TR::Node::recreate(nullCheck, TR::ResolveCHK);
          break;
+
+      default:
+         break;
       }
    }
 
@@ -2352,4 +2195,337 @@ J9::TransformUtil::specializeInvokeExactSymbol(TR::Compilation *comp, TR::Node *
          }
       }
       return false;
+   }
+
+bool
+J9::TransformUtil::refineMethodHandleInvokeBasic(TR::Compilation* comp, TR::TreeTop* treetop, TR::Node* node, TR::KnownObjectTable::Index mhIndex, bool trace)
+   {
+#if defined(J9VM_OPT_OPENJDK_METHODHANDLE)
+   if (!comp->fej9()->isResolvedDirectDispatchGuaranteed(comp))
+      {
+      if (trace)
+         {
+         traceMsg(
+            comp,
+            "Cannot refine invokeBasic n%un %p without isResolvedDirectDispatchGuaranteed()\n",
+            node->getGlobalIndex(),
+            node);
+         }
+      return false;
+      }
+
+   auto knot = comp->getKnownObjectTable();
+   if (mhIndex == TR::KnownObjectTable::UNKNOWN ||
+       !knot ||
+       knot->isNull(mhIndex))
+      {
+      if (trace)
+         traceMsg(comp, "MethodHandle for invokeBasic n%dn %p is unknown or null\n", node->getGlobalIndex(), node);
+      return false;
+      }
+
+   TR_J9VMBase* fej9 = comp->fej9();
+   auto targetMethod = fej9->targetMethodFromMethodHandle(comp, mhIndex);
+
+   TR_ASSERT(targetMethod, "Can't get target method from MethodHandle obj%d\n", mhIndex);
+
+   auto symRef = node->getSymbolReference();
+   // Refine the call
+   auto refinedMethod = fej9->createResolvedMethod(comp->trMemory(), targetMethod, symRef->getOwningMethod(comp));
+   if (!performTransformation(comp, "O^O Refine invokeBasic n%dn %p with known MH object\n", node->getGlobalIndex(), node))
+      return false;
+
+   // Preserve NULLCHK
+   TR::TransformUtil::separateNullCheck(comp, treetop, trace);
+
+   TR::SymbolReference *newSymRef =
+       comp->getSymRefTab()->findOrCreateMethodSymbol
+       (symRef->getOwningMethodIndex(), -1, refinedMethod, TR::MethodSymbol::Static);
+
+   TR::Node::recreateWithSymRef(node, refinedMethod->directCallOpCode(), newSymRef);
+   // doNotProfile flag is used to imply whether the bytecode can OSR under voluntary OSR. Above transformation
+   // will set this flag to indicate the node cannot OSR. However, the transformation does not change the operand
+   // stack and local state before the call, hence it can OSR.
+   //
+   node->getByteCodeInfo().setDoNotProfile(false);
+
+   return true;
+#else
+   return false;
+#endif
+   }
+
+TR::MethodSymbol::Kinds getTargetMethodCallKind(TR::RecognizedMethod rm)
+   {
+   TR::MethodSymbol::Kinds callKind;
+   switch (rm)
+      {
+      case TR::java_lang_invoke_MethodHandle_invokeBasic:
+      case TR::java_lang_invoke_MethodHandle_linkToStatic:
+         callKind = TR::MethodSymbol::Static; break;
+      case TR::java_lang_invoke_MethodHandle_linkToSpecial:
+         callKind = TR::MethodSymbol::Special; break;
+      case TR::java_lang_invoke_MethodHandle_linkToVirtual:
+         callKind = TR::MethodSymbol::Virtual; break;
+      case TR::java_lang_invoke_MethodHandle_linkToInterface:
+         callKind = TR::MethodSymbol::Interface; break;
+      default:
+         TR_ASSERT_FATAL(0, "Unsupported method");
+      }
+   return callKind;
+   }
+
+// Use getIndirectCall(datatype), pass in return type
+TR::ILOpCodes getTargetMethodCallOpCode(TR::RecognizedMethod rm, TR::DataType type)
+   {
+   switch (rm)
+      {
+      case TR::java_lang_invoke_MethodHandle_invokeBasic:
+      case TR::java_lang_invoke_MethodHandle_linkToStatic:
+      case TR::java_lang_invoke_MethodHandle_linkToSpecial:
+         return TR::ILOpCode::getDirectCall(type);
+      case TR::java_lang_invoke_MethodHandle_linkToVirtual:
+      case TR::java_lang_invoke_MethodHandle_linkToInterface:
+         return TR::ILOpCode::getIndirectCall(type);
+      default:
+         TR_ASSERT_FATAL(0, "Unsupported method");
+      }
+   return TR::BadILOp;
+   }
+
+bool
+J9::TransformUtil::refineMethodHandleLinkTo(TR::Compilation* comp, TR::TreeTop* treetop, TR::Node* node, TR::KnownObjectTable::Index mnIndex, bool trace)
+   {
+#if defined(J9VM_OPT_OPENJDK_METHODHANDLE)
+   TR_J9VMBase* fej9 = comp->fej9();
+   auto symRef = node->getSymbolReference();
+   auto rm = node->getSymbol()->castToMethodSymbol()->getMandatoryRecognizedMethod();
+   const char *missingResolvedDispatch = NULL;
+   switch (rm)
+      {
+      case TR::java_lang_invoke_MethodHandle_linkToStatic:
+      case TR::java_lang_invoke_MethodHandle_linkToSpecial:
+         if (!fej9->isResolvedDirectDispatchGuaranteed(comp))
+            missingResolvedDispatch = "Direct";
+         break;
+
+      case TR::java_lang_invoke_MethodHandle_linkToVirtual:
+         if (!fej9->isResolvedVirtualDispatchGuaranteed(comp))
+            missingResolvedDispatch = "Virtual";
+         break;
+
+      default:
+        TR_ASSERT_FATAL(false, "Unsupported method %s", symRef->getSymbol()->getResolvedMethodSymbol()->getResolvedMethod()->signature(comp->trMemory()));
+      }
+
+   if (missingResolvedDispatch != NULL)
+      {
+      if (trace)
+         {
+         traceMsg(
+            comp,
+            "Cannot refine linkToXXX n%un %p without isResolved%sDispatchGuaranteed()\n",
+            node->getGlobalIndex(),
+            node,
+            missingResolvedDispatch);
+         }
+      return false;
+      }
+
+   auto knot = comp->getKnownObjectTable();
+   if (mnIndex == TR::KnownObjectTable::UNKNOWN ||
+       !knot ||
+       knot->isNull(mnIndex))
+      {
+      if (trace)
+         traceMsg(comp, "MethodName for linkToXXX n%dn %p is unknown or null\n", node->getGlobalIndex(), node);
+      return false;
+      }
+
+   auto targetMethod = fej9->targetMethodFromMemberName(comp, mnIndex);
+
+   TR_ASSERT(targetMethod, "Can't get target method from MethodName obj%d\n", mnIndex);
+
+   TR::MethodSymbol::Kinds callKind = getTargetMethodCallKind(rm);
+   TR::ILOpCodes callOpCode = getTargetMethodCallOpCode(rm, node->getDataType());
+
+   TR::SymbolReference* newSymRef = NULL;
+   uint32_t vTableSlot = 0;
+   int32_t jitVTableOffset = 0;
+   if (rm == TR::java_lang_invoke_MethodHandle_linkToVirtual)
+      {
+      uintptr_t slot = fej9->vTableOrITableIndexFromMemberName(comp, mnIndex);
+      if ((slot & J9_JNI_MID_INTERFACE) != 0)
+         {
+         // TODO: Refine this to an interface call to the method identified by
+         // the itable slot and the method's defining (interface) class from
+         // the MemberName.
+         //
+         // Unfortunately, such a call will not be representable until
+         // interface calls are allowed to be resolved. As it stands, code
+         // generation requires a CP index for the dispatch.
+         //
+         // For the moment, just leave the call unrefined.
+         //
+         return false;
+         }
+
+      vTableSlot = (uint32_t)slot;
+      jitVTableOffset = fej9->vTableSlotToVirtualCallOffset(vTableSlot);
+      // For private virtual methods and java/lang/Object; type virtual methods, there is no corresponding
+      // entry in the vtable, and for such methods the interpreter vtable index is 0.
+      // The dispatch is not performed through the vtable entry, but directly dispatched to the J9Method
+      // in Membername.vmtarget. In such cases, we can refine a linkToVirtual call similar to linkToStatic.
+      // jitVTableOffset is obtained using sizeof(J9Class) - interpreter vtable offset, resulting in a positive
+      // value when the interpreter vtable index we get (from MemberName.vmindex.vtableoffset) is set as 0.
+      if (jitVTableOffset > 0)
+         callKind = TR::MethodSymbol::Static;
+      }
+
+   if (!performTransformation(comp, "O^O Refine linkToXXX n%dn [%p] with known MemberName object\n", node->getGlobalIndex(), node))
+      return false;
+
+   auto resolvedMethod = fej9->createResolvedMethodWithVTableSlot(comp->trMemory(), vTableSlot, targetMethod, symRef->getOwningMethod(comp));
+   newSymRef = comp->getSymRefTab()->findOrCreateMethodSymbol(symRef->getOwningMethodIndex(), -1, resolvedMethod, callKind);
+   if (callKind == TR::MethodSymbol::Virtual)
+      newSymRef->setOffset(jitVTableOffset);
+
+   bool needNullChk, needVftChild, needResolveChk;
+   needNullChk = needVftChild = false;
+   switch (rm)
+      {
+      case TR::java_lang_invoke_MethodHandle_linkToVirtual:
+         if (callKind == TR::MethodSymbol::Virtual)
+            needVftChild = true;
+         // fall through
+      case TR::java_lang_invoke_MethodHandle_linkToSpecial:
+         needNullChk = true;
+         break;
+      default:
+         break;
+      }
+
+  if (needNullChk)
+      {
+      TR::Node::recreateWithSymRef(treetop->getNode(), TR::NULLCHK, comp->getSymRefTab()->findOrCreateNullCheckSymbolRef(symRef->getOwningMethodSymbol(comp)));
+      }
+
+   if (needVftChild)
+      {
+      auto vftLoad = TR::Node::createWithSymRef(node, TR::aloadi, 1, node->getFirstArgument(), comp->getSymRefTab()->findOrCreateVftSymbolRef());
+      // Save all arguments of linkTo* to an array
+      int32_t numArgs = node->getNumArguments();
+      TR::Node **args= new (comp->trStackMemory()) TR::Node*[numArgs];
+      for (int32_t i = 0; i < numArgs; i++)
+         args[i] = node->getArgument(i);
+
+      node->removeLastChild();
+      // Anchor all children to a treetop before transmuting the call node
+      for (int i = 0; i <node->getNumChildren(); i++)
+         {
+         TR::TreeTop *tt = TR::TreeTop::create(comp, TR::Node::create(TR::treetop, 1, node->getChild(i)));
+         treetop->insertBefore(tt);
+         }
+
+      node->removeAllChildren();
+      // Recreate the node to a indirect call node
+      TR::Node::recreateWithoutProperties(node, callOpCode, numArgs, vftLoad, newSymRef);
+      // doNotProfile flag is used to imply whether the bytecode can OSR under voluntary OSR. Above transformation
+      // will set this flag to indicate the node cannot OSR. However, the transformation does not change the operand
+      // stack and local state before the call, hence it can OSR.
+      //
+      node->getByteCodeInfo().setDoNotProfile(false);
+
+      for (int32_t i = 0; i < numArgs - 1; i++)
+         node->setAndIncChild(i + 1, args[i]);
+      }
+   else
+      {
+      // VFT child is not needed, the call is direct, just need to change the symref and remove MemberName arg
+      node->setSymbolReference(newSymRef);
+      // Remove MemberName arg
+      node->removeLastChild();
+      }
+
+   return true;
+#else
+   return false;
+#endif
+   }
+
+TR::KnownObjectTable::Index
+J9::TransformUtil::knownObjectFromFinalStatic(
+   TR::Compilation *comp,
+   TR_ResolvedMethod *owningMethod,
+   int32_t cpIndex,
+   void *dataAddress)
+   {
+   if (comp->compileRelocatableCode())
+      return TR::KnownObjectTable::UNKNOWN;
+
+   TR::KnownObjectTable *knot = comp->getOrCreateKnownObjectTable();
+   if (knot == NULL)
+      return TR::KnownObjectTable::UNKNOWN;
+
+#if defined(J9VM_OPT_JITSERVER)
+   if (comp->isOutOfProcessCompilation())
+      {
+      TR_ResolvedJ9JITServerMethod *serverMethod = static_cast<TR_ResolvedJ9JITServerMethod*>(owningMethod);
+      TR_ResolvedMethod *clientMethod = serverMethod->getRemoteMirror();
+
+      auto stream = TR::CompilationInfo::getStream();
+      stream->write(JITServer::MessageType::KnownObjectTable_symbolReferenceTableCreateKnownObject, dataAddress, clientMethod, cpIndex);
+
+      auto recv = stream->read<TR::KnownObjectTable::Index, uintptr_t*>();
+      TR::KnownObjectTable::Index knownObjectIndex = std::get<0>(recv);
+      uintptr_t *objectPointerReference = std::get<1>(recv);
+
+      if (knownObjectIndex != TR::KnownObjectTable::UNKNOWN)
+         {
+         knot->updateKnownObjectTableAtServer(knownObjectIndex, objectPointerReference);
+         }
+
+      return knownObjectIndex;
+      }
+#endif /* defined(J9VM_OPT_JITSERVER) */
+
+   TR::VMAccessCriticalSection getObjectReferenceLocation(comp);
+   TR_J9VMBase *fej9 = comp->fej9();
+
+   // Could return the null index when the reference is null, but current
+   // callers aren't interested in it.
+   if (*((uintptr_t*)dataAddress) == 0)
+      return TR::KnownObjectTable::UNKNOWN;
+
+   TR_OpaqueClassBlock *declaringClass = owningMethod->getDeclaringClassFromFieldOrStatic(comp, cpIndex);
+   if (!declaringClass || !fej9->isClassInitialized(declaringClass))
+      return TR::KnownObjectTable::UNKNOWN;
+
+   static const char *foldVarHandle = feGetEnv("TR_FoldVarHandleWithoutFear");
+   int32_t clazzNameLength = 0;
+   char *clazzName = fej9->getClassNameChars(declaringClass, clazzNameLength);
+   bool createKnownObject = false;
+
+   if (J9::TransformUtil::foldFinalFieldsIn(declaringClass, clazzName, clazzNameLength, true, comp))
+      {
+      createKnownObject = true;
+      }
+   else if (foldVarHandle
+            && (clazzNameLength != 16 || strncmp(clazzName, "java/lang/System", 16)))
+      {
+      TR_OpaqueClassBlock *varHandleClass =  fej9->getSystemClassFromClassName("java/lang/invoke/VarHandle", 26);
+      TR_OpaqueClassBlock *objectClass = TR::Compiler->cls.objectClass(comp, *((uintptr_t*)dataAddress));
+
+      if (varHandleClass != NULL
+          && objectClass != NULL
+          && fej9->isInstanceOf(objectClass, varHandleClass, true, true))
+         {
+         createKnownObject = true;
+         }
+      }
+
+   if (!createKnownObject)
+      return TR::KnownObjectTable::UNKNOWN;
+
+   return knot->getOrCreateIndexAt((uintptr_t*)dataAddress);
    }

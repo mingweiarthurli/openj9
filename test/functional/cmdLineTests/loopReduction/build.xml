@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 
 <!--
-  Copyright (c) 2016, 2018 IBM Corp. and others
+  Copyright (c) 2016, 2021 IBM Corp. and others
 
   This program and the accompanying materials are made available under
   the terms of the Eclipse Public License 2.0 which accompanies this
@@ -17,7 +17,7 @@
   OpenJDK Assembly Exception [2].
 
   [1] https://www.gnu.org/software/classpath/license.html
-  [2] http://openjdk.java.net/legal/assembly-exception.html
+  [2] https://openjdk.org/legal/assembly-exception.html
 
   SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 -->
@@ -27,6 +27,8 @@
 	<description>
 		Build loopReduction
 	</description>
+
+	<import file="${TEST_ROOT}/functional/cmdLineTests/buildTools.xml"/>
 
 	<!-- set properties for this build -->
 	<property name="DEST" value="${BUILD_ROOT}/functional/cmdLineTests/loopReduction" />
@@ -38,8 +40,11 @@
 			<fileset dir="${src}" includes="*.mk"/>
 		</copy>
 	</target>
-	
-	<target name="build" >
+
+	<target name="build" depends="buildCmdLineTestTools">
+		<subant target="build">
+			<fileset dir="${TEST_ROOT}/functional/JIT_Test/" includes="build.xml" />
+		</subant>
 		<antcall target="dist" inheritall="true" />
 	</target>
 </project>

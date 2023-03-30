@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2017 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -52,12 +52,13 @@ printCardCleaningStats(OMR_VMThread *omrVMThread)
 	J9VMThread *currentThread = (J9VMThread *)MM_EnvironmentBase::getEnvironment(omrVMThread)->getLanguageVMThread();
 	MM_TgcExtensions *tgcExtensions = MM_TgcExtensions::getExtensions(currentThread);
 	PORT_ACCESS_FROM_VMC(currentThread);
+	OMRPORT_ACCESS_FROM_J9PORT(PORTLIB);
 	char timestamp[32];
 	
 	U_64 totalTime = 0;
 	UDATA totalCardsCleaned = 0;
 	
-	j9str_ftime(timestamp, sizeof(timestamp), "%b %d %H:%M:%S %Y", j9time_current_time_millis());
+	omrstr_ftime_ex(timestamp, sizeof(timestamp), "%b %d %H:%M:%S %Y", j9time_current_time_millis(), OMRSTR_FTIME_FLAG_LOCAL);
 	tgcExtensions->printf("<cardcleaning timestamp=\"%s\">\n", timestamp);
 	
 	GC_VMThreadListIterator threadIterator(currentThread);
@@ -65,10 +66,10 @@ printCardCleaningStats(OMR_VMThread *omrVMThread)
 	while (NULL != (thread = threadIterator.nextVMThread())) {
 		MM_EnvironmentBase* env = MM_EnvironmentBase::getEnvironment(thread->omrVMThread);
 
-		if ((GC_SLAVE_THREAD == env->getThreadType()) || (thread == currentThread)) {
+		if ((GC_WORKER_THREAD == env->getThreadType()) || (thread == currentThread)) {
 			U_64 cleanTimeInMicros = j9time_hires_delta(0, env->_cardCleaningStats._cardCleaningTime, J9PORT_TIME_DELTA_IN_MICROSECONDS);
 			tgcExtensions->printf("\t<thread id=\"%zu\" cardcleaningtime=\"%llu.%03.3llu\" cardscleaned=\"%zu\" />\n", 
-					env->getSlaveID(),
+					env->getWorkerID(),
 					cleanTimeInMicros / 1000,
 					cleanTimeInMicros % 1000,
 					env->_cardCleaningStats._cardsCleaned);

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2019 IBM Corp. and others
+ * Copyright (c) 1991, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -56,6 +56,26 @@ static UDATA classLocationHashFn(void *key, void *userData);
 static UDATA classLocationHashEqualFn(void *leftKey, void *rightKey, void *userData);
 
 static void addLocationGeneratedClass(J9VMThread *vmThread, J9ClassLoader *classLoader, KeyHashTableClassEntry *existingPackageEntry, IDATA entryIndex, I_32 locationType);
+
+#if defined(J9_EXTENDED_DEBUG)
+static void checkClassAlignment(J9Class *clazz, char const *caller)
+{
+	if (J9_ARE_ANY_BITS_SET((UDATA)clazz, J9_REQUIRED_CLASS_ALIGNMENT - 1)) {
+		J9JavaVM *vm = NULL;
+		jint nVMs = 0;
+		if (JNI_OK == J9_GetCreatedJavaVMs((JavaVM **)&vm, 1, &nVMs)) {
+			if (nVMs == 1) {
+				PORT_ACCESS_FROM_JAVAVM(vm);
+				J9VMThread *currentThread = currentVMThread(vm);
+				j9tty_printf(PORTLIB, "\n<%p> %s: Unaligned class value %p\n", currentThread, caller, clazz);
+			}
+		}
+		Assert_VM_unreachable();
+	}
+}
+#else /* J9_EXTENDED_DEBUG */
+#define checkClassAlignment(clazz, caller) Assert_VM_false(J9_ARE_ANY_BITS_SET((UDATA)(clazz), J9_REQUIRED_CLASS_ALIGNMENT - 1))
+#endif /* J9_EXTENDED_DEBUG */
 
 static UDATA
 classHashGetName(KeyHashTableClassEntry *entry, const U_8 **name, UDATA *nameLength)
@@ -98,8 +118,21 @@ classHashEqualFn(void *tableNode, void *queryNode, void *userData)
 	UDATA queryNodeLength = 0;
 	const U_8 *tableNodeName = NULL;
 	const U_8 *queryNodeName = NULL;
+	char buf[ROM_ADDRESS_LENGTH + 1] = {0};
 	UDATA tableNodeType = classHashGetName(tableNode, &tableNodeName, &tableNodeLength);
 	UDATA queryNodeType = classHashGetName(queryNode, &queryNodeName, &queryNodeLength);
+	UDATA tableNodeTag = ((KeyHashTableClassEntry*)tableNode)->tag;
+	BOOLEAN isTableNodeHiddenClass = (TYPE_CLASS == tableNodeType)
+									&& (TAG_RAM_CLASS == (tableNodeTag & MASK_RAM_CLASS))
+									&& J9ROMCLASS_IS_HIDDEN(((KeyHashTableClassEntry*)tableNode)->ramClass->romClass);
+	
+	if (isTableNodeHiddenClass) {
+		/* Hidden class is keyed on its rom address, not on its name. */
+		PORT_ACCESS_FROM_JAVAVM(javaVM);
+		j9str_printf(PORTLIB, (char*)buf, ROM_ADDRESS_LENGTH + 1, ROM_ADDRESS_FORMAT, (UDATA)((KeyHashTableClassEntry*)tableNode)->ramClass->romClass);
+		tableNodeName = (const U_8 *)buf;
+		tableNodeLength = ROM_ADDRESS_LENGTH;
+	}
 
 	if (queryNodeType == TYPE_UNICODE) {
 		if (tableNodeType == TYPE_CLASS) {
@@ -189,11 +222,23 @@ classHashFn(void *key, void *userData)
 	const U_8 *name = NULL;
 	U_32 hash = 0;
 	UDATA type = classHashGetName(key, &name, &length);
+	UDATA keyTag = ((KeyHashTableClassEntry*)key)->tag;
+	char buf[ROM_ADDRESS_LENGTH + 1] = {0};
+	BOOLEAN isTableNodeHiddenClass = (TYPE_CLASS == type)
+									&& (TAG_RAM_CLASS == (keyTag & MASK_RAM_CLASS))
+									&& J9ROMCLASS_IS_HIDDEN(((KeyHashTableClassEntry*)key)->ramClass->romClass);
 
+	if (isTableNodeHiddenClass) {
+		/* for hidden class, do not key on its name, key on its rom address */
+		PORT_ACCESS_FROM_JAVAVM(javaVM);
+		j9str_printf(PORTLIB, (char*)buf, ROM_ADDRESS_LENGTH + 1, ROM_ADDRESS_FORMAT, (UDATA)((KeyHashTableClassEntry*)key)->ramClass->romClass);
+		name = (const U_8 *)buf;
+		length = ROM_ADDRESS_LENGTH;
+	}
 	if (type == TYPE_UNICODE) {
 		j9object_t stringObject = (j9object_t)name;
 
-		hash = J9VMJAVALANGSTRING_HASHCODE_VM(javaVM, stringObject);
+		hash = J9VMJAVALANGSTRING_HASH_VM(javaVM, stringObject);
 		if (0 == hash) {
 			j9object_t charArray = J9VMJAVALANGSTRING_VALUE_VM(javaVM, stringObject);
 			U_32 i = 0;
@@ -211,7 +256,7 @@ classHashFn(void *key, void *userData)
 				}
 			}
 
-			J9VMJAVALANGSTRING_SET_HASHCODE_VM(javaVM, stringObject, hash);
+			J9VMJAVALANGSTRING_SET_HASH_VM(javaVM, stringObject, hash);
 		}
 		type = TYPE_CLASS;
 	} else {
@@ -285,7 +330,10 @@ hashClassTableAt(J9ClassLoader *classLoader, U_8 *className, UDATA classNameLeng
 	result = hashTableFind(table, &key);
 	if (NULL != result) {
 		J9Class *clazz = result->ramClass;
-		Assert_VM_false(J9_ARE_ANY_BITS_SET((UDATA)clazz, J9_REQUIRED_CLASS_ALIGNMENT - 1));
+		checkClassAlignment(clazz, "hashClassTableAt");
+		if (J9ROMCLASS_IS_HIDDEN(clazz->romClass)) {
+			return NULL;
+		}
 		return clazz;
 	} else {
 		return NULL;
@@ -409,35 +457,92 @@ hashClassTableReplace(J9VMThread *vmThread, J9ClassLoader *classLoader, J9Class 
 }
 
 J9Class *
-hashClassTableStartDo(J9ClassLoader *classLoader, J9HashTableState *walkState)
+hashClassTableStartDo(J9ClassLoader *classLoader, J9HashTableState *walkState, UDATA flags)
 {
+	BOOLEAN skipHidden = J9_ARE_ALL_BITS_SET(flags, J9_HASH_TABLE_STATE_FLAG_SKIP_HIDDEN);
+	BOOLEAN continueToNext = FALSE;
 	KeyHashTableClassEntry *first = hashTableStartDo(classLoader->classHashTable, walkState);
 
-	/* only report RAM classes */
-	while ((NULL != first) && (TAG_RAM_CLASS != (first->tag & MASK_RAM_CLASS))) {
-		first = hashTableNextDo(walkState);
+	if (NULL != first) {	
+		if (TAG_RAM_CLASS != (first->tag & MASK_RAM_CLASS)) {
+			/* only report RAM classes */
+			continueToNext = TRUE;
+		} else {
+			if (skipHidden && J9ROMCLASS_IS_HIDDEN(first->ramClass->romClass)) {
+				continueToNext = TRUE;
+			} else {
+				continueToNext = FALSE;
+			}
+		}
+	} else {
+		continueToNext = FALSE;
 	}
 
+	
+	while (continueToNext) {
+		first = hashTableNextDo(walkState);
+		if (NULL != first) {	
+			if (TAG_RAM_CLASS != (first->tag & MASK_RAM_CLASS)) {
+				/* only report RAM classes */
+				continueToNext = TRUE;
+			} else {
+				if (skipHidden && J9ROMCLASS_IS_HIDDEN(first->ramClass->romClass)) {
+					continueToNext = TRUE;
+				} else {
+					continueToNext = FALSE;
+				}
+			}
+		} else {
+			continueToNext = FALSE;
+		}
+	}
+	walkState->flags = flags;
 	return (NULL == first) ? NULL : first->ramClass;
 }
 
 J9Class *
 hashClassTableNextDo(J9HashTableState *walkState)
 {
+	BOOLEAN skipHidden = J9_ARE_ALL_BITS_SET(walkState->flags, J9_HASH_TABLE_STATE_FLAG_SKIP_HIDDEN);
+	BOOLEAN continueToNext = FALSE;
 	KeyHashTableClassEntry *next = hashTableNextDo(walkState);
 
+	if (NULL != next) {	
+		if (TAG_RAM_CLASS != (next->tag & MASK_RAM_CLASS)) {
+			/* only report RAM classes */
+			continueToNext = TRUE;
+		} else {
+			if (skipHidden && J9ROMCLASS_IS_HIDDEN(next->ramClass->romClass)) {
+				continueToNext = TRUE;
+			} else {
+				continueToNext = FALSE;
+			}
+		}
+	} else {
+		continueToNext = FALSE;
+	}
 	/* only report RAM classes */
-	while ((NULL != next) && (TAG_RAM_CLASS != (next->tag & MASK_RAM_CLASS))) {
+	while (continueToNext) {
 		next = hashTableNextDo(walkState);
+		if (NULL != next) {	
+			if (TAG_RAM_CLASS != (next->tag & MASK_RAM_CLASS)) {
+				/* only report RAM classes */
+				continueToNext = TRUE;
+			} else {
+				if (skipHidden && J9ROMCLASS_IS_HIDDEN(next->ramClass->romClass)) {
+					continueToNext = TRUE;
+				} else {
+					continueToNext = FALSE;
+				}
+			}
+		} else {
+			continueToNext = FALSE;
+		}
 	}
 
 	return (NULL == next) ? NULL : next->ramClass;
 }
 
-/**
- * Find the package ID for the given name and length.
- * NOTE: You must own the class table mutex before calling this function.
- */
 UDATA
 hashPkgTableIDFor(J9VMThread *vmThread, J9ClassLoader *classLoader, J9ROMClass *romClass, IDATA entryIndex, I_32 locationType)
 {
@@ -459,14 +564,27 @@ hashPkgTableIDFor(J9VMThread *vmThread, J9ClassLoader *classLoader, J9ROMClass *
 		return (UDATA)classLoader;
 	} else {
 		UDATA packageID = 0;
-		KeyHashTableClassEntry *result = hashTableAdd(table, &key);
-		if (NULL == result) {
-			result = growClassHashTable(javaVM, classLoader, &key);
+		KeyHashTableClassEntry *result = NULL;
+		BOOLEAN peekOnly = (J9_CP_INDEX_PEEK == entryIndex);
+
+		if (peekOnly) {
+			result = hashTableFind(table, &key);
+			if (NULL == result) {
+				/* Not in the table yet, so use this romClass for the packageID as it is the
+				 * first occurrence of this package in this class loader.
+				 */
+				result = &key;
+			}
+		} else {
+			result = hashTableAdd(table, &key);
+			if (NULL == result) {
+				result = growClassHashTable(javaVM, classLoader, &key);
+			}
 		}
 		if (NULL != result) {
-			packageID = *(UDATA *)result;
+			packageID = result->packageID.taggedROMClass;
 			if (isSystemClassLoader && J9_ARE_ALL_BITS_SET(result->tag, TAG_GENERATED_PACKAGE)) {
-				if (J9_ARE_NO_BITS_SET(key.tag, TAG_GENERATED_PACKAGE)) {
+				if (!peekOnly && J9_ARE_NO_BITS_SET(key.tag, TAG_GENERATED_PACKAGE)) {
 					/* Below function removes the TAG_GENERATED_PACKAGE bit from the hash table entry after adding
 					 * a location for the generated class.
 					 */
@@ -535,7 +653,10 @@ hashClassTableAtString(J9ClassLoader *classLoader, j9object_t stringObject)
 	result = hashTableFind(table, &key);
 	if (NULL != result) {
 		J9Class *clazz = result->ramClass;
-		Assert_VM_false(J9_ARE_ANY_BITS_SET((UDATA)clazz, J9_REQUIRED_CLASS_ALIGNMENT - 1));
+		checkClassAlignment(clazz, "hashClassTableAtString");
+		if (J9ROMCLASS_IS_HIDDEN(clazz->romClass)) {
+			return NULL;
+		}
 		return clazz;
 	}
 	return NULL;

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2019, 2020 IBM Corp. and others
+ * Copyright (c) 2019, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -34,6 +34,11 @@
 #define J9AccAbstract 0x400
 #define J9AccAnnotation 0x2000
 #define J9AccBridge 0x40
+
+#define J9AccClassHasIdentity 0x20
+#define J9AccClassIsValueBased 0x40
+#define J9AccClassHiddenOptionNestmate 0x80
+#define J9AccClassHiddenOptionStrong 0x100
 #define J9AccClassAnnnotionRefersDoubleSlotEntry 0x80000
 #define J9AccClassAnonClass 0x800
 #define J9AccClassArray 0x10000
@@ -54,13 +59,15 @@
 #define J9AccClassHasVerifyData 0x800000
 #define J9AccClassHotSwappedOut 0x4000000
 #define J9AccClassInnerClass 0x4000
+#define J9AccClassHidden 0x8000
 #define J9AccClassNeedsStaticConstantInit 0x10000
 #define J9AccClassIntermediateDataIsClassfile 0x20000
 #define J9AccClassInternalPrimitiveType 0x20000
 #define J9AccClassIsContended 0x1000000
 #define J9AccClassOwnableSynchronizer 0x200000
-#define J9AccClassUnused200 0x200
+#define J9AccClassContinuation 0x1000000
 #define J9AccClassUnused400 0x400
+#define J9AccClassUnused200 0x200
 #define J9AccClassRAMArray 0x10000
 #define J9AccClassRAMShapeShift 0x10
 #define J9AccClassReferenceMask 0x30000000
@@ -113,11 +120,12 @@
 #define J9AccSynchronized 0x20
 #define J9AccSynthetic 0x1000
 #define J9AccTransient 0x80
-#define J9AccValueType 0x100
 #define J9AccVarArgs 0x80
 #define J9AccVolatile 0x40
+#define J9AccValueType 0x40
 #define J9AccRecord 0x400
 #define J9AccSealed 0x200
+#define J9AccPrimitiveValueType 0x800
 #define J9StaticFieldRefBaseType 0x1
 #define J9StaticFieldRefDouble 0x2
 #define J9StaticFieldRefVolatile 0x4
@@ -125,7 +133,7 @@
 #define J9StaticFieldRefPutResolved 0x10
 #define J9StaticFieldRefFinal 0x20
 #define J9StaticFieldRefFlagBits 0x3F
-#define J9_JAVA_CLASS_FINALIZER_CHECK_MASK (J9AccClassFinalizeNeeded | J9AccClassOwnableSynchronizer)
+#define J9_JAVA_CLASS_FINALIZER_CHECK_MASK (J9AccClassFinalizeNeeded | J9AccClassOwnableSynchronizer | J9AccClassContinuation)
 #define J9_JAVA_MODIFIERS_SPECIAL_OBJECT (J9AccClassFinalizeNeeded | J9AccClassReferenceMask)
 
 #endif /*J9JAVAACCESSFLAGS_H */

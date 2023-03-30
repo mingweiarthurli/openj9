@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -57,6 +57,15 @@ class S390J9CallSnippet : public TR::S390CallSnippet
 
    static uint8_t *generateVIThunk(TR::Node *callNode, int32_t argSize, TR::CodeGenerator *cg);
    static TR_J2IThunk *generateInvokeExactJ2IThunk(TR::Node *callNode, int32_t argSize, char* signature, TR::CodeGenerator *cg);
+
+   TR_RuntimeHelper getInterpretedDispatchHelper(TR::SymbolReference *methodSymRef, TR::DataType type);
+
+   uint8_t *generatePICBinary(uint8_t *cursor, TR::SymbolReference *glueRef);
+   uint32_t getPICBinaryLength();
+   virtual uint32_t getLength(int32_t estimatedSnippetStart);
+
+   virtual void print(TR::FILE *pOutFile, TR_Debug *debug);
+                                                 
    virtual uint8_t *emitSnippetBody();
    };
 

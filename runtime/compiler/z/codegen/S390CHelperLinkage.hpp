@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -48,10 +48,10 @@ class CHelperLinkage : public TR::Linkage
 #endif
 public:
 
-   CHelperLinkage(TR::CodeGenerator * cg, TR_S390LinkageConventions elc=TR_JavaHelper, TR_LinkageConventions lc=TR_CHelper);
+   CHelperLinkage(TR::CodeGenerator * cg, TR_LinkageConventions elc=TR_Helper);
 
-   virtual void createPrologue(TR::Instruction * cursor) { TR_ASSERT(false, "Not Implemented"); }
-   virtual void createEpilogue(TR::Instruction * cursor) { TR_ASSERT(false, "Not Implemented"); }
+   virtual void createPrologue(TR::Instruction * cursor) { TR_UNIMPLEMENTED(); }
+   virtual void createEpilogue(TR::Instruction * cursor) { TR_UNIMPLEMENTED(); }
 
    virtual void setParameterLinkageRegisterIndex(TR::ResolvedMethodSymbol * method)
       {
@@ -63,10 +63,10 @@ public:
       TR_ASSERT_FATAL(false, "CHelperLinkage should only be used for call-outs");
       }
 
-   virtual void mapStack(TR::ResolvedMethodSymbol *symbol) { TR_ASSERT(false, "Not Implemented"); }
-   virtual void mapSingleAutomatic(TR::AutomaticSymbol *p, uint32_t &stackIndex) { TR_ASSERT(false, "Not Implemented"); }
-   virtual bool hasToBeOnStack(TR::ParameterSymbol * parm) { TR_ASSERT(false, "Not Implemented"); return false; }
-   virtual void initS390RealRegisterLinkage() { TR_ASSERT(false, "Not Implemented"); }
+   virtual void mapStack(TR::ResolvedMethodSymbol *symbol) { TR_UNIMPLEMENTED(); }
+   virtual void mapSingleAutomatic(TR::AutomaticSymbol *p, uint32_t &stackIndex) { TR_UNIMPLEMENTED(); }
+   virtual bool hasToBeOnStack(TR::ParameterSymbol * parm) { TR_UNIMPLEMENTED(); return false; }
+   virtual void initS390RealRegisterLinkage() { TR_UNIMPLEMENTED(); }
    virtual TR::RealRegister::RegNum setMethodMetaDataRegister(TR::RealRegister::RegNum r) { return _methodMetaDataRegister = r; }
    virtual TR::RealRegister::RegNum getMethodMetaDataRegister() { return _methodMetaDataRegister; }
    virtual TR::RealRegister::RegNum setReturnAddressRegister(TR::RealRegister::RegNum r) { return _returnAddressRegister = r; }

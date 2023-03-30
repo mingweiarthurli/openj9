@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -25,6 +25,7 @@
 #include "control/CompilationRuntime.hpp"
 #include "control/CompilationThread.hpp"
 #include "control/JITServerHelpers.hpp"
+#include "runtime/JITClientSession.hpp"
 #endif /* defined(J9VM_OPT_JITSERVER) */
 #include "env/ClassEnv.hpp"
 #include "env/CompilerEnv.hpp"
@@ -32,10 +33,11 @@
 #include "env/TypeLayout.hpp"
 #include "env/VMJ9.h"
 #include "j9.h"
-#include "j9protos.h"
-#include "j9cp.h"
 #include "j9cfg.h"
+#include "j9cp.h"
 #include "j9fieldsInfo.h"
+#include "j9nonbuilder.h"
+#include "j9protos.h"
 #include "rommeth.h"
 #include "runtime/RuntimeAssumptions.hpp"
 
@@ -85,7 +87,8 @@ J9::ClassEnv::isClassSpecialForStackAllocation(TR_OpaqueClassBlock * clazz)
    const UDATA mask = (J9AccClassReferenceWeak |
                        J9AccClassReferenceSoft |
                        J9AccClassFinalizeNeeded |
-                       J9AccClassOwnableSynchronizer);
+                       J9AccClassOwnableSynchronizer |
+                       J9AccClassContinuation );
 
 #if defined(J9VM_OPT_JITSERVER)
    if (auto stream = TR::CompilationInfo::getStream())
@@ -276,17 +279,6 @@ J9::ClassEnv::isStringClass(TR_OpaqueClassBlock *clazz)
    return false;
    }
 
-
-bool
-J9::ClassEnv::isStringClass(uintptr_t objectPointer)
-   {
-   /*
-   TR_ASSERT(TR::Compiler->vm.hasAccess(omrVMThread), "isString requires VM access");
-   return isString(getObjectClass(objectPointer));
-   */
-   return false;
-   }
-
 bool
 J9::ClassEnv::isAbstractClass(TR::Compilation *comp, TR_OpaqueClassBlock *clazzPointer)
    {
@@ -297,6 +289,12 @@ bool
 J9::ClassEnv::isInterfaceClass(TR::Compilation *comp, TR_OpaqueClassBlock *clazzPointer)
    {
    return comp->fej9()->isInterfaceClass(clazzPointer);
+   }
+
+bool
+J9::ClassEnv::isConcreteClass(TR::Compilation *comp, TR_OpaqueClassBlock * clazzPointer)
+   {
+   return comp->fej9()->isConcreteClass(clazzPointer);
    }
 
 bool
@@ -348,6 +346,12 @@ J9::ClassEnv::isClassInitialized(TR::Compilation *comp, TR_OpaqueClassBlock *cla
    }
 
 bool
+J9::ClassEnv::isClassVisible(TR::Compilation *comp, TR_OpaqueClassBlock *sourceClass, TR_OpaqueClassBlock *destClass)
+   {
+   return comp->fej9()->isClassVisible(sourceClass, destClass);
+   }
+
+bool
 J9::ClassEnv::classHasIllegalStaticFinalFieldModification(TR_OpaqueClassBlock * clazzPointer)
    {
    J9Class* j9clazz = TR::Compiler->cls.convertClassOffsetToClassPtr(clazzPointer);
@@ -383,12 +387,6 @@ J9::ClassEnv::isString(TR::Compilation *comp, TR_OpaqueClassBlock *clazz)
    }
 
 bool
-J9::ClassEnv::isString(TR::Compilation *comp, uintptr_t objectPointer)
-   {
-   return comp->fej9()->isString(objectPointer);
-   }
-
-bool
 J9::ClassEnv::jitStaticsAreSame(
       TR::Compilation *comp,
       TR_ResolvedMethod * method1,
@@ -417,24 +415,118 @@ J9::ClassEnv::isAnonymousClass(TR::Compilation *comp, TR_OpaqueClassBlock *clazz
    return comp->fej9()->isAnonymousClass(clazz);
    }
 
-const TR::TypeLayout*
-J9::ClassEnv::enumerateFields(TR::Region& region, TR_OpaqueClassBlock * opaqueClazz, TR::Compilation *comp)
-   {  
-   J9Class *clazz = (J9Class*)opaqueClazz;
-   TR_VMFieldsInfo fieldsInfo(comp, clazz, 1, stackAlloc);
-   ListIterator<TR_VMField> iter(fieldsInfo.getFields());
-   TR::TypeLayoutBuilder tlb(region);
-   for (TR_VMField *field = iter.getFirst(); field; field = iter.getNext())
+/*
+ * Merges the prefix with the field name to a new string.
+ *
+ * \param prefix
+ *    prefix could be NULL.
+ * \param prefixLength
+ *    The length of the prefix string.
+ * \param mergedLength
+ *    The merged length of the concatenated field name that is returned to the caller.
+ */
+static char * mergeFieldNames(char *prefix, uint32_t prefixLength, J9ROMFieldShape *field,
+                              TR::Region &region, uint32_t &mergedLength)
+   {
+   J9UTF8 *fieldNameUTF = J9ROMFIELDSHAPE_NAME(field);
+   char *fieldName = reinterpret_cast<char *>(J9UTF8_DATA(fieldNameUTF));
+   uint32_t nameLength = J9UTF8_LENGTH(fieldNameUTF);
+
+   mergedLength = nameLength + prefixLength;
+   mergedLength++; // for adding '\0' at the end
+
+   char *newName = new (region) char[mergedLength];
+
+   if (prefixLength > 0)
+      strncpy(newName, prefix, prefixLength);
+   strncpy(newName + prefixLength, fieldName, nameLength);
+
+   newName[mergedLength-1] = '\0';
+
+   return newName;
+   }
+
+/*
+ * Builds a new string with the prefix and the field name and appends the string with "." to be used
+ * as a part of the flattened field chain name.
+ *
+ * \param prefix
+ *    prefix could be ended with `.` or NULL.
+ * \param prefixLength
+ *    The length of the prefix string.
+ * \param mergedLength
+ *    The merged length of the concatenated field name that is returned to the caller.
+ */
+static char * buildTransitiveFieldNames(char *prefix, uint32_t prefixLength, J9ROMFieldShape *field,
+                                        TR::Region &region, uint32_t &mergedLength)
+   {
+   J9UTF8 *fieldNameUTF = J9ROMFIELDSHAPE_NAME(field);
+   char *fieldName = reinterpret_cast<char *>(J9UTF8_DATA(fieldNameUTF));
+   uint32_t nameLength = J9UTF8_LENGTH(fieldNameUTF);
+
+   mergedLength = nameLength + prefixLength;
+   mergedLength++; // for appending '.'
+   mergedLength++; // for adding '\0' at the end
+
+   char *newName = new (region) char[mergedLength];
+
+   if (prefixLength > 0)
+      strncpy(newName, prefix, prefixLength);
+   strncpy(newName + prefixLength, fieldName, nameLength);
+
+   newName[mergedLength-2] = '.';
+   newName[mergedLength-1] = '\0';
+
+   return newName;
+   }
+
+static void addEntryForFieldImpl(TR_VMField *field, TR::TypeLayoutBuilder &tlb, TR::Region &region, J9Class *definingClass,
+                                 char *prefix, uint32_t prefixLength, IDATA offsetBase, TR::Compilation *comp)
+   {
+   J9JavaVM *vm = comp->fej9()->getJ9JITConfig()->javaVM;
+   bool trace = comp->getOption(TR_TraceILGen);
+   uint32_t mergedLength = 0;
+   J9UTF8 *signature = J9ROMFIELDSHAPE_SIGNATURE(field->shape);
+
+   if (TR::Compiler->om.areValueTypesEnabled() &&
+       vm->internalVMFunctions->isNameOrSignatureQtype(signature) &&
+       vm->internalVMFunctions->isFlattenableFieldFlattened(definingClass, field->shape))
+      {
+      char *prefixForChild = buildTransitiveFieldNames(prefix, prefixLength, field->shape, comp->trMemory()->currentStackRegion(), mergedLength);
+      uint32_t prefixLengthForChild = mergedLength-1;
+      IDATA offsetBaseForChild = field->offset + offsetBase;
+
+      if (trace)
+         traceMsg(comp, "field %s:%s is flattened. offset from TR_VMField %d, offset from fcc %d\n",
+            field->name, field->signature, field->offset,
+            vm->internalVMFunctions->getFlattenableFieldOffset(definingClass, field->shape));
+
+      J9Class *fieldClass = vm->internalVMFunctions->getFlattenableFieldType(definingClass, field->shape);
+      TR_VMFieldsInfo fieldsInfo(comp, fieldClass, 1, stackAlloc);
+      ListIterator<TR_VMField> iter(fieldsInfo.getFields());
+      for (TR_VMField *childField = iter.getFirst(); childField; childField = iter.getNext())
+         {
+         IDATA offsetBaseForChild = field->offset + offsetBase;
+         /* Types with fields (flat or non-flat) that require double (64bit) alignment are pre-padded if there isn't
+          * a smaller type that can be used as pre-padding. Pre-padding is eliminated when a type is flattened within
+          * its container. As a result pre-padding must be subtracted from the base offset of the flattened field.
+          */
+         offsetBaseForChild -= J9CLASS_PREPADDING_SIZE(fieldClass);
+
+         addEntryForFieldImpl(childField, tlb, region, fieldClass, prefixForChild, prefixLengthForChild, offsetBaseForChild, comp);
+         }
+      }
+   else
       {
       char *signature = field->signature;
       char charSignature = *signature;
       TR::DataType dataType;
       switch(charSignature)
          {
-         case 'Z': 
-         case 'B': 
-         case 'C': 
-         case 'S': 
+         case 'Z':
+         case 'B':
+         case 'C':
+         case 'S':
          case 'I':
             {
             dataType = TR::Int32;
@@ -455,7 +547,6 @@ J9::ClassEnv::enumerateFields(TR::Region& region, TR_OpaqueClassBlock * opaqueCl
             dataType = TR::Double;
             break;
             }
-// VALHALLA_TODO:  Might require different TR::DataType for value types (Q)
          case 'L':
          case 'Q':
          case '[':
@@ -464,16 +555,71 @@ J9::ClassEnv::enumerateFields(TR::Region& region, TR_OpaqueClassBlock * opaqueCl
             break;
             }
          }
-      size_t nameSize = strlen(field->name)+1;
-      char *fieldName = new (region) char[nameSize];
-      strncpy(fieldName, field->name, nameSize);
-      TR_ASSERT_FATAL(fieldName[nameSize-1] == '\0', "fieldName buffer was too small.");
-      int32_t offset = field->offset + TR::Compiler->om.objectHeaderSizeInBytes();
+
+      char *fieldName = mergeFieldNames(prefix, prefixLength, field->shape, region, mergedLength);
+      int32_t offset = offsetBase + field->offset + TR::Compiler->om.objectHeaderSizeInBytes();
       bool isVolatile = (field->modifiers & J9AccVolatile) ? true : false;
       bool isPrivate = (field->modifiers & J9AccPrivate) ? true : false;
       bool isFinal = (field->modifiers & J9AccFinal) ? true : false;
-      tlb.add(TR::TypeLayoutEntry(dataType, offset, fieldName, isVolatile, isPrivate, isFinal, signature));
+
+      int sigLen = strlen(signature);
+      char *fieldSignature = new (region) char[sigLen+1];
+      memcpy(fieldSignature, signature, sigLen);
+      fieldSignature[sigLen] = '\0';
+
+      if (trace)
+         traceMsg(comp, "type layout definingClass %p field: %s signature: %s field offset: %d offsetBase %d\n", definingClass, fieldName, fieldSignature, field->offset, offsetBase);
+      tlb.add(TR::TypeLayoutEntry(dataType, offset, fieldName, isVolatile, isPrivate, isFinal, fieldSignature));
       }
+   }
+
+static void addEntryForField(TR_VMField *field, TR::TypeLayoutBuilder &tlb, TR::Region &region, TR_OpaqueClassBlock *opaqueClazz, TR::Compilation *comp)
+   {
+   char *prefix = NULL;
+   uint32_t prefixLength = 0;
+   IDATA offsetBase = 0;
+   J9Class *definingClass = reinterpret_cast<J9Class*>(opaqueClazz);
+
+   addEntryForFieldImpl(field, tlb, region, definingClass, prefix, prefixLength, offsetBase, comp);
+   }
+
+const TR::TypeLayout *
+J9::ClassEnv::enumerateFields(TR::Region &region, TR_OpaqueClassBlock *opaqueClazz, TR::Compilation *comp)
+   {
+   TR::TypeLayoutBuilder tlb(region);
+#if defined(J9VM_OPT_JITSERVER)
+   if (comp->isOutOfProcessCompilation())
+      {
+      auto stream = comp->getStream();
+      stream->write(JITServer::MessageType::ClassEnv_enumerateFields, opaqueClazz);
+      auto recv = stream->read<std::vector<TR::TypeLayoutEntry>, std::vector<std::string>, std::vector<std::string>>();
+      auto &entries = std::get<0>(recv);
+      auto &fieldNames = std::get<1>(recv);
+      auto &typeSignatures = std::get<2>(recv);
+      for (int32_t idx = 0; idx < entries.size(); ++idx)
+         {
+         TR::TypeLayoutEntry entry = entries[idx];
+         char *fieldname = new (region) char[fieldNames[idx].length() + 1];
+         memcpy(fieldname, fieldNames[idx].data(), fieldNames[idx].length() + 1);
+         entry._fieldname = fieldname;
+         char *typeSignature = new (region) char[typeSignatures[idx].length() + 1];
+         memcpy(typeSignature, typeSignatures[idx].data(), typeSignatures[idx].length() + 1);
+         entry._typeSignature = typeSignature;
+         tlb.add(entry);
+         }
+
+      }
+   else
+#endif /* defined(J9VM_OPT_JITSERVER) */
+      {
+      TR_VMFieldsInfo fieldsInfo(comp, reinterpret_cast<J9Class *>(opaqueClazz), 1, stackAlloc);
+      ListIterator<TR_VMField> iter(fieldsInfo.getFields());
+      for (TR_VMField *field = iter.getFirst(); field; field = iter.getNext())
+         {
+         addEntryForField(field, tlb, region, opaqueClazz, comp);
+         }
+      }
+
    return tlb.build();
    }
 
@@ -583,29 +729,6 @@ uint8_t *
 J9::ClassEnv::getROMClassRefName(TR::Compilation *comp, TR_OpaqueClassBlock *clazz, uint32_t cpIndex, int &classRefLen)
    {
    J9ROMConstantPoolItem *romCP = self()->getROMConstantPool(comp, clazz);
-#if defined(J9VM_OPT_JITSERVER)
-   if (comp->isOutOfProcessCompilation())
-      {
-      J9ROMFieldRef *romFieldRef = (J9ROMFieldRef *)&romCP[cpIndex];
-      TR_ASSERT(JITServerHelpers::isAddressInROMClass(romFieldRef, self()->romClassOf(clazz)), "Field ref must be in ROM class");
-
-      J9ROMClassRef *romClassRef = (J9ROMClassRef *)&romCP[romFieldRef->classRefCPIndex];
-      TR_ASSERT(JITServerHelpers::isAddressInROMClass(romClassRef, self()->romClassOf(clazz)), "Class ref must be in ROM class");
-
-      TR::CompilationInfoPerThread *compInfoPT = TR::compInfoPT;
-      char *name = NULL;
-
-      OMR::CriticalSection getRemoteROMClass(compInfoPT->getClientData()->getROMMapMonitor()); 
-      auto &classMap = compInfoPT->getClientData()->getROMClassMap();
-      auto it = classMap.find(reinterpret_cast<J9Class *>(clazz));
-      auto &classInfo = it->second;
-      name = classInfo.getROMString(classRefLen, romClassRef,
-                             {
-                             offsetof(J9ROMClassRef, name)
-                             });
-      return (uint8_t *) name;
-      }
-#endif /* defined(J9VM_OPT_JITSERVER) */
    J9ROMFieldRef *romFieldRef = (J9ROMFieldRef *)&romCP[cpIndex];
    J9ROMClassRef *romClassRef = (J9ROMClassRef *)&romCP[romFieldRef->classRefCPIndex];
    J9UTF8 *classRefNameUtf8 = J9ROMCLASSREF_NAME(romClassRef);
@@ -652,6 +775,129 @@ J9::ClassEnv::isValueTypeClass(TR_OpaqueClassBlock *clazz)
    }
 
 bool
+J9::ClassEnv::isPrimitiveValueTypeClass(TR_OpaqueClassBlock *clazz)
+   {
+#if defined(J9VM_OPT_JITSERVER)
+   if (auto stream = TR::CompilationInfo::getStream())
+      {
+      uintptr_t classFlags = 0;
+      JITServerHelpers::getAndCacheRAMClassInfo((J9Class *)clazz, TR::compInfoPT->getClientData(), stream, JITServerHelpers::CLASSINFO_CLASS_FLAGS, (void *)&classFlags);
+#ifdef DEBUG
+      stream->write(JITServer::MessageType::ClassEnv_classFlagsValue, clazz);
+      uintptr_t classFlagsRemote = std::get<0>(stream->read<uintptr_t>());
+      // Check that class flags from remote call is equal to the cached ones
+      classFlags = classFlags & J9ClassIsPrimitiveValueType;
+      classFlagsRemote = classFlagsRemote & J9ClassIsPrimitiveValueType;
+      TR_ASSERT(classFlags == classFlagsRemote, "remote call class flags is not equal to cached class flags");
+#endif
+      return classFlags & J9ClassIsPrimitiveValueType;
+      }
+#endif /* defined(J9VM_OPT_JITSERVER) */
+   J9Class *j9class = reinterpret_cast<J9Class*>(clazz);
+   return J9_IS_J9CLASS_PRIMITIVE_VALUETYPE(j9class);
+   }
+
+bool
+J9::ClassEnv::isValueTypeClassFlattened(TR_OpaqueClassBlock *clazz)
+   {
+#if defined(J9VM_OPT_JITSERVER)
+   if (auto stream = TR::CompilationInfo::getStream())
+      {
+      uintptr_t classFlags = 0;
+      JITServerHelpers::getAndCacheRAMClassInfo((J9Class *)clazz, TR::compInfoPT->getClientData(), stream, JITServerHelpers::CLASSINFO_CLASS_FLAGS, (void *)&classFlags);
+#ifdef DEBUG
+      stream->write(JITServer::MessageType::ClassEnv_classFlagsValue, clazz);
+      uintptr_t classFlagsRemote = std::get<0>(stream->read<uintptr_t>());
+      // Check that class flags from remote call is equal to the cached ones
+      classFlags = classFlags & J9ClassIsFlattened;
+      classFlagsRemote = classFlagsRemote & J9ClassIsFlattened;
+      TR_ASSERT(classFlags == classFlagsRemote, "remote call class flags is not equal to cached class flags");
+#endif
+      return classFlags & J9ClassIsFlattened;
+      }
+#endif /* defined(J9VM_OPT_JITSERVER) */
+
+   return (clazz && J9_IS_J9CLASS_FLATTENED(reinterpret_cast<J9Class*>(clazz)));
+   }
+
+bool
+J9::ClassEnv::isValueBasedOrValueTypeClass(TR_OpaqueClassBlock *clazz)
+   {
+#if defined(J9VM_OPT_JITSERVER)
+   if (auto stream = TR::CompilationInfo::getStream())
+      {
+      uintptr_t classFlags = 0;
+      JITServerHelpers::getAndCacheRAMClassInfo((J9Class *)clazz, TR::compInfoPT->getClientData(), stream, JITServerHelpers::CLASSINFO_CLASS_FLAGS, (void *)&classFlags);
+#ifdef DEBUG
+      stream->write(JITServer::MessageType::ClassEnv_classFlagsValue, clazz);
+      uintptr_t classFlagsRemote = std::get<0>(stream->read<uintptr_t>());
+      // Check that class flags from remote call is equal to the cached ones
+      classFlags = classFlags & J9_CLASS_DISALLOWS_LOCKING_FLAGS;
+      classFlagsRemote = classFlagsRemote & J9_CLASS_DISALLOWS_LOCKING_FLAGS;
+      TR_ASSERT_FATAL(classFlags == classFlagsRemote, "remote call class flags is not equal to cached class flags");
+#endif
+      return J9_ARE_ANY_BITS_SET(classFlags, J9_CLASS_DISALLOWS_LOCKING_FLAGS);
+      }
+#endif /* defined(J9VM_OPT_JITSERVER) */
+   J9Class *j9class = reinterpret_cast<J9Class*>(clazz);
+   return J9_ARE_ANY_BITS_SET(j9class->classFlags, J9_CLASS_DISALLOWS_LOCKING_FLAGS);
+   }
+
+bool
+J9::ClassEnv::classHasIdentity(TR_OpaqueClassBlock *clazz)
+   {
+#if defined(J9VM_OPT_JITSERVER)
+   if (auto stream = TR::CompilationInfo::getStream())
+      {
+      uintptr_t classFlags = 0;
+      JITServerHelpers::getAndCacheRAMClassInfo((J9Class *)clazz, TR::compInfoPT->getClientData(), stream, JITServerHelpers::CLASSINFO_CLASS_FLAGS, (void *)&classFlags);
+#ifdef DEBUG
+      stream->write(JITServer::MessageType::ClassEnv_classFlagsValue, clazz);
+      uintptr_t classFlagsRemote = std::get<0>(stream->read<uintptr_t>());
+      // Check that class flags from remote call is equal to the cached ones
+      classFlags = classFlags & J9ClassHasIdentity;
+      classFlagsRemote = classFlagsRemote & J9ClassHasIdentity;
+      TR_ASSERT_FATAL(classFlags == classFlagsRemote, "remote call class flags is not equal to cached class flags");
+#endif
+      return J9_ARE_ANY_BITS_SET(classFlags, J9ClassHasIdentity);
+      }
+#endif /* defined(J9VM_OPT_JITSERVER) */
+   J9Class *j9class = reinterpret_cast<J9Class*>(clazz);
+   return J9_ARE_ANY_BITS_SET(j9class->classFlags, J9ClassHasIdentity);
+   }
+
+bool
+J9::ClassEnv::classSupportsDirectMemoryComparison(TR_OpaqueClassBlock *clazz)
+   {
+   uintptr_t classFlags = 0;
+#if defined(J9VM_OPT_JITSERVER)
+   if (auto stream = TR::CompilationInfo::getStream())
+      {
+      JITServerHelpers::getAndCacheRAMClassInfo((J9Class *)clazz, TR::compInfoPT->getClientData(), stream, JITServerHelpers::CLASSINFO_CLASS_FLAGS, (void *)&classFlags);
+#ifdef DEBUG
+      stream->write(JITServer::MessageType::ClassEnv_classFlagsValue, clazz);
+      uintptr_t classFlagsRemote = std::get<0>(stream->read<uintptr_t>());
+      // Check that class flags from remote call is equal to the cached ones
+      classFlags = classFlags & J9ClassCanSupportFastSubstitutability;
+      classFlagsRemote = classFlagsRemote & J9ClassCanSupportFastSubstitutability;
+      TR_ASSERT_FATAL(classFlags == classFlagsRemote, "remote call class flags is not equal to cached class flags");
+#endif
+      }
+   else
+#endif /* defined(J9VM_OPT_JITSERVER) */
+      {
+      J9Class *j9class = reinterpret_cast<J9Class*>(clazz);
+      classFlags = j9class->classFlags;
+      }
+
+   // If the value type has reference fields and the GC policy is concurrent scavenge, direct
+   // memory comparison cannot be supported.
+   return J9_ARE_ANY_BITS_SET(classFlags, J9ClassCanSupportFastSubstitutability) &&
+            (J9_ARE_NO_BITS_SET(classFlags, J9ClassHasReferences) ||
+             (TR::Compiler->om.readBarrierType() != gc_modron_readbar_none));
+   }
+
+bool
 J9::ClassEnv::isZeroInitializable(TR_OpaqueClassBlock *clazz)
    {
 #if defined(J9VM_OPT_JITSERVER)
@@ -673,7 +919,7 @@ J9::ClassEnv::isZeroInitializable(TR_OpaqueClassBlock *clazz)
    return (self()->classFlagsValue(clazz) & J9ClassContainsUnflattenedFlattenables) == 0;
    }
 
-bool 
+bool
 J9::ClassEnv::containsZeroOrOneConcreteClass(TR::Compilation *comp, List<TR_PersistentClassInfo>* subClasses)
    {
    int count = 0;
@@ -682,7 +928,7 @@ J9::ClassEnv::containsZeroOrOneConcreteClass(TR::Compilation *comp, List<TR_Pers
       {
       ListIterator<TR_PersistentClassInfo> j(subClasses);
       TR_ScratchList<TR_PersistentClassInfo> subClassesNotCached(comp->trMemory());
-   
+
       // Process classes cached at the server first
       ClientSessionData * clientData = TR::compInfoPT->getClientData();
       for (TR_PersistentClassInfo *ptClassInfo = j.getFirst(); ptClassInfo; ptClassInfo = j.getNext())
@@ -696,7 +942,7 @@ J9::ClassEnv::containsZeroOrOneConcreteClass(TR::Compilation *comp, List<TR_Pers
             }
          else
             {
-            if (!TR::Compiler->cls.isInterfaceClass(comp, clazz) && !TR::Compiler->cls.isAbstractClass(comp, clazz))
+            if (TR::Compiler->cls.isConcreteClass(comp, clazz))
                {
                if (++count > 1)
                   return false;
@@ -708,7 +954,7 @@ J9::ClassEnv::containsZeroOrOneConcreteClass(TR::Compilation *comp, List<TR_Pers
       for (TR_PersistentClassInfo *ptClassInfo = i.getFirst(); ptClassInfo; ptClassInfo = i.getNext())
          {
          TR_OpaqueClassBlock *clazz = ptClassInfo->getClassId();
-         if (!TR::Compiler->cls.isInterfaceClass(comp, clazz) && !TR::Compiler->cls.isAbstractClass(comp, clazz))
+         if (TR::Compiler->cls.isConcreteClass(comp, clazz))
             {
             if (++count > 1)
                return false;
@@ -722,7 +968,7 @@ J9::ClassEnv::containsZeroOrOneConcreteClass(TR::Compilation *comp, List<TR_Pers
       for (TR_PersistentClassInfo *ptClassInfo = i.getFirst(); ptClassInfo; ptClassInfo = i.getNext())
          {
          TR_OpaqueClassBlock *clazz = ptClassInfo->getClassId();
-         if (!TR::Compiler->cls.isInterfaceClass(comp, clazz) && !TR::Compiler->cls.isAbstractClass(comp, clazz))
+         if (TR::Compiler->cls.isConcreteClass(comp, clazz))
             {
             if (++count > 1)
                return false;
@@ -733,12 +979,12 @@ J9::ClassEnv::containsZeroOrOneConcreteClass(TR::Compilation *comp, List<TR_Pers
    }
 
 bool
-J9::ClassEnv::isClassRefValueType(TR::Compilation *comp, TR_OpaqueClassBlock *cpContextClass, int32_t cpIndex)
+J9::ClassEnv::isClassRefPrimitiveValueType(TR::Compilation *comp, TR_OpaqueClassBlock *cpContextClass, int32_t cpIndex)
    {
 #if defined(J9VM_OPT_JITSERVER)
-   if (auto stream = TR::CompilationInfo::getStream())
+   if (auto stream = comp->getStream())
       {
-      stream->write(JITServer::MessageType::ClassEnv_isClassRefValueType, cpContextClass, cpIndex);
+      stream->write(JITServer::MessageType::ClassEnv_isClassRefPrimitiveValueType, cpContextClass, cpIndex);
       return std::get<0>(stream->read<bool>());
       }
    else // non-jitserver
@@ -747,5 +993,90 @@ J9::ClassEnv::isClassRefValueType(TR::Compilation *comp, TR_OpaqueClassBlock *cp
       J9Class * j9class = reinterpret_cast<J9Class *>(cpContextClass);
       J9JavaVM *vm = comp->fej9()->getJ9JITConfig()->javaVM;
       return vm->internalVMFunctions->isClassRefQtype(j9class, cpIndex);
+      }
+   }
+
+char *
+J9::ClassEnv::classNameToSignature(const char *name, int32_t &len, TR::Compilation *comp, TR_AllocationKind allocKind, TR_OpaqueClassBlock *clazz)
+   {
+   char *sig;
+
+   if (name[0] == '[')
+      {
+      sig = (char *)comp->trMemory()->allocateMemory(len+1, allocKind);
+      memcpy(sig,name,len);
+      }
+   else
+      {
+      len += 2;
+      sig = (char *)comp->trMemory()->allocateMemory(len+1, allocKind);
+      if (clazz && TR::Compiler->om.areValueTypesEnabled() && self()->isPrimitiveValueTypeClass(clazz))
+         sig[0] = 'Q';
+      else
+         sig[0] = 'L';
+      memcpy(sig+1,name,len-2);
+      sig[len-1]=';';
+      }
+
+   sig[len] = '\0';
+   return sig;
+   }
+
+int32_t
+J9::ClassEnv::flattenedArrayElementSize(TR::Compilation *comp, TR_OpaqueClassBlock *arrayClass)
+   {
+#if defined(J9VM_OPT_JITSERVER)
+   if (auto stream = comp->getStream())
+      {
+      int32_t arrayElementSize = 0;
+      JITServerHelpers::getAndCacheRAMClassInfo((J9Class *)arrayClass, TR::compInfoPT->getClientData(), stream, JITServerHelpers::CLASSINFO_ARRAY_ELEMENT_SIZE, (void *)&arrayElementSize);
+      return arrayElementSize;
+      }
+   else
+#endif /* defined(J9VM_OPT_JITSERVER) */
+      {
+      J9JavaVM *vm = comp->fej9()->getJ9JITConfig()->javaVM;
+      return vm->internalVMFunctions->arrayElementSize((J9ArrayClass*)self()->convertClassOffsetToClassPtr(arrayClass));
+      }
+   }
+
+j9object_t*
+J9::ClassEnv::getDefaultValueSlotAddress(TR::Compilation *comp, TR_OpaqueClassBlock *clazz)
+   {
+   TR_ASSERT_FATAL(self()->isClassInitialized(comp, clazz), "clazz %p must be initialized when getDefaultValueSlotAddress is called", clazz);
+
+#if defined(J9VM_OPT_JITSERVER)
+   if (auto stream = comp->getStream())
+      {
+      j9object_t* defaultValueSlotAddress = NULL;
+      ClientSessionData *clientSessionData = TR::compInfoPT->getClientData();
+
+      JITServerHelpers::getAndCacheRAMClassInfo((J9Class *)clazz, clientSessionData, stream, JITServerHelpers::CLASSINFO_DEFAULT_VALUE_SLOT_ADDRESS, (void *)&defaultValueSlotAddress);
+
+      if (!defaultValueSlotAddress)
+         {
+         stream->write(JITServer::MessageType::ClassEnv_getDefaultValueSlotAddress, clazz);
+         defaultValueSlotAddress = std::get<0>(stream->read<j9object_t*>());
+
+         if (defaultValueSlotAddress)
+            {
+            OMR::CriticalSection getRemoteROMClass(clientSessionData->getROMMapMonitor());
+            auto it = clientSessionData->getROMClassMap().find((J9Class*) clazz);
+            if (it != clientSessionData->getROMClassMap().end())
+               {
+               it->second._defaultValueSlotAddress = defaultValueSlotAddress;
+               }
+            }
+         }
+
+      return defaultValueSlotAddress;
+      }
+   else // non-jitserver
+#endif /* defined(J9VM_OPT_JITSERVER) */
+      {
+      J9Class *j9class = reinterpret_cast<J9Class *>(clazz);
+      J9JavaVM *vm = comp->fej9()->getJ9JITConfig()->javaVM;
+
+      return vm->internalVMFunctions->getDefaultValueSlotAddress(j9class);
       }
    }

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2000, 2020 IBM Corp. and others
+ * Copyright (c) 2000, 2021 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -45,7 +45,6 @@ namespace J9 { class Compilation; }
 namespace TR { class Compilation; }
 class TR_J9VMBase;
 namespace J9 { class ObjectModel; }
-class TR_DebugExt;
 class TR_VMFieldsInfo;
 class TR_BitVector;
 
@@ -75,8 +74,9 @@ class OMR_EXTENSIBLE KnownObjectTable : public OMR::KnownObjectTableConnector
    {
    friend class ::TR_J9VMBase;
    friend class Compilation;
-   friend class ::TR_DebugExt;
    TR_Array<uintptr_t*> _references;
+   TR_Array<int32_t> _stableArrayRanks;
+
 
 public:
    TR_ALLOC(TR_Memory::FrontEnd);
@@ -103,6 +103,9 @@ public:
    void updateKnownObjectTableAtServer(Index index, uintptr_t *objectReferenceLocationClient);
    void getKnownObjectTableDumpInfo(std::vector<TR_KnownObjectTableDumpInfo> &knotDumpInfoList);
 #endif /* defined(J9VM_OPT_JITSERVER) */
+
+   void addStableArray(Index index, int32_t stableArrayRank);
+   bool isArrayWithStableElements(Index index);
 
 private:
 

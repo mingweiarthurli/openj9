@@ -1,7 +1,6 @@
-<?xml version="1.0" encoding="UTF-8"?>
-
+<?xml version='1.0' encoding='UTF-8'?>
 <!--
-  Copyright (c) 2016, 2019 IBM Corp. and others
+  Copyright (c) 2016, 2022 IBM Corp. and others
 
   This program and the accompanying materials are made available under
   the terms of the Eclipse Public License 2.0 which accompanies this
@@ -17,26 +16,62 @@
   OpenJDK Assembly Exception [2].
 
   [1] https://www.gnu.org/software/classpath/license.html
-  [2] http://openjdk.java.net/legal/assembly-exception.html
+  [2] https://openjdk.org/legal/assembly-exception.html
 
   SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
 -->
-
 <playlist xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../TKG/playlist.xsd">
 	<test>
 		<testCaseName>testXXArgumentTesting</testCaseName>
 		<variations>
-			<variation>NoOptions</variation>
+			<variation>Mode150</variation>
 		</variations>
 		<command>$(JAVA_COMMAND) -DEXE=$(SQ)$(JAVA_COMMAND) $(JVM_OPTIONS)$(SQ) -jar $(CMDLINETESTER_JAR) \
 	-config $(Q)$(TEST_RESROOT)$(D)XXArgumentTesting.xml$(Q); \
 	$(TEST_STATUS)</command>
-		<platformRequirements>vm.cmprssptrs</platformRequirements>
 		<levels>
 			<level>sanity</level>
 		</levels>
 		<groups>
 			<group>functional</group>
 		</groups>
+	</test>
+	<test>
+		<testCaseName>testXXArgumentTesting_j9</testCaseName>
+		<variations>
+			<variation>NoOptions</variation>
+			<variation>Mode101</variation>
+			<variation>Mode601</variation>
+			<variation>Mode150</variation>
+			<variation>Mode650</variation>
+		</variations>
+		<command>$(JAVA_COMMAND) -DEXE=$(SQ)$(JAVA_COMMAND) $(JVM_OPTIONS)$(SQ) -jar $(CMDLINETESTER_JAR) \
+	-config $(Q)$(TEST_RESROOT)$(D)XXArgumentTesting_j9.xml$(Q) \
+	-nonZeroExitWhenError; \
+	$(TEST_STATUS)</command>
+		<platformRequirements>bits.64</platformRequirements>
+		<disables>
+			<disable>
+				<comment>github_ibm/runtimes/infrastructure/issues/6123</comment>
+				<version>8</version>
+				<impl>ibm</impl>
+				<variation>Mode650</variation>
+			</disable>
+			<disable>
+				<comment>https://github.com/eclipse-openj9/openj9/issues/13767</comment>
+				<platform>aarch64_mac.*</platform>
+			</disable>
+
+		</disables>
+		<levels>
+			<level>sanity</level>
+		</levels>
+		<groups>
+			<group>functional</group>
+		</groups>
+		<impls>
+			<impl>openj9</impl>
+			<impl>ibm</impl>
+		</impls>
 	</test>
 </playlist>

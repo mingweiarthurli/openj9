@@ -1,6 +1,6 @@
 /*[INCLUDE-IF Sidecar17]*/
 /*******************************************************************************
- * Copyright (c) 2005, 2019 IBM Corp. and others
+ * Copyright (c) 2005, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -16,7 +16,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -25,7 +25,6 @@ package com.ibm.lang.management.internal;
 import com.ibm.java.lang.management.internal.RuntimeMXBeanImpl;
 import com.ibm.lang.management.RuntimeMXBean;
 import openj9.internal.tools.attach.target.AttachHandler;
-
 
 /**
  * Runtime type for {@link com.ibm.lang.management.RuntimeMXBean}.
@@ -63,15 +62,21 @@ public final class ExtendedRuntimeMXBeanImpl extends RuntimeMXBeanImpl implement
 		return os.getSystemLoadAverage();
 	}
 
+/*[IF JAVA_SPEC_VERSION < 19]*/
 	/**
 	 * {@inheritDoc}
 	 */
+	/*[IF JAVA_SPEC_VERSION >= 10]*/
+	@Deprecated(forRemoval = true, since = "10")
+	@SuppressWarnings("removal")
+	/*[ENDIF] JAVA_SPEC_VERSION >= 10 */
 	@Override
 	public long getProcessID() {
 		return getProcessIDImpl();
 	}
 
 	private native long getProcessIDImpl();
+/*[ENDIF] JAVA_SPEC_VERSION < 19*/
 
 	/**
 	 * {@inheritDoc}

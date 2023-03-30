@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2015, 2020 IBM Corp. and others
+ * Copyright (c) 2015, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -27,18 +27,22 @@
 #if defined(OMR_GC_MODRON_SCAVENGER)
 #include "CollectorLanguageInterfaceImpl.hpp"
 #include "ConfigurationDelegate.hpp"
-#include "Dispatcher.hpp"
 #include "FinalizableReferenceBuffer.hpp"
 #include "FinalizableObjectBuffer.hpp"
 #include "HeapRegionDescriptorStandard.hpp"
 #include "HeapRegionIteratorStandard.hpp"
 #include "ObjectAccessBarrier.hpp"
+#include "ParallelDispatcher.hpp"
 #include "ReferenceObjectBuffer.hpp"
 #include "ReferenceObjectList.hpp"
 #include "ReferenceStats.hpp"
 #include "SlotObject.hpp"
 #include "UnfinalizedObjectBuffer.hpp"
 #include "UnfinalizedObjectList.hpp"
+#include "ContinuationObjectBuffer.hpp"
+#include "ContinuationObjectList.hpp"
+#include "VMHelpers.hpp"
+
 #include "ScavengerRootClearer.hpp"
 
 void
@@ -70,21 +74,12 @@ MM_ScavengerRootClearer::processReferenceList(MM_EnvironmentStandard *env, MM_He
 			}
 
 			if (_scavenger->isObjectInEvacuateMemory(referent)) {
-				uintptr_t referenceObjectType = J9CLASS_FLAGS(J9GC_J9OBJECT_CLAZZ(referenceObj, env)) & J9AccClassReferenceMask;
 				/* transition the state to cleared */
 				Assert_MM_true(GC_ObjectModel::REF_STATE_INITIAL == J9GC_J9VMJAVALANGREFERENCE_STATE(env, referenceObj));
 				J9GC_J9VMJAVALANGREFERENCE_STATE(env, referenceObj) = GC_ObjectModel::REF_STATE_CLEARED;
 
 				referenceStats->_cleared += 1;
-
-				/* Phantom references keep it's referent alive in Java 8 and doesn't in Java 9 and later */
-				J9JavaVM * javaVM = (J9JavaVM*)env->getLanguageVM();
-				if ((J9AccClassReferencePhantom == referenceObjectType) && ((J2SE_VERSION(javaVM) & J2SE_VERSION_MASK) <= J2SE_18)) {
-					/* Scanning will be done after the enqueuing */
-					_scavenger->copyObjectSlot(env, &referentSlotObject);
-				} else {
-					referentSlotObject.writeReferenceToSlot(NULL);
-				}
+				referentSlotObject.writeReferenceToSlot(NULL);
 
 				/* Check if the reference has a queue */
 				if (0 != J9GC_J9VMJAVALANGREFERENCE_QUEUE(env, referenceObj)) {
@@ -106,15 +101,18 @@ MM_ScavengerRootClearer::scavengeReferenceObjects(MM_EnvironmentStandard *env, u
 {
 	Assert_MM_true(env->getGCEnvironment()->_referenceObjectBuffer->isEmpty());
 
+	/* Disable dynamicBreadthFirstScanOrdering depth copying before scavenging reference objects to avoid immediate copying of hot children of reference objects */
+	env->disableHotFieldDepthCopy();
+
 	MM_ScavengerJavaStats *javaStats = &env->getGCEnvironment()->_scavengerJavaStats;
 	MM_HeapRegionDescriptorStandard *region = NULL;
 	GC_HeapRegionIteratorStandard regionIterator(_extensions->heapRegionManager);
-	while(NULL != (region = regionIterator.nextRegion())) {
+	while (NULL != (region = regionIterator.nextRegion())) {
 		if (MEMORY_TYPE_NEW == (region->getTypeFlags() & MEMORY_TYPE_NEW)) {
 			MM_HeapRegionDescriptorStandardExtension *regionExtension = MM_ConfigurationDelegate::getHeapRegionDescriptorStandardExtension(env, region);
 			for (uintptr_t i = 0; i < regionExtension->_maxListIndex; i++) {
 				/* NOTE: we can't look at the list to determine if there's work to do since another thread may have already processed it and deleted everything */
-				if(J9MODRON_HANDLE_NEXT_WORK_UNIT(env)) {
+				if (J9MODRON_HANDLE_NEXT_WORK_UNIT(env)) {
 					MM_ReferenceObjectList *list = &regionExtension->_referenceObjectLists[i];
 					MM_ReferenceStats *stats = NULL;
 					j9object_t head = NULL;
@@ -151,6 +149,9 @@ MM_ScavengerRootClearer::scavengeReferenceObjects(MM_EnvironmentStandard *env, u
 			}
 		}
 	}
+	/* Re-enable dynamicBreadthFirstScanOrdering depth copying after scavenging reference objects */
+	env->enableHotFieldDepthCopy();
+	
 	Assert_MM_true(env->getGCEnvironment()->_referenceObjectBuffer->isEmpty());
 }
 
@@ -158,18 +159,21 @@ MM_ScavengerRootClearer::scavengeReferenceObjects(MM_EnvironmentStandard *env, u
 void
 MM_ScavengerRootClearer::scavengeUnfinalizedObjects(MM_EnvironmentStandard *env)
 {
+	/* Disable dynamicBreadthFirstScanOrdering depth copying before scavenging finalizable objects to avoid immediate copying of hot children of finalizable objects */
+	env->disableHotFieldDepthCopy();
+
 	GC_FinalizableObjectBuffer buffer(_extensions);
 	MM_HeapRegionDescriptorStandard *region = NULL;
 	GC_HeapRegionIteratorStandard regionIterator(_extensions->heapRegionManager);
 	GC_Environment *gcEnv = env->getGCEnvironment();
 	bool const compressed = _extensions->compressObjectReferences();
-	while(NULL != (region = regionIterator.nextRegion())) {
+	while (NULL != (region = regionIterator.nextRegion())) {
 		if (MEMORY_TYPE_NEW == (region->getTypeFlags() & MEMORY_TYPE_NEW)) {
 			MM_HeapRegionDescriptorStandardExtension *regionExtension = MM_ConfigurationDelegate::getHeapRegionDescriptorStandardExtension(env, region);
 			for (uintptr_t i = 0; i < regionExtension->_maxListIndex; i++) {
 				MM_UnfinalizedObjectList *list = &regionExtension->_unfinalizedObjectLists[i];
 				if (!list->wasEmpty()) {
-					if(J9MODRON_HANDLE_NEXT_WORK_UNIT(env)) {
+					if (J9MODRON_HANDLE_NEXT_WORK_UNIT(env)) {
 						omrobjectptr_t object = list->getPriorList();
 						while (NULL != object) {
 							omrobjectptr_t next = NULL;
@@ -208,8 +212,53 @@ MM_ScavengerRootClearer::scavengeUnfinalizedObjects(MM_EnvironmentStandard *env)
 
 	/* restore everything to a flushed state before exiting */
 	gcEnv->_unfinalizedObjectBuffer->flush(env);
+
+	/* Re-enable dynamicBreadthFirstScanOrdering depth copying after scavenging finalizable objects */
+	env->enableHotFieldDepthCopy();
 }
 #endif /* J9VM_GC_FINALIZATION */
+
+void
+MM_ScavengerRootClearer::scavengeContinuationObjects(MM_EnvironmentStandard *env)
+{
+	MM_HeapRegionDescriptorStandard *region = NULL;
+	GC_HeapRegionIteratorStandard regionIterator(_extensions->heapRegionManager);
+	GC_Environment *gcEnv = env->getGCEnvironment();
+	bool const compressed = _extensions->compressObjectReferences();
+	while (NULL != (region = regionIterator.nextRegion())) {
+		if (MEMORY_TYPE_NEW == (region->getTypeFlags() & MEMORY_TYPE_NEW)) {
+			MM_HeapRegionDescriptorStandardExtension *regionExtension = MM_ConfigurationDelegate::getHeapRegionDescriptorStandardExtension(env, region);
+			for (uintptr_t i = 0; i < regionExtension->_maxListIndex; i++) {
+				MM_ContinuationObjectList *list = &regionExtension->_continuationObjectLists[i];
+				if (!list->wasEmpty()) {
+					if (J9MODRON_HANDLE_NEXT_WORK_UNIT(env)) {
+						omrobjectptr_t object = list->getPriorList();
+						while (NULL != object) {
+							omrobjectptr_t next = _extensions->accessBarrier->getContinuationLink(object);
+							gcEnv->_scavengerJavaStats._continuationCandidates += 1;
+
+							MM_ForwardedHeader forwardedHeader(object, compressed);
+							if (!forwardedHeader.isForwardedPointer()) {
+								Assert_GC_true_with_message2(env, _scavenger->isObjectInEvacuateMemory(object), "Continuation object  %p should be a dead object, forwardedHeader=%p\n", object, &forwardedHeader);
+								gcEnv->_scavengerJavaStats._continuationCleared += 1;
+								VM_VMHelpers::cleanupContinuationObject((J9VMThread *)env->getLanguageVMThread(), object);
+							} else {
+								omrobjectptr_t forwardedPtr = forwardedHeader.getForwardedObject();
+								Assert_GC_true_with_message(env, NULL != forwardedPtr, "Continuation object  %p should be forwarded\n", object);
+								gcEnv->_continuationObjectBuffer->add(env, forwardedPtr);
+							}
+							object = next;
+						}
+					}
+				}
+			}
+		}
+	}
+
+	/* restore everything to a flushed state before exiting */
+	gcEnv->_continuationObjectBuffer->flush(env);
+}
+
 #endif /* defined(OMR_GC_MODRON_SCAVENGER) */
 
 

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 1991, 2018 IBM Corp. and others
+ * Copyright (c) 1991, 2022 IBM Corp. and others
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -102,6 +102,9 @@ base types: (in the 19bit class index field)
 #define BCV_TAG_BASE_ARRAY_OR_NULL			2		/* set bit means base type array */
 #define BCV_SPECIAL_INIT					4		/* set bit means special init object ("this" for <init>) */
 #define BCV_SPECIAL_NEW						8		/* set bit means special new object (PC offset in upper 28 bits) */
+#define BCV_PRIMITIVE_VALUETYPE				16		/* set bit means primitive class */
+
+#define BCV_GET_TYPE_FROM_CHAR(char) (IS_QTYPE((char)) ? BCV_PRIMITIVE_VALUETYPE : BCV_OBJECT_OR_ARRAY)
 
 #define	BCV_TAG_MASK						(BCV_TAG_BASE_TYPE_OR_TOP | BCV_TAG_BASE_ARRAY_OR_NULL | BCV_SPECIAL_INIT | BCV_SPECIAL_NEW)
 

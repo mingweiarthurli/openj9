@@ -15,7 +15,7 @@
  * OpenJDK Assembly Exception [2].
  *
  * [1] https://www.gnu.org/software/classpath/license.html
- * [2] http://openjdk.java.net/legal/assembly-exception.html
+ * [2] https://openjdk.org/legal/assembly-exception.html
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0 WITH Classpath-exception-2.0 OR LicenseRef-GPL-2.0 WITH Assembly-exception
  *******************************************************************************/
@@ -25,6 +25,7 @@
 
 #include "codegen/Linkage.hpp"
 #include "env/jittypes.h"
+#include "compile/CompilationTypes.hpp"
 #include "infra/Assert.hpp"
 
 namespace TR { class CodeGenerator; }
@@ -85,6 +86,11 @@ public:
 
       inline uint16_t getReservedWord() { return (_word & ReservedMask) >> 16; }
       inline void setReservedWord(uint16_t w) { _word |= ((w << 16) & ReservedMask); }
+
+      inline TR_ReturnInfo getReturnInfo() { return (TR_ReturnInfo)(_word & ReturnInfoMask); }
+      inline void setReturnInfo(TR_ReturnInfo w) { _word |= (w & ReturnInfoMask); }
+
+      inline uint32_t getWord() { return _word; }
 
       int32_t getJitEntryOffset()
          {
