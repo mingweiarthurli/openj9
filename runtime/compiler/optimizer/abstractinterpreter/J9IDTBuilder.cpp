@@ -70,9 +70,9 @@ J9::IDTBuilder::~IDTBuilder()
    }
 
 
-void J9::IDTBuilder::performAbstractInterpretation(IDTNode* node, IDTBuilderVisitor& visitor, AbsArguments* arguments, int32_t callerIndex)
+void J9::IDTBuilder::performAbstractInterpretation(TR::IDTNode* node, TR::IDTBuilderVisitor& visitor, TR::AbsArguments* arguments, int32_t callerIndex)
    {
-   J9AbsInterpreter interpreter(node->getResolvedMethodSymbol(), node->getCallTarget()->_cfg, &visitor, arguments, region(), comp());
+   AbsInterpreter interpreter(node->getResolvedMethodSymbol(), node->getCallTarget()->_cfg, &visitor, arguments, region(), comp());
    
    interpreter.setCallerIndex(callerIndex);
    interpreter.interpret();

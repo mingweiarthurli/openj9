@@ -48,8 +48,6 @@ class IDTBuilder : public OMR::IDTBuilderConnector
 
    ~IDTBuilder();
 
-   private:
-
    /**
     * @brief generate the control flow graph of a call target so that the abstract interpretation can use. 
     *
@@ -70,7 +68,9 @@ class IDTBuilder : public OMR::IDTBuilderConnector
     * 
     * @return void
     */
-   virtual void performAbstractInterpretation(IDTNode* node, IDTBuilderVisitor& visitor, AbsArguments* arguments, int32_t callerIndex);
+   virtual void performAbstractInterpretation(TR::IDTNode* node, TR::IDTBuilderVisitor& visitor, TR::AbsArguments* arguments, int32_t callerIndex);
+
+   private:
 
    TR_J9EstimateCodeSize* _cfgGen;
    };
