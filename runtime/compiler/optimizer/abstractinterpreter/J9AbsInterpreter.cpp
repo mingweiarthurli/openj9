@@ -157,7 +157,7 @@ void J9::AbsInterpreter::setStartBlockState()
          TR::DataType dataType = arg->getDataType();
 
          TR::AbsVPValue* param = new TR::AbsVPValue(vp(), arg->getConstraint(), dataType);
-         param->setParamPosition(paramPos);
+         param->setParameterPosition(paramPos);
 
          if (i == 0 && !_callerMethod->isStatic())
             param->setImplicitParam();
@@ -196,7 +196,7 @@ void J9::AbsInterpreter::setStartBlockState()
          {
          TR_OpaqueClassBlock *classBlock = _callerMethod->containingClass();
          TR::AbsValue* value = createObject(classBlock, TR_yes);
-         value->setParamPosition(paramPos++);
+         value->setParameterPosition(paramPos++);
          value->setImplicitParam();
          state->set(slotIndex++, value);
          }
@@ -213,13 +213,13 @@ void J9::AbsInterpreter::setStartBlockState()
             case TR::Int16:
             case TR::Int32:
                param = createTopInt();
-               param->setParamPosition(paramPos);
+               param->setParameterPosition(paramPos);
                state->set(slotIndex, param);
                break;
             
             case TR::Int64:
                param = createTopLong();
-               param->setParamPosition(paramPos);
+               param->setParameterPosition(paramPos);
                state->set(slotIndex, param);
                slotIndex++;
                state->set(slotIndex, createTopLong());
@@ -227,7 +227,7 @@ void J9::AbsInterpreter::setStartBlockState()
             
             case TR::Double:
                param = createTopDouble();
-               param->setParamPosition(paramPos);
+               param->setParameterPosition(paramPos);
                state->set(slotIndex, param);
                slotIndex++;
                state->set(slotIndex, createTopDouble());
@@ -235,7 +235,7 @@ void J9::AbsInterpreter::setStartBlockState()
             
             case TR::Float:
                param = createTopFloat();
-               param->setParamPosition(paramPos);
+               param->setParameterPosition(paramPos);
                state->set(slotIndex, param);
                break;
             
@@ -247,13 +247,13 @@ void J9::AbsInterpreter::setStartBlockState()
                   int32_t arrayType = comp()->fe()->getNewArrayTypeFromClass(classBlock);
                   int32_t elemetSize = arrayType == 7 || arrayType == 11 ? 8 : 4; //7: double, 11: long
                   param = createArrayObject(classBlock, TR_maybe, 0, INT32_MAX, elemetSize);
-                  param->setParamPosition(paramPos);
+                  param->setParameterPosition(paramPos);
                   state->set(slotIndex, param);
                   }
                else
                   {
                   param = createObject(classBlock, TR_maybe);
-                  param->setParamPosition(paramPos);
+                  param->setParameterPosition(paramPos);
                   state->set(slotIndex, param);
                   }
                break;
@@ -841,6 +841,8 @@ void J9::AbsInterpreter::ldc(bool wide)
 
 void J9::AbsInterpreter::load(TR::DataType type, int32_t index)
    {
+   // if (index == 0)
+   //    return;
    TR::AbsStackMachineState* state = static_cast<TR::AbsStackMachineState*>(currentBlock()->getAbsState());
    
    switch (type)
@@ -1675,291 +1677,145 @@ void J9::AbsInterpreter::conditionalBranch(TR::DataType type, int32_t label, Con
 
    switch(op)
       {
-      /*** ifnull ***/
-      case ConditionalBranchOperator::null:
-         {
-         TR::AbsValue* value = state->pop();
-         TR_ASSERT_FATAL(value->getDataType() == TR::Address, "Unexpected type");
-         
-         if (value->isParameter() && !value->isImplicitParameter())
-            {
-            TR_YesNoMaybe isNonNull = TR_maybe;
-            if (isNonNullObject(value))
-               isNonNull = TR_yes;
-            else if (isNullObject(value))
-               isNonNull = TR_no;
-            
-            if (TR::NullBranchFoldingPredicate::predicate(isNonNull, TR::NullBranchFoldingPredicate::Kind::IfNull))
-               {
-               TR::PotentialOptimization* opt = new (region()) TR::PotentialOptimization(currentByteCodeIndex(), _callerMethodSymbol, TR::PotentialOptimization::OptKind::BranchFolding);
-               _inliningMethodSummary->addOpt(opt);
-               }
-            }
-         
-         switch (type)
-            {
-            case TR::Address:
-               break;
-            default:
-               TR_ASSERT_FATAL(false, "Invalid type");
-               break;
-            }
-
-         break;
-         }
       
-      /*** ifnonnull ***/
+      // null branch folding predicate
+      case ConditionalBranchOperator::null:
       case ConditionalBranchOperator::nonnull:
          {
          TR::AbsValue* value = state->pop();
          TR_ASSERT_FATAL(value->getDataType() == TR::Address, "Unexpected type");
-
-         if (value->isParameter() && !value->isImplicitParameter())
-            {
-            TR_YesNoMaybe isNonNull = TR_maybe;
-            if (isNonNullObject(value))
-               isNonNull = TR_yes;
-            else if (isNullObject(value))
-               isNonNull = TR_no;
-            
-            if (TR::NullBranchFoldingPredicate::predicate(isNonNull, TR::NullBranchFoldingPredicate::Kind::IfNonNull))
-               {
-               TR::PotentialOptimization* opt = new (region()) TR::PotentialOptimization(currentByteCodeIndex(), _callerMethodSymbol, TR::PotentialOptimization::OptKind::BranchFolding);
-               _inliningMethodSummary->addOpt(opt);
-               }
-            }
-
-         switch (type)
-            {
-            case TR::Address:
-               break;
-            default:
-               TR_ASSERT_FATAL(false, "Invalid type");
-               break;
-            }
-
-         break;
-         }
-
-      /*** ifeq ***/
-      case ConditionalBranchOperator::eq:
-         {
-         TR::AbsValue* value = state->pop();
-         TR_ASSERT_FATAL(value->getDataType() == TR::Int32, "Unexpected type");
-
-         if (value->isParameter())
-            {
-            if (isInt(value))
-               {
-               TR::AbsVPValue* vpValue = static_cast<TR::AbsVPValue*>(value);
-               int32_t low = vpValue->getConstraint()->asIntConstraint()->getLowInt();
-               int32_t high = vpValue->getConstraint()->asIntConstraint()->getHighInt();
-
-               if (TR::BranchFoldingPredicate::predicate(low, high, TR::BranchFoldingPredicate::Kind::IfEq))
-                  {
-                  TR::PotentialOptimization* opt = new (region()) TR::PotentialOptimization(currentByteCodeIndex(), _callerMethodSymbol, TR::PotentialOptimization::OptKind::BranchFolding);
-                  _inliningMethodSummary->addOpt(opt);
-                  }
-               }
-            }
-
-         switch (type)
-            {
-            case TR::Int32:
-               break;
-            default:
-               TR_ASSERT_FATAL(false, "Invalid type");
-               break;
-            }
-         break;
-         }
-
-      /*** ifne ***/
-      case ConditionalBranchOperator::ne:
-         {
-         TR::AbsValue* value = state->pop();
-         TR_ASSERT_FATAL(value->getDataType() == TR::Int32, "Unexpected type");
-
-         if (value->isParameter())
-            {
-            if (isInt(value))
-               {
-               TR::AbsVPValue* vpValue = static_cast<TR::AbsVPValue*>(value);
-               int32_t low = vpValue->getConstraint()->asIntConstraint()->getLowInt();
-               int32_t high = vpValue->getConstraint()->asIntConstraint()->getHighInt();
-
-               if (TR::BranchFoldingPredicate::predicate(low, high, TR::BranchFoldingPredicate::Kind::IfNe))
-                  {
-                  TR::PotentialOptimization* opt = new (region()) TR::PotentialOptimization(currentByteCodeIndex(), _callerMethodSymbol, TR::PotentialOptimization::OptKind::BranchFolding);
-                  _inliningMethodSummary->addOpt(opt);
-                  }
-               }
-            }
-
-         switch (type)
-            {
-            case TR::Int32:
-               break;
-            default:
-               TR_ASSERT_FATAL(false, "Invalid type");
-               break;
-            }
-         break;
-         }
-
-      /*** ifge ***/
-      case ConditionalBranchOperator::ge:
-         {
-         TR::AbsValue* value = state->pop();
-         TR_ASSERT_FATAL(value->getDataType() == TR::Int32, "Unexpected type");
-
-         if (value->isParameter())
-            {
-            if (isInt(value))
-               {
-               TR::AbsVPValue* vpValue = static_cast<TR::AbsVPValue*>(value);
-               int32_t low = vpValue->getConstraint()->asIntConstraint()->getLowInt();
-               int32_t high = vpValue->getConstraint()->asIntConstraint()->getHighInt();
-
-               if (TR::BranchFoldingPredicate::predicate(low, high, TR::BranchFoldingPredicate::Kind::IfGe))
-                  {
-                  TR::PotentialOptimization* opt = new (region()) TR::PotentialOptimization(currentByteCodeIndex(), _callerMethodSymbol, TR::PotentialOptimization::OptKind::BranchFolding);
-                  _inliningMethodSummary->addOpt(opt);
-                  }
-               }
-            }
-
-         switch (type)
-            {
-            case TR::Int32:
-               break;
-            default:
-               TR_ASSERT_FATAL(false, "Invalid type");
-               break;
-            }
-         break;
-         }
-
-      /*** ifgt ***/
-      case ConditionalBranchOperator::gt:
-         {
-         TR::AbsValue* value = state->pop();
-         TR_ASSERT_FATAL(value->getDataType() == TR::Int32, "Unexpected type");
          
-         if (value->isParameter())
+         if (value->isParameter() && !value->isImplicitParameter())
+         // if (value->isParameter())
             {
-            if (isInt(value))
-               {
-               TR::AbsVPValue* vpValue = static_cast<TR::AbsVPValue*>(value);
-               int32_t low = vpValue->getConstraint()->asIntConstraint()->getLowInt();
-               int32_t high = vpValue->getConstraint()->asIntConstraint()->getHighInt();
-
-               if (TR::BranchFoldingPredicate::predicate(low, high, TR::BranchFoldingPredicate::Kind::IfGt))
-                  {
-                  TR::PotentialOptimization* opt = new (region()) TR::PotentialOptimization(currentByteCodeIndex(), _callerMethodSymbol, TR::PotentialOptimization::OptKind::BranchFolding);
-                  _inliningMethodSummary->addOpt(opt);
-                  }
-               }
+            // test null branch folding
+            TR::VPClassPresence *nonNullVPConstraint = TR::VPNonNullObject::create(vp());
+            TR::VPClassPresence *nullVPConstraint = TR::VPNullObject::create(vp());
+            TR::PotentialOptimizationVPPredicate* nonNullOpt = new (region()) TR::PotentialOptimizationVPPredicate(nonNullVPConstraint, currentByteCodeIndex(), TR::PotentialOptimizationPredicate::Kind::NullCheckFolding, vp());
+            TR::PotentialOptimizationVPPredicate* nullOpt = new (region()) TR::PotentialOptimizationVPPredicate(nullVPConstraint, currentByteCodeIndex(), TR::PotentialOptimizationPredicate::Kind::NullCheckFolding, vp());
+            if (nonNullOpt->test(value))
+               _inliningMethodSummary->addPotentialOptimizationByArgument(nonNullOpt, value->getParameterPosition());
+            else if (nullOpt->test(value))
+               _inliningMethodSummary->addPotentialOptimizationByArgument(nullOpt, value->getParameterPosition());
             }
-
+         
          switch (type)
             {
-            case TR::Int32:
-               break;
-            default:
-               TR_ASSERT_FATAL(false, "Invalid type");
-               break;
-            }
-         break;
-         }
-
-      /*** ifle ***/
-      case ConditionalBranchOperator::le:
-         {
-         TR::AbsValue* value = state->pop();
-         TR_ASSERT_FATAL(value->getDataType() == TR::Int32, "Unexpected type");
-
-         if (value->isParameter())
-            {
-            if (isInt(value))
-               {
-               TR::AbsVPValue* vpValue = static_cast<TR::AbsVPValue*>(value);
-               int32_t low = vpValue->getConstraint()->asIntConstraint()->getLowInt();
-               int32_t high = vpValue->getConstraint()->asIntConstraint()->getHighInt();
-
-               if (TR::BranchFoldingPredicate::predicate(low, high, TR::BranchFoldingPredicate::Kind::IfLe))
-                  {
-                  TR::PotentialOptimization* opt = new (region()) TR::PotentialOptimization(currentByteCodeIndex(), _callerMethodSymbol, TR::PotentialOptimization::OptKind::BranchFolding);
-                  _inliningMethodSummary->addOpt(opt);
-                  }
-               }
-            }
-
-         switch (type)
-            {
-            case TR::Int32:
-               break;
-            default:
-               TR_ASSERT_FATAL(false, "Invalid type");
-               break;
-            }
-         break;
-         }
-
-      /*** iflt ***/
-      case ConditionalBranchOperator::lt:
-         {
-         TR::AbsValue* value = state->pop();
-         TR_ASSERT_FATAL(value->getDataType() == TR::Int32, "Unexpected type");
-
-         if (value->isParameter())
-            {
-            if (isInt(value))
-               {
-               TR::AbsVPValue* vpValue = static_cast<TR::AbsVPValue*>(value);
-               int32_t low = vpValue->getConstraint()->asIntConstraint()->getLowInt();
-               int32_t high = vpValue->getConstraint()->asIntConstraint()->getHighInt();
-
-               if (TR::BranchFoldingPredicate::predicate(low, high, TR::BranchFoldingPredicate::Kind::IfLt))
-                  {
-                  TR::PotentialOptimization* opt = new (region()) TR::PotentialOptimization(currentByteCodeIndex(), _callerMethodSymbol, TR::PotentialOptimization::OptKind::BranchFolding);
-                  _inliningMethodSummary->addOpt(opt);
-                  }
-               }
-            }
-
-         switch (type)
-            {
-            case TR::Int32:
-               break;
-            default:
-               TR_ASSERT_FATAL(false, "Invalid type");
-               break;
-            }
-         break;
-         }
-      
-      /*** if_cmpeq ***/
-      case ConditionalBranchOperator::cmpeq:
-         {
-         TR::AbsValue* value2 = state->pop();
-         TR::AbsValue* value1 = state->pop();
-         TR_ASSERT_FATAL(value1->getDataType() == type, "Unexpected type");
-         TR_ASSERT_FATAL(value2->getDataType() == type, "Unexpected type");
-   
-         switch (type)
-            {
-            case TR::Int32:
             case TR::Address:
                break;
             default:
                TR_ASSERT_FATAL(false, "Invalid type");
                break;
             }
+
          break;
          }
 
-      /*** if_cmpne ***/
+         // branch folding predicate
+         case ConditionalBranchOperator::eq:
+         case ConditionalBranchOperator::ne:
+         {
+         TR::AbsValue* value = state->pop();
+         TR_ASSERT_FATAL(value->getDataType() == TR::Int32, "Unexpected type");
+
+         if (value->isParameter())
+            {
+            if (isInt(value))
+               {
+               // test branch folding
+               TR::VPIntConstraint *zeroVPConstraint = TR::VPIntConst::create(vp(), 0);
+               TR::VPIntConstraint *lowVPConstraint = TR::VPIntRange::create(vp(), std::numeric_limits<int>::min(), -1);
+               TR::VPIntConstraint *highVPConstraint = TR::VPIntRange::create(vp(), 1, std::numeric_limits<int>::max());
+               TR::PotentialOptimizationVPPredicate* zeroOpt = new (region()) TR::PotentialOptimizationVPPredicate(zeroVPConstraint, currentByteCodeIndex(), TR::PotentialOptimizationPredicate::Kind::BranchFolding, vp());
+               TR::PotentialOptimizationVPPredicate* lowOpt = new (region()) TR::PotentialOptimizationVPPredicate(lowVPConstraint, currentByteCodeIndex(), TR::PotentialOptimizationPredicate::Kind::BranchFolding, vp());
+               TR::PotentialOptimizationVPPredicate* highOpt = new (region()) TR::PotentialOptimizationVPPredicate(highVPConstraint, currentByteCodeIndex(), TR::PotentialOptimizationPredicate::Kind::BranchFolding, vp());
+               if (zeroOpt->test(value))
+                  _inliningMethodSummary->addPotentialOptimizationByArgument(zeroOpt, value->getParameterPosition());
+               else if (lowOpt->test(value))
+                  _inliningMethodSummary->addPotentialOptimizationByArgument(lowOpt, value->getParameterPosition());
+               else if (highOpt->test(value))
+                  _inliningMethodSummary->addPotentialOptimizationByArgument(highOpt, value->getParameterPosition());
+               }
+            }
+
+         switch (type)
+            {
+            case TR::Int32:
+               break;
+            default:
+               TR_ASSERT_FATAL(false, "Invalid type");
+               break;
+            }
+         break;
+         }
+
+         case ConditionalBranchOperator::ge:
+         case ConditionalBranchOperator::lt:
+         {
+         TR::AbsValue* value = state->pop();
+         TR_ASSERT_FATAL(value->getDataType() == TR::Int32, "Unexpected type");
+
+         if (value->isParameter())
+            {
+            if (isInt(value))
+               {
+               // test branch folding
+               TR::VPIntConstraint *lowVPConstraint = TR::VPIntRange::create(vp(), std::numeric_limits<int>::min(), -1);
+               TR::VPIntConstraint *highVPConstraint = TR::VPIntRange::create(vp(), 0, std::numeric_limits<int>::max());
+               TR::PotentialOptimizationVPPredicate* lowOpt = new (region()) TR::PotentialOptimizationVPPredicate(lowVPConstraint, currentByteCodeIndex(), TR::PotentialOptimizationPredicate::Kind::BranchFolding, vp());
+               TR::PotentialOptimizationVPPredicate* highOpt = new (region()) TR::PotentialOptimizationVPPredicate(highVPConstraint, currentByteCodeIndex(), TR::PotentialOptimizationPredicate::Kind::BranchFolding, vp());
+               if (lowOpt->test(value))
+                  _inliningMethodSummary->addPotentialOptimizationByArgument(lowOpt, value->getParameterPosition());
+               else if (highOpt->test(value))
+                  _inliningMethodSummary->addPotentialOptimizationByArgument(highOpt, value->getParameterPosition());
+               }
+            }
+
+         switch (type)
+            {
+            case TR::Int32:
+               break;
+            default:
+               TR_ASSERT_FATAL(false, "Invalid type");
+               break;
+            }
+         break;
+         }
+
+         case ConditionalBranchOperator::le:
+         case ConditionalBranchOperator::gt:
+         {
+         TR::AbsValue* value = state->pop();
+         TR_ASSERT_FATAL(value->getDataType() == TR::Int32, "Unexpected type");
+
+         if (value->isParameter())
+            {
+            if (isInt(value))
+               {
+               // test branch folding
+               TR::VPIntConstraint *lowVPConstraint = TR::VPIntRange::create(vp(), std::numeric_limits<int>::min(), 0);
+               TR::VPIntConstraint *highVPConstraint = TR::VPIntRange::create(vp(), 1, std::numeric_limits<int>::max());
+               TR::PotentialOptimizationVPPredicate* lowOpt = new (region()) TR::PotentialOptimizationVPPredicate(lowVPConstraint, currentByteCodeIndex(), TR::PotentialOptimizationPredicate::Kind::BranchFolding, vp());
+               TR::PotentialOptimizationVPPredicate* highOpt = new (region()) TR::PotentialOptimizationVPPredicate(highVPConstraint, currentByteCodeIndex(), TR::PotentialOptimizationPredicate::Kind::BranchFolding, vp());
+               if (lowOpt->test(value))
+                  _inliningMethodSummary->addPotentialOptimizationByArgument(lowOpt, value->getParameterPosition());
+               else if (highOpt->test(value))
+                  _inliningMethodSummary->addPotentialOptimizationByArgument(highOpt, value->getParameterPosition());
+               }
+            }
+
+         switch (type)
+            {
+            case TR::Int32:
+               break;
+            default:
+               TR_ASSERT_FATAL(false, "Invalid type");
+               break;
+            }
+         break;
+         }
+
+      case ConditionalBranchOperator::cmpeq:
       case ConditionalBranchOperator::cmpne:
          {
          TR::AbsValue* value2 = state->pop();
@@ -1980,65 +1836,10 @@ void J9::AbsInterpreter::conditionalBranch(TR::DataType type, int32_t label, Con
          break;
          }
 
-      /*** if_cmpge ***/
-      case ConditionalBranchOperator::cmpge:
-         {
-         TR::AbsValue* value2 = state->pop();
-         TR::AbsValue* value1 = state->pop();
-
-         TR_ASSERT_FATAL(value2->getDataType() == type, "Unexpected type");
-         TR_ASSERT_FATAL(value1->getDataType() == type, "Unexpected type");
-   
-         switch (type)
-            {
-            case TR::Int32:
-               break;
-            default:
-               TR_ASSERT_FATAL(false, "Invalid type");
-               break;
-            }
-         break;
-         }
-
-      /*** if_cmpgt ***/
-      case ConditionalBranchOperator::cmpgt:
-         {
-         TR::AbsValue* value2 = state->pop();
-         TR::AbsValue* value1 = state->pop();
-   
-         switch (type)
-            {
-            case TR::Int32:
-               break;
-            default:
-               TR_ASSERT_FATAL(false, "Invalid type");
-               break;
-            }
-         break;
-         }
-
-      /*** if_cmple ***/
-      case ConditionalBranchOperator::cmple:
-         {
-         TR::AbsValue* value2 = state->pop();
-         TR::AbsValue* value1 = state->pop();
-
-         TR_ASSERT_FATAL(value2->getDataType() == type, "Unexpected type");
-         TR_ASSERT_FATAL(value1->getDataType() == type, "Unexpected type");
-   
-         switch (type)
-            {
-            case TR::Int32:
-               break;
-            default:
-               TR_ASSERT_FATAL(false, "Invalid type");
-               break;
-            }
-         break;
-         }
-
-      /*** if_cmplt ***/
-      case ConditionalBranchOperator::cmplt:
+         case ConditionalBranchOperator::cmpge:
+         case ConditionalBranchOperator::cmpgt:
+         case ConditionalBranchOperator::cmple:
+         case ConditionalBranchOperator::cmplt:
          {
          TR::AbsValue* value2 = state->pop();
          TR::AbsValue* value1 = state->pop();
@@ -2195,20 +1996,17 @@ void J9::AbsInterpreter::arraylength()
    TR_ASSERT_FATAL(arrayRef->getDataType() == TR::Address, "Unexpected type");
 
    if (arrayRef->isParameter() && !arrayRef->isImplicitParameter())
+   // if (arrayRef->isParameter())
       {
-      TR_YesNoMaybe isNonNull = TR_maybe;
-
-      if (isNonNullObject(arrayRef))
-         isNonNull = TR_yes;
-      else if (isNullObject(arrayRef))
-         isNonNull = TR_no;
-      
-      if (TR::NullCheckFoldingPredicate::predicate(isNonNull))
-         {
-         TR::PotentialOptimization* opt = new (region()) TR::PotentialOptimization(currentByteCodeIndex(), _callerMethodSymbol, TR::PotentialOptimization::OptKind::NullCheckFolding);
-         _inliningMethodSummary->addOpt(opt);
-         }
-         
+      // test null check folding
+      TR::VPClassPresence *nonNullVPConstraint = TR::VPNonNullObject::create(vp());
+      TR::VPClassPresence *nullVPConstraint = TR::VPNullObject::create(vp());
+      TR::PotentialOptimizationVPPredicate* nonNullOpt = new (region()) TR::PotentialOptimizationVPPredicate(nonNullVPConstraint, currentByteCodeIndex(), TR::PotentialOptimizationPredicate::Kind::NullCheckFolding, vp());
+      TR::PotentialOptimizationVPPredicate* nullOpt = new (region()) TR::PotentialOptimizationVPPredicate(nullVPConstraint, currentByteCodeIndex(), TR::PotentialOptimizationPredicate::Kind::NullCheckFolding, vp());
+      if (nonNullOpt->test(arrayRef))
+         _inliningMethodSummary->addPotentialOptimizationByArgument(nonNullOpt, arrayRef->getParameterPosition());
+      else if (nullOpt->test(arrayRef))
+         _inliningMethodSummary->addPotentialOptimizationByArgument(nullOpt, arrayRef->getParameterPosition());
       }
      
    if (isArrayObject(arrayRef))
@@ -2241,28 +2039,16 @@ void J9::AbsInterpreter::instanceof()
 
    int32_t cpIndex = next2Bytes();
    TR_OpaqueClassBlock *castClass = _callerMethod->getClassFromConstantPool(comp(), cpIndex); //The cast class to be compared with
+   TR::VPClassType *castClassType = castClass ? TR::VPResolvedClass::create(vp(), castClass) : NULL;
+   TR::VPConstraint *castVPConstraint = TR::VPClass::create(vp(), castClassType, TR::VPNonNullObject::create(vp()), NULL, NULL, NULL);
 
    //Add to the inlining summary
    if (objectRef->isParameter() && !objectRef->isImplicitParameter())
+   // if (objectRef->isParameter())
       {
-      TR_YesNoMaybe isNonNull = TR_maybe;
-      TR_OpaqueClassBlock* instanceClass = NULL;
-      bool isFixedClass = false;
-
-      if (isNullObject(objectRef))
-         isNonNull = TR_no;
-      else if (isObject(objectRef) && isNonNullObject(objectRef))
-         {
-         instanceClass = static_cast<TR::AbsVPValue*>(objectRef)->getConstraint()->getClass();
-         isFixedClass = static_cast<TR::AbsVPValue*>(objectRef)->getConstraint()->isFixedClass();
-         isNonNull = TR_yes;
-         }
-
-      if (TR::InstanceOfFoldingPredicate::predicate(isNonNull, instanceClass, isFixedClass, castClass, comp()->fe()))
-         {
-         TR::PotentialOptimization* opt = new (region()) TR::PotentialOptimization(currentByteCodeIndex(), _callerMethodSymbol, TR::PotentialOptimization::OptKind::InstanceOfFolding);
-         _inliningMethodSummary->addOpt(opt);
-         }
+      TR::PotentialOptimizationVPPredicate* opt = new (region()) TR::PotentialOptimizationVPPredicate(castVPConstraint, currentByteCodeIndex(), TR::PotentialOptimizationPredicate::Kind::InstanceOfFolding, vp());
+      if (opt->test(objectRef)) // test instanceof folding
+         _inliningMethodSummary->addPotentialOptimizationByArgument(opt, objectRef->getParameterPosition());
       }
 
    if (isNullObject(objectRef)) //instanceof null
@@ -2307,28 +2093,17 @@ void J9::AbsInterpreter::checkcast()
 
    int32_t cpIndex = next2Bytes();
    TR_OpaqueClassBlock* castClass = _callerMethod->getClassFromConstantPool(comp(), cpIndex);
+   TR::VPConstraint *castVPConstraint = castClass ? static_cast<TR::VPConstraint*>(TR::VPResolvedClass::create(vp(), castClass)) : static_cast<TR::VPConstraint*>(TR::VPNullObject::create(vp()));
 
    //adding to method summary
    if (objRef->isParameter() && !objRef->isImplicitParameter() )
+   // if (objRef->isParameter())
       {
-      TR_YesNoMaybe isNonNull = TR_maybe;
-      TR_OpaqueClassBlock* checkClass = NULL;
-      bool isFixedClass = false;
-
-      if (isNullObject(objRef))
-         isNonNull = TR_no;
-      else if (isObject(objRef) && isNonNullObject(objRef))
-         {
-         checkClass = static_cast<TR::AbsVPValue*>(objRef)->getConstraint()->getClass();
-         isNonNull = TR_yes;
-         isFixedClass = static_cast<TR::AbsVPValue*>(objRef)->getConstraint()->isFixedClass();
-         }
-
-      if (TR::InstanceOfFoldingPredicate::predicate(isNonNull, checkClass, isFixedClass, castClass, comp()->fe()))
-         {
-         TR::PotentialOptimization* opt = new (region()) TR::PotentialOptimization(currentByteCodeIndex(), _callerMethodSymbol, TR::PotentialOptimization::OptKind::CheckCastFolding);
-         _inliningMethodSummary->addOpt(opt);
-         }
+      TR::PotentialOptimizationVPPredicate* opt = new (region()) TR::PotentialOptimizationVPPredicate(castVPConstraint, currentByteCodeIndex(), TR::PotentialOptimizationPredicate::Kind::CheckCastFolding, vp());
+      // if (!castClass)
+      //    printf("castClass is NULL\n");
+      if (opt->test(objRef)) // test checkcast folding
+         _inliningMethodSummary->addPotentialOptimizationByArgument(opt, objRef->getParameterPosition());
       }
 
    if (isNullObject(objRef)) //Check cast null object, always succeed
@@ -2383,19 +2158,17 @@ void J9::AbsInterpreter::get(bool isStatic)
       TR_ASSERT_FATAL(objRef->getDataType() == TR::Address, "Unexpected type");
 
       if (objRef->isParameter() && !objRef->isImplicitParameter())  
+      // if (objRef->isParameter())
          {
-         TR_YesNoMaybe isNonNull = TR_maybe;
-
-         if (isNonNullObject(objRef))
-            isNonNull = TR_yes;
-         else if (isNullObject(objRef))
-            isNonNull = TR_no;
-         
-         if (TR::NullCheckFoldingPredicate::predicate(isNonNull))
-            {
-            TR::PotentialOptimization* opt = new (region()) TR::PotentialOptimization(currentByteCodeIndex(), _callerMethodSymbol, TR::PotentialOptimization::OptKind::NullCheckFolding);
-            _inliningMethodSummary->addOpt(opt);
-            }
+         // test null check folding
+         TR::VPClassPresence *nonNullVPConstraint = TR::VPNonNullObject::create(vp());
+         TR::VPClassPresence *nullVPConstraint = TR::VPNullObject::create(vp());
+         TR::PotentialOptimizationVPPredicate* nonNullOpt = new (region()) TR::PotentialOptimizationVPPredicate(nonNullVPConstraint, currentByteCodeIndex(), TR::PotentialOptimizationPredicate::Kind::NullCheckFolding, vp());
+         TR::PotentialOptimizationVPPredicate* nullOpt = new (region()) TR::PotentialOptimizationVPPredicate(nullVPConstraint, currentByteCodeIndex(), TR::PotentialOptimizationPredicate::Kind::NullCheckFolding, vp());
+         if (nonNullOpt->test(objRef))
+            _inliningMethodSummary->addPotentialOptimizationByArgument(nonNullOpt, objRef->getParameterPosition());
+         else if (nullOpt->test(objRef))
+            _inliningMethodSummary->addPotentialOptimizationByArgument(nullOpt, objRef->getParameterPosition());
          }
 
       uint32_t a; bool b; bool c; bool d; bool e;
@@ -2463,19 +2236,17 @@ void J9::AbsInterpreter::put(bool isStatic)
       TR_ASSERT_FATAL(objRef->getDataType() == TR::Address, "Unexpected type");
 
       if (objRef->isParameter() && !objRef->isImplicitParameter())  
+      // if (objRef->isParameter())
          {
-         TR_YesNoMaybe isNonNull = TR_maybe;
-
-         if (isNonNullObject(objRef))
-            isNonNull = TR_yes;
-         else if (isNullObject(objRef))
-            isNonNull = TR_no;
-         
-         if (TR::NullCheckFoldingPredicate::predicate(isNonNull))
-            {
-            TR::PotentialOptimization* opt = new (region()) TR::PotentialOptimization(currentByteCodeIndex(), _callerMethodSymbol, TR::PotentialOptimization::OptKind::NullCheckFolding);
-            _inliningMethodSummary->addOpt(opt);
-            }
+         // test null check folding
+         TR::VPClassPresence *nonNullVPConstraint = TR::VPNonNullObject::create(vp());
+         TR::VPClassPresence *nullVPConstraint = TR::VPNullObject::create(vp());
+         TR::PotentialOptimizationVPPredicate* nonNullOpt = new (region()) TR::PotentialOptimizationVPPredicate(nonNullVPConstraint, currentByteCodeIndex(), TR::PotentialOptimizationPredicate::Kind::NullCheckFolding, vp());
+         TR::PotentialOptimizationVPPredicate* nullOpt = new (region()) TR::PotentialOptimizationVPPredicate(nullVPConstraint, currentByteCodeIndex(), TR::PotentialOptimizationPredicate::Kind::NullCheckFolding, vp());
+         if (nonNullOpt->test(objRef))
+            _inliningMethodSummary->addPotentialOptimizationByArgument(nonNullOpt, objRef->getParameterPosition());
+         else if (nullOpt->test(objRef))
+            _inliningMethodSummary->addPotentialOptimizationByArgument(nullOpt, objRef->getParameterPosition());
          }
       }
    
