@@ -266,7 +266,7 @@ void TR::AbsInterpreter::transferBlockStatesFromPredeccesors(TR::Block* block, b
          for (auto e = ++block->getPredecessors().begin(); e != block->getPredecessors().end(); e ++)
             {
             TR::Block* predBlock = (*e)->getFrom()->asBlock();
-            state->merge(getState(predBlock));
+            state->merge(getState(predBlock), region());
             }
 
          setState(block, state);
@@ -285,7 +285,7 @@ void TR::AbsInterpreter::transferBlockStatesFromPredeccesors(TR::Block* block, b
             if (!state && getState(predBlock))
                state = getState(predBlock)->clone(region());
             else if (getState(predBlock))
-               state->merge(getState(predBlock));
+               state->merge(getState(predBlock), region());
             }
 
          setState(block, state);

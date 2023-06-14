@@ -86,7 +86,7 @@ class AbsStackMachineState
     *
     * @param other another state to be merged with
     */
-   void merge(const TR::AbsStackMachineState* other);
+   void merge(const TR::AbsStackMachineState* other, TR::Region& region);
 
    size_t getStackSize() const { return _stack->size();  }
    size_t getArraySize() const { return _array->size();  }

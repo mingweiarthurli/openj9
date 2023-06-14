@@ -27,10 +27,10 @@ TR::AbsStackMachineState* TR::AbsStackMachineState::clone(TR::Region& region) co
    return copy;
    }
 
-void TR::AbsStackMachineState::merge(const TR::AbsStackMachineState* other)
+void TR::AbsStackMachineState::merge(const TR::AbsStackMachineState* other, TR::Region& region)
    {
-   _array->merge(other->_array);
-   _stack->merge(other->_stack);
+   _array->merge(other->_array, region);
+   _stack->merge(other->_stack, region);
    }
 
 void TR::AbsStackMachineState::print(TR::Compilation* comp) const
