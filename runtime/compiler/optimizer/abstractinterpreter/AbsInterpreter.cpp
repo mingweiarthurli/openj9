@@ -3,7 +3,7 @@
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
- * distribution and is available at http://eclipse.org/legal/epl-2.0
+ * distribution and is available at https://www.eclipse.org/legal/epl-2.0/
  * or the Apache License, Version 2.0 which accompanies this distribution
  * and is available at https://www.apache.org/licenses/LICENSE-2.0.
  *
@@ -35,7 +35,7 @@ TR::AbsInterpreter::AbsInterpreter(TR::ResolvedMethodSymbol* callerMethodSymbol,
                                     TR::Compilation* comp) :
       _callerMethodSymbol(callerMethodSymbol),
       _callerMethod(callerMethodSymbol->getResolvedMethod()),
-      _callerIndex(-1),
+      _callerIndex(comp->getCurrentInlinedSiteIndex()),
       _cfg(cfg),
       _visitor(vistor),
       _arguments(arguments),
@@ -268,7 +268,6 @@ bool TR::AbsInterpreter::interpretBlock(TR::Block* block, bool insideLoop, bool 
                                            getState(block),
                                            insideLoop,
                                            lastTimeThrough,
-                                           _callerIndex,
                                            _callerMethodSymbol,
                                            _bci,
                                            &_returnValue,
@@ -295,7 +294,6 @@ TR::AbsBlockInterpreter::AbsBlockInterpreter(TR::Block* block,
                                              TR::AbsStackMachineState* state,
                                              bool insideLoop,
                                              bool lastTimeThrough,
-                                             int32_t callerIndex,
                                              TR::ResolvedMethodSymbol* callerMethodSymbol,
                                              TR_J9ByteCodeIterator& bci,
                                              TR::AbsValue** returnValue,
@@ -308,7 +306,7 @@ TR::AbsBlockInterpreter::AbsBlockInterpreter(TR::Block* block,
       _state(state),
       _insideLoop(insideLoop),
       _lastTimeThrough(lastTimeThrough),
-      _callerIndex(callerIndex),
+      _callerIndex(comp->getCurrentInlinedSiteIndex()),
       _callerMethodSymbol(callerMethodSymbol),
       _callerMethod(callerMethodSymbol->getResolvedMethod()),
       _bci(bci),
@@ -2717,7 +2715,7 @@ void TR::AbsBlockInterpreter::invoke(TR::MethodSymbol::Kinds kind)
       }
 
    if (lastTimeThrough())
-      _visitor->visitCallSite(callsite, _callerIndex, callBlock, &args); //callback
+      _visitor->visitCallSite(callsite, callBlock, &args); //callback
 
    if (calleeMethod->isConstructor() || calleeMethod->returnType() == TR::NoType )
       return;

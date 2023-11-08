@@ -3,7 +3,7 @@
  *
  * This program and the accompanying materials are made available under
  * the terms of the Eclipse Public License 2.0 which accompanies this
- * distribution and is available at http://eclipse.org/legal/epl-2.0
+ * distribution and is available at https://www.eclipse.org/legal/epl-2.0/
  * or the Apache License, Version 2.0 which accompanies this distribution
  * and is available at https://www.apache.org/licenses/LICENSE-2.0.
  *
@@ -71,7 +71,7 @@ class IDTBuilder : public OMR::IDTBuilderConnector
     * @param arguments the arguments passed from the caller method.
     * @param callerIndex the caller index for call site
     */
-   void performAbstractInterpretation(TR::IDTNode* node, OMR::IDTBuilder::Visitor& visitor, TR::vector<TR::AbsValue*, TR::Region&>* arguments, int32_t callerIndex);
+   void performAbstractInterpretation(TR::IDTNode* node, OMR::IDTBuilder::Visitor& visitor, TR::vector<TR::AbsValue*, TR::Region&>* arguments);
 
    TR_J9EstimateCodeSize* _cfgGen;
    };
