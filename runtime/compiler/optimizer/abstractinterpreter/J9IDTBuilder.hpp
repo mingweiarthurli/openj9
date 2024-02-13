@@ -39,7 +39,7 @@ namespace TR { class IDTBuilder; }
 
 namespace J9
 {
-class IDTBuilder : public OMR::IDTBuilderConnector
+class OMR_EXTENSIBLE IDTBuilder : public OMR::IDTBuilderConnector
    {
 
    friend class OMR::IDTBuilder;
@@ -69,7 +69,6 @@ class IDTBuilder : public OMR::IDTBuilderConnector
     * @param node the IDT node (method) to be interpreted
     * @param visitor the abstract interpretation visitor
     * @param arguments the arguments passed from the caller method.
-    * @param callerIndex the caller index for call site
     */
    void performAbstractInterpretation(TR::IDTNode* node, OMR::IDTBuilder::Visitor& visitor, TR::vector<TR::AbsValue*, TR::Region&>* arguments);
 

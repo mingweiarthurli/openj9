@@ -61,7 +61,7 @@ class AbsInterpreter
 
    TR::ValuePropagation *vp();
 
-   typedef TR::typed_allocator<std::pair<TR::Block*, TR::AbsStackMachineState*>, TR::Region&> BlockStateMapAllocator;
+   typedef TR::typed_allocator<std::pair<TR::Block * const, TR::AbsStackMachineState*>, TR::Region&> BlockStateMapAllocator;
    typedef std::less<TR::Block*> BlockStateMapComparator;
    std::map<TR::Block*, TR::AbsStackMachineState*, BlockStateMapComparator, BlockStateMapAllocator> _blockStateMap;
 
@@ -179,7 +179,23 @@ class AbsBlockInterpreter
 
    void shift(TR::DataType type, ShiftOperator op);
 
-   void conversion(TR::DataType fromType, TR::DataType toType);
+
+   TR::AbsValue* popFromValue(TR::AbsStackMachineState* state, TR::DataType fromType);
+   void conversionI2b(TR::DataType fromType);
+   void conversionI2c(TR::DataType fromType);
+   void conversionI2s(TR::DataType fromType);
+   void conversionI2l(TR::DataType fromType);
+   void conversionI2f(TR::DataType fromType);
+   void conversionI2d(TR::DataType fromType);
+   void conversionL2i(TR::DataType fromType);
+   void conversionL2f(TR::DataType fromType);
+   void conversionL2d(TR::DataType fromType);
+   void conversionD2i(TR::DataType fromType);
+   void conversionD2f(TR::DataType fromType);
+   void conversionD2l(TR::DataType fromType);
+   void conversionF2i(TR::DataType fromType);
+   void conversionF2d(TR::DataType fromType);
+   void conversionF2l(TR::DataType fromType);
 
    void comparison(TR::DataType type, ComparisonOperator op);
 
@@ -213,15 +229,16 @@ class AbsBlockInterpreter
 
    TR::SymbolReference* getSymbolReference(int32_t cpIndex, TR::MethodSymbol::Kinds kind);
 
-   TR_CallSite* getCallSite(TR::MethodSymbol::Kinds kind, int32_t bcIndex, int32_t cpIndex);
+   TR_CallSite* getCallSite(TR::MethodSymbol::Kinds kind, int32_t bcIndex, int32_t cpIndex, TR::Method* calleeMethod, TR::vector<TR::AbsValue*, TR::Region&>& args);
 
    /*** Methods for creating different types of abstract values ***/
-   TR::AbsValue* createObject(TR_OpaqueClassBlock* opaqueClass, TR_YesNoMaybe isNonNull);
+   TR::AbsValue* createObject(TR_OpaqueClassBlock* opaqueClass);
 
    TR::AbsValue* createNullObject();
+   TR::AbsValue* createNonNullObject(TR_OpaqueClassBlock* opaqueClass);
 
-   TR::AbsValue* createArrayObject(TR_OpaqueClassBlock* arrayClass, TR_YesNoMaybe isNonNull, int32_t lengthLow, int32_t lengthHigh, int32_t elementSize);
-   TR::AbsValue* createStringObject(TR::SymbolReference* symRef, TR_YesNoMaybe isNonNull);
+   TR::AbsValue* createArrayObject(TR_OpaqueClassBlock* arrayClass, bool isNonNull, int32_t lengthLow, int32_t lengthHigh, int32_t elementSize);
+   TR::AbsValue* createStringObject(TR::SymbolReference* symRef, bool isNonNull);
 
    TR::AbsValue* createIntConst(int32_t value);
    TR::AbsValue* createLongConst(int64_t value);
@@ -238,10 +255,8 @@ class AbsBlockInterpreter
    TR::AbsValue* createTopObject();
 
    bool isNullObject(TR::AbsValue* v);
-   bool isNonNullObject(TR::AbsValue* v);
 
    bool isArrayObject(TR::AbsValue* v);
-   bool isObject(TR::AbsValue* v);
 
    bool isIntConst(TR::AbsValue* v);
    bool isIntRange(TR::AbsValue* v);

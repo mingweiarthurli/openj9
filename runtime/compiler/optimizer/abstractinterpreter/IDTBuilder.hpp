@@ -27,7 +27,7 @@
 
 namespace TR
 {
-class IDTBuilder : public J9::IDTBuilderConnector
+class OMR_EXTENSIBLE IDTBuilder : public J9::IDTBuilderConnector
    {
    public:
    IDTBuilder(TR::ResolvedMethodSymbol* symbol, int32_t budget, TR::Region& region, TR::Compilation* comp, TR_InlinerBase* inliner) :
