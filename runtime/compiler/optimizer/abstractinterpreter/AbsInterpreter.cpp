@@ -115,7 +115,7 @@ bool TR::AbsInterpreter::interpret()
    //
    if (_cfg->hasBackEdges()) // may have loops, do the structural analysis
       {
-      TR_Structure* structure = TR_RegionAnalysis::getRegions(comp(), _cfg); // generating the structures
+      TR_Structure* structure = TR_RegionAnalysis::getRegions(comp(), _cfg, false); // generating the structures
       if (!structure) //Fail to generate structures
          {
          TR::ReversePostorderSnapshotBlockIterator blockIt(_cfg, comp());
@@ -1008,17 +1008,21 @@ void TR::AbsBlockInterpreter::ldc(bool wide)
          else if (_callerMethod->isClassConstant(cpIndex))
             {
             TR_OpaqueClassBlock* classBlock = _callerMethod->getClassFromConstantPool(comp(), cpIndex);
-            TR_OpaqueClassBlock* javaLangClass = comp()->fe()->getClassClassPointer(classBlock);
-            TR::AbsValue* value = createNonNullObject(javaLangClass);
+            if (classBlock)
+               {
+               TR_OpaqueClassBlock* jlClass = comp()->fe()->getClassClassPointer(classBlock);
+               TR::AbsValue* value = createNonNullObject(classBlock);
+               state->push(value);
+               }
+            else
+               {
+               state->push(createNullObject());
+               }
+            break;
+            }
 
-            state->push(value);
-            break;
-            }
-         else
-            {
-            state->push(createTopObject());
-            break;
-            }
+         state->push(createTopObject());
+         break;
          }
       default:
          TR_ASSERT_FATAL(false, "Invalid type");
@@ -2629,18 +2633,27 @@ TR::SymbolReference* TR::AbsBlockInterpreter::getSymbolReference(int32_t cpIndex
    return symbolReference;
    }
 
-TR::AbsValue* TR::AbsBlockInterpreter::createObject(TR_OpaqueClassBlock* opaqueClass) // create object that we don't know nullness
+/**
+ * @brief create object that don't know its nullness
+ */
+TR::AbsValue* TR::AbsBlockInterpreter::createObject(TR_OpaqueClassBlock* opaqueClass)
    {
    TR::VPClassType *classType = opaqueClass ? TR::VPResolvedClass::create(vp(), opaqueClass) : NULL;
 
    return new (region()) TR::AbsVPValue(vp(), TR::VPClass::create(vp(), classType, NULL, NULL, NULL, NULL), TR::Address);
    }
 
+/**
+ * @brief create object that is certainly null
+ */
 TR::AbsValue* TR::AbsBlockInterpreter::createNullObject()  // create object that is certainly null
    {
    return new (region()) TR::AbsVPValue(vp(), TR::VPNullObject::create(vp()), TR::Address);
    }
 
+/**
+ * @brief create object that is certainly not null
+*/
 TR::AbsValue* TR::AbsBlockInterpreter::createNonNullObject(TR_OpaqueClassBlock* opaqueClass) // create object that is certainly not null
    {
    TR::VPClassPresence *classPresence = TR::VPNonNullObject::create(vp());
