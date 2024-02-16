@@ -259,6 +259,7 @@ class AbsBlockInterpreter
    TR::AbsValue* createTopObject();
 
    bool isNullObject(TR::AbsValue* v);
+   bool isNonNullObject(TR::AbsValue* v);
 
    bool isArrayObject(TR::AbsValue* v);
 
@@ -269,6 +270,8 @@ class AbsBlockInterpreter
    bool isLongConst(TR::AbsValue* v);
    bool isLongRange(TR::AbsValue* v);
    bool isLong(TR::AbsValue* v);
+
+   int32_t arrayElementSize(const char *signature);
 
    TR::Compilation* comp() { return _comp; }
    TR::Region& region() { return _region; }

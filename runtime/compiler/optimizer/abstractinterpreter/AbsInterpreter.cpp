@@ -19,6 +19,7 @@
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
 
+#include <unordered_map>
 #include "optimizer/abstractinterpreter/AbsInterpreter.hpp"
 #include "optimizer/J9CallGraph.hpp"
 #include "optimizer/StructuralAnalysis.hpp"
@@ -49,7 +50,7 @@ TR::AbsInterpreter::AbsInterpreter(TR::ResolvedMethodSymbol* callerMethodSymbol,
    {
    TR::AllBlockIterator blockIt1(_cfg, _comp);
    TR::vector<int32_t, TR::Region&> blockStartIndices(comp->trMemory()->currentStackRegion());
-   uint32_t i = 0;
+
    while (blockIt1.currentBlock())
       {
       if (blockIt1.currentBlock() != _cfg->getStart()->asBlock() && blockIt1.currentBlock() != _cfg->getEnd()->asBlock()) //skip start and exit block
@@ -483,11 +484,9 @@ TR::AbsStackMachineState* TR::AbsBlockInterpreter::setStartBlockState(TR::vector
                TR_OpaqueClassBlock *classBlock = pi->getOpaqueClass();
                if (pi->isArray())
                   {
-                  int32_t arrayType = comp()->fe()->getNewArrayTypeFromClass(classBlock);
-                  int32_t elementSize = arrayType == 7 || arrayType == 11 ? 8 : 4; //7: double, 11: long
                   uint32_t sigLength;
                   char *sig = pi->getUnresolvedJavaClassSignature(sigLength);
-                  // int32_t elementSize2 = OMR::arrayElementSize(sig, static_cast<int32_t>(sigLength), NULL, NULL);
+                  int32_t elementSize = arrayElementSize(sig);
                   param = createArrayObject(classBlock, true, 0, INT32_MAX, elementSize);
                   param->setParameterPosition(paramPos);
                   state->set(slotIndex, param);
@@ -544,101 +543,9 @@ bool TR::AbsBlockInterpreter::interpret()
 
 bool TR::AbsBlockInterpreter::interpretByteCode()
    {
-   char *J9_ByteCode_Strings[] =
-	{
-	"J9BCnop",
-	"J9BCaconstnull",
-	"J9BCiconstm1",
-	"J9BCiconst0", "J9BCiconst1", "J9BCiconst2", "J9BCiconst3", "J9BCiconst4", "J9BCiconst5",
-	"J9BClconst0", "J9BClconst1",
-	"J9BCfconst0", "J9BCfconst1", "J9BCfconst2",
-	"J9BCdconst0", "J9BCdconst1",
-	"J9BCbipush", "J9BCsipush",
-	"J9BCldc", "J9BCldcw", "J9BCldc2lw", "J9BCldc2dw",
-	"J9BCiload", "J9BClload", "J9BCfload", "J9BCdload", "J9BCaload",
-	"J9BCiload0", "J9BCiload1", "J9BCiload2", "J9BCiload3",
-	"J9BClload0", "J9BClload1", "J9BClload2", "J9BClload3",
-	"J9BCfload0", "J9BCfload1", "J9BCfload2", "J9BCfload3",
-	"J9BCdload0", "J9BCdload1", "J9BCdload2", "J9BCdload3",
-	"J9BCaload0", "J9BCaload1", "J9BCaload2", "J9BCaload3",
-	"J9BCiaload", "J9BClaload", "J9BCfaload", "J9BCdaload", "J9BCaaload", "J9BCbaload", "J9BCcaload", "J9BCsaload",
-	"J9BCiloadw", "J9BClloadw", "J9BCfloadw", "J9BCdloadw", "J9BCaloadw",
-	"J9BCistore", "J9BClstore", "J9BCfstore", "J9BCdstore", "J9BCastore",
-	"J9BCistorew", "J9BClstorew", "J9BCfstorew", "J9BCdstorew", "J9BCastorew",
-	"J9BCistore0", "J9BCistore1", "J9BCistore2", "J9BCistore3",
-	"J9BClstore0", "J9BClstore1", "J9BClstore2", "J9BClstore3",
-	"J9BCfstore0", "J9BCfstore1", "J9BCfstore2", "J9BCfstore3",
-	"J9BCdstore0", "J9BCdstore1", "J9BCdstore2", "J9BCdstore3",
-	"J9BCastore0", "J9BCastore1", "J9BCastore2", "J9BCastore3",
-	"J9BCiastore", "J9BClastore", "J9BCfastore", "J9BCdastore", "J9BCaastore", "J9BCbastore", "J9BCcastore", "J9BCsastore",
-	"J9BCpop", "J9BCpop2",
-	"J9BCdup", "J9BCdupx1", "J9BCdupx2", "J9BCdup2", "J9BCdup2x1", "J9BCdup2x2",
-	"J9BCswap",
-	"J9BCiadd", "J9BCladd", "J9BCfadd", "J9BCdadd",
-	"J9BCisub", "J9BClsub", "J9BCfsub", "J9BCdsub",
-	"J9BCimul", "J9BClmul", "J9BCfmul", "J9BCdmul",
-	"J9BCidiv", "J9BCldiv", "J9BCfdiv", "J9BCddiv",
-	"J9BCirem", "J9BClrem", "J9BCfrem", "J9BCdrem",
-	"J9BCineg", "J9BClneg", "J9BCfneg", "J9BCdneg",
-	"J9BCishl", "J9BClshl", "J9BCishr", "J9BClshr", "J9BCiushr", "J9BClushr",
-	"J9BCiand", "J9BCland",
-	"J9BCior", "J9BClor",
-	"J9BCixor", "J9BClxor",
-	"J9BCiinc", "J9BCiincw",
-	"J9BCi2l", "J9BCi2f", "J9BCi2d",
-	"J9BCl2i", "J9BCl2f", "J9BCl2d", "J9BCf2i", "J9BCf2l", "J9BCf2d",
-	"J9BCd2i", "J9BCd2l", "J9BCd2f",
-	"J9BCi2b", "J9BCi2c", "J9BCi2s",
-	"J9BClcmp", "J9BCfcmpl", "J9BCfcmpg", "J9BCdcmpl", "J9BCdcmpg",
-	"J9BCifeq", "J9BCifne", "J9BCiflt", "J9BCifge", "J9BCifgt", "J9BCifle",
-	"J9BCificmpeq", "J9BCificmpne", "J9BCificmplt", "J9BCificmpge", "J9BCificmpgt", "J9BCificmple", "J9BCifacmpeq", "J9BCifacmpne",
-	"J9BCifnull", "J9BCifnonnull",
-	"J9BCgoto",
-	"J9BCgotow",
-	"J9BCtableswitch", "J9BClookupswitch",
-	"J9BCgenericReturn",
-	"J9BCgetstatic", "J9BCputstatic",
-	"J9BCgetfield", "J9BCputfield",
-	"J9BCinvokevirtual", "J9BCinvokespecial", "J9BCinvokestatic", "J9BCinvokeinterface", "J9BCinvokedynamic", "J9BCinvokehandle", "J9BCinvokehandlegeneric","J9BCinvokespecialsplit",
-
-	/** \brief
-	*      Pops 1 int32_t argument off the stack and truncates to a uint16_t.
-	*/
-	"J9BCReturnC",
-
-	/** \brief
-	*      Pops 1 int32_t argument off the stack and truncates to a int16_t.
-	*/
-	"J9BCReturnS",
-
-	/** \brief
-	*      Pops 1 int32_t argument off the stack and truncates to a int8_t.
-	*/
-	"J9BCReturnB",
-
-	/** \brief
-	*      Pops 1 int32_t argument off the stack returns the single lowest order bit.
-	*/
-	"J9BCReturnZ",
-
-	"J9BCinvokestaticsplit", "J9BCinvokeinterface2",
-	"J9BCnew", "J9BCnewarray", "J9BCanewarray", "J9BCmultianewarray",
-	"J9BCarraylength",
-	"J9BCathrow",
-	"J9BCcheckcast",
-	"J9BCinstanceof",
-	"J9BCmonitorenter", "J9BCmonitorexit",
-	"J9BCwide",
-	"J9BCasyncCheck",
-	"J9BCdefaultvalue",
-	"J9BCwithfield",
-	"J9BCbreakpoint",
-	"J9BCunknown"
-	};
-
    switch(_bci.current())
       {
-      case J9BCnop: nop(); break;
+      case J9BCnop: break;
 
       case J9BCaconstnull: constantNull(); break;
 
@@ -904,8 +811,8 @@ bool TR::AbsBlockInterpreter::interpretByteCode()
       case J9BCifacmpne: conditionalBranch(TR::Address, _bci.next2BytesSigned(), ConditionalBranchOperator::cmpne); break;
 
       //goto_x
-      case J9BCgoto: goto_(_bci.next2BytesSigned()); break;
-      case J9BCgotow: goto_(_bci.next4BytesSigned()); break;
+      case J9BCgoto: break;
+      case J9BCgotow: break;
 
       //x_switch
       case J9BClookupswitch: switch_(true); break;
@@ -932,7 +839,7 @@ bool TR::AbsBlockInterpreter::interpretByteCode()
 
       case J9BCarraylength: arraylength(); break;
 
-      case J9BCathrow: athrow(); break;
+      case J9BCathrow: break;
 
       case J9BCcheckcast: checkcast(); break;
 
@@ -959,7 +866,7 @@ bool TR::AbsBlockInterpreter::interpretByteCode()
             case J9BCdstore: store(TR::Double, _bci.next2Bytes(2)); break;
             case J9BCastore: store(TR::Address, _bci.next2Bytes(2)); break;
             default:
-               break;
+               return false; // unrecognized bytecode
             }
          break;
          }
@@ -993,7 +900,7 @@ bool TR::AbsBlockInterpreter::interpretByteCode()
       case J9BCgenericReturn: return_(_callerMethod->returnType()); break;
 
       default:
-      break;
+         return false; // unrecognized bytecode
       }
 
    return true; //This bytecode is successfully interpreted
@@ -1084,8 +991,7 @@ void TR::AbsBlockInterpreter::ldc(bool wide)
          }
       case TR::Address:
          {
-         bool isString = _callerMethod->isStringConstant(cpIndex);
-         if (isString)
+         if (_callerMethod->isStringConstant(cpIndex))
             {
             TR::SymbolReference *symbolReference = comp()->getSymRefTab()->findOrCreateStringSymbol(_callerMethodSymbol, cpIndex);
             if (symbolReference->isUnresolved())
@@ -1097,14 +1003,22 @@ void TR::AbsBlockInterpreter::ldc(bool wide)
                TR::AbsValue *stringVal = createStringObject(symbolReference, true);
                state->push(stringVal);
                }
+            break;
             }
-         else  //Class
+         else if (_callerMethod->isClassConstant(cpIndex))
             {
             TR_OpaqueClassBlock* classBlock = _callerMethod->getClassFromConstantPool(comp(), cpIndex);
-            TR::AbsValue* value = createNonNullObject(classBlock);
+            TR_OpaqueClassBlock* javaLangClass = comp()->fe()->getClassClassPointer(classBlock);
+            TR::AbsValue* value = createNonNullObject(javaLangClass);
+
             state->push(value);
+            break;
             }
-         break;
+         else
+            {
+            state->push(createTopObject());
+            break;
+            }
          }
       default:
          TR_ASSERT_FATAL(false, "Invalid type");
@@ -1552,10 +1466,6 @@ void TR::AbsBlockInterpreter::pop(int32_t size)
       }
    }
 
-void TR::AbsBlockInterpreter::nop()
-   {
-   }
-
 void TR::AbsBlockInterpreter::swap()
    {
    TR::AbsStackMachineState* state = getState();
@@ -1925,10 +1835,6 @@ void TR::AbsBlockInterpreter::comparison(TR::DataType type, ComparisonOperator o
       }
    }
 
-void TR::AbsBlockInterpreter::goto_(int32_t label)
-   {
-   }
-
 void TR::AbsBlockInterpreter::conditionalBranch(TR::DataType type, int32_t label, ConditionalBranchOperator op)
    {
    TR::AbsStackMachineState* state = getState();
@@ -2141,7 +2047,19 @@ void TR::AbsBlockInterpreter::newarray()
     * 11: long
     */
    int32_t aType = _bci.nextByte();
-   int32_t elementSize = aType == 7 || aType == 11 ? 8 : 4;
+
+   std::unordered_map<int, int> lookupTable =
+      {
+      {8, 1},
+      {5, 2},
+      {9, 2},
+      {10, 4},
+      {6, 4},
+      {7, 8},
+      {11, 8},
+      {4, static_cast<int32_t>(TR::Compiler->om.elementSizeOfBooleanArray())}
+      };
+   int32_t elementSize = lookupTable.count(aType) ? lookupTable[aType] : TR::Compiler->om.sizeofReferenceField();
 
    TR_OpaqueClassBlock* arrayType = comp()->fe()->getClassFromNewArrayType(aType);
 
@@ -2234,7 +2152,7 @@ void TR::AbsBlockInterpreter::instanceof()
 
       _inliningMethodSummary->addPotentialOptimizationByArgument(p1, objectRef->getParameterPosition());
 
-      if (castClass)
+      if (castClass && isNonNullObject(objectRef))
          {
          TR::PotentialOptimizationVPPredicate* p2 =
             new (region()) TR::PotentialOptimizationVPPredicate(TR::VPResolvedClass::create(vp(), castClass), _bci.currentByteCodeIndex(), TR::PotentialOptimizationPredicate::Kind::InstanceOfFolding, vp());
@@ -2251,7 +2169,7 @@ void TR::AbsBlockInterpreter::instanceof()
       return;
       }
 
-   if (static_cast<TR::AbsVPValue*>(objectRef)->getConstraint())
+   if (isNonNullObject(objectRef))
       {
       if (castClass && static_cast<TR::AbsVPValue*>(objectRef)->getConstraint()->getClass())
          {
@@ -2273,7 +2191,7 @@ void TR::AbsBlockInterpreter::instanceof()
          }
       }
 
-   state->push(createIntRange(0, 1)); // there isn't any constraint on objectRef or not sure objectRef is an instance of castClass
+   state->push(createIntRange(0, 1)); // not sure objectRef's nullness or if it is an instance of castClass
    return;
    }
 
@@ -2321,21 +2239,26 @@ void TR::AbsBlockInterpreter::checkcast()
                                           true);
          if (yesNoMaybe == TR_yes)
             {
-            if (castClass == static_cast<TR::AbsVPValue*>(objRef)->getConstraint()->getClass()) //cast into the same type, no change
-               {
-               state->push(objRef);
-               return;
-               }
-            else //cast into a different type
-               {
-               state->push(createNonNullObject(castClass));
-               return;
-               }
+            state->push(objRef);
+            return;
             }
          }
       }
 
-   state->push(createTopObject()); // there isn't any constraint on objRef
+   /**
+    *  Even knowing nothing about the operand, we only reach the next bytecode instruction on success,
+    *  so at that point it must be an instance of castClass (or null).
+    *  Parameter position from objRef can also be propagated, since it is still the value of a parameter.
+    */
+   TR::AbsValue *result = NULL;
+
+   if (castClass)
+      result = createObject(castClass);
+   else
+      result = createTopObject();
+
+   result->setParameterPosition(objRef->getParameterPosition());
+   state->push(result);
    }
 
 void TR::AbsBlockInterpreter::get(bool isStatic)
@@ -2471,10 +2394,6 @@ void TR::AbsBlockInterpreter::iinc(int32_t index, int32_t incVal)
       }
 
    state->set(index, createTopInt());
-   }
-
-void TR::AbsBlockInterpreter::athrow()
-   {
    }
 
 void TR::AbsBlockInterpreter::invoke(TR::MethodSymbol::Kinds kind)
@@ -2798,6 +2717,12 @@ bool TR::AbsBlockInterpreter::isNullObject(TR::AbsValue* v)
    return value->getConstraint() && value->getConstraint()->isNullObject();
    }
 
+bool TR::AbsBlockInterpreter::isNonNullObject(TR::AbsValue* v)
+   {
+   TR::AbsVPValue* value = static_cast<TR::AbsVPValue*>(v);
+   return value->getConstraint() && value->getConstraint()->isNonNullObject();
+   }
+
 bool TR::AbsBlockInterpreter::isArrayObject(TR::AbsValue* v)
    {
    TR::AbsVPValue* value = static_cast<TR::AbsVPValue*>(v);
@@ -2838,6 +2763,34 @@ bool TR::AbsBlockInterpreter::isLong(TR::AbsValue* v)
    {
    TR::AbsVPValue* value = static_cast<TR::AbsVPValue*>(v);
    return value->getConstraint() && (value->getConstraint()->asLongConstraint() || value->getConstraint()->asMergedLongConstraints());
+   }
+
+int32_t TR::AbsBlockInterpreter::arrayElementSize(const char *signature)
+   {
+   if (signature[0] != '[')
+      return 0;
+
+   // regular array element size
+   if (signature[0] == '[')
+      {
+      switch (signature[1])
+         {
+         case 'B': return 1;
+         case 'C':
+         case 'S': return 2;
+         case 'I':
+         case 'F': return 4;
+         case 'D':
+         case 'J': return 8;
+         case 'Z': return static_cast<int32_t>(TR::Compiler->om.elementSizeOfBooleanArray());
+         case 'L':
+         case 'Q':
+         default :
+            return TR::Compiler->om.sizeofReferenceField();
+         }
+      }
+
+   return 0;
    }
 
 TR::RegionIterator::RegionIterator(TR_RegionStructure *region, TR::Region &mem):
