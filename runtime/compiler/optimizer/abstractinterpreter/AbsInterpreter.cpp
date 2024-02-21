@@ -1248,7 +1248,7 @@ void TR::AbsBlockInterpreter::binaryOperation(TR::DataType type, BinaryOperator 
                   break;
 
                case BinaryOperator::rem:
-                  resultVal = intVal1 % intVal2;
+                  resultVal = (intVal1 == INT32_MIN && intVal2 == -1) ? 0 : (intVal1 % intVal2);
                   break;
 
                case BinaryOperator::and_:
@@ -1314,7 +1314,7 @@ void TR::AbsBlockInterpreter::binaryOperation(TR::DataType type, BinaryOperator 
                   break;
 
                case BinaryOperator::rem:
-                  resultVal = longVal1 % longVal2;
+                  resultVal = (longVal1 == INT64_MIN && longVal2 == -1) ? 0 : (longVal1 % longVal2);
                   break;
 
                case BinaryOperator::and_:
